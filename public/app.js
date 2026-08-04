@@ -36,7 +36,8 @@ const SUMMARY_ORDER = [
 /**
  * URL で開き方を指定できる。
  *
- *  ?session=<id> … そのセッションを開く（見に戻るときのブックマーク用）
+ *  ?session=<id> … そのセッションを開く（見に戻るときのブックマーク用）。
+ *                  一覧に無いもの（24時間より古いもの）も開ける
  *  ?theme=dark|light … 配色を固定する
  *  ?only=1 … 時系列を「判断だけ」で開く
  *  ?nolive=1 … 自動更新をつながない
@@ -63,9 +64,23 @@ const store = {
   rows: [],
   meta: null,
   selected: null,
+  /**
+   * 選んだ経路。'live' は一覧から、'query' は ?session= から。
+   *
+   * 一覧から選んだものが一覧から消えたら選択を外すが、?session= で直に開いたものは
+   * 一覧に居ないのが正常なので外してはいけない。その区別に使う
+   */
+  selectedFrom: null,
   /** 選んでいるセッションの詳細（/api/sessions/:id の応答） */
   detail: null,
   detailError: null,
+  /**
+   * detailError がどのセッションのものか。
+   *
+   * 選び直すと前のエラーは無関係になる。id を持たずに文字列だけ残すと、
+   * 次のセッションの読み込み中に前のエラーが出てしまう
+   */
+  detailErrorFor: null,
   /** サーバから来た「今」。経過時間はこれを基準に進める */
   now: Date.now(),
   onlyLive: localStorage.getItem('claude-deck.onlyLive') === '1',
@@ -110,6 +125,55 @@ function tokens(n) {
 function idleOf(row) {
   if (row.lastActivityAt) return Math.max(0, store.now - row.lastActivityAt);
   return row.idleMs ?? null;
+}
+
+/**
+ * 一覧から素の行を引く。
+ *
+ * @param {string|null} sessionId
+ * @returns {object|null} 一覧に居なければ null
+ */
+function rowOf(sessionId) {
+  if (!sessionId) return null;
+  return store.rows.find((r) => r.sessionId === sessionId) ?? null;
+}
+
+/**
+ * 詳細ペインが使う項目のうち、一覧の行のほうが新しいもの。
+ *
+ * 一覧は SSE で毎秒引き直され、詳細は開いた時点のもの。
+ * 状態をここで一覧に上書きさせないと、左のカードと右のヘッダが食い違う。
+ * 逆に身元（title / model / cwd）は詳細のほうが当たる。
+ * 一覧は末尾64KB、詳細は全文を読んで解析しているため。
+ *
+ * 上書きする項目を配列で名前付けするのは、プロパティの並び順に判断を埋めないため。
+ */
+const LIVE_FIELDS = [
+  'state', 'stateLabel', 'ball', 'idleMs', 'lastActivityAt',
+  'waitingFor', 'stateReason', 'stateConfident', 'statusRaw', 'alive', 'pid',
+];
+
+/**
+ * 詳細ペインが見る「行に相当するもの」を組む。
+ *
+ * 一覧の行だけを頼りにすると、一覧に居ないセッション（24時間より古いもの）を
+ * 開けない。詳細の応答は身元と状態の項目を同じ形で持っているので、そこから組める。
+ *
+ * @param {string|null} sessionId
+ * @returns {object|null} どちらの出どころも無ければ null
+ */
+function headOf(sessionId) {
+  if (!sessionId) return null;
+  const row = rowOf(sessionId);
+  const detail = store.detail?.sessionId === sessionId ? store.detail : null;
+  if (!detail) return row;
+  const head = { ...detail };
+  if (row) {
+    for (const key of LIVE_FIELDS) {
+      if (key in row) head[key] = row[key];
+    }
+  }
+  return head;
 }
 
 /* ---------------------------------------------------------------- 一覧 */
@@ -232,10 +296,13 @@ function refreshTimes() {
   }
   const detailIdle = dom.detail.querySelector('[data-live-idle]');
   if (detailIdle) {
-    const row = byId.get(detailIdle.dataset.liveIdle);
-    if (row) {
-      detailIdle.textContent = since(idleOf(row));
-      if (row.lastActivityAt) detailIdle.title = stamp(row.lastActivityAt);
+    // 一覧に無いセッション（?session= で直に開いたもの）は詳細から引く。
+    // byId だけを見ていると、そこで経過時間が凍る
+    const id = detailIdle.dataset.liveIdle;
+    const head = byId.get(id) ?? headOf(id);
+    if (head) {
+      detailIdle.textContent = since(idleOf(head));
+      if (head.lastActivityAt) detailIdle.title = stamp(head.lastActivityAt);
     }
   }
 }
@@ -735,11 +802,26 @@ function navBlock(sections) {
 }
 
 function renderDetail() {
-  const row = store.rows.find((r) => r.sessionId === store.selected);
+  // row と呼んでいるのは一覧の行と同じ形のもの。一覧に居なければ詳細から組む
+  const row = headOf(store.selected);
+  const error = detailErrorNow();
   dom.detail.replaceChildren();
 
+  // 入口を3つに割る。ひとまとめにすると「選んでいない」「取得中」「取得に失敗した」が
+  // すべて同じ空表示になり、存在しない id を開いても何も起きていないように見える
   if (!row) {
-    dom.detail.append(el('div', 'detail-empty', '左の一覧からセッションを選ぶと、ここに中身が出ます'));
+    if (!store.selected) {
+      dom.detail.append(el('div', 'detail-empty', '左の一覧からセッションを選ぶと、ここに中身が出ます'));
+    } else if (error) {
+      const p = panel('このセッションは開けませんでした');
+      p.body.append(el('p', 'note', error));
+      const id = el('p', 'note', 'セッションID ');
+      id.append(el('span', 'mono', store.selected));
+      p.body.append(id);
+      dom.detail.append(p.section);
+    } else {
+      dom.detail.append(el('div', 'loading', 'ログを読んでいます…'));
+    }
     return;
   }
 
@@ -747,9 +829,12 @@ function renderDetail() {
   wrap.append(el('h2', null, row.title ?? row.name ?? row.sessionId));
 
   const sub = el('div', 'detail-sub');
-  const state = el('span', 'state', row.stateLabel);
-  state.style.color = STATE_COLOR[row.state] ?? 'var(--off)';
-  sub.append(state);
+  // stateLabel が無いときに空の .state を出すと、色の点だけが残って意味を持たない
+  if (row.stateLabel) {
+    const state = el('span', 'state', row.stateLabel);
+    state.style.color = STATE_COLOR[row.state] ?? 'var(--off)';
+    sub.append(state);
+  }
   if (row.cwd) sub.append(el('span', 'path', row.cwd));
   wrap.append(sub);
   wrap.append(detailActions(row));
@@ -876,9 +961,9 @@ function renderDetail() {
       q.body.append(ul);
       stack.append(q.section);
     }
-  } else if (store.detailError) {
+  } else if (error) {
     const p = panel('詳細を読み込めませんでした');
-    p.body.append(el('p', 'note', store.detailError));
+    p.body.append(el('p', 'note', error));
     stack.append(p.section);
   } else {
     stack.append(el('div', 'loading', 'ログを読んでいます…'));
@@ -920,10 +1005,35 @@ function renderDetail() {
 
 /* ------------------------------------------------------ 詳細の取得と保持 */
 
-/** sessionId から {stamp, data}。stamp が変わっていなければ再取得しない */
+/** sessionId から {mark, data}。mark が変わっていなければ再取得しない */
 const detailCache = new Map();
 const DETAIL_CACHE_MAX = 8;
 let detailToken = 0;
+
+/**
+ * 詳細キャッシュの目印。
+ *
+ * lastActivityAt は使えない。サーバの SSE 差分判定がこのキーを比較から外しているので、
+ * 会話が進んでも push されず目印が動かない。それで詳細が開いたときのまま止まっていた。
+ * logSize は追記しか起きないので単調に増える。
+ *
+ * 一覧に居ないセッションは追記が止まっているものなので、前に取った詳細の大きさで代える。
+ * 0 は「大きさが取れなかった」＝不明の意味にして、必ず取り直す。
+ * 0 を有効な目印にすると、大きさが取れない行で古い内容を出し続けることになる。
+ *
+ * @param {string} sessionId
+ * @returns {number} 0 は不明
+ */
+function detailStampOf(sessionId) {
+  const row = rowOf(sessionId);
+  if (row) return row.logSize ?? 0;
+  return detailCache.get(sessionId)?.data?.log?.size ?? 0;
+}
+
+/** いま選んでいるセッションの取得エラー。前のセッションのものは無関係なので出さない */
+function detailErrorNow() {
+  return store.detailErrorFor === store.selected ? store.detailError : null;
+}
 
 async function loadDetail(sessionId, { silent = false } = {}) {
   if (!sessionId) {
@@ -932,12 +1042,13 @@ async function loadDetail(sessionId, { silent = false } = {}) {
     return;
   }
 
-  const row = store.rows.find((r) => r.sessionId === sessionId);
-  const stamp = row?.lastActivityAt ?? 0;
+  const mark = detailStampOf(sessionId);
   const cached = detailCache.get(sessionId);
-  if (cached && cached.stamp === stamp) {
+  // 目印が不明（0）のときは一致と見なさない。0 同士を突き合わせると永久にキャッシュが効く
+  if (cached && mark !== 0 && cached.mark === mark) {
     store.detail = cached.data;
     store.detailError = null;
+    store.detailErrorFor = null;
     renderDetail();
     return;
   }
@@ -946,32 +1057,46 @@ async function loadDetail(sessionId, { silent = false } = {}) {
   if (!silent) {
     store.detail = null;
     store.detailError = null;
+    store.detailErrorFor = null;
     renderDetail();
   }
 
   try {
     const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      // サーバは理由を日本語で返してくる。HTTP 404 より読める文言になるので、あればそれを出す
+      const reason = await res.json().then((j) => j?.error).catch(() => null);
+      throw new Error(reason ?? `HTTP ${res.status}`);
+    }
     const data = await res.json();
     // 選び直したあとに古い応答が届いても無視する
     if (token !== detailToken || store.selected !== sessionId) return;
-    detailCache.set(sessionId, { stamp, data });
+    // 目印は一覧の logSize を優先し、無ければ取れた詳細の大きさで代える。
+    // ここで不明（0）のまま入れると、次の push で必ず取り直しになる
+    detailCache.set(sessionId, { mark: mark || data.log?.size || 0, data });
     if (detailCache.size > DETAIL_CACHE_MAX) {
       detailCache.delete(detailCache.keys().next().value);
     }
     store.detail = data;
     store.detailError = null;
+    store.detailErrorFor = null;
   } catch (err) {
     if (token !== detailToken) return;
     store.detail = null;
     store.detailError = err.message;
+    store.detailErrorFor = sessionId;
   }
   renderDetail();
 }
 
-function select(sessionId) {
+/**
+ * @param {string|null} sessionId
+ * @param {'live'|'query'} [from] 選んだ経路。store.selectedFrom の説明を参照
+ */
+function select(sessionId, from = 'live') {
   if (store.selected === sessionId) return;
   store.selected = sessionId || null;
+  store.selectedFrom = store.selected ? from : null;
   for (const node of dom.list.querySelectorAll('.card')) {
     node.setAttribute('aria-current', String(node.dataset.sessionId === store.selected));
   }
@@ -987,20 +1112,27 @@ function apply(payload) {
   store.rows = payload.rows ?? [];
   store.meta = payload.meta ?? null;
   if (payload.meta?.now) store.now = payload.meta.now;
-  // 選んでいたセッションが消えたら選択を外す
-  if (store.selected && !store.rows.some((r) => r.sessionId === store.selected)) {
+  // 一覧から選んでいたセッションが一覧から消えたら選択を外す。
+  // ?session= で直に開いたものは一覧に居ないのが正常なので、push 1回で外してはいけない
+  if (store.selected && store.selectedFrom === 'live'
+    && !store.rows.some((r) => r.sessionId === store.selected)) {
     store.selected = null;
+    store.selectedFrom = null;
   }
   if (firstApply) {
     firstApply = false;
-    if (initialSession && store.rows.some((r) => r.sessionId === initialSession)) {
+    // 一覧にあるかどうかで判定しない。24時間より古いセッションも開けるようにするため。
+    // 実在するかはサーバの応答で決まり、無ければ詳細側にエラーが出る
+    if (initialSession) {
       store.selected = initialSession;
+      store.selectedFrom = store.rows.some((r) => r.sessionId === initialSession) ? 'live' : 'query';
     }
   }
   // 何も選んでいなければ先頭を開く。並び順の先頭が最も急ぐものなので、
   // 開いた瞬間に見るべきものが出ている状態にする
   if (!store.selected) {
     store.selected = visibleRows()[0]?.sessionId ?? null;
+    store.selectedFrom = store.selected ? 'live' : null;
   }
   renderSummary();
   renderList();
