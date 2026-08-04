@@ -178,16 +178,34 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 ## 画面側
 
-`public/app.js` はバニラ JS の1ファイル。フレームワークもビルドも無い。
+バニラ JS の2ファイル。フレームワークもビルドも無い。
+
+| ファイル | 役割 |
+|---|---|
+| `public/timeline.js` | 詳細ペインの時系列だけ。絞り込み・1行の組み立て・器の差し替え |
+| `public/app.js` | それ以外ぜんぶ。一覧・まとめ・詳細の他のパネル・SSE・URL クエリ |
+
+素の `<script>` を2本読む。**順番は `timeline.js` → `app.js` で固定。**
+`app.js` の `store` の初期値が `Timeline.initialHiddenKinds()` を呼ぶので、逆にすると立ち上がらない。
+
+依存は一方向にする。
+
+- `timeline.js` → `app.js` の小道具（`el` / `since` / `dur` / `num` / `ymd` / `hms` / `mark`）と `store` / `syncQuery`
+- `app.js` → `timeline.js` の `Timeline.*` **だけ**
+
+`app.js` から時系列の中の名前を直に呼ばない。呼びたくなったら `Timeline` の口に足すか、
+そもそも時系列の仕事ではないかのどちらか。素の `<script>` はトップレベルの `const` を共有するので、
+**同じ名前を両方に置くと SyntaxError で丸ごと死ぬ**（片方だけ壊れて済まない）。
 
 - SSE でつなぎ、`apply()` が一覧・まとめを描き直す。詳細は `renderDetailIfNeeded()` を通し、`detailKeyOf()` の値が動いたときだけ作り直す（毎回作り直すと開いた `<details>` と入力中の caret が消える）
-- 時系列だけは `renderTimeline()` が `.tl-host` を差し替える。絞り込みの帯は器の外に置く（中に入れると1文字ごとに入力欄が作り直される）
+- 時系列だけは `Timeline.render()` が `.tl-host` を差し替える。絞り込みの帯は器の外に置く（中に入れると1文字ごとに入力欄が作り直される）
+- 描く先は `Timeline.attach()` で預け、`Timeline.detach()` で外す。`app.js` から時系列の内部状態を触らない
 - 詳細は `detailCache`（`logSize` を印にした8件のキャッシュ）。中身が変わっていなければ取り直さない。印が `0`（不明）なら必ず取り直す
 - 取り直しのあいだは `silent` で前の内容を出したままにする
 - 狭い画面（860px 以下）では一覧が引き出しになる。閉じているあいだは `inert` で丸ごと触れなくする
 - URL クエリで開き方を指定できる … `?session=<id>` `?theme=dark|light` `?only=1` `?nolive=1` `?tab=archive` `?aq=` `?asort=` `?tq=` `?hide=`
 - `?hide=` は「キーが無い」と「空で付いている」を分けて見る。空は「何も隠さない」の指定なので既定に戻さない
-- 描画にかかった時間は `window.deckPerf()` で見る（目安は `renderDetail` が 50ms 未満、`renderTimeline` が 16ms 未満）
+- 描画にかかった時間は `window.deckPerf()` で見る（目安は `renderDetail` が 50ms 未満、時系列の描き直しが 16ms 未満）。測る入れ物は `app.js` の1つに保つ（2つに割ると `deckPerf()` が片方しか見えない）
 
 状態ラベルの日本語は画面側に持たない。
 `/api/sessions` の `meta.stateLabels`（`STATE_LABELS` そのまま）から引く。
