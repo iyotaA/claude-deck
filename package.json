@@ -1,0 +1,22 @@
+{
+  "name": "claude-deck",
+  "version": "0.1.0",
+  "private": true,
+  "description": "並行して動かしている Claude Code セッションの状態を一覧・詳細で見るローカルダッシュボード",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "claude-deck": "./server.mjs",
+    "claude-deck-list": "./cli.mjs"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "serve": "node server.mjs --no-open",
+    "list": "node cli.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

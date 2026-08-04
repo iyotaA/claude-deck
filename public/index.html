@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>ClaudeDeck</title>
+<!-- ico の中に 16 / 32 / 48 が入っている。作り直すなら scripts\build-icons.ps1 -->
+<link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="icon" type="image/png" href="favicon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="favicon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app" id="app">
+
+  <header class="topbar">
+    <!-- 狭い画面でだけ出る。一覧を手前に引き出す -->
+    <button class="hamburger" id="list-toggle" type="button"
+            aria-expanded="false" aria-controls="list-pane" aria-label="セッション一覧を開く">
+      <span class="bars" aria-hidden="true"></span>
+    </button>
+    <h1>ClaudeDeck<span class="sub">セッションの状態</span></h1>
+    <div class="summary" id="summary"></div>
+    <div class="topbar-actions">
+      <span class="live" id="live" data-live="wait">接続中</span>
+      <button class="btn" id="reload" type="button">再読み込み</button>
+      <button class="btn" id="theme-toggle" type="button" aria-label="配色を切り替える">配色</button>
+    </div>
+  </header>
+
+  <div class="deck">
+    <section class="list-pane" id="list-pane" aria-label="セッション一覧">
+      <div class="list-head">
+        <label><input type="checkbox" id="only-live"> 稼働中だけ</label>
+        <span id="list-count"></span>
+        <!-- 引き出しのときだけ出る。開いている間はハンバーガーが下に隠れるため -->
+        <button class="drawer-close" id="list-close" type="button" aria-label="一覧を閉じる">&#215;</button>
+      </div>
+      <ul class="list" id="list"></ul>
+    </section>
+
+    <section class="detail-pane" id="detail" aria-label="セッションの詳細" tabindex="-1">
+      <div class="detail-empty">左の一覧からセッションを選ぶと、ここに中身が出ます</div>
+    </section>
+  </div>
+
+  <!-- 引き出しの背後を覆う膜。押すと閉じる -->
+  <div class="scrim" id="scrim"></div>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>
