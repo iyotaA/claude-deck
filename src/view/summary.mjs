@@ -69,29 +69,36 @@ export function plainSummary(detail) {
   const first = prompts[0]?.text ?? null;
 
   /**
-   * Claude が書いた中間報告を見出しに使えるか。
+   * Claude が書いた中間報告は、見出しには使わない。
    *
-   * 最後の指示より古い報告は、いまの姿ではない。
-   * 報告を書いたあとに指示が出ていれば、作業はそこから先へ進んでいる。
-   * 古い自己申告を現在の目的として大きく出すのは、このアプリで一番避けたい誤解
+   * ここは「何を頼んだセッションか」を出す場所で、中間報告は
+   * 「いまどこまで進んだか」なので、答えている問いが違う。
+   *
+   * 一度は「報告が最後の指示より新しければ見出しに使う」形にしたが、実物で外した。
+   * 完了報告が目的の欄に居座って、何を頼んだセッションなのかが読めなくなる。
+   * さらに悪いのは、報告のあるセッションと無いセッションで同じ枠に違う種類の
+   * ものが出ること。時刻の前後で中身の種類が変わる枠は、読み手が信用できない。
+   *
+   * 例外は指示もタイトルも取れなかったときだけ。空欄より自己申告のほうがましなので、
+   * 最後の手段として使う。そのときは headlineSource が 'recap' になり、
+   * 画面が「Claude の申告」の印を出す
    */
   const recap = detail?.recap ?? null;
-  const lastPromptAt = prompts[prompts.length - 1]?.at ?? null;
-  const recapFresh = Boolean(recap?.text)
-    && (lastPromptAt === null || (typeof recap.at === 'number' && recap.at >= lastPromptAt));
 
   // 見出しの出どころを持ち回す。画面はこれを見て「Claude の申告」の印を出す。
   // source（誰が作った要約か）とは別の軸なので、混ぜない
-  let headline = recapFresh ? oneLine(recap.text, 160) : null;
-  let headlineSource = headline ? 'recap' : null;
-  let headlineAt = headline ? recap.at ?? null : null;
-  if (!headline) {
-    headline = oneLine(first, 160);
-    headlineSource = headline ? 'prompt' : null;
-  }
+  let headline = oneLine(first, 160);
+  let headlineSource = headline ? 'prompt' : null;
+  let headlineAt = null;
   if (!headline) {
     headline = detail?.title ?? null;
     headlineSource = headline ? 'title' : null;
+  }
+  if (!headline && recap?.text) {
+    headline = oneLine(recap.text, 160);
+    headlineSource = 'recap';
+    // いつの申告かを画面が出せるようにする
+    headlineAt = recap.at ?? null;
   }
 
   const points = [];

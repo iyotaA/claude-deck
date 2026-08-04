@@ -5,8 +5,9 @@
  * 必要な項目だけの入れ物を渡して確かめる。
  *
  * ここで固定したいのは「見出しが誰の言葉か」の1点。
- * Claude の中間報告は自己申告なので、古い報告を現在の目的として
- * 大きく出してしまうのが一番避けたい壊れ方になる。
+ * 見出しは常に「何を頼んだか」から作る。Claude の中間報告は自己申告で、
+ * しかも答えている問いが違う（いまどこまで進んだか）ため、
+ * 時刻の前後で見出しの種類が入れ替わらないことをここで縛る。
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -50,18 +51,22 @@ test('材料が何も無ければ見出しは null。出どころも立てない
   assert.equal(s.headlineSource, null);
 });
 
-test('最後の指示より新しい中間報告は見出しに使う', () => {
+test('最後の指示より新しい中間報告でも見出しには使わない', () => {
   const s = plainSummary(detailOf(
     [{ kind: 'prompt', at: T0, text: '構成を整理して' }],
     { recap: { text: '4ファイルを移して、テストを通しました', at: ms(1000) } },
   ));
-  assert.equal(s.headline, '4ファイルを移して、テストを通しました');
-  assert.equal(s.headlineSource, 'recap');
-  // いつの申告かを画面が出せるようにする
-  assert.equal(s.headlineAt, T0 + 1000);
+  // 完了報告が目的の欄に居座ると、何を頼んだセッションなのかが読めなくなる。
+  // 報告の有無で同じ枠の中身の種類が変わることが、いちばん避けたい壊れ方
+  assert.equal(s.headline, '構成を整理して');
+  assert.equal(s.headlineSource, 'prompt');
+  assert.equal(s.headlineAt, null);
+  // 捨てはしない。点に回す
+  const point = s.points.find((p) => p.label === 'Claude の申告');
+  assert.equal(point.text, '4ファイルを移して、テストを通しました');
 });
 
-test('最後の指示より古い中間報告は見出しに使わず、点に回す', () => {
+test('最後の指示より古い中間報告も見出しに使わず、点に回す', () => {
   const s = plainSummary(detailOf(
     [
       { kind: 'prompt', at: T0, text: '構成を整理して' },
@@ -78,20 +83,30 @@ test('最後の指示より古い中間報告は見出しに使わず、点に�
   assert.equal(point.text, '4ファイルを移しました');
 });
 
-test('時刻の分からない中間報告は見出しに使わない', () => {
-  const s = plainSummary(detailOf(
-    [{ kind: 'prompt', at: T0, text: '構成を整理して' }],
-    { recap: { text: '作業しました', at: null } },
-  ));
-  // 新しいか古いか判断できないものを、現在の姿として大きく出さない
-  assert.equal(s.headlineSource, 'prompt');
+test('時刻の分からない中間報告を最後の手段に使っても、時刻は作らない', () => {
+  const s = plainSummary(detailOf([], { recap: { text: '作業しました', at: null } }));
+  assert.equal(s.headlineSource, 'recap');
+  // 取れなかったものを 0 や現在時刻で埋めない。画面は null なら時刻を出さない
+  assert.equal(s.headlineAt, null);
 });
 
-test('指示が1件も無ければ、中間報告を見出しに使える', () => {
+test('タイトルが取れれば、中間報告よりタイトルを使う', () => {
+  const s = plainSummary(detailOf(
+    [],
+    { title: '構成のリファクタリング', recap: { text: '調査を続けています', at: ms(500) } },
+  ));
+  // タイトルも Claude が付けたものだが、頼んだ内容を指しているので目的の欄に置ける
+  assert.equal(s.headline, '構成のリファクタリング');
+  assert.equal(s.headlineSource, 'title');
+});
+
+test('指示もタイトルも無ければ、中間報告を見出しに使える', () => {
   const s = plainSummary(detailOf([], { recap: { text: '調査を続けています', at: ms(500) } }));
-  // 比べる相手が居ないので、古いと決めつける理由が無い
+  // 空欄より自己申告のほうがまし。印が付くので誤解にはならない
   assert.equal(s.headline, '調査を続けています');
   assert.equal(s.headlineSource, 'recap');
+  // いつの申告かを画面が出せるようにする
+  assert.equal(s.headlineAt, T0 + 500);
 });
 
 test('見出しに使った中間報告は点には出さない（二重に出さない）', () => {
