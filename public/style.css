@@ -1001,6 +1001,19 @@ details.rejected .label { color: var(--fg); }
   gap: .1rem;
 }
 
+/* 差し替える範囲を囲う器。絞り込みの入力欄はこの外（.timeline の兄弟）に置くので、
+   ここを replaceChildren しても入力中の文字と caret は消えない */
+.tl-host {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 続きを出すボタン。既定では 120 件だけ組んで、押した人にだけ続きを足す */
+.tl-more {
+  margin-top: .6rem;
+  align-self: stretch;
+}
+
 .tl {
   display: grid;
   grid-template-columns: 5.5rem minmax(0, 1fr);

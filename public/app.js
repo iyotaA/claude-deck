@@ -103,6 +103,20 @@ const store = {
   newestFirst: localStorage.getItem('claude-deck.newestFirst') !== '0',
   onlyDecisions: query.get('only') === '1' || localStorage.getItem('claude-deck.onlyDecisions') === '1',
   /**
+   * 時系列をいま何件まで出しているか。
+   *
+   * 0 は「まだ整えていない」。最初の描画で TL_PAGE に直る。
+   * ここで TL_PAGE を初期値に書けないのは、定数の宣言がこの下にあるため
+   */
+  tlShown: 0,
+  /**
+   * その窓がどのセッションのものか。
+   *
+   * 窓を先頭に戻すのはセッションを選び直したときだけにする。追記で詳細が入れ替わるたびに
+   * 戻すと、動いているセッションでは2秒ごとに「続きを出す」が巻き戻る
+   */
+  tlShownFor: null,
+  /**
    * 左のペインに出しているもの。'live'（稼働中）か 'archive'（書庫）。
    *
    * localStorage には残さない。書庫を開いたまま保存すると、次に開いたときに
@@ -1198,6 +1212,8 @@ function navBlock(sections) {
   for (const s of sections) {
     const b = el('button', 'nav-chip', s.label);
     b.type = 'button';
+    // あとから件数だけ差し替えるための目印。時系列は絞り込みで数が動く
+    b.dataset.sec = s.id;
     if (s.tone) b.classList.add(`is-${s.tone}`);
     if (s.count !== undefined && s.count !== null) b.append(el('span', 'n', s.count));
     b.addEventListener('click', () => {
@@ -1212,10 +1228,150 @@ function navBlock(sections) {
   return nav;
 }
 
+/* -------------------------------------------------------- 時系列の描き直し */
+
+/**
+ * 1回に出す時系列の件数。
+ *
+ * 400件を前もって全部組むと初回の描画が重い。窓を掛けて、末尾のボタンで継ぎ足す。
+ * 120 はふつうの画面でスクロール数回ぶんに収まる量
+ */
+const TL_PAGE = 120;
+
+/**
+ * 時系列だけを描き直すための取っ手。
+ *
+ * renderDetail() が時系列パネルを組むたびに入れ替える。
+ * null のあいだは時系列が画面に無い（未選択・取得中・失敗）ので、renderTimeline() は何もしない。
+ *
+ * items をここに写して持つのは、開いている時系列と描く材料を食い違わせないため。
+ * renderTimeline() から store.detail を見に行くと、押した瞬間に別の詳細が入っていることがある
+ */
+let tlRef = null;
+
+/**
+ * 描画にかかった時間を直近40回ぶんだけ持つ。
+ *
+ * 道具は足さない。console から deckPerf() を呼べば p95 が出る。
+ * 目安は初回の renderDetail() が 50ms 未満、renderTimeline() が 16ms 未満（1フレーム）
+ */
+const perfLog = { detail: [], timeline: [] };
+
+/** @param {'detail'|'timeline'} kind @param {number} t0 performance.now() の値 */
+function mark(kind, t0) {
+  const a = perfLog[kind];
+  a.push(performance.now() - t0);
+  if (a.length > 40) a.shift();
+}
+
+window.deckPerf = () => {
+  const p95 = (a) => {
+    if (!a.length) return null;
+    const sorted = [...a].sort((x, y) => x - y);
+    return Math.round(sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)] * 10) / 10;
+  };
+  const of = (a) => ({ n: a.length, p95: p95(a), last: a.length ? Math.round(a[a.length - 1] * 10) / 10 : null });
+  return { detail: of(perfLog.detail), timeline: of(perfLog.timeline) };
+};
+
+/**
+ * 時系列だけを描き直す。
+ *
+ * 絞り込みや並び替えで変わるのは時系列の中身と件数だけ。それなのに renderDetail() を
+ * 呼ぶと、回答パネル・TODO・ファイル・状態の一覧まで作り直すことになる。
+ * 開いた <details> とスクロール位置が消え、絞り込みの入力欄では caret が飛ぶ
+ */
+function renderTimeline() {
+  if (!tlRef) return;
+  const t0 = performance.now();
+
+  if (store.tlShownFor !== store.selected) {
+    store.tlShown = TL_PAGE;
+    store.tlShownFor = store.selected;
+  }
+
+  const all = tlRef.items;
+  const matched = store.onlyDecisions ? all.filter((i) => DECISION_KINDS.has(i.kind)) : all;
+  const ordered = store.newestFirst ? [...matched].reverse() : matched;
+  const shown = ordered.slice(0, Math.max(TL_PAGE, store.tlShown));
+  const rest = ordered.length - shown.length;
+
+  const box = el('div', 'timeline');
+  for (const item of shown) box.append(timelineItem(item));
+
+  const nodes = [box];
+  if (rest > 0) {
+    const more = el('button', 'btn tl-more', `続きを出す（残り ${num(rest)} 件）`);
+    more.type = 'button';
+    more.addEventListener('click', () => {
+      store.tlShown = shown.length + TL_PAGE;
+      renderTimeline();
+    });
+    nodes.push(more);
+  }
+  tlRef.host.replaceChildren(...nodes);
+
+  // 見出しの件数。窓で切っているときは「出している数 / 当てはまった数」を出す。
+  // 全体の数だけを出すと、下に「続きを出す」がある理由が読めない
+  const label = shown.length < ordered.length
+    ? `${num(shown.length)} / ${num(ordered.length)} 件`
+    : store.onlyDecisions
+      ? `${num(matched.length)} / ${num(all.length)} 件`
+      : `${num(all.length)} 件${tlRef.dropped ? `（説明 ${num(tlRef.dropped)} 件は省略）` : ''}`;
+  if (tlRef.count) tlRef.count.textContent = label;
+  // 目次の件数も絞り込みで動く。放っておくと古い数が上に残る
+  if (tlRef.nav) tlRef.nav.textContent = num(matched.length);
+
+  mark('timeline', t0);
+}
+
+/**
+ * 詳細ペインを作り直すかどうかの材料。
+ *
+ * 一覧の push は2秒ごとに来る。そのたびに作り直すと、開いた <details> と
+ * スクロール位置が消える。実際に画面へ出している値が動いたときだけ作り直す。
+ *
+ * idleMs と lastActivityAt は入れない。refreshTimes() が文字だけ差し替えるので
+ * 作り直す必要がなく、しかも毎秒動くので入れると条件そのものが意味を失う
+ */
+function detailKeyOf() {
+  const row = headOf(store.selected);
+  const w = row?.waitingFor ?? null;
+  return [
+    store.selected ?? '',
+    detailErrorNow() ?? '',
+    row?.state ?? '',
+    row?.stateLabel ?? '',
+    row?.stateReason ?? '',
+    row?.statusRaw ?? '',
+    row?.alive ? '1' : '0',
+    row?.pid ?? '',
+    row?.contextTokens ?? '',
+    w ? `${w.tool ?? ''}${w.detail ?? ''}` : '',
+  ].join('');
+}
+
+/** 前回 renderDetail() を通したときの材料。detail は参照そのままで見比べる */
+let lastDetailRender = { detail: undefined, key: null };
+
+/**
+ * 必要なら詳細ペインを作り直す。
+ *
+ * apply() と loadDetail() は毎秒ここを通る。作り直すかどうかの判断は detailKeyOf() に寄せた
+ */
+function renderDetailIfNeeded() {
+  if (lastDetailRender.detail === store.detail && lastDetailRender.key === detailKeyOf()) return;
+  renderDetail();
+}
+
 function renderDetail() {
+  const t0 = performance.now();
   // row と呼んでいるのは一覧の行と同じ形のもの。一覧に居なければ詳細から組む
   const row = headOf(store.selected);
   const error = detailErrorNow();
+  lastDetailRender = { detail: store.detail, key: detailKeyOf() };
+  // 前の取っ手はここで捨てる。作り直したあとの画面に無い節点を掴んだままにしない
+  tlRef = null;
   dom.detail.replaceChildren();
 
   // 入口を3つに割る。ひとまとめにすると「選んでいない」「取得中」「取得に失敗した」が
@@ -1233,6 +1389,7 @@ function renderDetail() {
     } else {
       dom.detail.append(el('div', 'loading', 'ログを読んでいます…'));
     }
+    mark('detail', t0);
     return;
   }
 
@@ -1323,38 +1480,45 @@ function renderDetail() {
       stack.append(p.section);
     }
 
-    const actions = el('span', 'panel-actions');
-    actions.append(
-      toggle('判断だけ', store.onlyDecisions, () => {
-        store.onlyDecisions = !store.onlyDecisions;
-        localStorage.setItem('claude-deck.onlyDecisions', store.onlyDecisions ? '1' : '0');
-        // 開き方を人に渡せるようにする（?only=1）
-        syncQuery();
-        renderDetail();
-      }),
-      toggle(store.newestFirst ? '新しい順' : '古い順', false, () => {
-        store.newestFirst = !store.newestFirst;
-        localStorage.setItem('claude-deck.newestFirst', store.newestFirst ? '1' : '0');
-        renderDetail();
-      }),
-    );
-
-    let items = d.digest.items;
-    if (store.onlyDecisions) items = items.filter((i) => DECISION_KINDS.has(i.kind));
-    const shown = store.newestFirst ? [...items].reverse() : items;
-
-    const p = panel('時系列', {
-      id: SEC.timeline,
-      count: store.onlyDecisions
-        ? `${items.length} / ${d.digest.items.length} 件`
-        : `${d.digest.items.length} 件${d.digest.stats.droppedItems ? `（説明 ${d.digest.stats.droppedItems} 件は省略）` : ''}`,
-      action: actions,
+    // 押したときに renderDetail() を呼ばない。時系列の中身と件数しか変わらないので、
+    // 全体を作り直すと開いた <details> とスクロール位置まで捨てることになる。
+    // そのぶん、ボタン自身の見た目（押した状態・並び順の文字）はここで書き換える
+    const onlyBtn = toggle('判断だけ', store.onlyDecisions, () => {
+      store.onlyDecisions = !store.onlyDecisions;
+      localStorage.setItem('claude-deck.onlyDecisions', store.onlyDecisions ? '1' : '0');
+      // 開き方を人に渡せるようにする（?only=1）
+      syncQuery();
+      onlyBtn.setAttribute('aria-pressed', String(store.onlyDecisions));
+      // 当てはまる件数が変わるので窓は先頭から出し直す
+      store.tlShown = TL_PAGE;
+      renderTimeline();
     });
-    sections.push({ id: SEC.timeline, label: '時系列', count: items.length });
-    const tl = el('div', 'timeline');
-    for (const item of shown) tl.append(timelineItem(item));
-    p.body.append(tl);
+    const orderBtn = toggle(store.newestFirst ? '新しい順' : '古い順', false, () => {
+      store.newestFirst = !store.newestFirst;
+      localStorage.setItem('claude-deck.newestFirst', store.newestFirst ? '1' : '0');
+      orderBtn.textContent = store.newestFirst ? '新しい順' : '古い順';
+      // 逆から出すことになるので、窓の続きは意味を持たない
+      store.tlShown = TL_PAGE;
+      renderTimeline();
+    });
+    const actions = el('span', 'panel-actions');
+    actions.append(onlyBtn, orderBtn);
+
+    // 件数は renderTimeline() が入れる。ここで空文字を渡すのは、入れる先の節点を作らせるため
+    const p = panel('時系列', { id: SEC.timeline, count: '', action: actions });
+    sections.push({ id: SEC.timeline, label: '時系列', count: '' });
+    // 絞り込みの入力欄（第2段で足す）を .timeline の兄弟に置けるよう、
+    // 差し替える範囲を器で囲っておく。入力欄まで作り直すと1文字ごとに caret が飛ぶ
+    const host = el('div', 'tl-host');
+    p.body.append(host);
     stack.append(p.section);
+    tlRef = {
+      host,
+      count: p.section.querySelector('h3 .count'),
+      nav: null,
+      items: d.digest.items,
+      dropped: d.digest.stats.droppedItems ?? 0,
+    };
 
     if (d.digest.files.length) {
       const q = panel('書き換えたファイル', { id: SEC.files, count: `${d.digest.files.length} 件` });
@@ -1427,10 +1591,19 @@ function renderDetail() {
 
   // ジャンプ用リンクはパネルを積み終わってから作る（あるものだけを並べたいので）
   const nav = navBlock(sections);
-  if (nav) wrap.append(nav);
+  if (nav) {
+    wrap.append(nav);
+    // 目次の件数の差し替え先を拾っておく。パネルが3枚に届かないと目次自体が出ないので、
+    // 取れないこともある（renderTimeline() は null を見て素通りする）
+    if (tlRef) tlRef.nav = nav.querySelector(`[data-sec="${SEC.timeline}"] .n`);
+  }
 
   wrap.append(stack);
+  // 時系列の中身はここで入れる。まだ document に付いていないので、
+  // 120件を組んでもレイアウトの計算は1回で済む
+  renderTimeline();
   dom.detail.append(wrap);
+  mark('detail', t0);
 }
 
 /* ------------------------------------------------------ 詳細の取得と保持 */
@@ -1468,7 +1641,7 @@ function detailErrorNow() {
 async function loadDetail(sessionId, { silent = false } = {}) {
   if (!sessionId) {
     store.detail = null;
-    renderDetail();
+    renderDetailIfNeeded();
     return;
   }
 
@@ -1479,7 +1652,7 @@ async function loadDetail(sessionId, { silent = false } = {}) {
     store.detail = cached.data;
     store.detailError = null;
     store.detailErrorFor = null;
-    renderDetail();
+    renderDetailIfNeeded();
     return;
   }
 
@@ -1488,7 +1661,7 @@ async function loadDetail(sessionId, { silent = false } = {}) {
     store.detail = null;
     store.detailError = null;
     store.detailErrorFor = null;
-    renderDetail();
+    renderDetailIfNeeded();
   }
 
   try {
@@ -1516,7 +1689,7 @@ async function loadDetail(sessionId, { silent = false } = {}) {
     store.detailError = err.message;
     store.detailErrorFor = sessionId;
   }
-  renderDetail();
+  renderDetailIfNeeded();
 }
 
 /**
@@ -1575,7 +1748,9 @@ function apply(payload) {
   // 書庫を出しているあいだ #list には触らない。replaceChildren すると
   // 見えていない一覧のスクロール位置が毎秒先頭へ飛ぶ
   if (store.tab !== 'archive') renderList();
-  renderDetail();
+  // 詳細は「見えているものが動いたとき」だけ作り直す。毎回作り直すと、
+  // 開いた <details> とスクロール位置が2秒ごとに消える
+  renderDetailIfNeeded();
   // 詳細は中身が変わっていなければ取り直さない。
   // silent にして、取り直しのあいだも前の内容を出したままにする
   loadDetail(store.selected, { silent: true });
