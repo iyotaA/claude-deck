@@ -178,11 +178,14 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 `public/app.js` はバニラ JS の1ファイル。フレームワークもビルドも無い。
 
-- SSE でつなぎ、`apply()` が一覧・まとめ・詳細をまとめて描き直す
-- 詳細は `detailCache`（`lastActivityAt` を印にした8件のキャッシュ）。中身が変わっていなければ取り直さない
+- SSE でつなぎ、`apply()` が一覧・まとめを描き直す。詳細は `renderDetailIfNeeded()` を通し、`detailKeyOf()` の値が動いたときだけ作り直す（毎回作り直すと開いた `<details>` と入力中の caret が消える）
+- 時系列だけは `renderTimeline()` が `.tl-host` を差し替える。絞り込みの帯は器の外に置く（中に入れると1文字ごとに入力欄が作り直される）
+- 詳細は `detailCache`（`logSize` を印にした8件のキャッシュ）。中身が変わっていなければ取り直さない。印が `0`（不明）なら必ず取り直す
 - 取り直しのあいだは `silent` で前の内容を出したままにする
 - 狭い画面（860px 以下）では一覧が引き出しになる。閉じているあいだは `inert` で丸ごと触れなくする
-- URL クエリで開き方を指定できる … `?session=<id>` `?theme=dark|light` `?only=1` `?nolive=1`
+- URL クエリで開き方を指定できる … `?session=<id>` `?theme=dark|light` `?only=1` `?nolive=1` `?tab=archive` `?aq=` `?asort=` `?tq=` `?hide=`
+- `?hide=` は「キーが無い」と「空で付いている」を分けて見る。空は「何も隠さない」の指定なので既定に戻さない
+- 描画にかかった時間は `window.deckPerf()` で見る（目安は `renderDetail` が 50ms 未満、`renderTimeline` が 16ms 未満）
 
 状態ラベルの日本語は画面側に持たない。
 `/api/sessions` の `meta.stateLabels`（`STATE_LABELS` そのまま）から引く。

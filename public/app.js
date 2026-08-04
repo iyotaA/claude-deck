@@ -40,6 +40,8 @@ const SUMMARY_ORDER = [
  *                  一覧に無いもの（24時間より古いもの）も開ける
  *  ?theme=dark|light … 配色を固定する
  *  ?only=1 … 時系列を「判断だけ」で開く
+ *  ?tq=<語> … 時系列の検索語
+ *  ?hide=<種類,種類> … 時系列で隠す種類。空で付けると「何も隠さない」になる
  *  ?nolive=1 … 自動更新をつながない
  *  ?tab=archive … 書庫（終了したものも含む全セッション）を開いた状態にする
  *  ?aq=<語> … 書庫の検索語
@@ -49,6 +51,31 @@ const query = new URLSearchParams(location.search);
 
 /** 書庫の並び順。サーバ側（view/archive.mjs の SORTS）と同じ語を使う */
 const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
+
+/**
+ * 時系列で既定から隠す種類。
+ *
+ * 足跡（trace）は件数が桁で多い。既定で出すと判断の記録が埋もれる。
+ *
+ * 拒否リストで持つのが要点。許可リストにすると、サーバが新しい種類を足したときに
+ * 既定で見えなくなる。「未知の形で落ちない」は、黙って消えないことも含む。
+ * 副産物として「足跡は既定オフ、1回押せば以後オン」が特別扱いではなく初期値1つで済む
+ */
+const HIDDEN_KINDS_DEFAULT = ['trace'];
+
+/**
+ * 隠している種類の初期値を決める。
+ *
+ * ?hide= と localStorage は「キーが無い」と「空で付いている」を分けて見る。
+ * 空の指定は「何も隠さない」という意思なので、既定に戻してはいけない。
+ * これで「既定のまま」「何も隠さない」「これだけ隠す」の3つを人に渡せる
+ */
+function initialHiddenKinds() {
+  const fromUrl = query.get('hide');
+  const raw = fromUrl !== null ? fromUrl : localStorage.getItem('claude-deck.hiddenKinds');
+  if (raw === null) return new Set(HIDDEN_KINDS_DEFAULT);
+  return new Set(raw.split(',').map((s) => s.trim()).filter(Boolean));
+}
 
 const dom = {
   app: document.getElementById('app'),
@@ -116,6 +143,10 @@ const store = {
    * 戻すと、動いているセッションでは2秒ごとに「続きを出す」が巻き戻る
    */
   tlShownFor: null,
+  /** 時系列の検索語。null は「検索していない」。空文字は作らない */
+  tq: (query.get('tq') ?? '').trim() || null,
+  /** 時系列で隠している種類（拒否リスト）。HIDDEN_KINDS_DEFAULT の説明を参照 */
+  hiddenKinds: initialHiddenKinds(),
   /**
    * 左のペインに出しているもの。'live'（稼働中）か 'archive'（書庫）。
    *
@@ -158,7 +189,7 @@ function el(tag, className, text) {
  * pushState は使わない。検索欄は1文字ごとにここを通るので、履歴が入力の回数だけ積まれ、
  * 戻るボタンが使えなくなる。replaceState なら今のアドレスだけが差し替わる。
  *
- * 触るキーは session / only / tab / aq / asort だけ。
+ * 触るキーは session / only / tq / hide / tab / aq / asort だけ。
  * theme と nolive は「開くときの指定」なので、こちらから書き換えない
  */
 function syncQuery() {
@@ -170,6 +201,12 @@ function syncQuery() {
 
   set('session', store.selected);
   set('only', store.onlyDecisions ? '1' : null);
+  set('tq', store.tq);
+  // 隠している種類は「既定と同じなら書かない」。空の指定（何も隠さない）は空文字のまま残す。
+  // set() は空文字を消してしまうので、ここだけ直に書く
+  const hide = [...store.hiddenKinds].sort().join(',');
+  if (hide === [...HIDDEN_KINDS_DEFAULT].sort().join(',')) params.delete('hide');
+  else params.set('hide', hide);
   set('tab', store.tab === 'archive' ? 'archive' : null);
   set('aq', store.tab === 'archive' ? store.archive.q : null);
   // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
@@ -788,6 +825,166 @@ function waitFact(bucket) {
   return parts.length ? parts.join(' / ') : null;
 }
 
+/* --------------------------------------------------------- 時系列の絞り込み */
+
+/**
+ * 検索語に当たった所を <mark> で囲んだ節点の並びを返す。
+ *
+ * innerHTML は使わない。当たった所は要素として作り、それ以外は createTextNode で入れる。
+ * ログ本文にタグが書かれていても、ただの文字として出る。
+ *
+ * 正規表現も使わない。検索語は人が打つ文字列なので、記号のたびにエスケープが要る。
+ *
+ * @param {string|null} text
+ * @param {string|null} needle 検索語。null なら素の文字として1つ返す
+ * @returns {Array<Node>}
+ */
+function markUp(text, needle) {
+  const t = String(text ?? '');
+  if (!needle) return [document.createTextNode(t)];
+
+  // 大小を無視して探す。ただし toLowerCase で長さが変わる文字（İ など）が混ざると
+  // 元の文字列と位置がずれて、関係ない所を切り出す。
+  // そのときだけ大小を区別する検索に落とす。ずれた強調を出すより外れるほうがまし
+  const lower = t.toLowerCase();
+  const nLower = needle.toLowerCase();
+  const exact = lower.length !== t.length || nLower.length !== needle.length;
+  const hay = exact ? t : lower;
+  const pin = exact ? needle : nLower;
+
+  const out = [];
+  let from = 0;
+  for (;;) {
+    const hit = hay.indexOf(pin, from);
+    if (hit < 0) break;
+    if (hit > from) out.push(document.createTextNode(t.slice(from, hit)));
+    out.push(el('mark', null, t.slice(hit, hit + pin.length)));
+    from = hit + pin.length;
+  }
+  if (!out.length) return [document.createTextNode(t)];
+  if (from < t.length) out.push(document.createTextNode(t.slice(from)));
+  return out;
+}
+
+/**
+ * 検索語の強調つきで節点を1つ作る。
+ *
+ * el() と同じ形で呼べるようにしてある。needle が null なら el() と同じものができる
+ */
+function marked(tag, className, text, needle) {
+  const node = el(tag, className);
+  node.append(...markUp(text, needle));
+  return node;
+}
+
+/** 検索語が何回出てくるか。markUp と同じ数え方（大小は無視、重なりは数えない） */
+function countHits(text, needle) {
+  if (!needle) return 0;
+  const hay = String(text ?? '').toLowerCase();
+  const pin = needle.toLowerCase();
+  if (!pin) return 0;
+  let n = 0;
+  let from = 0;
+  for (;;) {
+    const hit = hay.indexOf(pin, from);
+    if (hit < 0) return n;
+    n += 1;
+    from = hit + pin.length;
+  }
+}
+
+/**
+ * この item を検索語と突き合わせる文字列。
+ *
+ * 対象は画面に出している文字だけにする。出していないものに当てると
+ * 「一致したのに、その行を見ても語が無い」行が出てしまう
+ */
+function searchableOf(item) {
+  const parts = [KIND_LABELS[item.kind] ?? item.kind];
+  const push = (v) => { if (typeof v === 'string' && v) parts.push(v); };
+  push(item.text);
+  push(item.tool);
+  push(item.detail);
+  push(item.note);
+  push(item.message);
+  push(item.skill);
+  push(item.args);
+  push(item.command);
+  push(item.agentType);
+  push(item.description);
+  push(item.denialLabel);
+  push(item.plan);
+  push(item.feedback);
+  push(item.planFile);
+  for (const a of item.answers ?? []) {
+    push(a.question);
+    push(a.chosen);
+    push(a.header);
+    for (const o of [...(a.chosenOptions ?? []), ...(a.otherOptions ?? [])]) {
+      push(o.label);
+      push(o.description);
+    }
+  }
+  return parts.join('\n');
+}
+
+/**
+ * searchableOf の結果を item ごとに覚える。
+ *
+ * item は詳細を取り直すまで同じ参照なので、1文字打つたびに組み直さなくて済む。
+ * WeakMap なので詳細が入れ替われば古い分は勝手に消える
+ */
+const searchCache = new WeakMap();
+
+/** 覚えてあれば使う。 */
+function searchTextOf(item) {
+  let s = searchCache.get(item);
+  if (s === undefined) {
+    s = searchableOf(item);
+    searchCache.set(item, s);
+  }
+  return s;
+}
+
+/**
+ * 時系列を絞り込む。
+ *
+ * 順序は「種類 → 検索語」。逆にすると見出しの件数が何を数えたものか読めなくなる
+ * （検索で 12 件に絞ったあと種類で隠すと、12 は消えた行を含んだ数になる）。
+ *
+ * 「判断だけ」は種類の絞り込みとは独立させて AND する。
+ * 種類の集合の preset にすると、既存の ?only=1 と localStorage の意味が変わってしまう
+ */
+function filterTimeline(items) {
+  let out = items;
+  if (store.hiddenKinds.size) out = out.filter((i) => !store.hiddenKinds.has(i.kind));
+  if (store.onlyDecisions) out = out.filter((i) => DECISION_KINDS.has(i.kind));
+  if (store.tq) {
+    const pin = store.tq.toLowerCase();
+    out = out.filter((i) => searchTextOf(i).toLowerCase().includes(pin));
+  }
+  return out;
+}
+
+/**
+ * 種類ごとの件数。チップの並びを作るのに使う。
+ *
+ * 並びは KIND_LABELS の順に固定する。多い順にすると、セッションを切り替えるたびに
+ * チップの位置が入れ替わって押し間違える。知らない種類は後ろに足す（黙って消さない）
+ */
+function countKinds(items) {
+  const counts = new Map();
+  for (const item of items) counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
+  const ordered = new Map();
+  for (const kind of Object.keys(KIND_LABELS)) {
+    if (counts.has(kind)) ordered.set(kind, counts.get(kind));
+  }
+  for (const [kind, n] of counts) {
+    if (!ordered.has(kind)) ordered.set(kind, n);
+  }
+  return ordered;
+}
+
 /**
  * 長い本文は頭だけ出して、続きは折りたたむ。
  *
@@ -798,12 +995,13 @@ function waitFact(bucket) {
  * @param {number} limit 頭出しの文字数
  * @param {number} maxLines 頭出しの行数
  * @param {number|null} [fullLength] 切る前の文字数。サーバが切っていれば受け取った長さより大きい
+ * @param {string|null} [needle] 検索語。当たった所を強調する
  */
-function bodyText(text, limit, maxLines, fullLength = null) {
+function bodyText(text, limit, maxLines, fullLength = null, needle = null) {
   const t = String(text ?? '').trim();
   if (!t) return [];
   const lines = t.split('\n');
-  if (t.length <= limit && lines.length <= maxLines) return [el('div', 'tl-text', t)];
+  if (t.length <= limit && lines.length <= maxLines) return [marked('div', 'tl-text', t, needle)];
 
   let head = lines.slice(0, maxLines).join('\n');
   if (head.length > limit) head = head.slice(0, limit);
@@ -811,11 +1009,16 @@ function bodyText(text, limit, maxLines, fullLength = null) {
   // ここで持っているのが本当の全文かどうかで文言を変える。サーバ側が既に切っているのに
   // 「全文」と書くと嘘になる（say は 1,200 字、recap は 2,000 字で切られている）
   const clipped = typeof fullLength === 'number' && fullLength > t.length;
-  more.append(el('summary', null, clipped
+  const label = clipped
     ? `全 ${fullLength.toLocaleString('ja-JP')} 字（このうち ${t.length.toLocaleString('ja-JP')} 字まで表示）`
-    : `全文（${t.length.toLocaleString('ja-JP')}字）`));
-  more.append(el('pre', null, t));
-  return [el('div', 'tl-text', `${head.trimEnd()}…`), more];
+    : `全文（${t.length.toLocaleString('ja-JP')}字）`;
+  // 検索語が頭出しに無く、続きの中にあるときは開いた状態で出す。
+  // 閉じたまま出すと「一致した行なのに、見ても語が見つからない」ことになる
+  const hits = countHits(t, needle);
+  if (hits > countHits(head, needle)) more.open = true;
+  more.append(el('summary', null, hits ? `${label}　一致 ${num(hits)} 件` : label));
+  more.append(marked('pre', null, t, needle));
+  return [marked('div', 'tl-text', `${head.trimEnd()}…`, needle), more];
 }
 
 /**
@@ -824,17 +1027,21 @@ function bodyText(text, limit, maxLines, fullLength = null) {
  * compact のときは質問と選んだ答えだけ。時系列の中では短くしたいので。
  * それ以外は選択肢の説明と、選ばなかった案も出す。
  * 説明文が「その選択が何を意味していたか」なので、判断の理由がここに残る。
+ *
+ * @param {object} a digest の answer 1件
+ * @param {boolean} compact 時系列の中で短く出すか
+ * @param {string|null} [needle] 検索語
  */
-function answerBlock(a, compact) {
+function answerBlock(a, compact, needle = null) {
   const wrap = el('div', 'decision');
-  wrap.append(el('div', 'decision-q', a.question || '(質問文なし)'));
+  wrap.append(marked('div', 'decision-q', a.question || '(質問文なし)', needle));
 
   const box = el('div', 'decision-a');
   if (a.freeText) box.classList.add('is-free');
   if (a.chosen) {
-    box.append(el('div', 'label', a.chosen));
+    box.append(marked('div', 'label', a.chosen, needle));
     const why = a.chosenOptions?.[0]?.description;
-    if (!compact && why) box.append(el('p', 'why', why));
+    if (!compact && why) box.append(marked('p', 'why', why, needle));
     else if (!compact && a.freeText) box.append(el('p', 'why', '選択肢から選ばず、自分で書いた回答'));
   } else {
     box.append(el('div', 'label', '（まだ回答していません）'));
@@ -845,33 +1052,44 @@ function answerBlock(a, compact) {
     const d = el('details', 'rejected');
     d.append(el('summary', null, `選ばなかった案 ${a.otherOptions.length} 件`));
     const ul = el('ul');
+    let hits = 0;
     for (const o of a.otherOptions) {
       const li = el('li');
-      li.append(el('span', 'label', o.label));
-      if (o.description) li.append(document.createTextNode(` — ${o.description}`));
+      li.append(marked('span', 'label', o.label, needle));
+      if (o.description) li.append(...markUp(` — ${o.description}`, needle));
+      hits += countHits(o.label, needle) + countHits(o.description, needle);
       ul.append(li);
     }
+    // 当たった所が畳んだ中にしか無いときは開いて出す。閉じたままだと語が見つからない
+    if (hits) d.open = true;
     d.append(ul);
     wrap.append(d);
   }
   return wrap;
 }
 
-function planBlock(item, compact) {
+/**
+ * @param {object} item digest の plan 1件
+ * @param {boolean} compact 全文を畳むだけにするか
+ * @param {string|null} [needle] 検索語
+ */
+function planBlock(item, compact, needle = null) {
   const box = el('div', 'tl-body');
   const status = item.pending ? '承認を待っています' : item.approved ? '承認済み' : '差し戻し';
   const line = el('div', 'tl-text', status);
   // パスは等幅で出す。和文フォントに落ちると \ が ¥ の字形になって別物に見えるため
   if (item.planFile) {
     line.append(' — ');
-    line.append(el('span', 'mono', item.planFile));
+    line.append(marked('span', 'mono', item.planFile, needle));
   }
   box.append(line);
-  if (item.feedback) box.append(el('pre', 'tl-detail', item.feedback));
+  if (item.feedback) box.append(marked('pre', 'tl-detail', item.feedback, needle));
   if (item.plan && !compact) {
     const d = el('details', 'more');
-    d.append(el('summary', null, 'プラン全文'));
-    d.append(el('pre', null, item.plan));
+    const hits = countHits(item.plan, needle);
+    d.append(el('summary', null, hits ? `プラン全文　一致 ${num(hits)} 件` : 'プラン全文'));
+    if (hits) d.open = true;
+    d.append(marked('pre', null, item.plan, needle));
     box.append(d);
   }
   return box;
@@ -894,8 +1112,14 @@ function whenNode(at) {
   return node;
 }
 
-/** 時系列の1行。 */
-function timelineItem(item) {
+/**
+ * 時系列の1行。
+ *
+ * @param {object} item digest の item
+ * @param {object} [ctx] 描くときの文脈。{needle} 検索語
+ */
+function timelineItem(item, ctx = {}) {
+  const needle = ctx.needle ?? null;
   const row = el('div', 'tl');
   row.dataset.kind = item.kind;
 
@@ -913,7 +1137,7 @@ function timelineItem(item) {
   row.append(whenNode(item.at));
   const body = el('div', 'tl-body');
   const kindRow = el('div', 'tl-kind');
-  kindRow.append(document.createTextNode(KIND_LABELS[item.kind] ?? item.kind));
+  kindRow.append(...markUp(KIND_LABELS[item.kind] ?? item.kind, needle));
   // 前のやり取りからの間。取れていない行には何も付かない
   const wait = waitBadge(item.wait);
   if (wait) kindRow.append(wait);
@@ -922,15 +1146,15 @@ function timelineItem(item) {
   switch (item.kind) {
     // 自分の指示は判断の記録そのものなので、Claude の説明より長く出す
     case 'prompt':
-      body.append(...bodyText(item.text, 900, 12));
+      body.append(...bodyText(item.text, 900, 12, null, needle));
       break;
     case 'say':
-      body.append(...bodyText(item.text, 260, 4, item.fullLength));
+      body.append(...bodyText(item.text, 260, 4, item.fullLength, needle));
       break;
     // Claude の自己申告。時系列でもその場で断ってから本文を出す
     case 'recap':
       body.append(el('p', 'note', 'Claude 自身が書いた中間報告です。機械的に抜き出した記録ではありません'));
-      body.append(...bodyText(item.text, 600, 8, item.fullLength));
+      body.append(...bodyText(item.text, 600, 8, item.fullLength, needle));
       break;
     // 間引きで落ちた区間の目印。何が落ちたかまで出す（足跡だけの区間かどうかが読めるように）
     case 'elided': {
@@ -946,32 +1170,33 @@ function timelineItem(item) {
     }
     // 選んだ理由（選択肢の説明文）は判断の記録そのものなので、時系列でも省かない
     case 'answer':
-      for (const a of item.answers ?? []) body.append(answerBlock(a, false));
+      for (const a of item.answers ?? []) body.append(answerBlock(a, false, needle));
       break;
     case 'plan':
-      body.append(...planBlock(item, false).childNodes);
+      body.append(...planBlock(item, false, needle).childNodes);
       break;
     case 'denial':
-      body.append(el('div', 'tl-text', `${item.denialLabel} — ${item.tool}`));
-      if (item.detail) body.append(el('pre', 'tl-detail', item.detail));
+      body.append(marked('div', 'tl-text', `${item.denialLabel} — ${item.tool}`, needle));
+      if (item.detail) body.append(marked('pre', 'tl-detail', item.detail, needle));
       // note は定型文を除いた残り。自分が添えたコメントがあればここに出る
-      if (item.note) body.append(el('pre', 'tl-detail', item.note));
+      if (item.note) body.append(marked('pre', 'tl-detail', item.note, needle));
       break;
     case 'interrupt':
       body.append(el('div', 'tl-text', 'ここで実行を止めた'));
       break;
     case 'skill':
-      body.append(el('div', 'tl-text', item.args ? `/${item.skill} ${item.args}` : `/${item.skill}`));
+      body.append(marked('div', 'tl-text', item.args ? `/${item.skill} ${item.args}` : `/${item.skill}`, needle));
       break;
     case 'agent':
-      body.append(el('div', 'tl-text', [item.agentType, item.description].filter(Boolean).join(' — ') || '(説明なし)'));
+      body.append(marked('div', 'tl-text',
+        [item.agentType, item.description].filter(Boolean).join(' — ') || '(説明なし)', needle));
       break;
     case 'error':
-      body.append(el('div', 'tl-text', `${item.tool}${item.detail ? ` — ${item.detail}` : ''}`));
-      if (item.message) body.append(el('pre', 'tl-detail', item.message));
+      body.append(marked('div', 'tl-text', `${item.tool}${item.detail ? ` — ${item.detail}` : ''}`, needle));
+      if (item.message) body.append(marked('pre', 'tl-detail', item.message, needle));
       break;
     case 'slash':
-      body.append(el('div', 'tl-text', item.args ? `${item.command} ${item.args}` : item.command));
+      body.append(marked('div', 'tl-text', item.args ? `${item.command} ${item.args}` : item.command, needle));
       break;
     default:
       body.append(el('div', 'tl-text', JSON.stringify(item)));
@@ -1275,6 +1500,85 @@ window.deckPerf = () => {
 };
 
 /**
+ * 検索欄の待ち時間。
+ *
+ * 1文字ごとに組み直すと、400件の時系列では打っている手が引っかかる。
+ * 種類のチップは意図した1回の操作なので、こちらは待たずに即座に反映する
+ */
+const TL_DEBOUNCE_MS = 120;
+
+let tlSearchTimer = null;
+
+/**
+ * 隠している種類を覚える。
+ *
+ * 空の集合も「何も隠さない」という指定なので、キーごと消さずに空文字で残す。
+ * 消してしまうと次に開いたとき既定（足跡を隠す）に戻ってしまう
+ */
+function saveHiddenKinds() {
+  localStorage.setItem('claude-deck.hiddenKinds', [...store.hiddenKinds].join(','));
+}
+
+/**
+ * 時系列の絞り込み帯を組む。
+ *
+ * 呼ぶのは renderDetail() だけ。返した節点は .tl-host の外（.timeline の兄弟）に置く。
+ * 器の中に入れると renderTimeline() の replaceChildren で入力欄まで作り直され、
+ * 1文字打つたびに caret が消えて打ち続けられなくなる
+ *
+ * @param {Array} all 間引き後の全 item。チップの並びと件数はここから作る
+ */
+function timelineFilterBar(all) {
+  const bar = el('div', 'tl-filter');
+
+  const q = el('input', 'tl-q');
+  q.type = 'search';
+  q.placeholder = '時系列の中を探す';
+  q.setAttribute('aria-label', '時系列を検索');
+  // 値の復元は value に入れるだけ。?tq= で開いた人にも打った途中の人にも同じ形で効く
+  if (store.tq) q.value = store.tq;
+  q.addEventListener('input', () => {
+    clearTimeout(tlSearchTimer);
+    tlSearchTimer = setTimeout(() => {
+      store.tq = q.value.trim() || null;
+      // 探した状態を人に渡せるようにする（?tq=）
+      syncQuery();
+      // 当てはまる件数が変わるので窓は先頭から出し直す
+      store.tlShown = TL_PAGE;
+      renderTimeline();
+    }, TL_DEBOUNCE_MS);
+  });
+  bar.append(q);
+
+  const kinds = el('div', 'tl-kinds');
+  for (const [kind, n] of countKinds(all)) {
+    const chip = el('button', 'tl-chip', KIND_LABELS[kind] ?? kind);
+    chip.type = 'button';
+    chip.append(el('span', 'n', num(n)));
+    // 押した状態は「出している」を true とする。隠す種類を持つのは store 側の拒否リスト
+    const paint = () => {
+      const shown = !store.hiddenKinds.has(kind);
+      chip.setAttribute('aria-pressed', String(shown));
+      chip.title = shown ? 'この種類を隠す' : 'この種類を出す';
+    };
+    paint();
+    chip.addEventListener('click', () => {
+      if (store.hiddenKinds.has(kind)) store.hiddenKinds.delete(kind);
+      else store.hiddenKinds.add(kind);
+      paint();
+      saveHiddenKinds();
+      syncQuery();
+      store.tlShown = TL_PAGE;
+      renderTimeline();
+    });
+    kinds.append(chip);
+  }
+  bar.append(kinds);
+
+  return bar;
+}
+
+/**
  * 時系列だけを描き直す。
  *
  * 絞り込みや並び替えで変わるのは時系列の中身と件数だけ。それなのに renderDetail() を
@@ -1291,15 +1595,24 @@ function renderTimeline() {
   }
 
   const all = tlRef.items;
-  const matched = store.onlyDecisions ? all.filter((i) => DECISION_KINDS.has(i.kind)) : all;
+  const matched = filterTimeline(all);
   const ordered = store.newestFirst ? [...matched].reverse() : matched;
   const shown = ordered.slice(0, Math.max(TL_PAGE, store.tlShown));
   const rest = ordered.length - shown.length;
 
   const box = el('div', 'timeline');
-  for (const item of shown) box.append(timelineItem(item));
+  // 検索語は1回だけ渡す。timelineItem が store を見に行くと、
+  // 描いている途中で語が変わったときに強調と絞り込みが食い違う
+  const ctx = { needle: store.tq };
+  for (const item of shown) box.append(timelineItem(item, ctx));
 
   const nodes = [box];
+  if (!ordered.length) {
+    // 「1件も無い」と「絞り込みで消えた」を分ける。後者は戻し方も添える
+    nodes.push(el('div', 'empty-note', all.length
+      ? '絞り込みに当てはまる行がありません。検索語を消すか、隠している種類を出してください'
+      : '時系列に出せる行がありません'));
+  }
   if (rest > 0) {
     const more = el('button', 'btn tl-more', `続きを出す（残り ${num(rest)} 件）`);
     more.type = 'button';
@@ -1507,10 +1820,10 @@ function renderDetail() {
     // 件数は renderTimeline() が入れる。ここで空文字を渡すのは、入れる先の節点を作らせるため
     const p = panel('時系列', { id: SEC.timeline, count: '', action: actions });
     sections.push({ id: SEC.timeline, label: '時系列', count: '' });
-    // 絞り込みの入力欄（第2段で足す）を .timeline の兄弟に置けるよう、
-    // 差し替える範囲を器で囲っておく。入力欄まで作り直すと1文字ごとに caret が飛ぶ
+    // 絞り込みの帯は器の外（.timeline の兄弟）に置く。
+    // 中に入れると renderTimeline() が入力欄まで作り直し、1文字ごとに caret が飛ぶ
     const host = el('div', 'tl-host');
-    p.body.append(host);
+    p.body.append(timelineFilterBar(d.digest.items), host);
     stack.append(p.section);
     tlRef = {
       host,

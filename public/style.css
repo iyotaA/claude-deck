@@ -1008,6 +1008,80 @@ details.rejected .label { color: var(--fg); }
   flex-direction: column;
 }
 
+/* --------------------------------------------------- 時系列の絞り込み */
+
+.tl-filter {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  margin-bottom: .6rem;
+}
+
+/* 書庫の検索欄と同じ作りにする。同じ役目のものを2通りの見た目にしない */
+.tl-q {
+  width: 100%;
+  min-width: 0;
+  padding: .3rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: .8rem;
+}
+
+.tl-q:focus-visible { border-color: var(--accent); }
+
+.tl-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+}
+
+/* 目次のチップと同じ丸み。押した状態は色ではなく濃さで表す（状態色と混ぜない） */
+.tl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .12rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  font: inherit;
+  font-size: .76rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tl-chip:hover { border-color: var(--border-strong); color: var(--fg); }
+
+.tl-chip .n {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .72rem;
+  color: var(--fg-faint);
+}
+
+/* 隠している種類。線で消すのは「押せば戻る」ことを見せるため。消さずに沈める */
+.tl-chip[aria-pressed="false"] {
+  border-style: dashed;
+  color: var(--fg-faint);
+  text-decoration: line-through;
+}
+
+/* 検索に当たった所。ブラウザ既定の黄色い塗りを消す。
+   面を塗ると状態色の塗り分けとぶつかって、どれが自分の番か読めなくなる */
+mark {
+  background: none;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
 /* 続きを出すボタン。既定では 120 件だけ組んで、押した人にだけ続きを足す */
 .tl-more {
   margin-top: .6rem;
