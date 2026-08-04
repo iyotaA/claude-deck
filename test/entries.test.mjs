@@ -17,6 +17,9 @@ import {
   slashCommandOf,
   timestampOf,
   isMainline,
+  isSidechain,
+  uuidOf,
+  recapOf,
   DENIAL_KINDS,
   ASK_TOOLS,
 } from '../src/parse/entries.mjs';
@@ -160,6 +163,46 @@ test('isMainline はサブエージェントの行だけ外す', () => {
   assert.equal(isMainline({ ...say('枝'), isSidechain: true }), false);
   assert.equal(isMainline({ ...say('枝'), isSidechain: false }), true);
   assert.equal(isMainline(null), true);
+});
+
+test('isSidechain は isMainline の真裏', () => {
+  const branch = { ...say('枝'), isSidechain: true };
+  assert.equal(isSidechain(branch), true);
+  assert.equal(isSidechain(say('本流')), false);
+  // キーが無い行は本流。サブエージェントの行だけが印を持つ
+  assert.equal(isSidechain({}), false);
+  assert.equal(isSidechain(null), false);
+});
+
+test('uuidOf は文字列のときだけ返す', () => {
+  assert.equal(uuidOf({ uuid: 'abc' }), 'abc');
+  // 数値や欠落を空文字にすると「取れなかった」と「空だった」が混ざる
+  assert.equal(uuidOf({ uuid: 42 }), null);
+  assert.equal(uuidOf({}), null);
+  assert.equal(uuidOf(null), null);
+});
+
+test('recapOf は Claude の中間報告を取り出し、断り書きだけ落とす', () => {
+  const withTail = {
+    type: 'system',
+    subtype: 'away_summary',
+    content: '一覧の描画を直しています (disable recaps in /config)',
+  };
+  assert.equal(recapOf(withTail), '一覧の描画を直しています');
+
+  // 断り書きが付いていない行もある（実測183件中25件）。除去は付いているときだけ
+  const bare = { type: 'system', subtype: 'away_summary', content: 'テストを通しました' };
+  assert.equal(recapOf(bare), 'テストを通しました');
+});
+
+test('recapOf は中間報告以外の行を拾わない', () => {
+  // 本文は message.content ではなく entry.content に入る。ここを取り違えると全件が空になる
+  assert.equal(recapOf({ type: 'system', subtype: 'away_summary', message: { content: '別の場所' } }), null);
+  assert.equal(recapOf({ type: 'system', subtype: 'turn_duration', content: 'ちがう種類' }), null);
+  assert.equal(recapOf(say('assistant の発言')), null);
+  // 断り書きだけの行は中身が無いので null
+  assert.equal(recapOf({ type: 'system', subtype: 'away_summary', content: '(disable recaps in /config)' }), null);
+  assert.equal(recapOf({ type: 'system', subtype: 'away_summary', content: 42 }), null);
 });
 
 test('却下の種類と待ち専用ツールの一覧', () => {

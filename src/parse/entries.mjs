@@ -122,3 +122,43 @@ export function timestampOf(entry) {
 export function isMainline(entry) {
   return entry?.isSidechain !== true;
 }
+
+/** サブエージェントの行か。isMainline の真裏。どの行が数に入るかの解釈はここに集める。 */
+export function isSidechain(entry) {
+  return entry?.isSidechain === true;
+}
+
+/** 行を指す識別子。原文に戻るときの鍵になる。取れなければ null。 */
+export function uuidOf(entry) {
+  return typeof entry?.uuid === 'string' ? entry.uuid : null;
+}
+
+/**
+ * 中間報告に付く断り書き。
+ *
+ * 実測 183 件のうち 158 件に付いていた。付いていない行もあるので、除去は付いているときだけ。
+ * 報告の中身ではなく Claude Code の案内文なので、読み物としては邪魔になる
+ */
+const RECAP_TAIL = '(disable recaps in /config)';
+
+/**
+ * Claude 自身が書いた中間報告（recap）を取り出す。
+ *
+ * 実測した形（183 件で確認）:
+ *   {type:"system", subtype:"away_summary", content:"…素の文字列…", ...}
+ *
+ * message.content ではなく entry.content に素の文字列で入るので textOf では取れない。
+ * これは Claude の自己申告であって、機械的に抽出した記録ではない。
+ * 画面に出すときは同じ重さに見せない
+ *
+ * @param {object} entry 会話ログの1行
+ * @returns {string|null} 中間報告の本文。その行でなければ null
+ */
+export function recapOf(entry) {
+  if (entry?.type !== 'system' || entry.subtype !== 'away_summary') return null;
+  const raw = entry.content;
+  if (typeof raw !== 'string') return null;
+  let text = raw.trim();
+  if (text.endsWith(RECAP_TAIL)) text = text.slice(0, -RECAP_TAIL.length).trim();
+  return text || null;
+}
