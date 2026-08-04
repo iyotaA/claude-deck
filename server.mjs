@@ -16,6 +16,7 @@ import { spawn } from 'node:child_process';
 import { listSessions } from './src/view/sessions.mjs';
 import { getSessionDetail } from './src/view/detail.mjs';
 import { listArchive, parseArchiveQuery } from './src/view/archive.mjs';
+import { getRawEntry } from './src/view/entry.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
 import { sessionsDir, projectsDir, configDir } from './src/read/paths.mjs';
 
@@ -256,6 +257,21 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/archive') {
     listArchive(parseArchiveQuery(url.searchParams)).then(
       (payload) => sendJson(res, 200, payload),
+      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+    );
+    return;
+  }
+
+  // 原文の1行。詳細より露出量が多いので、entry.mjs 側で鍵らしい値を伏せて長さを切る。
+  // 下の detailMatch は末尾 $ で閉じていて / を含まないので構造上ぶつからないが、
+  // 読み手が順序を気にしないで済むよう、具体的なほうを手前に置く
+  const entryMatch = /^\/api\/sessions\/([\w.-]{1,80})\/entry\/([\w-]{1,80})$/.exec(pathname);
+  if (entryMatch) {
+    getRawEntry(entryMatch[1], entryMatch[2], { agentId: url.searchParams.get('agent') }).then(
+      (raw) => {
+        if (!raw) sendJson(res, 404, { error: 'その行が見つかりません' });
+        else sendJson(res, 200, raw);
+      },
       (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
     );
     return;

@@ -77,6 +77,15 @@ const MAX_ITEMS = 400;
 const MAX_TRACES = 200;
 
 /**
+ * 足跡に残す結果の先頭の長さ。
+ *
+ * 本文は積まない。足跡が答えるのは「どこを見に行ったか」で、
+ * 結果の中身が要るときは原文（/api/sessions/:id/entry/:uuid）に戻ればよい。
+ * 200件ぶんの全文を載せると詳細の応答が桁で膨らむ
+ */
+const TRACE_HEAD = 160;
+
+/**
  * 上限を超えたときに落とす順。前のほうから使い切る。
  *
  * ここに無い種類は落とさない。指示・選択・プラン・却下・圧縮などの判断の記録がそれで、
@@ -496,6 +505,15 @@ export function buildDigest({ entries = [] } = {}) {
       if (at !== null) replyFrom = at;
     }
 
+    /**
+     * この行ぶんのふつうの呼び出し（足跡の材料）。
+     *
+     * assistant の1行につき1件の足跡にまとめる。1呼び出し1件にすると、
+     * 並列で6本呼んだ行が6件になって、判断の記録が水増しの中に埋もれる。
+     * 却下・質問・プラン・スキル・エージェント・失敗は自分の項目を持つので、ここには入れない
+     */
+    const calls = [];
+
     for (const tu of toolUses(entry)) {
       stats.toolCalls += 1;
       const result = results.get(tu.id) ?? null;
@@ -617,7 +635,37 @@ export function buildDigest({ entries = [] } = {}) {
           detail: describeTool(tu.name, tu.input),
           message: oneLine(result.text, LIMIT.detail),
         });
+        continue;
       }
+
+      calls.push({
+        tool: tu.name,
+        detail: describeTool(tu.name, tu.input),
+        // 呼んでから結果が返るまで。承認待ちの時間も含む（分けられない）
+        durationMs: typeof at === 'number' && typeof result?.at === 'number' ? result.at - at : null,
+        // 結果がまだ来ていない。いま止まっているのがここだと分かる
+        pending: !result,
+        // 0 と「取れなかった」を分ける。結果が無い行は null にする
+        resultChars: typeof result?.text === 'string' ? result.text.length : null,
+        head: oneLine(result?.text, TRACE_HEAD),
+        resultUuid: result?.uuid ?? null,
+      });
+    }
+
+    if (calls.length) {
+      // 一番遅い結果まで。1本も測れなければ null。取れた分があればその最長を出す
+      const durations = calls.map((c) => c.durationMs).filter((v) => typeof v === 'number');
+      items.push({
+        i: index++,
+        kind: 'trace',
+        at,
+        uuid,
+        count: calls.length,
+        // 畳んだ見出しに出す。同じツールを並列で呼んだ行を「Read ×4」と読めるようにする
+        tools: [...new Set(calls.map((c) => c.tool))],
+        durationMs: durations.length ? Math.max(...durations) : null,
+        calls,
+      });
     }
   }
 

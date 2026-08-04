@@ -85,7 +85,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 |---|---|---|
 | `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` |
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` |
-| `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` |
+| `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） |
 | `src/os/` | OS を叩く | `focus` |
 
@@ -162,6 +162,8 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 |---|---|
 | `GET /api/sessions` | 一覧を1回返す |
 | `GET /api/sessions/:id` | 詳細（ログ全文を読む） |
+| `GET /api/sessions/:id/entry/:uuid` | ログの1行を原文で返す。鍵らしい値は伏せ、長さと深さで切る。ファイルパスは返さない |
+| `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
 | `GET /api/health` | 生存確認。二重起動の判定にも使う |
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |

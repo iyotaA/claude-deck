@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDigest } from '../src/parse/digest.mjs';
-import { T0, at, say, call, result, prompt } from './helpers.mjs';
+import { T0, at, say, call, multiCall, result, prompt } from './helpers.mjs';
 
 /** 指定した kind の項目だけ取り出す。 */
 const only = (digest, kind) => digest.items.filter((i) => i.kind === kind);
@@ -490,6 +490,75 @@ test('上限を超えたら失敗の記録から先に落とす', () => {
   assert.equal(only(d, 'error').length, 0);
   assert.equal(d.stats.errors, 5);
   assert.deepEqual(only(d, 'elided')[0].byKind, { error: 5, say: 1 });
+});
+
+test('ふつうのツールの呼び出しは、行ごとに1件の足跡にまとまる', () => {
+  const d = buildDigest({
+    entries: [
+      multiCall([
+        { name: 'Read', input: { file_path: 'a.mjs' }, id: 'x1' },
+        { name: 'Read', input: { file_path: 'b.mjs' }, id: 'x2' },
+      ], { uuid: 'a-1' }),
+      result('x1', { ms: 300, text: 'あ'.repeat(500), uuid: 'r-1' }),
+      result('x2', { ms: 900, text: 'い' }),
+    ],
+  });
+
+  const [trace] = only(d, 'trace');
+  // 並列で2本呼んだ行を2件にすると、水増しになって判断の記録が埋もれる
+  assert.equal(trace.count, 2);
+  assert.equal(trace.uuid, 'a-1');
+  // 同じツールを並列で呼んだ行を「Read ×2」と読めるようにする
+  assert.deepEqual(trace.tools, ['Read']);
+  // 一番遅い結果まで。速いほうに合わせると、実際に待った時間が読めない
+  assert.equal(trace.durationMs, 900);
+  // 本文は積まない。長さだけ持って、中身は原文に戻って見る
+  assert.equal(trace.calls[0].resultChars, 500);
+  assert.equal(trace.calls[0].head.length, 160);
+  assert.equal(trace.calls[0].resultUuid, 'r-1');
+  assert.equal(trace.calls[0].pending, false);
+});
+
+test('自分の項目を持つ呼び出しは足跡に二重で数えない', () => {
+  const d = buildDigest({
+    entries: [
+      call('Bash', { command: 'boom' }, { id: 'x1' }),
+      result('x1', { ms: 10, isError: true, text: 'だめ' }),
+      call('ExitPlanMode', { plan: 'これでいく' }, { id: 'x2', ms: 20 }),
+      result('x2', { ms: 30, text: 'User has approved your plan' }),
+      call('Skill', { skill: 'review' }, { id: 'x3', ms: 40 }),
+      result('x3', { ms: 50 }),
+    ],
+  });
+  // 失敗・プラン・スキルは自分の項目を持つ。足跡にも出ると同じ呼び出しが2件に見える
+  assert.equal(only(d, 'trace').length, 0);
+});
+
+test('結果の来ていない呼び出しは足跡に保留として残る', () => {
+  const d = buildDigest({ entries: [call('Bash', { command: 'npm test' }, { id: 'x1' })] });
+  const [trace] = only(d, 'trace');
+  // いま止まっているのがここだと分かる
+  assert.equal(trace.calls[0].pending, true);
+  // 測れなかったものを 0 と書かない
+  assert.equal(trace.durationMs, null);
+  assert.equal(trace.calls[0].resultChars, null);
+  assert.equal(trace.calls[0].head, null);
+});
+
+test('足跡は独立した枠なので、あふれても説明は落とさない', () => {
+  const entries = [prompt('やって')];
+  for (let i = 0; i < 210; i += 1) {
+    entries.push(call('Read', { file_path: `f${i}.mjs` }, { id: `x${i}`, ms: i + 1 }));
+    entries.push(result(`x${i}`, { ms: i + 1 }));
+  }
+  for (let i = 0; i < 300; i += 1) entries.push(say(`発言 ${i}`, { ms: 500 + i }));
+
+  const d = buildDigest({ entries });
+  // 足跡は 200 件で止まる。本編（400）と枠を分けているので、説明は1件も落ちない
+  assert.equal(only(d, 'trace').length, 200);
+  assert.equal(only(d, 'say').length, 300);
+  // 落ちた区間の内訳を持たせるのは、足跡を隠している人に無関係な省略通知を出さないため
+  assert.deepEqual(only(d, 'elided')[0].byKind, { trace: 10 });
 });
 
 test('項目は元の行の uuid を持ち、結果の行も指せる', () => {

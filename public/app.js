@@ -231,6 +231,19 @@ function since(ms) {
   return `${Math.floor(h / 24)}日${h % 24}時間`;
 }
 
+/**
+ * かかった時間。since() と違って秒より下を捨てない。
+ *
+ * ツールの往復は 200ms で終わるものが多く、since() に渡すと「0秒」が縦に並ぶ。
+ * 1秒未満はミリ秒で出し、それ以上は since() に任せる（分・時間の粒度を持っている）。
+ * @param {number|null} ms かかった時間。取れていなければ null
+ */
+function dur(ms) {
+  if (typeof ms !== 'number') return '—';
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  return since(ms);
+}
+
 function shortModel(model) {
   if (!model) return null;
   return model.replace(/^claude-/, '').replace(/-\d{8}$/, '');
@@ -714,6 +727,9 @@ const KIND_LABELS = {
   // Claude 自身が書いた中間報告。機械的に抜き出した記録ではないので、語を分けておく
   recap: 'Claude の中間報告',
   elided: '省略',
+  // ふつうのツール呼び出し。既定では隠している（HIDDEN_KINDS_DEFAULT）。
+  // 絞り込みのチップにも同じ語が出るので、ここを直せば両方が変わる
+  trace: '足跡',
 };
 
 /**
@@ -916,6 +932,13 @@ function searchableOf(item) {
   push(item.plan);
   push(item.feedback);
   push(item.planFile);
+  // 足跡は畳んだ中に文字がある。畳んでいても画面には出しているので検索の対象に入れる
+  for (const t of item.tools ?? []) push(t);
+  for (const c of item.calls ?? []) {
+    push(c.tool);
+    push(c.detail);
+    push(c.head);
+  }
   for (const a of item.answers ?? []) {
     push(a.question);
     push(a.chosen);
@@ -1096,6 +1119,73 @@ function planBlock(item, compact, needle = null) {
 }
 
 /**
+ * 原文（会話ログの1行）を開ける折りたたみを作る。
+ *
+ * 押されたときだけ取りに行く。時系列には最大 400 行あるので、前もって全部取ると
+ * 詳細を開くだけで数百回の往復になる。
+ *
+ * モーダルにしない理由が3つ。既存の「全文」と同じ操作感になる。focus trap が要らない。
+ * そして Escape のハンドラは一覧の引き出しが開いているあいだ常に preventDefault() するので、
+ * モーダルにすると閉じ方をそこと調停する仕組みが要る。
+ *
+ * 取得に失敗したときは done を立てない。閉じて開き直せば取り直せる。
+ *
+ * @param {((uuid: string) => (string|null))|null} makeUrl 取得先を作る関数。
+ *   関数を渡す形にするのは、サブエージェントの記録を同じ timelineItem で描くときに
+ *   子ログの uuid を親の URL へ投げる事故を防ぐため。
+ *   これで timelineItem から store.selected への隠れた依存も消える
+ * @param {string|null} uuid 開きたい行の uuid。elided は null なので出さない
+ * @returns {HTMLElement|null}
+ */
+function rawBlock(makeUrl, uuid) {
+  if (typeof makeUrl !== 'function' || !uuid) return null;
+  const url = makeUrl(uuid);
+  if (!url) return null;
+
+  const d = el('details', 'more raw');
+  d.append(el('summary', null, '原文'));
+  const out = el('pre', 'raw-body');
+  d.append(out);
+
+  let done = false;
+  let loading = false;
+  d.addEventListener('toggle', async () => {
+    if (!d.open || done || loading) return;
+    loading = true;
+    out.textContent = '読み込んでいます…';
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      // 伏せた・切ったを断ってから出す。黙って加工すると原文だと思って読まれる
+      const notes = [];
+      if (data.masked) notes.push('鍵らしい値は伏せてあります');
+      if (data.truncated) notes.push('長すぎる所は切ってあります');
+      const head = notes.length ? `※ ${notes.join(' / ')}\n\n` : '';
+      out.textContent = `${head}${JSON.stringify(data.entry, null, 2)}`;
+      done = true;
+    } catch (err) {
+      out.textContent = `原文が取れません: ${err.message}`;
+    } finally {
+      loading = false;
+    }
+  });
+  return d;
+}
+
+/**
+ * 原文の取得先を作る関数を返す。
+ *
+ * @param {string|null} sessionId いま開いているセッション
+ * @returns {(uuid: string) => (string|null)}
+ */
+function rawUrlFor(sessionId) {
+  return (uuid) => (sessionId && uuid
+    ? `/api/sessions/${encodeURIComponent(sessionId)}/entry/${encodeURIComponent(uuid)}`
+    : null);
+}
+
+/**
  * 時系列の左端。日付と時刻を2段で出す。
  *
  * 時刻だけだと、23:58 の次に 00:03 が並んだときに同じ日なのか翌日なのかが読めない。
@@ -1116,7 +1206,7 @@ function whenNode(at) {
  * 時系列の1行。
  *
  * @param {object} item digest の item
- * @param {object} [ctx] 描くときの文脈。{needle} 検索語
+ * @param {object} [ctx] 描くときの文脈。{needle} 検索語 / {rawUrl} 原文の取得先を作る関数
  */
 function timelineItem(item, ctx = {}) {
   const needle = ctx.needle ?? null;
@@ -1130,6 +1220,8 @@ function timelineItem(item, ctx = {}) {
     const trigger = item.trigger === 'auto' ? '自動' : item.trigger ?? '';
     body.append(el('div', 'tl-text',
       `ここで文脈が圧縮されました（${from} → ${to} tokens${trigger ? ` / ${trigger}` : ''}）。これより前の細部は Claude 側にも残っていません`));
+    const compactRaw = rawBlock(ctx.rawUrl, item.uuid);
+    if (compactRaw) body.append(compactRaw);
     row.append(body);
     return row;
   }
@@ -1198,9 +1290,53 @@ function timelineItem(item, ctx = {}) {
     case 'slash':
       body.append(marked('div', 'tl-text', item.args ? `${item.command} ${item.args}` : item.command, needle));
       break;
+    // 足跡。assistant の1行につき1件で、並列に呼んだ分は calls にまとまっている。
+    // 既定では畳んでおく。1件ずつ広げると、ここだけで画面が埋まって判断の記録が流れる
+    case 'trace': {
+      const tools = item.tools?.length ? item.tools.join(' / ') : 'ツール';
+      const label = [
+        `${tools}${item.count > 1 ? ` ×${item.count}` : ''}`,
+        typeof item.durationMs === 'number' ? dur(item.durationMs) : null,
+      ].filter(Boolean).join('　');
+      const d = el('details', 'more trace');
+      // 畳んだ中に検索語があるときは開いて出す。閉じたままだと語が見つからない
+      const inner = (item.calls ?? [])
+        .map((c) => [c.tool, c.detail, c.head].filter(Boolean).join(' '))
+        .join('\n');
+      const hits = countHits(inner, needle);
+      d.append(marked('summary', null, hits ? `${label}　一致 ${num(hits)} 件` : label, needle));
+      if (hits) d.open = true;
+
+      const ul = el('ul', 'trace-calls');
+      for (const c of item.calls ?? []) {
+        const li = el('li');
+        const line = el('div', 'trace-head');
+        line.append(marked('span', 'mono', c.tool ?? '?', needle));
+        if (c.detail) line.append(marked('span', 'trace-detail', c.detail, needle));
+        if (c.pending) {
+          // 結果が来ていない。いま止まっているのがここだと分かる
+          line.append(el('span', 'trace-n', '結果を待っています'));
+        } else {
+          if (typeof c.durationMs === 'number') line.append(el('span', 'trace-n', dur(c.durationMs)));
+          // 0 字と「測れなかった」を分ける。null のときは何も出さない
+          if (typeof c.resultChars === 'number') line.append(el('span', 'trace-n', `${num(c.resultChars)} 字`));
+        }
+        li.append(line);
+        // 結果の先頭だけ。中身が要るときは原文へ戻る
+        if (c.head) li.append(marked('div', 'trace-result', c.head, needle));
+        ul.append(li);
+      }
+      d.append(ul);
+      body.append(d);
+      break;
+    }
     default:
       body.append(el('div', 'tl-text', JSON.stringify(item)));
   }
+
+  // 原文へ戻る口。同じ assistant 行から複数の item が出るので、これは「この行を開く」意味になる
+  const raw = rawBlock(ctx.rawUrl, item.uuid);
+  if (raw) body.append(raw);
 
   row.append(body);
   return row;
@@ -1602,8 +1738,9 @@ function renderTimeline() {
 
   const box = el('div', 'timeline');
   // 検索語は1回だけ渡す。timelineItem が store を見に行くと、
-  // 描いている途中で語が変わったときに強調と絞り込みが食い違う
-  const ctx = { needle: store.tq };
+  // 描いている途中で語が変わったときに強調と絞り込みが食い違う。
+  // 原文の取得先も同じ理由でここで固める（描いている最中に選択が変わっても混ざらない）
+  const ctx = { needle: store.tq, rawUrl: rawUrlFor(store.selected) };
   for (const item of shown) box.append(timelineItem(item, ctx));
 
   const nodes = [box];

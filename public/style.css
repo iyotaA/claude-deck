@@ -1224,6 +1224,59 @@ mark {
   overflow-y: auto;
 }
 
+/* 足跡（ふつうのツール呼び出し）。行ごと沈める。
+   状態色は付けない。ここは判断の記録ではなく、そこへ至る道すじの控えなので、
+   色を付けると「あなたの回答」や「却下」と同じ重さに見えて順番が読めなくなる */
+.tl[data-kind="trace"] {
+  font-size: .78rem;
+  color: var(--fg-faint);
+}
+
+.tl[data-kind="trace"] .tl-kind { font-weight: 400; color: var(--fg-faint); }
+
+/* 畳んだ見出しもアクセント色にしない。ここだけは他の details.more と見た目を分ける */
+.tl[data-kind="trace"] details.more > summary { color: var(--fg-muted); }
+
+.trace-calls {
+  list-style: none;
+  margin: .3rem 0 0;
+  padding: 0 0 0 .6rem;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+
+/* ツール名・引数・所要時間を1行に並べる。狭い画面では折り返す */
+.trace-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .4rem;
+  font-size: .76rem;
+}
+
+.trace-detail { color: var(--fg-muted); overflow-wrap: anywhere; }
+
+.trace-n {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .72rem;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+/* 結果の頭だけ。読ませるためではなく「何が返ってきたか」の見当をつけるためのもの */
+.trace-result {
+  margin-top: .15rem;
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  line-height: 1.5;
+  color: var(--fg-faint);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 details.more { font-size: .8rem; }
 details.more > summary {
   cursor: pointer;
@@ -1231,6 +1284,24 @@ details.more > summary {
   padding: .1rem 0;
 }
 details.more > pre { margin-top: .4rem; max-height: 30rem; overflow: auto; }
+
+/* 原文。ログの1行をそのまま出すので、他の全文より小さく詰めて出す。
+   セレクタを2クラスにしているのは、上の details.more > pre（型2つ）に
+   max-height を上書きされないため。順序ではなく詳細度で勝たせる */
+details.raw > .raw-body {
+  margin: .4rem 0 0;
+  padding: .4rem .5rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: .72rem;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 24rem;
+  overflow-y: auto;
+}
 
 /* ------------------------------------------------------------------ TODO */
 
