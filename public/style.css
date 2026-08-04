@@ -470,6 +470,14 @@ button {
   gap: .4rem;
 }
 
+/* hidden 属性で消えるのはブラウザ既定の [hidden] { display: none } によるもので、
+   作者側が display を1つ書いた時点で必ず負ける（詳細度ではなく出どころの優先順）。
+   上の flex がそれに当たるので、消えるほうを明示して書き直す。
+   タブの切り替えは hidden の付け外しだけでやっているため、これが無いと
+   稼働中と書庫の両方が縦に積まれたまま出る */
+.list[hidden],
+.list-head[hidden] { display: none; }
+
 .card {
   position: relative;
   display: grid;
