@@ -158,9 +158,43 @@ test('サブエージェントの呼び出しを記録する', () => {
   assert.equal(meta.agents[0].at, T0);
 });
 
+test('Claude の中間報告と、その時刻を拾う', () => {
+  const meta = extractMeta([
+    { type: 'system', subtype: 'away_summary', timestamp: at(100), content: '古い報告' },
+    {
+      type: 'system',
+      subtype: 'away_summary',
+      timestamp: at(200),
+      content: 'テストを通して\nコミットしました (disable recaps in /config)',
+    },
+  ]);
+  // 後ろの行がいまの状態。断り書きは落として、本文は一行に詰める
+  assert.equal(meta.recap, 'テストを通して コミットしました');
+  assert.equal(meta.recapAt, T0 + 200);
+});
+
+test('中間報告の行からも作業場所やバージョンを拾える', () => {
+  const meta = extractMeta([
+    {
+      type: 'system',
+      subtype: 'away_summary',
+      timestamp: at(0),
+      content: '進捗の報告',
+      cwd: 'C:\\work\\deck',
+      version: '2.1.0',
+    },
+  ]);
+  // 中間報告を switch の case で処理すると、ここが飛ばされて null になる
+  assert.equal(meta.cwd, 'C:\\work\\deck');
+  assert.equal(meta.version, '2.1.0');
+  assert.equal(meta.recap, '進捗の報告');
+});
+
 test('空のログでも形の揃った結果を返す', () => {
   const meta = extractMeta([]);
   assert.equal(meta.title, null);
+  assert.equal(meta.recap, null);
+  assert.equal(meta.recapAt, null);
   assert.equal(meta.cwd, null);
   assert.equal(meta.contextTokens, null);
   assert.deepEqual(meta.skills, []);

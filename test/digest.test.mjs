@@ -310,6 +310,27 @@ test('compactMetadata が無くても落ちない', () => {
   );
 });
 
+test('Claude の中間報告は専用の種類で時系列に並ぶ', () => {
+  const d = buildDigest({
+    entries: [
+      prompt('長い作業をお願い'),
+      {
+        type: 'system',
+        subtype: 'away_summary',
+        uuid: 'r1',
+        timestamp: at(500),
+        content: 'テストを通しました。\n次はコミットします。 (disable recaps in /config)',
+      },
+    ],
+  });
+  const [r] = only(d, 'recap');
+  assert.equal(r.uuid, 'r1');
+  assert.equal(r.at, T0 + 500);
+  // 断り書きだけ落として、改行は残す（読み物として読ませる本文なので）
+  assert.equal(r.text, 'テストを通しました。\n次はコミットします。');
+  assert.equal(r.fullLength, r.text.length);
+});
+
 test('スキルと サブエージェントは専用の一覧にも溜まる', () => {
   const d = buildDigest({
     entries: [

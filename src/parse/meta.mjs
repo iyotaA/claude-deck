@@ -17,6 +17,7 @@ import {
   timestampOf,
   isUserPrompt,
   isMainline,
+  recapOf,
   slashCommandOf,
 } from './entries.mjs';
 import { oneLine } from '../shared/text.mjs';
@@ -42,6 +43,8 @@ export function extractMeta(entries) {
     agents: [],
     lastUserPrompt: null,
     lastAssistantText: null,
+    recap: null,
+    recapAt: null,
   };
 
   for (const entry of entries) {
@@ -68,6 +71,17 @@ export function extractMeta(entries) {
     if (typeof entry?.slug === 'string') meta.slug = entry.slug;
 
     if (!isMainline(entry)) continue;
+
+    // Claude 自身が書いた最後の中間報告。
+    // 上の switch に case を足していないのは、case がすべて continue で抜けるため。
+    // 足すと直前の cwd / version / gitBranch / slug の拾い上げを飛ばしてしまう
+    const recap = recapOf(entry);
+    if (recap) {
+      meta.recap = oneLine(recap, 240);
+      // 鮮度の判定に使う。最後の指示より古い報告は今の姿ではない
+      meta.recapAt = timestampOf(entry);
+      continue;
+    }
 
     // isMainline は null を本流と見なすので、ここで type を見る前に entry の有無を確かめる。
     // ログの行が JSON として null だった場合に落ちるのを防ぐ

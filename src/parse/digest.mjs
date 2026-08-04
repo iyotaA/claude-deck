@@ -41,6 +41,7 @@ import {
   toolResults,
   timestampOf,
   uuidOf,
+  recapOf,
   isUserPrompt,
   isInterrupt,
   isMainline,
@@ -56,6 +57,8 @@ const LIMIT = {
   prompt: 6000,
   say: 1200,
   plan: 24000,
+  // 中間報告は Claude が自分で畳んだ文なので、もともと長くない。発言より少しだけ広く取る
+  recap: 2000,
   // ツールの一行説明と同じ長さ。並べて出るものなので揃える
   detail: MAX_DETAIL,
   feedback: 2000,
@@ -430,6 +433,22 @@ export function buildDigest({ entries = [] } = {}) {
       items.push(item);
       compactions.push(item);
       replyFrom = null;
+      continue;
+    }
+
+    // Claude 自身が書いた中間報告。
+    // これは自己申告であって、機械的に抽出した記録ではない。
+    // 間引きでは落とさない（数が少なく、抜けると「報告があった事実」まで消える）
+    const recap = recapOf(entry);
+    if (recap) {
+      items.push({
+        i: index++,
+        kind: 'recap',
+        at,
+        uuid,
+        text: clip(recap, LIMIT.recap),
+        fullLength: recap.length,
+      });
       continue;
     }
 

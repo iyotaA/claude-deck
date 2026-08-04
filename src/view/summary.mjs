@@ -12,7 +12,9 @@
  * ── AI 要約に差し替えるときの入り口 ──────────────────────────
  *
  * この summarize() が唯一の差し替え点。detail.mjs は結果の形しか見ていない。
- * 返す形（source / headline / points）を保てば、中身は何で作ってもよい。
+ * 返す形（source / headline / headlineSource / points）を保てば、中身は何で作ってもよい。
+ * headlineSource は「見出しが誰の言葉か」を表す。AI が作った見出しに 'recap' を
+ * 立ててはいけない（画面が「Claude の申告」の印を出すので、意味が変わる）。
  *
  * 置き換えるときに守ること:
  *
@@ -39,7 +41,7 @@
 import { oneLine } from '../shared/text.mjs';
 
 /** 要約に出す点の数。増やすと読む量が増えて、畳んだ意味が薄れる。 */
-const MAX_POINTS = 4;
+const MAX_POINTS = 5;
 
 /** 選んだ答えを「質問 → ラベル」の一行にする。 */
 function answerLine(answer) {
@@ -65,13 +67,43 @@ export function plainSummary(detail) {
   // 最初の指示がこのセッションの目的そのもの。ここが「なぜやっているか」にあたる。
   // 圧縮で消えていることがあるので、無ければタイトルで代える
   const first = prompts[0]?.text ?? null;
-  const headline = oneLine(first, 160) ?? detail?.title ?? null;
+
+  /**
+   * Claude が書いた中間報告を見出しに使えるか。
+   *
+   * 最後の指示より古い報告は、いまの姿ではない。
+   * 報告を書いたあとに指示が出ていれば、作業はそこから先へ進んでいる。
+   * 古い自己申告を現在の目的として大きく出すのは、このアプリで一番避けたい誤解
+   */
+  const recap = detail?.recap ?? null;
+  const lastPromptAt = prompts[prompts.length - 1]?.at ?? null;
+  const recapFresh = Boolean(recap?.text)
+    && (lastPromptAt === null || (typeof recap.at === 'number' && recap.at >= lastPromptAt));
+
+  // 見出しの出どころを持ち回す。画面はこれを見て「Claude の申告」の印を出す。
+  // source（誰が作った要約か）とは別の軸なので、混ぜない
+  let headline = recapFresh ? oneLine(recap.text, 160) : null;
+  let headlineSource = headline ? 'recap' : null;
+  let headlineAt = headline ? recap.at ?? null : null;
+  if (!headline) {
+    headline = oneLine(first, 160);
+    headlineSource = headline ? 'prompt' : null;
+  }
+  if (!headline) {
+    headline = detail?.title ?? null;
+    headlineSource = headline ? 'title' : null;
+  }
 
   const points = [];
 
   // 途中で目的が変わっていることがあるため、最後の指示も別に出す
   const last = prompts[prompts.length - 1]?.text ?? null;
   if (last && last !== first) points.push({ label: '直近の指示', text: oneLine(last, 120) });
+
+  // 見出しに使わなかった報告は点に回す。捨てると「報告があった事実」まで消える
+  if (recap?.text && headlineSource !== 'recap') {
+    points.push({ label: 'Claude の申告', text: oneLine(recap.text, 120) });
+  }
 
   const lastAnswer = answers[answers.length - 1]?.answers?.slice(-1)[0];
   const decided = lastAnswer ? answerLine(lastAnswer) : null;
@@ -93,8 +125,11 @@ export function plainSummary(detail) {
   const compacted = (detail?.digest?.compactions ?? []).length;
 
   return {
+    // 誰が作った要約か。AI に差し替えたときの判別に使うので、ここは変えない
     source: 'plain',
     headline,
+    headlineSource,
+    headlineAt,
     points: points.slice(0, MAX_POINTS),
     counts: {
       prompts: stats.prompts ?? 0,

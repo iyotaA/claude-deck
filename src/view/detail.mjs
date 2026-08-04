@@ -44,6 +44,10 @@ export async function getSessionDetail(sessionId, now = Date.now()) {
     ...identity({ registry, meta, sessionId, transcript }),
     ...stateFields(state),
 
+    // Claude が最後に書いた中間報告。自己申告なので、機械的に抽出した項目とは別のキーに置く。
+    // 無ければ null。機能が1つ消えるだけで、他の表示には影響させない
+    recap: meta.recap ? { text: meta.recap, at: meta.recapAt } : null,
+
     digest,
     tasks,
 
