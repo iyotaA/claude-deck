@@ -326,6 +326,38 @@ button {
   border-right: 1px solid var(--border);
 }
 
+/* 稼働中と書庫の切り替え。押されているほうだけ下に線を1本引く。
+   面は塗らない（一覧のカードと同じ理由で、塗ると重さの差が読めなくなる） */
+.list-tabs {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  padding: .35rem .5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  padding: .35rem .7rem .3rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: .82rem;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+
+.tab:hover { color: var(--fg-muted); }
+
+.tab[aria-pressed="true"] {
+  color: var(--fg);
+  font-weight: 700;
+  border-bottom-color: var(--accent);
+}
+
+/* 閉じるボタンはタブ行の右端。書庫を出しているあいだも同じ位置に残る */
+.list-tabs .drawer-close { margin-left: auto; }
+
 .list-head {
   display: flex;
   align-items: center;
@@ -334,6 +366,64 @@ button {
   border-bottom: 1px solid var(--border);
   font-size: .78rem;
   color: var(--fg-muted);
+}
+
+/* 書庫のヘッダは項目が多い。折り返して2段になっても崩れないようにする */
+.archive-head { flex-wrap: wrap; }
+
+.archive-q {
+  flex: 1 1 9rem;
+  min-width: 0;
+  padding: .3rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: .8rem;
+}
+
+.archive-q:focus-visible { border-color: var(--accent); }
+
+.archive-head select {
+  padding: .25rem .3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: .78rem;
+}
+
+.archive-head #archive-count {
+  flex: 1 0 100%;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+/* 書庫のカードには状態色の帯を出さない。全部終わっているので、
+   色を付けると稼働中の一覧と同じ重さに見えて手をつける順番が読めなくなる */
+.card.is-archive { padding-left: .7rem; }
+.card.is-archive::before { content: none; }
+
+.card .when {
+  font-size: .74rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.archive-more {
+  width: 100%;
+  justify-content: center;
+}
+
+.empty-note {
+  margin-top: .5rem;
+  font-size: .78rem;
+  color: var(--fg-faint);
 }
 
 .list-head #list-count {
@@ -595,6 +685,24 @@ button {
   color: var(--warn);
 }
 
+/* 見出しが Claude 自身の中間報告から来ているときの出どころ表示。
+   機械的に抜き出した項目と同じ重さに見せないため、必ずここで断る */
+.purpose-src {
+  display: flex;
+  align-items: baseline;
+  gap: .4rem;
+  margin-top: .3rem;
+  font-size: .72rem;
+  color: var(--fg-faint);
+}
+
+.purpose-src .claim {
+  padding: .05rem .3rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+}
+
 .purpose-points {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -772,6 +880,17 @@ button {
   overflow-wrap: anywhere;
 }
 
+/* 待ち時間の集計。状態の facts とは出どころが違う（こちらは会話ログから測った値）ので、
+   破線で区切って続きであることを示す。枠を分けると別の話に見える */
+.facts-waits {
+  margin-top: .6rem;
+  padding-top: .6rem;
+  border-top: 1px dashed var(--border);
+}
+
+/* 「迷った時間ではない」の注記。集計のすぐ下に付ける */
+.facts-waits + .note { margin-top: .45rem; }
+
 .scroll-x {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -842,11 +961,15 @@ pre code { background: none; border: 0; border-radius: 0; padding: 0; font-size:
   color: var(--accent);
 }
 
+/* 選んだ理由は AskUserQuestion の description そのまま。
+   digest 側で oneLine を通していない生の文字列なので、改行を潰さずに出す */
 .decision-a .why {
   margin: .2rem 0 0;
   font-size: .8rem;
   color: var(--fg-muted);
   line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .decision-a.is-free .label { color: var(--warn); }
@@ -899,11 +1022,38 @@ details.rejected .label { color: var(--fg); }
 
 .tl-body { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
 
+/* 種類の名前と、その右に待ち時間の印が並ぶ。狭い画面では折り返す */
 .tl-kind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .4rem;
   font-size: .74rem;
   font-weight: 700;
   letter-spacing: .02em;
   color: var(--fg-muted);
+}
+
+/* 前のやり取りからの間。判断そのものではないので、種類の名前より軽く出す。
+   色は付けない（時間の長さに良し悪しは無い） */
+.tl-wait {
+  font-weight: 400;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+/* 4時間を超える間。ここを普通の待ちと同じ見た目にすると
+   「4時間考えた」と読まれる。断り書きを添えて別物として出す */
+.tl-wait[data-away] { color: var(--fg-muted); }
+
+.tl-wait .away {
+  margin-left: .3rem;
+  padding: .05rem .3rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: .68rem;
 }
 
 .tl-text {
@@ -943,6 +1093,25 @@ details.rejected .label { color: var(--fg); }
   font-size: .78rem;
   color: var(--warn);
   font-weight: 600;
+}
+
+/* Claude の自己申告。色は付けない。
+   色を足すと「機械的に抜き出した記録」と同じ強さになり、断り書きが効かなくなる */
+.tl[data-kind="recap"] .tl-body {
+  padding: .45rem .6rem;
+  background: var(--bg-sunk);
+  border-radius: 6px;
+}
+
+.tl[data-kind="recap"] .note { font-size: .72rem; color: var(--fg-faint); }
+.tl[data-kind="recap"] .tl-text { color: var(--fg-muted); }
+
+/* 間引きで落ちた区間の目印。本編ではないので沈める */
+.tl[data-kind="elided"] .tl-kind,
+.tl[data-kind="elided"] .tl-text {
+  font-size: .74rem;
+  font-weight: 400;
+  color: var(--fg-faint);
 }
 
 .tl-detail {

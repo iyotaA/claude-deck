@@ -31,13 +31,36 @@
 
   <div class="deck">
     <section class="list-pane" id="list-pane" aria-label="セッション一覧">
-      <div class="list-head">
-        <label><input type="checkbox" id="only-live"> 稼働中だけ</label>
-        <span id="list-count"></span>
-        <!-- 引き出しのときだけ出る。開いている間はハンバーガーが下に隠れるため -->
+      <!-- role="tab" は使わない。正式なタブは矢印キーでタブ間を移動する約束が付くが、
+           この下の一覧が上下キーをカードの移動に使っている。同じペインに矢印キーの
+           契約を2つ置くほうが害が大きいので、押した状態は aria-pressed で表す -->
+      <div class="list-tabs">
+        <button class="tab" id="tab-live" type="button" aria-pressed="true">稼働中</button>
+        <button class="tab" id="tab-archive" type="button" aria-pressed="false">書庫</button>
+        <!-- 引き出しのときだけ出る。開いている間はハンバーガーが下に隠れるため。
+             タブ行に置くのは、書庫を出しているあいだも閉じられるようにするため -->
         <button class="drawer-close" id="list-close" type="button" aria-label="一覧を閉じる">&#215;</button>
       </div>
+
+      <div class="list-head" id="live-head">
+        <label><input type="checkbox" id="only-live"> 稼働中だけ</label>
+        <span id="list-count"></span>
+      </div>
       <ul class="list" id="list"></ul>
+
+      <div class="list-head archive-head" id="archive-head" hidden>
+        <input class="archive-q" id="archive-q" type="search"
+               placeholder="ID・置き場所で探す" aria-label="書庫を検索">
+        <!-- 既定はファイルを開かない検索。タイトルまで探すのは押されたときだけ -->
+        <label><input type="checkbox" id="archive-deep"> 中身も探す</label>
+        <select id="archive-sort" aria-label="書庫の並び順">
+          <option value="recent">新しい順</option>
+          <option value="oldest">古い順</option>
+          <option value="size">大きい順</option>
+        </select>
+        <span id="archive-count"></span>
+      </div>
+      <ul class="list" id="archive" hidden></ul>
     </section>
 
     <section class="detail-pane" id="detail" aria-label="セッションの詳細" tabindex="-1">

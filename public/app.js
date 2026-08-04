@@ -41,8 +41,14 @@ const SUMMARY_ORDER = [
  *  ?theme=dark|light … 配色を固定する
  *  ?only=1 … 時系列を「判断だけ」で開く
  *  ?nolive=1 … 自動更新をつながない
+ *  ?tab=archive … 書庫（終了したものも含む全セッション）を開いた状態にする
+ *  ?aq=<語> … 書庫の検索語
+ *  ?asort=recent|oldest|size … 書庫の並び順
  */
 const query = new URLSearchParams(location.search);
+
+/** 書庫の並び順。サーバ側（view/archive.mjs の SORTS）と同じ語を使う */
+const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
 
 const dom = {
   app: document.getElementById('app'),
@@ -58,6 +64,15 @@ const dom = {
   listToggle: document.getElementById('list-toggle'),
   listClose: document.getElementById('list-close'),
   scrim: document.getElementById('scrim'),
+  tabLive: document.getElementById('tab-live'),
+  tabArchive: document.getElementById('tab-archive'),
+  liveHead: document.getElementById('live-head'),
+  archiveHead: document.getElementById('archive-head'),
+  archive: document.getElementById('archive'),
+  archiveQ: document.getElementById('archive-q'),
+  archiveDeep: document.getElementById('archive-deep'),
+  archiveSort: document.getElementById('archive-sort'),
+  archiveCount: document.getElementById('archive-count'),
 };
 
 const store = {
@@ -87,6 +102,31 @@ const store = {
   // 時系列は既定で新しい順。切り替えたあと開いても、いま何が起きているかが上に出る
   newestFirst: localStorage.getItem('claude-deck.newestFirst') !== '0',
   onlyDecisions: query.get('only') === '1' || localStorage.getItem('claude-deck.onlyDecisions') === '1',
+  /**
+   * 左のペインに出しているもの。'live'（稼働中）か 'archive'（書庫）。
+   *
+   * localStorage には残さない。書庫を開いたまま保存すると、次に開いたときに
+   * 「誰が待っているか」が見えない状態で始まってしまう。
+   * 書庫で固定したい人は ?tab=archive をブックマークする
+   */
+  tab: query.get('tab') === 'archive' ? 'archive' : 'live',
+  /** 書庫の状態。rows はサーバの応答そのまま（logSize と mtimeMs を持つ） */
+  archive: {
+    rows: [],
+    total: 0,
+    page: 1,
+    pages: 1,
+    q: (query.get('aq') ?? '').trim() || null,
+    sort: ARCHIVE_SORTS.has(query.get('asort')) ? query.get('asort') : 'recent',
+    deep: false,
+    meta: null,
+    loading: false,
+    error: null,
+    /** 1度でも引けたか。「まだ引いていない」と「0件だった」を区別するため */
+    loaded: false,
+    /** サーバ側がまだ書庫に対応していない（404）。静かに退く */
+    unavailable: false,
+  },
 };
 
 /* -------------------------------------------------------------- 小道具 */
@@ -96,6 +136,36 @@ function el(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined && text !== null) node.textContent = String(text);
   return node;
+}
+
+/**
+ * いまの状態を URL に書き戻す。
+ *
+ * pushState は使わない。検索欄は1文字ごとにここを通るので、履歴が入力の回数だけ積まれ、
+ * 戻るボタンが使えなくなる。replaceState なら今のアドレスだけが差し替わる。
+ *
+ * 触るキーは session / only / tab / aq / asort だけ。
+ * theme と nolive は「開くときの指定」なので、こちらから書き換えない
+ */
+function syncQuery() {
+  const params = new URLSearchParams(location.search);
+  const set = (key, value) => {
+    if (value === null || value === undefined || value === '') params.delete(key);
+    else params.set(key, value);
+  };
+
+  set('session', store.selected);
+  set('only', store.onlyDecisions ? '1' : null);
+  set('tab', store.tab === 'archive' ? 'archive' : null);
+  set('aq', store.tab === 'archive' ? store.archive.q : null);
+  // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
+  set('asort', store.tab === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
+
+  const qs = params.toString();
+  const next = qs ? `${location.pathname}?${qs}` : location.pathname;
+  // 中身が同じなら書き換えない。一覧の push ごとにここを通るので、無駄な履歴操作を避ける
+  if (next === `${location.pathname}${location.search}`) return;
+  history.replaceState(null, '', next);
 }
 
 /** 経過時間を読みやすくする。 */
@@ -128,14 +198,20 @@ function idleOf(row) {
 }
 
 /**
- * 一覧から素の行を引く。
+ * 一覧から素の行を引く。無ければ書庫の行に落とす。
+ *
+ * 書庫の行は LIVE_FIELDS（state / idleMs など）を1つも持たないので、
+ * headOf の上書きは何も起こさない。逆に logSize は持っているので、
+ * 書庫から開いたセッションでも detailStampOf が本物の目印を取れる。
  *
  * @param {string|null} sessionId
- * @returns {object|null} 一覧に居なければ null
+ * @returns {object|null} どちらにも居なければ null
  */
 function rowOf(sessionId) {
   if (!sessionId) return null;
-  return store.rows.find((r) => r.sessionId === sessionId) ?? null;
+  return store.rows.find((r) => r.sessionId === sessionId)
+    ?? store.archive.rows.find((r) => r.sessionId === sessionId)
+    ?? null;
 }
 
 /**
@@ -307,6 +383,234 @@ function refreshTimes() {
   }
 }
 
+/* ---------------------------------------------------------------- 書庫 */
+
+/** 1ページの件数。サーバ側の上限は 50 */
+const ARCHIVE_PER = 30;
+/** 検索欄のデバウンス。打つたびに引くと 1 文字ごとにファイルを読ませることになる */
+const ARCHIVE_DEBOUNCE_MS = 200;
+
+let archiveToken = 0;
+let archiveTimer = null;
+
+/** バイト数を KB で。書庫はログの大きさが「どれだけ話したか」の目安になる */
+function kb(bytes) {
+  if (typeof bytes !== 'number') return '';
+  return `${Math.round(bytes / 1024).toLocaleString('ja-JP')} KB`;
+}
+
+/** 書庫の日時。年は同じものが並ぶので落とし、月日と時刻だけにする */
+function shortStamp(at) {
+  if (!at) return '';
+  const d = new Date(at);
+  return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/**
+ * 書庫のカード1枚。
+ *
+ * 状態色は出さない。書庫に出るものは全部終わっているので、色を付けると
+ * 稼働中の一覧と同じ重さに見えて、どれから手をつけるかが読めなくなる。
+ */
+function buildArchiveCard(row) {
+  const li = el('li');
+  const card = el('button', 'card is-archive');
+  card.type = 'button';
+  card.setAttribute('aria-current', String(row.sessionId === store.selected));
+  card.dataset.sessionId = row.sessionId ?? '';
+
+  const top = el('div', 'card-top');
+  const when = el('span', 'when', shortStamp(row.mtimeMs));
+  // 「08/03 14:22」だけでは何年のものか分からない。年は乗せたときだけ出す
+  if (row.mtimeMs) when.title = stamp(row.mtimeMs);
+  top.append(when);
+  top.append(el('span', 'idle', kb(row.logSize)));
+  card.append(top);
+
+  // 「読んでいないから空」と「本当に空」を混同させない。read でそこを分ける
+  const label = row.title ?? (row.read ? '（指示なしで終わっています）' : '（まだ読んでいません）');
+  const title = el('div', 'card-title', label);
+  if (!row.title) title.classList.add('is-empty');
+  card.append(title);
+
+  const meta = el('div', 'card-meta');
+  if (row.project) meta.append(el('span', 'path', row.project));
+  if (row.gitBranch && row.gitBranch !== 'HEAD') meta.append(el('span', 'tag', row.gitBranch));
+  if (meta.childElementCount > 0) card.append(meta);
+
+  card.addEventListener('click', () => {
+    select(row.sessionId, 'archive');
+    setListOpen(false, dom.detail);
+  });
+  li.append(card);
+  return li;
+}
+
+/** 書庫のヘッダに出す件数と、読んだ件数の内訳 */
+function renderArchiveCount() {
+  const a = store.archive;
+  if (!a.loaded) {
+    dom.archiveCount.textContent = '';
+    return;
+  }
+  const parts = [`${a.total.toLocaleString('ja-JP')} 件`];
+  if (a.rows.length < a.total) parts.push(`${a.rows.length} 件表示`);
+  // どこまで中身を読んだかを正直に出す。打ち切っていれば「全部を探せていない」と分かる
+  if (a.meta?.scanLimited) parts.push(`中身は新しい ${a.meta.scanMax} 件まで`);
+  dom.archiveCount.textContent = parts.join(' / ');
+}
+
+function renderArchive() {
+  const a = store.archive;
+  dom.archive.replaceChildren();
+  renderArchiveCount();
+
+  // 空表示を4つに割る。ひとまとめにすると「まだ引いていない」と「0件だった」が同じ顔になる
+  if (a.unavailable) {
+    const li = el('li');
+    li.append(el('div', 'empty', '書庫はまだ使えません（サーバ側が対応していません）'));
+    dom.archive.append(li);
+    return;
+  }
+  if (a.error) {
+    const li = el('li');
+    const box = el('div', 'empty', `書庫を読めませんでした: ${a.error}`);
+    const retry = el('button', 'btn', 'もう一度試す');
+    retry.type = 'button';
+    retry.addEventListener('click', () => loadArchive());
+    const action = el('div', 'empty-note');
+    action.append(retry);
+    box.append(action);
+    li.append(box);
+    dom.archive.append(li);
+    return;
+  }
+  if (!a.loaded) {
+    // 引いている途中だけ出す。押す前から空の枠を出すと「0件だった」に見える
+    if (a.loading) {
+      const li = el('li');
+      li.append(el('div', 'empty', '書庫を読んでいます…'));
+      dom.archive.append(li);
+    }
+    return;
+  }
+  if (a.rows.length === 0) {
+    const li = el('li');
+    const box = el('div', 'empty', a.q
+      ? `「${a.q}」に当たるセッションがありません`
+      : 'セッションのログが見つかりません');
+    // 既定の検索はタイトルまで見ていない。深い検索という手が残っていることを伝える
+    if (a.q && !a.deep) {
+      box.append(el('div', 'empty-note', '「中身も探す」を入れると、ログを開いてタイトルまで探します'));
+    }
+    li.append(box);
+    dom.archive.append(li);
+    return;
+  }
+
+  for (const row of a.rows) dom.archive.append(buildArchiveCard(row));
+
+  if (a.rows.length < a.total) {
+    const li = el('li');
+    const more = el('button', 'btn archive-more',
+      `続きを出す（残り ${(a.total - a.rows.length).toLocaleString('ja-JP')} 件）`);
+    more.type = 'button';
+    more.disabled = a.loading;
+    more.addEventListener('click', () => loadArchive({ append: true }));
+    li.append(more);
+    dom.archive.append(li);
+  }
+}
+
+/**
+ * 書庫を引く。
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.append] 次のページを継ぎ足す（並びと検索語は変えない）
+ */
+async function loadArchive({ append = false } = {}) {
+  const a = store.archive;
+  if (a.unavailable) return;
+
+  const token = ++archiveToken;
+  a.loading = true;
+  a.error = null;
+  renderArchive();
+
+  const params = new URLSearchParams();
+  params.set('page', String(append ? a.page + 1 : 1));
+  params.set('per', String(ARCHIVE_PER));
+  params.set('sort', a.sort);
+  if (a.q) params.set('q', a.q);
+  if (a.deep) params.set('deep', '1');
+
+  try {
+    const res = await fetch(`/api/archive?${params.toString()}`, { cache: 'no-store' });
+    // サーバ側と歩調を合わせずに画面側だけ先に入れられるようにする
+    if (res.status === 404) {
+      if (token === archiveToken) {
+        a.unavailable = true;
+        a.loading = false;
+        renderArchive();
+      }
+      return;
+    }
+    if (!res.ok) {
+      const reason = await res.json().then((j) => j?.error).catch(() => null);
+      throw new Error(reason ?? `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    // 打ち終わる前の応答が後から届くことがある。古い応答で上書きしない
+    if (token !== archiveToken) return;
+    a.rows = append ? [...a.rows, ...(data.rows ?? [])] : (data.rows ?? []);
+    a.total = data.total ?? a.rows.length;
+    a.page = data.page ?? 1;
+    a.pages = data.pages ?? 1;
+    a.meta = data.meta ?? null;
+    a.loaded = true;
+  } catch (err) {
+    if (token !== archiveToken) return;
+    a.error = err.message;
+  } finally {
+    if (token === archiveToken) {
+      a.loading = false;
+      renderArchive();
+    }
+  }
+}
+
+/**
+ * 左のペインを切り替える。
+ *
+ * 書庫を出しているあいだも上のバーのまとめ（renderSummary）は動かし続ける。
+ * あれが「誰かが待っている」の唯一の合図なので、ここで止めると質問を取りこぼす。
+ *
+ * @param {'live'|'archive'} tab
+ * @param {object} [opts]
+ * @param {boolean} [opts.sync] URL を書き戻すか。起動時だけ false にする
+ *   （まだ ?session= を store に取り込んでいないので、書き戻すと指定が消える）
+ */
+function setTab(tab, { sync = true } = {}) {
+  store.tab = tab === 'archive' ? 'archive' : 'live';
+  const isArchive = store.tab === 'archive';
+
+  dom.tabLive.setAttribute('aria-pressed', String(!isArchive));
+  dom.tabArchive.setAttribute('aria-pressed', String(isArchive));
+  dom.liveHead.hidden = isArchive;
+  dom.list.hidden = isArchive;
+  dom.archiveHead.hidden = !isArchive;
+  dom.archive.hidden = !isArchive;
+  if (sync) syncQuery();
+
+  if (!isArchive) {
+    // まだ一覧を受け取っていない起動直後は描かない。空表示が一瞬出るのを避ける
+    if (store.meta) renderList();
+    return;
+  }
+  if (!store.archive.loaded && !store.archive.loading) loadArchive();
+  else renderArchive();
+}
+
 /* ---------------------------------------------------------------- 詳細 */
 
 function fact(dl, label, value) {
@@ -356,6 +660,9 @@ const KIND_LABELS = {
   error: 'エラー',
   slash: 'コマンド',
   interrupt: 'あなたが中断',
+  // Claude 自身が書いた中間報告。機械的に抜き出した記録ではないので、語を分けておく
+  recap: 'Claude の中間報告',
+  elided: '省略',
 };
 
 /**
@@ -363,6 +670,8 @@ const KIND_LABELS = {
  *
  * Claude の説明（say）を落とすと、自分が動かした所だけが縦に並ぶ。
  * 何十往復もしたセッションを思い出すときは、こちらのほうが速い。
+ *
+ * recap（Claude の中間報告）は入れない。自己申告であって自分の判断ではないため。
  */
 const DECISION_KINDS = new Set([
   'prompt', 'answer', 'plan', 'denial', 'interrupt', 'slash', 'skill', 'agent', 'error', 'compact',
@@ -407,12 +716,76 @@ function num(n) {
 }
 
 /**
+ * 待ちの種類ごとの言い方。
+ *
+ * どれも「〜までの間」で止める。「迷った時間」「悩んだ時間」とは書かない。
+ * ログから分かるのは前のやり取りからの経過だけで、席を外していた時間と区別できない
+ */
+const WAIT_LABELS = {
+  answer: '回答までの間',
+  plan: '承認までの間',
+  denial: '却下までの間',
+  reply: '返信までの間',
+  tool: 'ツールの往復',
+};
+
+/** 待ちに必ず添える注記。言い切らないための断り書き */
+const WAIT_NOTE = '「…までの間」は前のやり取りからの経過時間です。席を外していた時間と区別できないため、迷っていた時間とは限りません。';
+
+/**
+ * 待ち時間の印を1つ作る。
+ *
+ * wait が null のときは何も返さない。圧縮や中断を跨いだ区間・時刻が取れなかった区間が
+ * そこに当たる。0 と書くと「即答した」に読めるので、取れなかったものは出さない。
+ *
+ * @param {object|null} wait digest の item.wait（{kind, ms, away}）
+ * @returns {HTMLElement|null}
+ */
+function waitBadge(wait) {
+  if (!wait || typeof wait.ms !== 'number') return null;
+  const node = el('span', 'tl-wait', `${WAIT_LABELS[wait.kind] ?? '間'} ${since(wait.ms)}`);
+  node.title = WAIT_NOTE;
+  // 4時間を超える間は、判断に使った時間として読ませない
+  if (wait.away) {
+    node.dataset.away = 'true';
+    node.append(el('span', 'away', '席を外していた可能性'));
+  }
+  return node;
+}
+
+/**
+ * 待ちの集計を1行にする。
+ *
+ * 測れたものが1つも無ければ null。fact() が null を素通りするので、
+ * 「取れなかった項目は出さない」が自動で守られる。
+ *
+ * @param {object|null} bucket stats.waits の1つ（{count, totalMs, maxMs, away}）
+ */
+function waitFact(bucket) {
+  if (!bucket) return null;
+  const parts = [];
+  if (bucket.count > 0) {
+    parts.push(`${bucket.count} 回`);
+    parts.push(`合計 ${since(bucket.totalMs)}`);
+    parts.push(`最長 ${since(bucket.maxMs)}`);
+  }
+  // 4時間超は合計に混ぜていない。件数だけは出して「無かった」と読ませない
+  if (bucket.away > 0) parts.push(`4時間超 ${bucket.away} 回は別枠`);
+  return parts.length ? parts.join(' / ') : null;
+}
+
+/**
  * 長い本文は頭だけ出して、続きは折りたたむ。
  *
  * 時系列は「ざっと目で追える」ことが値なので、1件が画面を埋めてはいけない。
  * 全文は残すが、開いたときだけ見せる。
+ *
+ * @param {string|null} text 出す本文（サーバ側で既に切られていることがある）
+ * @param {number} limit 頭出しの文字数
+ * @param {number} maxLines 頭出しの行数
+ * @param {number|null} [fullLength] 切る前の文字数。サーバが切っていれば受け取った長さより大きい
  */
-function bodyText(text, limit, maxLines) {
+function bodyText(text, limit, maxLines, fullLength = null) {
   const t = String(text ?? '').trim();
   if (!t) return [];
   const lines = t.split('\n');
@@ -421,7 +794,12 @@ function bodyText(text, limit, maxLines) {
   let head = lines.slice(0, maxLines).join('\n');
   if (head.length > limit) head = head.slice(0, limit);
   const more = el('details', 'more');
-  more.append(el('summary', null, `全文（${t.length.toLocaleString('ja-JP')}字）`));
+  // ここで持っているのが本当の全文かどうかで文言を変える。サーバ側が既に切っているのに
+  // 「全文」と書くと嘘になる（say は 1,200 字、recap は 2,000 字で切られている）
+  const clipped = typeof fullLength === 'number' && fullLength > t.length;
+  more.append(el('summary', null, clipped
+    ? `全 ${fullLength.toLocaleString('ja-JP')} 字（このうち ${t.length.toLocaleString('ja-JP')} 字まで表示）`
+    : `全文（${t.length.toLocaleString('ja-JP')}字）`));
   more.append(el('pre', null, t));
   return [el('div', 'tl-text', `${head.trimEnd()}…`), more];
 }
@@ -520,7 +898,12 @@ function timelineItem(item) {
 
   row.append(whenNode(item.at));
   const body = el('div', 'tl-body');
-  body.append(el('div', 'tl-kind', KIND_LABELS[item.kind] ?? item.kind));
+  const kindRow = el('div', 'tl-kind');
+  kindRow.append(document.createTextNode(KIND_LABELS[item.kind] ?? item.kind));
+  // 前のやり取りからの間。取れていない行には何も付かない
+  const wait = waitBadge(item.wait);
+  if (wait) kindRow.append(wait);
+  body.append(kindRow);
 
   switch (item.kind) {
     // 自分の指示は判断の記録そのものなので、Claude の説明より長く出す
@@ -528,10 +911,28 @@ function timelineItem(item) {
       body.append(...bodyText(item.text, 900, 12));
       break;
     case 'say':
-      body.append(...bodyText(item.text, 260, 4));
+      body.append(...bodyText(item.text, 260, 4, item.fullLength));
       break;
+    // Claude の自己申告。時系列でもその場で断ってから本文を出す
+    case 'recap':
+      body.append(el('p', 'note', 'Claude 自身が書いた中間報告です。機械的に抜き出した記録ではありません'));
+      body.append(...bodyText(item.text, 600, 8, item.fullLength));
+      break;
+    // 間引きで落ちた区間の目印。何が落ちたかまで出す（足跡だけの区間かどうかが読めるように）
+    case 'elided': {
+      const kinds = Object.entries(item.byKind ?? {})
+        .map(([k, n]) => `${KIND_LABELS[k] ?? k} ${n}`)
+        .join(' / ');
+      const range = item.fromAt && item.toAt
+        ? `（${hms(new Date(item.fromAt))} 〜 ${hms(new Date(item.toAt))}）`
+        : '';
+      body.append(el('div', 'tl-text',
+        `${item.count} 件を省略しました${kinds ? `　${kinds}` : ''}${range}`));
+      break;
+    }
+    // 選んだ理由（選択肢の説明文）は判断の記録そのものなので、時系列でも省かない
     case 'answer':
-      for (const a of item.answers ?? []) body.append(answerBlock(a, true));
+      for (const a of item.answers ?? []) body.append(answerBlock(a, false));
       break;
     case 'plan':
       body.append(...planBlock(item, false).childNodes);
@@ -637,6 +1038,16 @@ function summaryBlock(summary) {
   const box = el('div', 'purpose');
   if (summary.headline) {
     box.append(el('div', 'purpose-head', summary.headline));
+    // 出どころが Claude の中間報告なら、そう断る。
+    // 機械的に抜き出した指示やタイトルと同じ重さに見せてはいけない（自己申告なので）
+    if (summary.headlineSource === 'recap') {
+      const mark = el('div', 'purpose-src');
+      mark.append(el('span', 'claim', 'Claude の申告'));
+      mark.append(document.createTextNode(summary.headlineAt
+        ? `${stamp(summary.headlineAt)} 時点で Claude 自身が書いた中間報告です`
+        : 'Claude 自身が書いた中間報告です'));
+      box.append(mark);
+    }
   }
 
   if (summary.compacted) {
@@ -917,6 +1328,8 @@ function renderDetail() {
       toggle('判断だけ', store.onlyDecisions, () => {
         store.onlyDecisions = !store.onlyDecisions;
         localStorage.setItem('claude-deck.onlyDecisions', store.onlyDecisions ? '1' : '0');
+        // 開き方を人に渡せるようにする（?only=1）
+        syncQuery();
         renderDetail();
       }),
       toggle(store.newestFirst ? '新しい順' : '古い順', false, () => {
@@ -993,6 +1406,23 @@ function renderDetail() {
     if (d.log.parseErrors) fact(dl, '読めなかった行', `${d.log.parseErrors} 行`);
   }
   basics.body.append(dl);
+
+  // 待ちの集計。1つも測れていなければ行も注記も出さない
+  const waits = d?.digest?.stats?.waits;
+  if (waits) {
+    const wdl = el('dl', 'facts facts-waits');
+    fact(wdl, WAIT_LABELS.answer, waitFact(waits.answer));
+    fact(wdl, WAIT_LABELS.plan, waitFact(waits.plan));
+    fact(wdl, WAIT_LABELS.denial, waitFact(waits.denial));
+    fact(wdl, WAIT_LABELS.reply, waitFact(waits.reply));
+    fact(wdl, WAIT_LABELS.tool, waitFact(waits.tool));
+    if (wdl.childElementCount > 0) {
+      basics.body.append(wdl);
+      // 注記は必ず添える。数字だけを出すと「迷っていた時間」と読まれる
+      basics.body.append(el('p', 'note', WAIT_NOTE));
+    }
+  }
+
   stack.append(basics.section);
 
   // ジャンプ用リンクはパネルを積み終わってから作る（あるものだけを並べたいので）
@@ -1091,15 +1521,18 @@ async function loadDetail(sessionId, { silent = false } = {}) {
 
 /**
  * @param {string|null} sessionId
- * @param {'live'|'query'} [from] 選んだ経路。store.selectedFrom の説明を参照
+ * @param {'live'|'query'|'archive'} [from] 選んだ経路。store.selectedFrom の説明を参照
  */
 function select(sessionId, from = 'live') {
   if (store.selected === sessionId) return;
   store.selected = sessionId || null;
   store.selectedFrom = store.selected ? from : null;
-  for (const node of dom.list.querySelectorAll('.card')) {
+  // 印は両方の一覧に付け直す。書庫で選んだあと稼働中に戻ったとき、
+  // 同じセッションが両方に居ることがある
+  for (const node of [...dom.list.querySelectorAll('.card'), ...dom.archive.querySelectorAll('.card')]) {
     node.setAttribute('aria-current', String(node.dataset.sessionId === store.selected));
   }
+  syncQuery();
   loadDetail(store.selected);
 }
 
@@ -1134,8 +1567,14 @@ function apply(payload) {
     store.selected = visibleRows()[0]?.sessionId ?? null;
     store.selectedFrom = store.selected ? 'live' : null;
   }
+  // 開いているものを URL に残す。押して選んだときは select が書くが、
+  // ここで自動的に決まった分（先頭を開く・?session= の取り込み）は通らない
+  syncQuery();
+  // まとめは書庫を出しているあいだも動かす。「誰かが待っている」の唯一の合図なので
   renderSummary();
-  renderList();
+  // 書庫を出しているあいだ #list には触らない。replaceChildren すると
+  // 見えていない一覧のスクロール位置が毎秒先頭へ飛ぶ
+  if (store.tab !== 'archive') renderList();
   renderDetail();
   // 詳細は中身が変わっていなければ取り直さない。
   // silent にして、取り直しのあいだも前の内容を出したままにする
@@ -1288,8 +1727,72 @@ function initTheme() {
   });
 }
 
+/**
+ * 一覧の中で上下キーで移動できるようにする。
+ *
+ * 稼働中と書庫で同じ操作にする。選んだ経路（from）だけが違う。
+ *
+ * @param {HTMLElement} listEl 対象の一覧
+ * @param {'live'|'archive'} from 選んだ経路
+ */
+function initListKeys(listEl, from) {
+  listEl.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+    const cards = [...listEl.querySelectorAll('.card')];
+    const at = cards.indexOf(document.activeElement);
+    if (at === -1) return;
+    const next = cards[at + (ev.key === 'ArrowDown' ? 1 : -1)];
+    if (next) {
+      ev.preventDefault();
+      next.focus();
+      select(next.dataset.sessionId, from);
+    }
+  });
+}
+
+/** 書庫タブの配線。store.tab は保存しないので、初期値は URL だけから決まる */
+function initTabs() {
+  dom.tabLive.addEventListener('click', () => setTab('live'));
+  dom.tabArchive.addEventListener('click', () => setTab('archive'));
+
+  dom.archiveQ.value = store.archive.q ?? '';
+  dom.archiveSort.value = store.archive.sort;
+  dom.archiveDeep.checked = store.archive.deep;
+
+  dom.archiveQ.addEventListener('input', () => {
+    const next = dom.archiveQ.value.trim() || null;
+    if (next === store.archive.q) return;
+    store.archive.q = next;
+    syncQuery();
+    // 打っている途中で毎回引かない。1文字ごとにサーバにログを開かせることになる
+    if (archiveTimer) clearTimeout(archiveTimer);
+    archiveTimer = setTimeout(() => {
+      archiveTimer = null;
+      loadArchive();
+    }, ARCHIVE_DEBOUNCE_MS);
+  });
+
+  // 意図した1クリックなので、こちらは即時に引き直す
+  dom.archiveDeep.addEventListener('change', () => {
+    store.archive.deep = dom.archiveDeep.checked;
+    loadArchive();
+  });
+
+  dom.archiveSort.addEventListener('change', () => {
+    const v = dom.archiveSort.value;
+    store.archive.sort = ARCHIVE_SORTS.has(v) ? v : 'recent';
+    syncQuery();
+    loadArchive();
+  });
+
+  setTab(store.tab, { sync: false });
+}
+
 initTheme();
 initListDrawer();
+initTabs();
+initListKeys(dom.list, 'live');
+initListKeys(dom.archive, 'archive');
 
 dom.onlyLive.checked = store.onlyLive;
 dom.onlyLive.addEventListener('change', () => {
@@ -1307,20 +1810,6 @@ dom.onlyLive.addEventListener('change', () => {
 dom.reload.addEventListener('click', () => {
   detailCache.clear();
   fetchOnce();
-});
-
-// 一覧の中で上下キーで移動できるようにする
-dom.list.addEventListener('keydown', (ev) => {
-  if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
-  const cards = [...dom.list.querySelectorAll('.card')];
-  const at = cards.indexOf(document.activeElement);
-  if (at === -1) return;
-  const next = cards[at + (ev.key === 'ArrowDown' ? 1 : -1)];
-  if (next) {
-    ev.preventDefault();
-    next.focus();
-    select(next.dataset.sessionId);
-  }
 });
 
 fetchOnce().then(() => {

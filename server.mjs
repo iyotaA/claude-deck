@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { listSessions } from './src/view/sessions.mjs';
 import { getSessionDetail } from './src/view/detail.mjs';
+import { listArchive, parseArchiveQuery } from './src/view/archive.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
 import { sessionsDir, projectsDir, configDir } from './src/read/paths.mjs';
 
@@ -245,6 +246,15 @@ const server = http.createServer((req, res) => {
 
   if (pathname === '/api/sessions') {
     computeSessions().then(
+      (payload) => sendJson(res, 200, payload),
+      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+    );
+    return;
+  }
+
+  // 書庫。一覧と違って毎秒引かれるものではないので、その場で作って返す（push はしない）
+  if (pathname === '/api/archive') {
+    listArchive(parseArchiveQuery(url.searchParams)).then(
       (payload) => sendJson(res, 200, payload),
       (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
     );
