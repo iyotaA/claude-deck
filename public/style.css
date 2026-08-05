@@ -1087,7 +1087,7 @@ mark {
   text-underline-offset: 2px;
 }
 
-/* 続きを出すボタン。最初は 12 件だけ組んで、押した人にだけ続きを足す */
+/* 続きを出すボタン。最初は 4 件だけ組んで、押した人にだけ続きを足す */
 .tl-more {
   margin-top: .6rem;
   align-self: stretch;
