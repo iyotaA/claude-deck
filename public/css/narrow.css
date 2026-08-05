@@ -1,0 +1,65 @@
+/* ClaudeDeck ── 狭い窓向け。必ず最後に読む
+ *
+ * ここより上のファイルの指定を上書きする。
+ * 読む順を前へ動かすと引き出しが出なくなる。
+ */
+
+/* ------------------------------------------------------------ 狭い窓向け */
+
+/* 背後を覆う膜。広い画面には引き出しが無いので、ここでは無効にしておく */
+.scrim { display: none; }
+
+/* 狭い画面では、一覧を常に出しておく場所が無い。
+   上半分を一覧に取られると詳細が読めないので、左上のボタンで手前に引き出す形にする。
+   閉じているあいだは詳細が全面を使う */
+@media (max-width: 860px) {
+  .deck {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .hamburger,
+  .drawer-close { display: inline-flex; }
+
+  /* 折り返しで高さが変わる上のバーごと覆う。中途半端に避けると位置が合わなくなる。
+     閉じている間は画面の外へ逃がすだけにして、visibility では隠さない。
+     visibility は変化が1フレームで確定せず、開いた直後は「隠れている」ままなので、
+     そのあいだ focus を受け付けない。見えていないカードへ Tab で入るのを防ぐのは
+     JS 側の inert に任せる（app.js の syncListInert） */
+  .list-pane {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    width: min(88vw, 24rem);
+    overscroll-behavior: contain;
+    transform: translateX(-100%);
+    transition: transform .18s ease;
+  }
+
+  /* 影は開いているときだけ。閉じていても影はにじむので、画面の左端に帯が出てしまう */
+  .is-list-open .list-pane {
+    box-shadow: var(--shadow);
+    transform: translateX(0);
+  }
+
+  /* 折り返した先で縦線だけが行頭に残るので、狭いときは区切りを外す */
+  .summary {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgb(0 0 0 / 45%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s ease;
+  }
+
+  .is-list-open .scrim { opacity: 1; pointer-events: auto; }
+}

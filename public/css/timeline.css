@@ -1,0 +1,323 @@
+/* ClaudeDeck ── 時系列
+ *
+ * 絞り込みの帯・1行の組み・足跡・原文。
+ */
+
+/* --------------------------------------------------------------- 時系列 */
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: .1rem;
+}
+
+/* 差し替える範囲を囲う器。絞り込みの入力欄はこの外（.timeline の兄弟）に置くので、
+   ここを replaceChildren しても入力中の文字と caret は消えない */
+.tl-host {
+  display: flex;
+  flex-direction: column;
+}
+
+/* --------------------------------------------------- 時系列の絞り込み */
+
+.tl-filter {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  margin-bottom: .6rem;
+}
+
+/* 書庫の検索欄と同じ作りにする。同じ役目のものを2通りの見た目にしない */
+.tl-q {
+  width: 100%;
+  min-width: 0;
+  padding: .3rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: .8rem;
+}
+
+.tl-q:focus-visible { border-color: var(--accent); }
+
+.tl-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+}
+
+/* 目次のチップと同じ丸み。押した状態は色ではなく濃さで表す（状態色と混ぜない） */
+.tl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .12rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  font: inherit;
+  font-size: .76rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tl-chip:hover { border-color: var(--border-strong); color: var(--fg); }
+
+.tl-chip .n {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .72rem;
+  color: var(--fg-faint);
+}
+
+/* 隠している種類。線で消すのは「押せば戻る」ことを見せるため。消さずに沈める */
+.tl-chip[aria-pressed="false"] {
+  border-style: dashed;
+  color: var(--fg-faint);
+  text-decoration: line-through;
+}
+
+/* 検索に当たった所。ブラウザ既定の黄色い塗りを消す。
+   面を塗ると状態色の塗り分けとぶつかって、どれが自分の番か読めなくなる */
+mark {
+  background: none;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+/* 続きを出すボタン。最初は 4 件だけ組んで、押した人にだけ続きを足す */
+.tl-more {
+  margin-top: .6rem;
+  align-self: stretch;
+}
+
+.tl {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: .1rem .7rem;
+  padding: .5rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.timeline > .tl:first-child { border-top: 0; }
+
+/* 日付と時刻を縦に積む。等幅10文字の yyyy/MM/dd は 5.5rem の列に収まるので、列幅は変えない */
+.tl-when {
+  display: flex;
+  flex-direction: column;
+  padding-top: .1rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .74rem;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+/* 日付は「跨いだかどうか」を確かめるための添え物。時刻より一段小さくして主役を譲る */
+.tl-date { font-size: .7rem; }
+
+.tl-time { font-size: .74rem; }
+
+.tl-body { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
+
+/* 種類の名前と、その右に待ち時間の印が並ぶ。狭い画面では折り返す */
+.tl-kind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .4rem;
+  font-size: .74rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--fg-muted);
+}
+
+/* 前のやり取りからの間。判断そのものではないので、種類の名前より軽く出す。
+   色は付けない（時間の長さに良し悪しは無い） */
+.tl-wait {
+  font-weight: 400;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+/* 4時間を超える間。ここを普通の待ちと同じ見た目にすると
+   「4時間考えた」と読まれる。断り書きを添えて別物として出す */
+.tl-wait[data-away] { color: var(--fg-muted); }
+
+.tl-wait .away {
+  margin-left: .3rem;
+  padding: .05rem .3rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: .68rem;
+}
+
+.tl-text {
+  font-size: .84rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tl[data-kind="prompt"] .tl-kind { color: var(--accent); }
+.tl[data-kind="prompt"] .tl-text {
+  padding: .45rem .6rem;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-elev);
+  border-radius: 0 6px 6px 0;
+}
+
+.tl[data-kind="denial"] .tl-kind { color: var(--hot); }
+.tl[data-kind="answer"] .tl-kind { color: var(--accent); }
+.tl[data-kind="plan"] .tl-kind { color: var(--warn); }
+.tl[data-kind="error"] .tl-kind { color: var(--hot); }
+.tl[data-kind="interrupt"] .tl-kind { color: var(--warn); }
+.tl[data-kind="interrupt"] .tl-text { color: var(--warn); font-size: .8rem; }
+.tl[data-kind="say"] .tl-text { color: var(--fg-muted); }
+
+/* 文脈が切れた地点は帯にして、時系列の区切りとして目立たせる */
+.tl[data-kind="compact"] {
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--bg-sunk);
+  border-radius: 6px;
+  padding: .45rem .6rem;
+  margin: .3rem 0;
+  border-top: 0;
+}
+
+.tl[data-kind="compact"] .tl-text {
+  font-size: .78rem;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* Claude の自己申告。色は付けない。
+   色を足すと「機械的に抜き出した記録」と同じ強さになり、断り書きが効かなくなる */
+.tl[data-kind="recap"] .tl-body {
+  padding: .45rem .6rem;
+  background: var(--bg-sunk);
+  border-radius: 6px;
+}
+
+.tl[data-kind="recap"] .note { font-size: .72rem; color: var(--fg-faint); }
+.tl[data-kind="recap"] .tl-text { color: var(--fg-muted); }
+
+/* 間引きで落ちた区間の目印。本編ではないので沈める */
+.tl[data-kind="elided"] .tl-kind,
+.tl[data-kind="elided"] .tl-text {
+  font-size: .74rem;
+  font-weight: 400;
+  color: var(--fg-faint);
+}
+
+/* プランの系譜の1行。面は塗らず、文字色だけ変える。
+   一致していた知らせは沈め、目を留めてほしいものだけ警告色にする */
+.plan-note {
+  font-size: .74rem;
+  color: var(--fg-faint);
+}
+
+.plan-note.warn { color: var(--warn); }
+
+.tl-detail {
+  margin: 0;
+  padding: .35rem .5rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: .76rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+/* 足跡（ふつうのツール呼び出し）。行ごと沈める。
+   状態色は付けない。ここは判断の記録ではなく、そこへ至る道すじの控えなので、
+   色を付けると「あなたの回答」や「却下」と同じ重さに見えて順番が読めなくなる */
+.tl[data-kind="trace"] {
+  font-size: .78rem;
+  color: var(--fg-faint);
+}
+
+.tl[data-kind="trace"] .tl-kind { font-weight: 400; color: var(--fg-faint); }
+
+/* 畳んだ見出しもアクセント色にしない。ここだけは他の details.more と見た目を分ける */
+.tl[data-kind="trace"] details.more > summary { color: var(--fg-muted); }
+
+.trace-calls {
+  list-style: none;
+  margin: .3rem 0 0;
+  padding: 0 0 0 .6rem;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+
+/* ツール名・引数・所要時間を1行に並べる。狭い画面では折り返す */
+.trace-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .4rem;
+  font-size: .76rem;
+}
+
+.trace-detail { color: var(--fg-muted); overflow-wrap: anywhere; }
+
+.trace-n {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: .72rem;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+/* 結果の頭だけ。読ませるためではなく「何が返ってきたか」の見当をつけるためのもの */
+.trace-result {
+  margin-top: .15rem;
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  line-height: 1.5;
+  color: var(--fg-faint);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+details.more { font-size: .8rem; }
+details.more > summary {
+  cursor: pointer;
+  color: var(--accent);
+  padding: .1rem 0;
+}
+details.more > pre { margin-top: .4rem; max-height: 30rem; overflow: auto; }
+
+/* 原文。ログの1行をそのまま出すので、他の全文より小さく詰めて出す。
+   セレクタを2クラスにしているのは、上の details.more > pre（型2つ）に
+   max-height を上書きされないため。順序ではなく詳細度で勝たせる */
+details.raw > .raw-body {
+  margin: .4rem 0 0;
+  padding: .4rem .5rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: .72rem;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 24rem;
+  overflow-y: auto;
+}

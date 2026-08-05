@@ -1,0 +1,190 @@
+/* ClaudeDeck ── 骨・上のバー・共通の部品
+ *
+ * リセット、body、全体の骨、上のバー、ボタン、つながり具合の点。
+ * 色は tokens.css の意味トークン（--bg など）だけを使う。
+ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg-sunk);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.num, code, pre, kbd, .mono { font-family: var(--font-mono); }
+.num, .mono, table tbody td { font-variant-numeric: tabular-nums; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------- 全体の骨 */
+
+.app {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+}
+
+.deck {
+  display: grid;
+  grid-template-columns: minmax(20rem, 27rem) minmax(0, 1fr);
+  gap: 0;
+  min-height: 0;
+}
+
+/* ------------------------------------------------------------------ 見出し */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: .7rem 1rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+
+/* 一覧を引き出すボタン。広い画面では一覧が常に見えているので出さない */
+.hamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.15rem;
+  height: 2.15rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+
+.hamburger:hover { border-color: var(--border-strong); }
+
+/* 3本線は線1本＋擬似要素2本で作る。字形に頼るとフォントで太さが変わる */
+.hamburger .bars,
+.hamburger .bars::before,
+.hamburger .bars::after {
+  display: block;
+  width: 1.05rem;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--fg);
+}
+
+.hamburger .bars { position: relative; }
+
+.hamburger .bars::before,
+.hamburger .bars::after {
+  content: "";
+  position: absolute;
+  left: 0;
+}
+
+.hamburger .bars::before { top: -5px; }
+.hamburger .bars::after { top: 5px; }
+
+.topbar h1 .sub {
+  font-weight: 400;
+  font-size: .8rem;
+  color: var(--fg-muted);
+  margin-left: .5rem;
+}
+
+/* 上のバーに並ぶ状態の数。題名とは別のものなので、細い縦線で区切る */
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin-right: auto;
+  padding-left: .9rem;
+  border-left: 1px solid var(--border);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .12rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  font-size: .78rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.chip strong {
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.chip.is-hot { border-color: var(--hot); color: var(--hot); }
+.chip.is-hot strong { color: var(--hot); }
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.btn {
+  padding: .25rem .65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  font-size: .8rem;
+}
+
+.btn:hover { border-color: var(--border-strong); }
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .78rem;
+  color: var(--fg-muted);
+}
+
+.live::before {
+  content: "";
+  width: .5rem;
+  height: .5rem;
+  border-radius: 50%;
+  background: var(--off);
+}
+
+.live[data-live="on"]::before { background: var(--calm); }
+.live[data-live="off"]::before { background: var(--hot); }

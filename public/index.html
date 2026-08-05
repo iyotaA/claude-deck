@@ -9,7 +9,15 @@
 <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
 <link rel="icon" type="image/png" href="favicon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="favicon-192.png">
-<link rel="stylesheet" href="style.css">
+<!-- CSS は宣言順で勝ち負けが付く。この順番を入れ替えない。
+     narrow.css は上の6枚を上書きするので必ず最後 -->
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/list.css">
+<link rel="stylesheet" href="css/detail.css">
+<link rel="stylesheet" href="css/timeline.css">
+<link rel="stylesheet" href="css/panels.css">
+<link rel="stylesheet" href="css/narrow.css">
 </head>
 <body>
 <div class="app" id="app">

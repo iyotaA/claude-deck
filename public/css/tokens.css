@@ -1,0 +1,140 @@
+/* ClaudeDeck ── 色のトークン
+ *
+ * 色は必ずトークン経由で取る。状態色は点と細いバーだけに使い、面は塗らない。
+ * 全面を塗ると全部が同じ重さに見えて、どれから手をつけるか分からなくなる。
+ *
+ * 読み込む順は index.html が決める。CSS は宣言順で勝ち負けが付くので、
+ * 並べ替えない。とくに narrow.css は必ず最後。
+ */
+
+:root {
+  /* ── 色の実体。ここだけが色そのものを持つ ──────────────────
+   * 明るいほうを --l-*、暗いほうを --d-* に置く。
+   * 下の意味トークン（--bg など）はここを指すだけにして、
+   * 色を変えるときに直す場所を1箇所にする。
+   */
+
+  /* 明るいほう */
+  --l-bg:        #FFFFFF;
+  --l-bg-elev:   #F5F7FA;
+  --l-bg-sunk:   #EDF1F6;
+  --l-code-bg:   #F0F3F7;
+  --l-fg:        #16202E;
+  --l-fg-muted:  #5A6B80;
+  --l-fg-faint:  #8A99AC;
+  --l-border:    #D8DFE8;
+  --l-border-strong: #C2CCD9;
+  --l-accent:    #1F5FD0;
+  --l-accent-fg: #FFFFFF;
+  --l-hot:       #C2372B;
+  --l-warn:      #A8620A;
+  --l-calm:      #1F5FD0;
+  --l-done:      #1B7A46;
+  --l-off:       #8A99AC;
+  --l-shadow: 0 1px 2px rgb(22 32 46 / 6%), 0 4px 12px rgb(22 32 46 / 4%);
+
+  /* 暗いほう */
+  --d-bg:        #0B1220;
+  --d-bg-elev:   #141C2B;
+  --d-bg-sunk:   #0F1725;
+  --d-code-bg:   #111A28;
+  --d-fg:        #E8EDF5;
+  --d-fg-muted:  #9AAABF;
+  --d-fg-faint:  #6F8098;
+  --d-border:    #26324A;
+  --d-border-strong: #35435F;
+  --d-accent:    #4C8DFF;
+  --d-accent-fg: #0B1220;
+  --d-hot:       #FF6B5A;
+  --d-warn:      #F2B01E;
+  --d-calm:      #4C8DFF;
+  --d-done:      #4ACB84;
+  --d-off:       #6F8098;
+  --d-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 14px rgb(0 0 0 / 22%);
+
+  /* ── 意味トークン。画面側はこちらだけを使う ──────────────── */
+  /* 面 */
+  --bg:        var(--l-bg);
+  --bg-elev:   var(--l-bg-elev);
+  --bg-sunk:   var(--l-bg-sunk);
+  --code-bg:   var(--l-code-bg);
+  /* 文字 */
+  --fg:        var(--l-fg);
+  --fg-muted:  var(--l-fg-muted);
+  --fg-faint:  var(--l-fg-faint);
+  /* 線 */
+  --border:    var(--l-border);
+  --border-strong: var(--l-border-strong);
+  /* 強調 */
+  --accent:    var(--l-accent);
+  --accent-fg: var(--l-accent-fg);
+  /* 状態 */
+  --hot:       var(--l-hot);   /* あなたの操作で止まっている */
+  --warn:      var(--l-warn);  /* あなたの返信を待っている */
+  --calm:      var(--l-calm);  /* Claude が動いている */
+  --done:      var(--l-done);  /* 終わって通っている（TODO の完了） */
+  --off:       var(--l-off);   /* 終了・不明 */
+  --shadow:    var(--l-shadow);
+
+  --font-sans: "Yu Gothic UI", "Yu Gothic", YuGothic, "Hiragino Sans",
+               "Hiragino Kaku Gothic ProN", Meiryo, system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "SF Mono", "Yu Gothic UI", monospace;
+
+  --radius: 8px;
+
+  color-scheme: light;
+}
+
+/* 暗いほうへの差し替え。
+ *
+ * :not([data-theme="light"]) を付けているのは、閲覧側が明るいほうを選んだときに
+ * ここが当たらないようにするため。これがあると明るいほうの割り当ては
+ * 上の :root だけで済み、[data-theme="light"] のブロックが不要になる。
+ * 順序や詳細度に頼らないので、ブロックを並べ替えても壊れない。
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:        var(--d-bg);
+    --bg-elev:   var(--d-bg-elev);
+    --bg-sunk:   var(--d-bg-sunk);
+    --code-bg:   var(--d-code-bg);
+    --fg:        var(--d-fg);
+    --fg-muted:  var(--d-fg-muted);
+    --fg-faint:  var(--d-fg-faint);
+    --border:    var(--d-border);
+    --border-strong: var(--d-border-strong);
+    --accent:    var(--d-accent);
+    --accent-fg: var(--d-accent-fg);
+    --hot:       var(--d-hot);
+    --warn:      var(--d-warn);
+    --calm:      var(--d-calm);
+    --done:      var(--d-done);
+    --off:       var(--d-off);
+    --shadow:    var(--d-shadow);
+
+    color-scheme: dark;
+  }
+}
+
+/* 閲覧側が暗いほうを選んだとき。OS の設定に関わらず当てる */
+:root[data-theme="dark"] {
+  --bg:        var(--d-bg);
+  --bg-elev:   var(--d-bg-elev);
+  --bg-sunk:   var(--d-bg-sunk);
+  --code-bg:   var(--d-code-bg);
+  --fg:        var(--d-fg);
+  --fg-muted:  var(--d-fg-muted);
+  --fg-faint:  var(--d-fg-faint);
+  --border:    var(--d-border);
+  --border-strong: var(--d-border-strong);
+  --accent:    var(--d-accent);
+  --accent-fg: var(--d-accent-fg);
+  --hot:       var(--d-hot);
+  --warn:      var(--d-warn);
+  --calm:      var(--d-calm);
+  --done:      var(--d-done);
+  --off:       var(--d-off);
+  --shadow:    var(--d-shadow);
+
+  color-scheme: dark;
+}

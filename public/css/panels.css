@@ -1,0 +1,98 @@
+/* ClaudeDeck ── TODO・サブエージェントの記録・ファイル */
+
+/* ------------------------------------------------------------------ TODO */
+
+.todo { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+
+.todo li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: .5rem;
+  align-items: baseline;
+  font-size: .84rem;
+}
+
+.todo .st {
+  font-size: .72rem;
+  padding: 0 .35rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.todo li[data-status="in_progress"] .st { border-color: var(--accent); color: var(--accent); }
+.todo li[data-status="completed"] { color: var(--fg-faint); }
+.todo li[data-status="completed"] .subject { text-decoration: line-through; }
+
+/* 通っているものは緑にする。塗るのは印だけで、行の面は塗らない。
+   全部が緑の面になると、残っている1件がどれか目で拾えなくなる */
+.todo li[data-status="completed"] .st { border-color: var(--done); color: var(--done); }
+.todo li[data-status="completed"] .st::before { content: "✓ "; }
+
+/* -------------------------------------------------------------- ファイル */
+
+/* ---- サブエージェントの記録 ---- */
+
+.agents { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+
+.agent { border-top: 1px solid var(--line); padding-top: .35rem; }
+.agent:first-child { border-top: 0; padding-top: 0; }
+
+/* 種類・指示・ボタンの3列。指示だけが伸びる */
+.agent-head {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, auto) 1fr auto;
+  gap: .5rem;
+  align-items: baseline;
+}
+
+.agent-type {
+  font-family: var(--font-mono);
+  font-size: .75rem;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.agent-desc { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+.agent-desc-text { font-size: .82rem; overflow-wrap: anywhere; }
+
+.agent-meta {
+  font-size: .72rem;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-note { font-size: .72rem; color: var(--fg-faint); }
+
+/* 記録のファイルが無い行。面は塗らず、文字だけ沈める */
+.agent.is-gone .agent-desc-text { color: var(--fg-faint); }
+
+.agent-body { margin: .35rem 0 .2rem; }
+
+.files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .2rem; }
+
+.files li {
+  display: flex;
+  gap: .5rem;
+  align-items: baseline;
+  font-size: .8rem;
+  font-family: var(--font-mono);
+}
+
+.files .n {
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  min-width: 2rem;
+  text-align: right;
+}
+
+.files .p { overflow-wrap: anywhere; }
+.files .dir { color: var(--fg-faint); }
+
+.loading {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: .85rem;
+}

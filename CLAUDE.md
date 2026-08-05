@@ -228,7 +228,22 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 `/api/sessions` の `meta.stateLabels`（`STATE_LABELS` そのまま）から引く。
 状態を1つ増やすときに直すのは `parse/state.mjs` だけで済む。
 
-`public/style.css` はライト／ダーク両対応。
+CSS は `public/css/` に7枚ある。`index.html` の `<link>` の並びが、そのまま重ね順になる。
+
+| ファイル | 中身 |
+|---|---|
+| `tokens.css` | 色の実体（`--l-*` / `--d-*`）・意味トークン・暗いほうへの差し替え |
+| `base.css` | リセット・全体の骨・上のバー・共通のボタン |
+| `list.css` | 一覧と書庫のカード |
+| `detail.css` | 詳細ペイン・パネルの器・待ち・判断・facts |
+| `timeline.css` | 時系列 |
+| `panels.css` | TODO・サブエージェントの記録・ファイル |
+| `narrow.css` | 狭い窓向け（`@media (max-width: 860px)`） |
+
+**`<link>` の順番を入れ替えない。** CSS は宣言順で勝ち負けが付く。
+`narrow.css` は上の6枚を上書きするので、必ず最後に読む。
+
+ライト／ダーク両対応。
 色の値は `--l-*`（明）と `--d-*`（暗）に1回だけ書き、`--bg` などの意味トークンがそこを指す。
 画面側は意味トークンだけを使う。
 
