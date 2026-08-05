@@ -17,6 +17,7 @@ import { listSessions } from './src/view/sessions.mjs';
 import { getSessionDetail } from './src/view/detail.mjs';
 import { listArchive, parseArchiveQuery } from './src/view/archive.mjs';
 import { getRawEntry } from './src/view/entry.mjs';
+import { getSubagentDetail } from './src/view/subagent.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
 import { sessionsDir, projectsDir, configDir } from './src/read/paths.mjs';
 
@@ -271,6 +272,23 @@ const server = http.createServer((req, res) => {
       (raw) => {
         if (!raw) sendJson(res, 404, { error: 'その行が見つかりません' });
         else sendJson(res, 200, raw);
+      },
+      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+    );
+    return;
+  }
+
+  // サブエージェント1件の記録。これも detailMatch より手前に置く（具体的なほうから）。
+  //
+  // ここの [\w-]{1,64} は入口の粗いふるいであって、安全の根拠ではない。
+  // 開くファイルは readdir が返した名前だけで、リクエストの文字列をパスに連結しない。
+  // 理由は view/subagent.mjs の getSubagentDetail の JSDoc に書いてある
+  const agentMatch = /^\/api\/sessions\/([\w.-]{1,80})\/subagents\/([\w-]{1,64})$/.exec(pathname);
+  if (agentMatch) {
+    getSubagentDetail(agentMatch[1], agentMatch[2]).then(
+      (payload) => {
+        if (!payload) sendJson(res, 404, { error: 'その記録が見つかりません' });
+        else sendJson(res, 200, payload);
       },
       (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
     );

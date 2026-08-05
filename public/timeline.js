@@ -971,6 +971,28 @@ function render({ reset = false } = {}) {
 }
 
 /**
+ * 渡された時系列をそのまま描いて返す。
+ *
+ * 絞り込み・窓・件数の見出しは付けない。サブエージェントの記録のように
+ * 「開いたその場に出すだけ」の並びのための口。
+ *
+ * ctx を空で渡すのが要点。原文の口は親ログの1行を返すものなので、
+ * 子ログの uuid を投げても見つからない。rawBlock は makeUrl が無ければ null を返すので、
+ * ここでは原文ボタンが出ない。
+ *
+ * プランの系譜も同じ理屈で出ない。lineageOf が uuid の一致を見るため、
+ * 親のプランの系譜が子のプランに貼られることはない
+ *
+ * @param {Array<object>} items digest.items
+ * @returns {HTMLElement} .timeline の器
+ */
+function renderPlain(items = []) {
+  const box = el('div', 'timeline');
+  for (const item of items) box.append(timelineItem(item, {}));
+  return box;
+}
+
+/**
  * app.js に見せる口。
  *
  * ここに無いものは app.js から呼ばない。逆に、ここに足すときは
@@ -988,6 +1010,7 @@ const Timeline = {
   setNav,
   filterBar,
   render,
+  renderPlain,
   answerBlock,
   planBlock,
   bodyText,

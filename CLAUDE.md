@@ -54,7 +54,7 @@ node --test test/state.test.mjs  1ファイルだけ走らせる
 Node 22 以降は引数をグロブとして解釈するため、フォルダ名では見つからないと言われる。
 引数なしの `node --test` が両方の版で動く。
 
-見ているのは解析側の4つ。
+見ているのは解析側と、判断だけを切り出した純関数。
 
 | ファイル | 対象 |
 |---|---|
@@ -62,9 +62,19 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `entries.test.mjs` | ログ1行から中身を取り出す小道具 |
 | `digest.test.mjs` | 詳細の時系列。回答の抽出と間引き |
 | `meta.test.mjs` | ログから拾う情報（`ai-title` などの実測した形） |
+| `summary.test.mjs` | 見出しの出どころ。古い自己申告を見出しに使わないこと |
+| `archive.test.mjs` | 書庫のクエリの丸め方 |
+| `entry.test.mjs` | 原文を出すときに伏せる・切る判断 |
+| `plans.test.mjs` | プランのパス検証と本文の突き合わせ |
+| `subagents.test.mjs` | サブエージェントの記録と呼び出しの突き合わせ |
 
 テストデータは `test/helpers.mjs` で組む。
 実物の `~/.claude` は読まない。環境によって中身が変わり、前提にできないため。
+
+ディスクを触る側（`listSubagents` / `readPlanFile` / `readHead` / `listArchive`）にはテストが無い。
+`configDir` が import 時に一度だけ評価される定数なので、差し替えるには import 順の細工が要る。
+代わりに**判断（純関数）と I/O（薄い殻）を分ける形**にして、判断だけをテストできるようにしてある。
+`read/` 側に残っているのは「readdir して、名前で絞って、stat して、try/catch で飲む」だけ。
 
 読み取り層（`read/`）と画面側にはテストが無い。
 そこは実物で確かめる。
@@ -83,9 +93,9 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 | 場所 | 役割 | 中身 |
 |---|---|---|
-| `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` |
+| `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` `plans` `subagents` |
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` |
-| `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） |
+| `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） |
 | `src/os/` | OS を叩く | `focus` |
 
@@ -163,6 +173,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/sessions` | 一覧を1回返す |
 | `GET /api/sessions/:id` | 詳細（ログ全文を読む） |
 | `GET /api/sessions/:id/entry/:uuid` | ログの1行を原文で返す。鍵らしい値は伏せ、長さと深さで切る。ファイルパスは返さない |
+| `GET /api/sessions/:id/subagents/:agentId` | サブエージェント1件の記録。応答は詳細と同じ形（`digest` ＋ `log`）。ファイルパスは返さない |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
 | `GET /api/health` | 生存確認。二重起動の判定にも使う |
@@ -236,6 +247,14 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - **`.ps1` は UTF-8 BOM 付きで保存する。** 旧 `powershell.exe` (5.1) は BOM が無いと OS の既定コードページで読み、日本語コメントが化けて構文解析まで壊れる。`pwsh` (7) は通るので気づきにくい
 - **`ClaudeDeck.cmd` は ASCII のみ。** `cmd.exe` は解析時のコンソールコードページで読むため、日本語を置くと shift-jis 環境で壊れる。日本語のメッセージは node 側から出す
 - **状態色は点と細いバーだけに使い、面は塗らない。** 全面を塗ると全部が同じ重さに見えて、どれから手をつけるか分からなくなる。色は必ず CSS 変数経由で取る
+- **0 と「不明」を分ける。** 取れなかったものを 0 と書かない。キャッシュの目印にも同じで、`logSize` が `0` なら「不明」として必ず取り直す
+- **`digest.mjs` の `agents.push(rec)` をコピーに変えない。** `items` と同じオブジェクト参照を共有していて、間引きで `items` から消えても `agents` には残る。サブエージェントの一覧がこの参照に依存している
+- **`indexTranscripts` を再帰にしない。** 今は2階層固定なので `<セッションID>/subagents/agent-*.jsonl` を弾けている。再帰にすると 148 ファイルが「セッション」として一覧に流れ込む
+- **`listSubagents` に memo を掛けない。** 印に使えるのはディレクトリの mtime だが、NTFS はファイルが増えたときは変わるのに、既存ファイルが太ったときは変わらない。走っているサブエージェントの大きさが固まって表示が伸びなくなる
+- **サブエージェントの `agentId` をパスに連結しない。** 開くファイルは常に `readdir` が返した名前にする。だからパストラバーサルの検証が要らない。`server.mjs` の正規表現は入口の粗いふるいであって、安全の根拠ではない
+- **プランのファイルは `plansDir` の中を指すことを確かめてから開く。** `filePath` はログ由来の外部入力。比較は `path.relative` で行う（`startsWith` はドライブレターの大小で正しいパスを弾く）
+- **プランの mtime だけで「提出後に変わった」と断定しない。** 実測45件で、ファイルのほうが古い例が28件あった。本文の一致を主判定にする。`planWasEdited` はキーが無いことを「編集なし」と読み替えない
+- **一覧の経路（毎秒走る）に重い処理を足さない。** サブエージェントの `readdir` は詳細を開いたときだけ。一覧に載せると 46 セッション分が毎秒走る
 
 ## 要約を AI に差し替えるとき
 
