@@ -27,27 +27,27 @@
  *
  * 拒否リストで持つのが要点。許可リストにすると、サーバが新しい種類を足したときに
  * 既定で見えなくなる。「未知の形で落ちない」は、黙って消えないことも含む。
- * 副産物として「足跡は既定オフ、1回押せば以後オン」が特別扱いではなく初期値1つで済む
+ * 副産物として「足跡は既定オフ」が特別扱いではなく初期値1つで済む
  */
 const HIDDEN_KINDS_DEFAULT = ['trace'];
-
-/** 隠している種類を覚えておく場所。読み書きするのはこのファイルだけ */
-const HIDDEN_KINDS_KEY = 'claude-deck.hiddenKinds';
 
 /**
  * 隠している種類の初期値を決める。
  *
- * ?hide= と localStorage は「キーが無い」と「空で付いている」を分けて見る。
- * 空の指定は「何も隠さない」という意思なので、既定に戻してはいけない。
+ * **localStorage には覚えさせない。** ここだけ他の設定（並び順・テーマ・稼働中だけ）と扱いを分ける。
+ * 覚えさせると、足跡をいちど押して中を見ただけで既定が永久に壊れる。
+ * 「判断の記録が埋もれない」はこのアプリの土台なので、開き直したら既定に戻すほうが安全。
+ *
+ * 出したままにしたい人は ?hide= を空で付けた URL を開く。
+ * 「キーが無い」と「空で付いている」は分けて見るので、空は「何も隠さない」の指定になる。
  * これで「既定のまま」「何も隠さない」「これだけ隠す」の3つを人に渡せる
  *
  * @param {string|null} fromUrl ?hide= の値。付いていなければ null（空文字とは別もの）
  * @returns {Set<string>}
  */
 function initialHiddenKinds(fromUrl = null) {
-  const raw = fromUrl !== null ? fromUrl : localStorage.getItem(HIDDEN_KINDS_KEY);
-  if (raw === null) return new Set(HIDDEN_KINDS_DEFAULT);
-  return new Set(raw.split(',').map((s) => s.trim()).filter(Boolean));
+  if (fromUrl === null) return new Set(HIDDEN_KINDS_DEFAULT);
+  return new Set(fromUrl.split(',').map((s) => s.trim()).filter(Boolean));
 }
 
 /**
@@ -60,16 +60,6 @@ function initialHiddenKinds(fromUrl = null) {
 function hideQueryValue() {
   const hide = [...store.hiddenKinds].sort().join(',');
   return hide === [...HIDDEN_KINDS_DEFAULT].sort().join(',') ? null : hide;
-}
-
-/**
- * 隠している種類を覚える。
- *
- * 空の集合も「何も隠さない」という指定なので、キーごと消さずに空文字で残す。
- * 消してしまうと次に開いたとき既定（足跡を隠す）に戻ってしまう
- */
-function saveHiddenKinds() {
-  localStorage.setItem(HIDDEN_KINDS_KEY, [...store.hiddenKinds].join(','));
 }
 
 /* ------------------------------------------------------------- 種類のラベル */
@@ -787,7 +777,7 @@ function filterBar(all) {
       if (store.hiddenKinds.has(kind)) store.hiddenKinds.delete(kind);
       else store.hiddenKinds.add(kind);
       paint();
-      saveHiddenKinds();
+      // 残すのは URL（?hide=）だけ。localStorage に覚えさせない理由は initialHiddenKinds に書いた
       syncQuery();
       render({ reset: true });
     });

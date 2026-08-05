@@ -124,7 +124,12 @@ const store = {
   tlShownFor: null,
   /** 時系列の検索語。null は「検索していない」。空文字は作らない */
   tq: (query.get('tq') ?? '').trim() || null,
-  /** 時系列で隠している種類（拒否リスト）。timeline.js の HIDDEN_KINDS_DEFAULT の説明を参照 */
+  /**
+   * 時系列で隠している種類（拒否リスト）。
+   *
+   * ここだけ localStorage を見ない。開き直したら既定（足跡を隠す）に戻す。
+   * 理由は timeline.js の initialHiddenKinds に書いた
+   */
   hiddenKinds: Timeline.initialHiddenKinds(query.get('hide')),
   /**
    * 左のペインに出しているもの。'live'（稼働中）か 'archive'（書庫）。
