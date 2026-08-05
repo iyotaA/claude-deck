@@ -68,6 +68,11 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `plans.test.mjs` | プランのパス検証と本文の突き合わせ |
 | `subagents.test.mjs` | サブエージェントの記録と呼び出しの突き合わせ |
 
+`digest.test.mjs` が呼ぶのは `buildDigest` だけ。
+`parse/digest/` の4枚はその中から呼ばれるので、入口経由で見ていることになる。
+分けたときにテストを1行も直さずに通ったのはこのため。
+ここを分け直すときも、入口の名前と応答の形を変えなければテストは無変更で通る。
+
 テストデータは `test/helpers.mjs` で組む。
 実物の `~/.claude` は読まない。環境によって中身が変わり、前提にできないため。
 
@@ -94,7 +99,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | 場所 | 役割 | 中身 |
 |---|---|---|
 | `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` `plans` `subagents` |
-| `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` |
+| `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） |
 | `src/os/` | OS を叩く | `focus` |
@@ -107,6 +112,19 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - `view/sessions.mjs:listSessions`
 - `view/detail.mjs:getSessionDetail`
 - `os/focus.mjs:focusTerminal`
+
+`digest.mjs` に残しているのは走査の本体（`buildDigest`）と、走査の前に1回だけ作る索引だけ。
+走査から呼ぶ判断は `digest/` の4枚に分けてある。`buildDigest` 本体は分けない
+（1つのループで `items` と `files` と `stats` を同時に埋めているため）。
+
+画面側は `public/` の下に2つ。
+
+| 場所 | 役割 | 中身 |
+|---|---|---|
+| `public/css/` | 見た目 | 7枚。`<link>` の並びがそのまま重ね順になる |
+| `public/js/` | 画面の組み立て | 16枚 ＋ `timeline/` 7枚 |
+
+こちらも import は一方向。層の一覧と、循環を切っている4箇所は「画面側」に書いてある。
 
 `assets/favicon.png` はアイコンの元絵。1.3MB あるので `src/` には置かない。
 
@@ -192,28 +210,61 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 ## 画面側
 
-バニラ JS の2ファイル。フレームワークもビルドも無い。
+バニラ JS。フレームワークもビルドも無い。`index.html` が読む `<script>` は1本だけ。
 
-| ファイル | 役割 |
+```html
+<script type="module" src="js/main.js"></script>
+```
+
+ESM なので**読み込み順を人が守る必要はない。** import が解決の順を決める。
+素の `<script>` を2本並べていた頃は、順番を入れ替えると立ち上がらず、
+トップレベルに同じ名前を2つ置くと SyntaxError で丸ごと落ちていた。その危険は無くなっている。
+
+拡張子は `.js` のままにする。`.mjs` を `public/` に置くと `server.mjs` の `MIME` に無く、
+`octet-stream` で返るのでブラウザが module として読まない。
+
+`public/js/` は 16枚 ＋ `timeline/` 7枚。**import は上から下へ一方向にだけ流す。**
+逆向きに import したくなったら、置き場所が間違っている。
+
+| 層 | ファイル | 役割 |
+|---|---|---|
+| 0 | `util.js` | 小道具（`el`・時刻・数値・`fact`） |
+| 0 | `perf.js` | 描画にかかった時間。`window.deckPerf()` |
+| 0 | `timeline/kinds.js` | 時系列の語彙。種類のラベルと、隠す種類の既定 |
+| 1 | `store.js` | 画面側の状態・DOM 参照・URL クエリの同期 |
+| 1 | `panel.js` | 詳細ペインの共通部品（器・見出し・折りたたみ） |
+| 1 | `detail-head.js` | 詳細ペインの頭。パネルより前に出るもの |
+| 2 | `rows.js` | 一覧の行の導出 |
+| 2 | `drawer.js` | 狭い画面の一覧（引き出し） |
+| 2 | `timeline/` | 時系列。外からは `index.js` の1枚として見る |
+| 3 | `detail-wait.js` | 「あなたの番」のパネル |
+| 3 | `detail-panels.js` | 詳細ペインに積むパネル |
+| 3 | `agents.js` | サブエージェントの記録のパネル |
+| 4 | `detail.js` | 詳細ペインの組み立て |
+| 5 | `session.js` | 詳細の取得・保持・選択 |
+| 6 | `list.js` | 稼働中の一覧と、上のバーのまとめ |
+| 7 | `archive.js` | 書庫と、左のペインのタブ |
+| 7 | `stream.js` | SSE でつなぎ、届いた一覧を画面へ流す |
+| 8 | `main.js` | 入口。配線・テーマ・キー操作・起動 |
+
+`timeline/` の中も同じで、`kinds` `waits` → `search` → `blocks` → `item` → `view` → `index` の順。
+**`timeline/` の中のファイルを、外から直に import しない。** 呼びたくなったら `index.js` の口に足すか、
+そもそも時系列の仕事かを考え直す。例外は `kinds.js` だけで、`store.js` が直に見る。
+
+**循環を切っている所が4つある。動かすと立ち上がらない。**
+
+| 切り方 | 切っている循環 |
 |---|---|
-| `public/timeline.js` | 詳細ペインの時系列だけ。絞り込み・1行の組み立て・器の差し替え |
-| `public/app.js` | それ以外ぜんぶ。一覧・まとめ・詳細の他のパネル・SSE・URL クエリ |
+| `hideQueryValue` は隠す種類を引数で受け取る | `store` → `kinds` → `store` |
+| `store.js` は `timeline/kinds.js` を直に見る（`index.js` を経由しない） | `index` → `view` → `store` |
+| `detailErrorNow` は `rows.js` に置く | `detail` ⇄ `session` |
+| `setListOpen` は `drawer.js` に置く | `list` → `main` → `list` |
 
-素の `<script>` を2本読む。**順番は `timeline.js` → `app.js` で固定。**
-`app.js` の `store` の初期値が `Timeline.initialHiddenKinds()` を呼ぶので、逆にすると立ち上がらない。
-
-依存は一方向にする。
-
-- `timeline.js` → `app.js` の小道具（`el` / `since` / `dur` / `num` / `ymd` / `hms` / `mark`）と `store` / `syncQuery`
-- `app.js` → `timeline.js` の `Timeline.*` **だけ**
-
-`app.js` から時系列の中の名前を直に呼ばない。呼びたくなったら `Timeline` の口に足すか、
-そもそも時系列の仕事ではないかのどちらか。素の `<script>` はトップレベルの `const` を共有するので、
-**同じ名前を両方に置くと SyntaxError で丸ごと死ぬ**（片方だけ壊れて済まない）。
+ふるまいで気をつけている所。
 
 - SSE でつなぎ、`apply()` が一覧・まとめを描き直す。詳細は `renderDetailIfNeeded()` を通し、`detailKeyOf()` の値が動いたときだけ作り直す（毎回作り直すと開いた `<details>` と入力中の caret が消える）
 - 時系列だけは `Timeline.render()` が `.tl-host` を差し替える。絞り込みの帯は器の外に置く（中に入れると1文字ごとに入力欄が作り直される）
-- 描く先は `Timeline.attach()` で預け、`Timeline.detach()` で外す。`app.js` から時系列の内部状態を触らない
+- 描く先は `Timeline.attach()` で預け、`Timeline.detach()` で外す。外から時系列の内部状態を触らない
 - 詳細は `detailCache`（`logSize` を印にした8件のキャッシュ）。中身が変わっていなければ取り直さない。印が `0`（不明）なら必ず取り直す
 - 取り直しのあいだは `silent` で前の内容を出したままにする
 - 狭い画面（860px 以下）では一覧が引き出しになる。閉じているあいだは `inert` で丸ごと触れなくする
@@ -221,8 +272,9 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - `?hide=` は「キーが無い」と「空で付いている」を分けて見る。空は「何も隠さない」の指定なので既定に戻さない
 - 隠している種類だけは `localStorage` に覚えさせない。開き直したら既定（足跡を隠す）に戻す。覚えさせると、足跡をいちど押して中を見ただけで既定が永久に壊れる
 - 種類を隠すときは、その種類だけを数えた省略の目印（`elided`）も一緒に落とす。残すと「20 件を省略しました　足跡 20」の文字だけが並び、隠れていないように見える（実測で窓 120 件のうち 36 件がこれだった）
+- **省略は絞り込みのチップに出さない。** 上の通り、出るか出ないかは他のチップ側で決まるので、独立したチップにすると件数が嘘になる。実測では「省略 74」と出しながら1行も出ない状態になっていた（74 件すべてが足跡だけの区間で、足跡は既定で隠れる）。その状態で他を全部隠すと時系列が空になる。目印ごと消す指定は URL に残してある（`?hide=elided`）
 - 窓（`TL_FIRST` = 4 で開き、`TL_MORE` = 60 ずつ継ぎ足す）の外にしか無い種類は名前で伝える。足跡は新しい 200 件だけが残るので、古い順で見ていると窓の中に1件も入らないことがある。黙っていると「押しても変わらない」に見える
-- 描画にかかった時間は `window.deckPerf()` で見る（目安は `renderDetail` が 50ms 未満、時系列の描き直しが 16ms 未満）。測る入れ物は `app.js` の1つに保つ（2つに割ると `deckPerf()` が片方しか見えない）
+- 描画にかかった時間は `window.deckPerf()` で見る（目安は `renderDetail` が 50ms 未満、時系列の描き直しが 16ms 未満）。測る入れ物は `perf.js` の1つに保つ（2つに割ると `deckPerf()` が片方しか見えない）
 
 状態ラベルの日本語は画面側に持たない。
 `/api/sessions` の `meta.stateLabels`（`STATE_LABELS` そのまま）から引く。
@@ -260,6 +312,8 @@ CSS は `public/css/` に7枚ある。`index.html` の `<link>` の並びが、�
 - **依存パッケージを増やさない。** 同僚にフォルダごと渡して動くことが要件。`dependencies` は空のまま
 - **未知の形で落ちない。** 読んでいるのは Claude Code の内部データで公開仕様ではない。未知のキー・未知の `status`・書き込み途中の壊れた JSON が来ても、黙って飛ばして進む
 - **`innerHTML` を使わない。** ログ本文をそのまま画面に出すので、必ず `textContent` で入れる
+- **`timeline/` の中のファイルを外から直に import しない。** 口は `timeline/index.js` の1枚に絞る。例外は `kinds.js`（層0の語彙）だけで、`index.js` を経由させると `index` → `view` → `store` → `index` の循環になる
+- **`public/` に `.mjs` を置かない。** `server.mjs` の `MIME` に無いので `octet-stream` で返り、ブラウザが module として読まない。画面側の拡張子は `.js`
 - **生死の判定は PID の存在確認だけ。** 登録簿の `updatedAt` は状態が変わったときしか書かれない。古さで終了扱いにすると稼働中のセッションが一覧から消える
 - **`slugifyCwd` の結果からパスを復元しない。** 英数字以外がすべて `-` になる不可逆変換。cwd は登録簿とログの各行から直接取る
 - **`.ps1` は UTF-8 BOM 付きで保存する。** 旧 `powershell.exe` (5.1) は BOM が無いと OS の既定コードページで読み、日本語コメントが化けて構文解析まで壊れる。`pwsh` (7) は通るので気づきにくい
