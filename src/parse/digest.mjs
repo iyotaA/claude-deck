@@ -41,10 +41,13 @@ import {
   toolResults,
   timestampOf,
   uuidOf,
+  agentIdOf,
   recapOf,
+  taskNotificationOf,
   isUserPrompt,
   isInterrupt,
   isMainline,
+  isSidechain,
   isToolResultEntry,
   slashCommandOf,
   DENIAL_KINDS,
@@ -217,6 +220,55 @@ function pickAnswers(input, result) {
   return out;
 }
 
+/**
+ * サブエージェントの終わりの記録を agentId から引ける表にする。
+ *
+ * 非同期で起動したエージェントは、呼び出しの結果には「起動した」までしか入らない。
+ * 終わりは別の行として差し込まれるので、そこを拾って結び直す。
+ * これがあるので「走っているかどうか」を mtime や推測で当てなくて済む
+ *
+ * @param {Array} scoped 対象の行
+ * @returns {Map<string, {status: string|null, at: number|null}>}
+ */
+function indexNotifications(scoped) {
+  const byAgent = new Map();
+  for (const entry of scoped) {
+    const note = taskNotificationOf(entry);
+    if (!note) continue;
+    // 同じエージェントが何度も止まると通知も複数出る（差し込みの note 自身がそう書いている）。
+    // あとから来たほうが最後の状態なので上書きする
+    byAgent.set(note.taskId, { status: note.status, at: timestampOf(entry) });
+  }
+  return byAgent;
+}
+
+/**
+ * サブエージェントの状態を決める。
+ *
+ * 言い切れないものを言い切らないための関数。上から順に見る。
+ *
+ *  1. 終わりの記録があればそれが最終（completed / killed / failed）
+ *  2. 呼び出しの結果が completed なら、同期で走って報告まで返っている
+ *  3. async_launched のまま終わりの記録が無ければ launched。
+ *     **「走っている」とは言わない。** セッションがもう終わっていれば走ってもいない。
+ *     この記録から言えるのは「起動したところまでは分かる」だけ
+ *  4. 結果そのものが無ければ pending（呼んだ直後で、まだ返ってきていない）
+ *
+ * 知らない値が来たらそのまま返す。黙って既知の値に丸めない
+ *
+ * @param {object|null} result 呼び出しに対応する結果
+ * @param {object|null} done 終わりの記録
+ * @returns {string|null}
+ */
+function agentStatus(result, done) {
+  if (done?.status) return done.status;
+  const raw = result?.structured?.status;
+  if (raw === 'completed') return 'completed';
+  if (raw === 'async_launched') return 'launched';
+  if (!result) return 'pending';
+  return typeof raw === 'string' ? raw : null;
+}
+
 /** tool_use_id から結果を引ける表を作る。承認・却下の判定に必要。 */
 function indexResults(entries) {
   const byId = new Map();
@@ -380,12 +432,19 @@ function trimItems(items) {
 /**
  * @param {object} params
  * @param {Array} params.entries readAll で読んだ全行
+ * @param {'main'|'sidechain'} [params.scope] どちらの流れを組むか。既定は本流。
+ *   サブエージェントのログは全行が isSidechain:true なので、main のままだと1件も残らない
+ * @param {string|null} [params.agentId] sidechain のとき、この agentId の行だけに絞る。
+ *   1エージェント1ファイルなので通常は要らないが、混ざったログを渡されても正しく組めるようにしておく
  * @returns {object} 詳細ビュー用のデータ
  */
-export function buildDigest({ entries = [] } = {}) {
-  const mainline = entries.filter(isMainline);
-  const results = indexResults(mainline);
-  const barriers = collectBarriers(mainline);
+export function buildDigest({ entries = [], scope = 'main', agentId = null } = {}) {
+  const scoped = scope === 'sidechain'
+    ? entries.filter((e) => isSidechain(e) && (agentId === null || agentIdOf(e) === agentId))
+    : entries.filter(isMainline);
+  const results = indexResults(scoped);
+  const barriers = collectBarriers(scoped);
+  const notifications = indexNotifications(scoped);
 
   const items = [];
   const files = new Map();
@@ -418,7 +477,7 @@ export function buildDigest({ entries = [] } = {}) {
    */
   let replyFrom = null;
 
-  for (const entry of mainline) {
+  for (const entry of scoped) {
     const at = timestampOf(entry);
     const uuid = uuidOf(entry);
     if (at !== null) {
@@ -573,16 +632,27 @@ export function buildDigest({ entries = [] } = {}) {
         stats.plans += 1;
         const wait = waitOf('plan', at, result?.at ?? null, barriers);
         addWait(stats.waits, wait);
+        const body = tu.input?.plan ?? result?.structured?.plan;
+        // 承認された結果には filePath が必ず入っていた（実測46件すべて）。
+        // 本文から拾う正規表現は、その形が無い古い版のための控え
+        const filePath = typeof result?.structured?.filePath === 'string'
+          ? result.structured.filePath
+          : saved ? saved[1].trim() : null;
         items.push({
           i: index++,
           kind: 'plan',
           at,
           uuid,
           resultUuid: result?.uuid ?? null,
-          plan: clip(tu.input?.plan ?? result?.structured?.plan, LIMIT.plan),
+          plan: clip(body, LIMIT.plan),
+          // 切る前の長さ。ディスクの本文と突き合わせるとき、切られた本文で比べると必ず不一致になる
+          planChars: typeof body === 'string' ? body.length : null,
+          // 実測では true のときだけ書かれ、false は一度も出ない。
+          // キーが無いことを「編集なし」と読み替えられないよう、無いときは null で渡す
+          edited: result?.structured?.planWasEdited === true ? true : null,
           approved,
           pending: !result,
-          planFile: saved ? saved[1].trim() : null,
+          planFile: filePath,
           // 却下・修正指示のときは本文にその内容が入る。次に何をするかの指示なので改行ごと残す
           feedback: approved ? null : clip(text, LIMIT.feedback),
           wait,
@@ -607,15 +677,38 @@ export function buildDigest({ entries = [] } = {}) {
       }
 
       if (tu.name === 'Agent' || tu.name === 'Task') {
+        // 結果には2つの形がある（実測140件）。
+        //   同期  59件 … status:"completed"。content に報告本文、totalDurationMs / totalTokens /
+        //                 totalToolUseCount / toolStats / usage が付く
+        //   非同期 81件 … status:"async_launched"。起動したことしか入らない。
+        //                 終わりは別の <task-notification> の行に出る（indexNotifications で拾う）
+        const s = result?.structured ?? null;
+        const agentId = typeof s?.agentId === 'string' ? s.agentId : null;
+        const done = agentId ? notifications.get(agentId) ?? null : null;
         // items と agents で同じオブジェクトを共有している。間引きで items から
         // 消えても agents には残る形にしたいので、ここをコピーに変えてはいけない
+        // （提案10 の subagents.items がこの参照に依存している）
         const rec = {
           i: index++,
           kind: 'agent',
           at,
           uuid,
-          agentType: tu.input?.subagent_type ?? null,
+          resultUuid: result?.uuid ?? null,
+          // サブエージェントの記録と突き合わせる鍵。呼び出し側の id と、結果に入る agentId
+          toolUseId: tu.id ?? null,
+          agentId,
+          // 呼び出しに subagent_type が無い形もあるので、結果側の agentType にも落とす
+          agentType: tu.input?.subagent_type ?? (typeof s?.agentType === 'string' ? s.agentType : null),
           description: oneLine(tu.input?.description, LIMIT.detail),
+          model: typeof s?.resolvedModel === 'string' ? s.resolvedModel : null,
+          status: agentStatus(result, done),
+          // 同期完了のときだけ入る。取れなければ null（0 と混ぜない）
+          durationMs: typeof s?.totalDurationMs === 'number' ? s.totalDurationMs : null,
+          tokens: typeof s?.totalTokens === 'number' ? s.totalTokens : null,
+          toolUseCount: typeof s?.totalToolUseCount === 'number' ? s.totalToolUseCount : null,
+          // 報告本文そのものは積まない。長さだけ出して、中身は「開く」の応答へ回す
+          reportChars: typeof s?.content === 'string' ? s.content.length : null,
+          doneAt: done?.at ?? null,
         };
         items.push(rec);
         agents.push(rec);
@@ -669,7 +762,7 @@ export function buildDigest({ entries = [] } = {}) {
     }
   }
 
-  stats.turns = mainline.filter((e) => e?.type === 'assistant').length;
+  stats.turns = scoped.filter((e) => e?.type === 'assistant').length;
 
   const trimmed = trimItems(items);
 

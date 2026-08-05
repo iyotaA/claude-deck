@@ -85,7 +85,10 @@ export function isUserPrompt(entry) {
 
   const text = textOf(entry);
   if (!text) return false;
-  if (/^<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|system-reminder|user-prompt-submit-hook)/.test(text)) {
+  // task-notification はサブエージェントの終わりを伝える差し込み。
+  // user の行として記録されるが打った指示ではない。除かないと実測 84 件が
+  // 「あなたの指示」として数えられ、時系列に XML がそのまま並ぶ
+  if (/^<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|system-reminder|user-prompt-submit-hook|task-notification)/.test(text)) {
     return false;
   }
   if (text.startsWith('Caveat: The messages below were generated')) return false;
@@ -131,6 +134,66 @@ export function isSidechain(entry) {
 /** 行を指す識別子。原文に戻るときの鍵になる。取れなければ null。 */
 export function uuidOf(entry) {
   return typeof entry?.uuid === 'string' ? entry.uuid : null;
+}
+
+/**
+ * その行を書いたサブエージェントの識別子。
+ *
+ * サブエージェントのログは全行が持っている（実測59行すべて）。
+ * 親のログの行には無いので、本流では常に null になる
+ *
+ * @param {object} entry 会話ログの1行
+ * @returns {string|null}
+ */
+export function agentIdOf(entry) {
+  return typeof entry?.agentId === 'string' ? entry.agentId : null;
+}
+
+/**
+ * サブエージェントの終わりを伝える差し込みを読む。
+ *
+ * 非同期で起動したエージェント（呼び出しの結果が status: async_launched）は、
+ * 親ログの結果に報告が入らない。終わったことは別の user の行として差し込まれる。
+ * 実測した形:
+ *
+ *   <task-notification>
+ *   <task-id>aae06781144f65807</task-id>     ← agentId と同じ値
+ *   <tool-use-id>toolu_…</tool-use-id>
+ *   <output-file>…</output-file>
+ *   <status>completed</status>
+ *   <summary>Agent "探偵A: …" finished</summary>
+ *   <note>…</note>
+ *   <result>…エージェントの報告本文…</result>
+ *
+ * status は completed 76 / killed 7 / failed 1（実測84件）。
+ * これがあるので、非同期のエージェントも「終わったか」を推測せずに言える。
+ *
+ * 報告本文の中に <summary> や <code> のようなタグが入っていることがあるため、
+ * <result> より手前だけを見る。実測 91 件のうち task-id が取れたのは 84 件で、
+ * 残り7件は task-id を持たない別の形だった。取れなければ null を返す
+ *
+ * @param {object} entry 会話ログの1行
+ * @returns {{taskId: string, toolUseId: string|null, status: string|null}|null}
+ */
+export function taskNotificationOf(entry) {
+  if (entry?.type !== 'user') return null;
+  const text = textOf(entry);
+  if (!text.startsWith('<task-notification>')) return null;
+
+  // 報告本文に入っている同名タグを拾わないよう、頭の部分だけに絞る
+  const cut = text.indexOf('<result>');
+  const head = cut === -1 ? text : text.slice(0, cut);
+
+  const taskId = /<task-id>([^<]+)<\/task-id>/.exec(head);
+  if (!taskId) return null;
+  const toolUseId = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(head);
+  const status = /<status>([^<]+)<\/status>/.exec(head);
+
+  return {
+    taskId: taskId[1].trim(),
+    toolUseId: toolUseId ? toolUseId[1].trim() : null,
+    status: status ? status[1].trim() : null,
+  };
 }
 
 /**

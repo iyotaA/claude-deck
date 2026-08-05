@@ -143,6 +143,58 @@ export async function readTail(file) {
   });
 }
 
+/**
+ * ログの先頭だけを読む。readTail の鏡像。
+ *
+ * バイト位置で切るので末尾の行が途中で終わりうる。その行は捨てる。
+ * 途中で切れたマルチバイト文字も、その捨てる行に含まれるので影響しない
+ * （readTail は先頭を落とすが、こちらは末尾を落とす）。
+ *
+ * 末尾ではなく先頭を読むのは、サブエージェントのログを開く目的が
+ * 「どうやって結論に至ったか」だから。結論（最終報告）は親ログの結果に既に入っている。
+ * 先頭には受けた指示と最初の調査が入っていて、そちらのほうが価値がある。
+ *
+ * @param {string} file 読むファイル
+ * @param {number} cap 読む上限バイト数
+ * @returns {Promise<{entries: Array, parseErrors: number, truncated: boolean, size: number, mtimeMs: number}>}
+ */
+export async function readHead(file, cap) {
+  let stat;
+  try {
+    stat = await fs.stat(file);
+  } catch {
+    return { entries: [], parseErrors: 0, truncated: false, size: 0, mtimeMs: 0 };
+  }
+
+  return memo(`head:${cap}:${file}`, stampOf(stat), async () => {
+    let handle;
+    try {
+      handle = await fs.open(file, 'r');
+    } catch {
+      return { entries: [], parseErrors: 0, truncated: false, size: stat.size, mtimeMs: stat.mtimeMs };
+    }
+
+    try {
+      const length = Math.min(cap, stat.size);
+      const buf = Buffer.allocUnsafe(length);
+      const { bytesRead } = await handle.read(buf, 0, length, 0);
+
+      let text = buf.subarray(0, bytesRead).toString('utf8');
+      const truncated = length < stat.size;
+      if (truncated) {
+        // 末尾の欠けた行を落とす
+        const nl = text.lastIndexOf('\n');
+        text = nl === -1 ? '' : text.slice(0, nl);
+      }
+
+      const parsed = parseLines(text.split('\n'));
+      return { ...parsed, truncated, size: stat.size, mtimeMs: stat.mtimeMs };
+    } finally {
+      await handle.close();
+    }
+  });
+}
+
 /** ログを全文読む。詳細ビューを開いたときだけ呼ぶ。 */
 export async function readAll(file) {
   let stat;

@@ -221,6 +221,34 @@ test('承認されたプランは保存先まで拾う', () => {
   assert.equal(d.stats.plans, 1);
 });
 
+test('プランの保存先は結果の構造化データを先に見る', () => {
+  const d = buildDigest({
+    entries: [
+      call('ExitPlanMode', { plan: '# 手順' }, { id: 'p1' }),
+      result('p1', {
+        ms: 100,
+        text: 'User has approved your plan. Plan saved to: C:\\wrong\\path.md',
+        structured: { filePath: 'C:\\Users\\me\\.claude\\plans\\right.md', planWasEdited: true },
+      }),
+    ],
+  });
+  const [plan] = only(d, 'plan');
+  // filePath は承認された結果すべてに入っていた（実測46件）。本文の正規表現は古い版のための控え
+  assert.equal(plan.planFile, 'C:\\Users\\me\\.claude\\plans\\right.md');
+  assert.equal(plan.edited, true);
+});
+
+test('プランは切る前の長さを持つ', () => {
+  const body = 'あ'.repeat(30_000);
+  const d = buildDigest({ entries: [call('ExitPlanMode', { plan: body }, { id: 'p1' })] });
+  const [plan] = only(d, 'plan');
+  // ディスクの本文と突き合わせるとき、切られた本文で比べると必ず不一致になる
+  assert.equal(plan.planChars, 30_000);
+  assert.ok(plan.plan.length < 30_000);
+  // 編集の有無は書かれていないので null。キーが無いことを「編集なし」と読み替えない
+  assert.equal(plan.edited, null);
+});
+
 test('却下されたプランは、返された指示が本文として残る', () => {
   const d = buildDigest({
     entries: [
@@ -690,4 +718,128 @@ test('空のログでも形の揃った結果を返す', () => {
   // 待ちの集計は種類の枠だけ先に作る。画面側が存在チェックをしなくて済む
   assert.deepEqual(d.stats.waits.answer, { count: 0, totalMs: 0, maxMs: 0, away: 0 });
   assert.deepEqual(Object.keys(d.stats.waits), ['answer', 'plan', 'denial', 'reply', 'tool']);
+});
+
+test('同期で終わったサブエージェントは結果から中身まで拾う', () => {
+  const report = 'あ'.repeat(4200);
+  const d = buildDigest({
+    entries: [
+      call('Agent', { subagent_type: 'Explore', description: '探偵A: parse 層を調査' }, { id: 'tu-1' }),
+      result('tu-1', {
+        ms: 90_000,
+        structured: {
+          agentId: 'a1b5fffa598f1c4ce',
+          agentType: 'Explore',
+          status: 'completed',
+          resolvedModel: 'claude-sonnet-5',
+          content: report,
+          totalDurationMs: 88_400,
+          totalTokens: 51_200,
+          totalToolUseCount: 12,
+        },
+      }),
+    ],
+  });
+  const [a] = d.agents;
+  // agentId はサブエージェントの記録（ファイル名）と突き合わせる鍵
+  assert.equal(a.agentId, 'a1b5fffa598f1c4ce');
+  assert.equal(a.toolUseId, 'tu-1');
+  assert.equal(a.status, 'completed');
+  assert.equal(a.model, 'claude-sonnet-5');
+  assert.equal(a.durationMs, 88_400);
+  assert.equal(a.tokens, 51_200);
+  assert.equal(a.toolUseCount, 12);
+  // 本文そのものは積まない。長さだけ出して、中身は「開く」の応答へ回す
+  assert.equal(a.reportChars, 4200);
+  assert.equal(a.content, undefined);
+});
+
+test('非同期のサブエージェントは完了通知から終わりを決める', () => {
+  const d = buildDigest({
+    entries: [
+      call('Agent', { subagent_type: 'general-purpose', description: '職人: 修正' }, { id: 'tu-2' }),
+      result('tu-2', {
+        ms: 500,
+        structured: { agentId: 'aae06781144f65807', status: 'async_launched', resolvedModel: 'claude-opus-5' },
+      }),
+      prompt([
+        '<task-notification>',
+        '<task-id>aae06781144f65807</task-id>',
+        '<status>killed</status>',
+        '<result>途中で止めました</result>',
+      ].join('\n'), { ms: 120_000 }),
+    ],
+  });
+  const [a] = d.agents;
+  // 呼び出しの結果には「起動した」までしか入らない。終わりは差し込みの行にだけ出る
+  assert.equal(a.status, 'killed');
+  assert.equal(a.doneAt, T0 + 120_000);
+  // 完了通知は指示ではないので、あなたの指示として数えない
+  assert.equal(d.stats.prompts, 0);
+});
+
+test('通知の来ていない非同期のエージェントを「走っている」と言わない', () => {
+  const d = buildDigest({
+    entries: [
+      call('Agent', { description: '探偵B: 調査' }, { id: 'tu-3' }),
+      result('tu-3', { ms: 500, structured: { agentId: 'b2', status: 'async_launched' } }),
+    ],
+  });
+  // 終わったセッションを開いても走っているように見えてしまう。起動したことだけを言う
+  assert.equal(d.agents[0].status, 'launched');
+  assert.equal(d.agents[0].doneAt, null);
+});
+
+test('結果がまだ来ていないエージェントは保留として出す', () => {
+  const d = buildDigest({ entries: [call('Agent', { description: '起動直後' }, { id: 'tu-4' })] });
+  const [a] = d.agents;
+  assert.equal(a.status, 'pending');
+  assert.equal(a.agentId, null);
+  // 取れなかったものを 0 と書かない
+  assert.equal(a.durationMs, null);
+  assert.equal(a.reportChars, null);
+});
+
+test('scope に sidechain を渡すとサブエージェントの行だけで組む', () => {
+  const branch = (entry) => ({ ...entry, isSidechain: true, agentId: 'a1' });
+  const entries = [
+    prompt('親の指示'),
+    branch(prompt('サブエージェントへの指示', { ms: 100 })),
+    branch(say('調べました', { ms: 200 })),
+  ];
+
+  // 既定（main）はサブエージェントの行を落とす。今までの呼び出し元は1文字も変わらない
+  const main = buildDigest({ entries });
+  assert.deepEqual(main.items.map((i) => i.kind), ['prompt']);
+
+  // サブエージェントのログは全行 isSidechain:true なので、main のままだと1件も残らない
+  const sub = buildDigest({ entries, scope: 'sidechain' });
+  assert.deepEqual(sub.items.map((i) => i.kind), ['prompt', 'say']);
+  assert.equal(sub.items[0].text, 'サブエージェントへの指示');
+  assert.equal(sub.stats.turns, 1);
+});
+
+test('sidechain では agentId でさらに絞れる', () => {
+  const entries = [
+    { ...say('こっちの枝', { ms: 100 }), isSidechain: true, agentId: 'a1' },
+    { ...say('別の枝', { ms: 200 }), isSidechain: true, agentId: 'a2' },
+  ];
+  const d = buildDigest({ entries, scope: 'sidechain', agentId: 'a2' });
+  // 1エージェント1ファイルなので通常は要らないが、混ざったログを渡されても正しく組めるようにしておく
+  assert.deepEqual(d.items.map((i) => i.text), ['別の枝']);
+});
+
+test('未知の type が混ざっても黙って飛ばす', () => {
+  const d = buildDigest({
+    entries: [
+      prompt('これやって'),
+      // 実測した未知の type。attachment のほか mode / ai-title / queue-operation などがある
+      { type: 'attachment', uuid: 'x1', timestamp: at(50), attachment: { type: 'plan_mode_exit' } },
+      { type: 'ai-title', uuid: 'x2', timestamp: at(60), title: 'つけられた題' },
+      { type: 'queue-operation', uuid: 'x3', timestamp: at(70) },
+      say('やるね', { ms: 100 }),
+    ],
+  });
+  // 公開仕様が無いので未知の形は必ず来る。落ちずに、知っている行だけ組む
+  assert.deepEqual(d.items.map((i) => i.kind), ['prompt', 'say']);
 });
