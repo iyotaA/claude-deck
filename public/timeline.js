@@ -671,6 +671,34 @@ function timelineItem(item, ctx = {}) {
 const TL_PAGE = 120;
 
 /**
+ * 窓の外にしか無い種類を数える。
+ *
+ * 「チップを押したのに何も変わらない」に見えるのを防ぐためのもの。
+ * 足跡は間引きで新しい 200 件だけが残る（MAX_TRACES）ので、古い順で見ていると
+ * 窓の中に1件も入らないことがある。実測した例では 383 件のうち最初の足跡が 151 件目で、
+ * 先頭 120 件には0件だった。この状態で足跡を出すと、見出しの件数と「続きを出す」の
+ * 残り数だけが動いて、出ている行は1行も変わらない。
+ *
+ * 窓の中に1件でもある種類は入れない。そちらは押せば目で見て変わるので、言う必要がない。
+ *
+ * @param {Array} ordered 絞り込みと並び替えを終えた全件
+ * @param {number} from ここから先が窓の外
+ * @returns {Map<string, number>} 種類 → 窓の外にある件数
+ */
+function kindsBeyond(ordered, from) {
+  const inside = new Set();
+  for (let i = 0; i < from; i += 1) inside.add(ordered[i].kind);
+
+  const out = new Map();
+  for (let i = from; i < ordered.length; i += 1) {
+    const kind = ordered[i].kind;
+    if (inside.has(kind)) continue;
+    out.set(kind, (out.get(kind) ?? 0) + 1);
+  }
+  return out;
+}
+
+/**
  * 時系列だけを描き直すための取っ手。
  *
  * renderDetail() が時系列パネルを組むたびに attach() で入れ替える。
@@ -832,6 +860,14 @@ function render({ reset = false } = {}) {
       : '時系列に出せる行がありません'));
   }
   if (rest > 0) {
+    // 窓の外にしか無い種類は名前で伝える。多いときは上位3つに絞る（並びが長いと読まれない）
+    const beyond = [...kindsBeyond(ordered, shown.length)].sort((a, b) => b[1] - a[1]);
+    if (beyond.length) {
+      const head = beyond.slice(0, 3).map(([k, n]) => `${KIND_LABELS[k] ?? k} ${num(n)} 件`).join('　');
+      const restKinds = beyond.length > 3 ? `　ほか ${num(beyond.length - 3)} 種類` : '';
+      nodes.push(el('div', 'empty-note', `いま出している範囲より先に、${head}${restKinds}があります`));
+    }
+
     const more = el('button', 'btn tl-more', `続きを出す（残り ${num(rest)} 件）`);
     more.type = 'button';
     more.addEventListener('click', () => {
