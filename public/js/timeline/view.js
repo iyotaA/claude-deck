@@ -158,6 +158,15 @@ export function filterBar(all) {
 
   const kinds = el('div', 'tl-kinds');
   for (const [kind, n] of countKinds(all)) {
+    // 省略はチップに出さない。自分で選ぶ種類ではなく、間引きの副産物だから。
+    //
+    // 目印の中身が隠している種類だけなら、目印も一緒に落としている（elidedAllHidden）。
+    // つまり出るか出ないかは他のチップで決まる。それをチップにすると、実測した例では
+    // 「省略 74」と出しながら1行も出ない状態になった（74 件すべてが足跡だけの区間で、
+    // 足跡は既定で隠れているため）。押しても何も起きず、件数だけが嘘になる。
+    //
+    // 目印ごと消したい人は URL で指定できる（?hide=elided）。そちらは効いたままにする
+    if (kind === 'elided') continue;
     const chip = el('button', 'tl-chip', KIND_LABELS[kind] ?? kind);
     chip.type = 'button';
     chip.append(el('span', 'n', num(n)));
