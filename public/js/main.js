@@ -10,11 +10,11 @@
  * 依存は上から下へ一方向にだけ流す。逆向きに import したくなったら置き場所が間違っている。
  *   層0  util.js / perf.js / timeline/kinds.js   誰にも依存しない
  *   層1  store.js（kinds.js を直に見る）/ rows.js
- *   層2  timeline.js
+ *   層2  timeline/                                6枚。中の向きは index.js の冒頭
  *   層3  このファイル                            全部を見る
  *
- * 時系列は timeline.js に分けてある。呼ぶのは Timeline.* を通してだけで、
- * あちらの中の名前を直に触らない（理由は timeline.js の冒頭に書いてある）。
+ * 時系列は timeline/ に分けてある。呼ぶのは Timeline.* を通してだけで、
+ * あちらの中のファイルを直に import しない（理由は timeline/index.js の冒頭に書いてある）。
  *
  * 'use strict' は書かない。module は常に strict で動く。
  */
@@ -26,8 +26,8 @@ import {
 } from './store.js';
 import { idleOf, rowOf, headOf, visibleRows, detailErrorNow } from './rows.js';
 // 名前空間ごと受ける。Timeline.render() のような呼び方をそのまま残すため。
-// 中をさらに分けても、差し替えるのはこの1行だけで済む
-import * as Timeline from './timeline.js';
+// 見るのは口（index.js）だけ。中の並びが変わってもこの1行は動かない
+import * as Timeline from './timeline/index.js';
 
 /* ---------------------------------------------------------------- 一覧 */
 
