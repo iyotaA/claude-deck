@@ -1209,6 +1209,15 @@ mark {
   color: var(--fg-faint);
 }
 
+/* プランの系譜の1行。面は塗らず、文字色だけ変える。
+   一致していた知らせは沈め、目を留めてほしいものだけ警告色にする */
+.plan-note {
+  font-size: .74rem;
+  color: var(--fg-faint);
+}
+
+.plan-note.warn { color: var(--warn); }
+
 .tl-detail {
   margin: 0;
   padding: .35rem .5rem;

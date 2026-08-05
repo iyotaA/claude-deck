@@ -11,6 +11,7 @@ import { extractMeta } from '../parse/meta.mjs';
 import { buildDigest } from '../parse/digest.mjs';
 import { identity, stateFields } from './shape.mjs';
 import { summarize } from './summary.mjs';
+import { buildPlanLineage } from './plans.mjs';
 
 /**
  * @param {string} sessionId
@@ -40,6 +41,14 @@ export async function getSessionDetail(sessionId, now = Date.now()) {
     readTasks(sessionId),
   ]);
 
+  // ディスクを1回だけ読む。落ちても詳細そのものは返す（プランの系譜が消えるだけ）
+  let planLineage = null;
+  try {
+    planLineage = await buildPlanLineage(digest);
+  } catch {
+    planLineage = null;
+  }
+
   const detail = {
     ...identity({ registry, meta, sessionId, transcript }),
     ...stateFields(state),
@@ -50,6 +59,10 @@ export async function getSessionDetail(sessionId, now = Date.now()) {
 
     digest,
     tasks,
+
+    // 承認したプランが、いまディスクにあるものと同じか。
+    // 材料が無ければ null。新しいデータ源は「無ければ機能が1つ消えるだけ」に閉じる
+    planLineage,
 
     log: {
       file: transcript?.file ?? null,

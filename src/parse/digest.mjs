@@ -644,6 +644,9 @@ export function buildDigest({ entries = [], scope = 'main', agentId = null } = {
           at,
           uuid,
           resultUuid: result?.uuid ?? null,
+          // 承認された時刻。ファイルの更新時刻と比べるのに使う。
+          // wait.toAt にも同じ値が入るが、区切りを跨ぐと null になるのでこちらに別で持つ
+          resultAt: result?.at ?? null,
           plan: clip(body, LIMIT.plan),
           // 切る前の長さ。ディスクの本文と突き合わせるとき、切られた本文で比べると必ず不一致になる
           planChars: typeof body === 'string' ? body.length : null,

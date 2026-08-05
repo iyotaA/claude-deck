@@ -435,6 +435,53 @@ function answerBlock(a, compact, needle = null) {
 }
 
 /**
+ * この提出に対応するプランの系譜を取り出す。
+ *
+ * サーバは最後の提出1件だけを調べて uuid を添えてくる。ここで uuid を突き合わせるのは、
+ * サブエージェントの時系列を同じ planBlock で描くときに、親のプランの系譜を
+ * 子のプランへ貼ってしまう事故を防ぐため（子ログの uuid は親に存在しない）
+ *
+ * @param {object} item digest の plan 1件
+ * @returns {object|null} 対応する系譜。無ければ null
+ */
+function lineageOf(item) {
+  const lineage = store.detail?.planLineage ?? null;
+  if (!lineage || !lineage.uuid || lineage.uuid !== item.uuid) return null;
+  return lineage;
+}
+
+/**
+ * プランの系譜を出す。
+ *
+ * 出すのは「あのとき approve したプランと、いまファイルに書かれているものが同じか」だけ。
+ * 差分は作らない。両方の本文を畳んで並べ、読み手が見比べられる形にする。
+ *
+ * 文言はサーバ側（view/plans.mjs）が作る。判定と文言が離れると、
+ * mtime だけを根拠に言い切らないという約束を2箇所で守ることになる
+ *
+ * @param {object} lineage detail.planLineage
+ * @returns {Node[]} 足すノード
+ */
+function lineageNodes(lineage) {
+  const out = [];
+  for (const note of lineage.notes ?? []) {
+    // 一致していた、は安心の知らせなので沈める。それ以外は目を留めてほしいので警告色にする
+    const calm = note === '提出後にファイルは変わっていません';
+    out.push(el('div', calm ? 'plan-note' : 'plan-note warn', note));
+  }
+
+  const disk = lineage.disk;
+  if (disk?.text) {
+    const d = el('details', 'more');
+    const when = typeof disk.mtimeMs === 'number' ? `　${ymd(disk.mtimeMs)} ${hms(disk.mtimeMs)} 更新` : '';
+    d.append(el('summary', null, `いまのファイルの中身　${num(disk.chars)} 字${when}`));
+    d.append(el('pre', null, disk.text));
+    out.push(d);
+  }
+  return out;
+}
+
+/**
  * @param {object} item digest の plan 1件
  * @param {boolean} compact 全文を畳むだけにするか
  * @param {string|null} [needle] 検索語
@@ -450,10 +497,16 @@ function planBlock(item, compact, needle = null) {
   }
   box.append(line);
   if (item.feedback) box.append(marked('pre', 'tl-detail', item.feedback, needle));
+
+  const lineage = lineageOf(item);
+  if (lineage) box.append(...lineageNodes(lineage));
+
   if (item.plan && !compact) {
     const d = el('details', 'more');
     const hits = countHits(item.plan, needle);
-    d.append(el('summary', null, hits ? `プラン全文　一致 ${num(hits)} 件` : 'プラン全文'));
+    // 系譜を出すときは、どちらの本文かが分かるように言い方を変える
+    const label = lineage?.disk?.text ? '提出したときの本文' : 'プラン全文';
+    d.append(el('summary', null, hits ? `${label}　一致 ${num(hits)} 件` : label));
     if (hits) d.open = true;
     d.append(marked('pre', null, item.plan, needle));
     box.append(d);
