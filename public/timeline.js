@@ -85,6 +85,30 @@ const KIND_LABELS = {
 };
 
 /**
+ * サブエージェントのログでだけ意味が変わる種類。
+ *
+ * 子ログの先頭に入っている user 行は、あなたが打ったものではない。
+ * Agent ツールを呼んだ親の Claude が書いた指示文がそのまま入っている。
+ * 「あなたの指示」と出すと、自分が言っていないことを言ったことにしてしまう
+ */
+const SIDECHAIN_LABELS = {
+  prompt: 'Claude からの指示',
+};
+
+/**
+ * 種類のラベルを引く。
+ *
+ * ctx.labels は差し替えたい種類だけを持つ（全部を書き写すと、KIND_LABELS に
+ * 1つ足したときに片方だけ古くなる）
+ *
+ * @param {string} kind item.kind
+ * @param {object} [ctx] timelineItem の ctx
+ */
+function labelOf(kind, ctx) {
+  return ctx?.labels?.[kind] ?? KIND_LABELS[kind] ?? kind;
+}
+
+/**
  * 「判断だけ」で残す種類。
  *
  * Claude の説明（say）を落とすと、自分が動かした所だけが縦に並ぶ。
@@ -627,7 +651,7 @@ function timelineItem(item, ctx = {}) {
   row.append(whenNode(item.at));
   const body = el('div', 'tl-body');
   const kindRow = el('div', 'tl-kind');
-  kindRow.append(...markUp(KIND_LABELS[item.kind] ?? item.kind, needle));
+  kindRow.append(...markUp(labelOf(item.kind, ctx), needle));
   // 前のやり取りからの間。取れていない行には何も付かない
   const wait = waitBadge(item.wait);
   if (wait) kindRow.append(wait);
@@ -649,7 +673,7 @@ function timelineItem(item, ctx = {}) {
     // 間引きで落ちた区間の目印。何が落ちたかまで出す（足跡だけの区間かどうかが読めるように）
     case 'elided': {
       const kinds = Object.entries(item.byKind ?? {})
-        .map(([k, n]) => `${KIND_LABELS[k] ?? k} ${n}`)
+        .map(([k, n]) => `${labelOf(k, ctx)} ${n}`)
         .join(' / ');
       const range = item.fromAt && item.toAt
         ? `（${hms(new Date(item.fromAt))} 〜 ${hms(new Date(item.toAt))}）`
@@ -978,9 +1002,9 @@ function render({ reset = false } = {}) {
  * 絞り込み・窓・件数の見出しは付けない。サブエージェントの記録のように
  * 「開いたその場に出すだけ」の並びのための口。
  *
- * ctx を空で渡すのが要点。原文の口は親ログの1行を返すものなので、
- * 子ログの uuid を投げても見つからない。rawBlock は makeUrl が無ければ null を返すので、
- * ここでは原文ボタンが出ない。
+ * ctx に入れるのはラベルの差し替えだけ。rawUrl を渡さないのが要点で、
+ * 原文の口は親ログの1行を返すものなので、子ログの uuid を投げても見つからない。
+ * rawBlock は makeUrl が無ければ null を返すので、ここでは原文ボタンが出ない。
  *
  * プランの系譜も同じ理屈で出ない。lineageOf が uuid の一致を見るため、
  * 親のプランの系譜が子のプランに貼られることはない
@@ -990,7 +1014,7 @@ function render({ reset = false } = {}) {
  */
 function renderPlain(items = []) {
   const box = el('div', 'timeline');
-  for (const item of items) box.append(timelineItem(item, {}));
+  for (const item of items) box.append(timelineItem(item, { labels: SIDECHAIN_LABELS }));
   return box;
 }
 
