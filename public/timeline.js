@@ -286,6 +286,29 @@ function searchTextOf(item) {
 }
 
 /**
+ * 省略の目印が、隠している種類だけを数えたものか。
+ *
+ * 間引きで落ちた区間には `elided` を1件置いていて、そこには「20 件を省略しました　足跡 20」
+ * のように何が落ちたかが書いてある。区間の中身が足跡だけだったとき、足跡を隠している人に
+ * この行を出すのは筋が通らない。隠したのに「足跡」という文字だけが残るので、
+ * 隠れていないように見える。
+ *
+ * 実測した例では、足跡を隠した窓 120 件のうち 36 件がこれだった。
+ * 本編（説明・指示）より省略の目印のほうが多く並ぶ状態になっていた。
+ *
+ * `byKind` が無い古い形は落とさない。中身が分からないものを黙って消さないため。
+ *
+ * @param {object} item 時系列の1件
+ * @returns {boolean} 隠す側に回すなら true
+ */
+function elidedAllHidden(item) {
+  if (item.kind !== 'elided') return false;
+  const kinds = Object.keys(item.byKind ?? {});
+  if (!kinds.length) return false;
+  return kinds.every((k) => store.hiddenKinds.has(k));
+}
+
+/**
  * 時系列を絞り込む。
  *
  * 順序は「種類 → 検索語」。逆にすると見出しの件数が何を数えたものか読めなくなる
@@ -296,7 +319,9 @@ function searchTextOf(item) {
  */
 function filterTimeline(items) {
   let out = items;
-  if (store.hiddenKinds.size) out = out.filter((i) => !store.hiddenKinds.has(i.kind));
+  if (store.hiddenKinds.size) {
+    out = out.filter((i) => !store.hiddenKinds.has(i.kind) && !elidedAllHidden(i));
+  }
   if (store.onlyDecisions) out = out.filter((i) => DECISION_KINDS.has(i.kind));
   if (store.tq) {
     const pin = store.tq.toLowerCase();
