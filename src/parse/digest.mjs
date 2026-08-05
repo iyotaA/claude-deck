@@ -9,31 +9,17 @@
  * だから現在時刻は受け取らない。進行中の待ちは state.mjs の idleMs が持っているので、
  * ここでは終わった待ちだけを扱う。
  *
- * 実測で分かった大事な形（公開仕様が無いので、このコメントが唯一の記録になる）:
+ * このファイルに残しているのは、走査の本体（buildDigest）と、
+ * 走査の前に1回だけ作る索引（indexResults / indexNotifications / agentStatus）だけ。
+ * 走査から呼ぶ判断は digest/ の4枚に分けてある。
  *
- *  AskUserQuestion の「選んだ答え」の出どころは2つあり、どちらも実在する。
+ *   digest/limits.mjs    上限と、超えたときに落とす順
+ *   digest/answers.mjs   選んだ答えの取り出し・却下文の整形（実測した形はこちらに書いた）
+ *   digest/waits.mjs     待ちの区間と集計
+ *   digest/trim.mjs      間引き
  *
- *   1. toolUseResult.answers … {質問文: 選んだラベル} の辞書。素直に引ける
- *   2. tool_result の本文 … 次の形で埋まっている
- *
- *      Your questions have been answered: "質問"="選んだラベル" selected preview:
- *      …（選択肢のプレビュー本文）…
- *      , "質問2"="選んだラベル2". You can now continue with these answers in mind.
- *
- *  手元のログで数えると 1 は 65 回、2 は 134 回。
- *  つまり半分近くは answers を持たない古い版なので、本文からの抽出は
- *  「念のため」ではなく必須の経路になる。1 を優先し、無ければ 2 に落とす。
- *
- *  2 の経路は質問文を鍵に該当位置だけを読む（本文はプレビューが挟まって崩れているので
- *  全体をパースできない）。この鍵の作り方には弱点があり、質問文に " が含まれると引けない。
- *  1 を先に見る理由がこれ。
- *
- *  引けたラベルを options[].label と照合すれば、その選択肢の description まで出せる。
- *  description は「その選択が何を意味していたか」の説明なので、
- *  あとから読み返したときに判断の理由がそのまま残る。
- *
- *  複数選択（multiSelect: true）の値も数えた。実測3本すべて ", " 連結の文字列で、
- *  配列は0件。将来配列に変わっても読めるように normalizeAnswer で吸収する。
+ * buildDigest 本体は分けない。1つの走査ループで items と files と stats を同時に埋めており、
+ * 切ると「どの順で何を数えているか」が読めなくなる。
  */
 import {
   textOf,
@@ -53,172 +39,11 @@ import {
   DENIAL_KINDS,
 } from './entries.mjs';
 import { clip, oneLine } from '../shared/text.mjs';
-import { describeTool, MAX_DETAIL } from '../shared/tools.mjs';
-
-/** 1件あたりの上限。判断の記録になるものは長めに残し、説明文は短くする。 */
-const LIMIT = {
-  prompt: 6000,
-  say: 1200,
-  plan: 24000,
-  // 中間報告は Claude が自分で畳んだ文なので、もともと長くない。発言より少しだけ広く取る
-  recap: 2000,
-  // ツールの一行説明と同じ長さ。並べて出るものなので揃える
-  detail: MAX_DETAIL,
-  feedback: 2000,
-};
-
-/** 時系列に並べる項目の上限。超えたら古い説明文から落とす。 */
-const MAX_ITEMS = 400;
-
-/**
- * 足跡（trace）だけの独立枠。
- *
- * 足跡は件数の桁が他と違うので、本編と同じ枠で取り合わせると
- * 足跡が残って Claude の説明が消える、という一番いやな壊れ方が起きる。
- * 既定では隠れている項目なので、本編を圧迫させない
- */
-const MAX_TRACES = 200;
-
-/**
- * 足跡に残す結果の先頭の長さ。
- *
- * 本文は積まない。足跡が答えるのは「どこを見に行ったか」で、
- * 結果の中身が要るときは原文（/api/sessions/:id/entry/:uuid）に戻ればよい。
- * 200件ぶんの全文を載せると詳細の応答が桁で膨らむ
- */
-const TRACE_HEAD = 160;
-
-/**
- * 上限を超えたときに落とす順。前のほうから使い切る。
- *
- * ここに無い種類は落とさない。指示・選択・プラン・却下・圧縮などの判断の記録がそれで、
- * 将来ここに知らない種類が増えても既定で残る側に倒れる
- */
-const DROP_ORDER = [
-  ['error'],           // 件数は stats.errors に残る
-  ['skill', 'agent'],  // skills / agents 配列と同じ参照なので、そちらに残る
-  ['say'],             // ここまで来たら諦める
-];
-
-/** ファイルを書き換えるツール。「触ったファイル」の判定に使う。 */
-const WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit']);
-
-/**
- * 4時間。これより長い待ちは「考えていた時間」ではなく席を外していた時間と見る。
- *
- * 境目に根拠があるわけではない。ただ、昼をまたいだ空白を「回答までの間」として
- * 合計に混ぜると集計が意味を失うので、別枠に寄せる線をどこかに引く必要がある
- */
-const AWAY_MS = 4 * 60 * 60 * 1000;
-
-/**
- * 却下されたときに機械的に入る英文。
- *
- * 中身は毎回同じで読む価値がないのに長いため、時系列を埋めてしまう。
- * 取り除いて、あとに何か残ればそれだけを出す（自分が添えたコメントがそこに来る）。
- */
-const DENIAL_NOISE = [
-  /The user doesn't want to proceed with this tool use\./g,
-  /The tool use was rejected \([^)]*\)\./g,
-  /STOP what you are doing and wait for the user to tell you how to proceed\./g,
-  /Note: The user's next message may contain a correction or preference\.[\s\S]*?future sessions\./g,
-  /The user doesn't want to take this action right now\./g,
-  /Permission (?:for this action was denied|to use \S+ was denied)[^.]*\./g,
-  /Tool use was rejected[^.]*\./g,
-];
-
-/**
- * 却下に添えたコメントだけを取り出す。
- *
- * oneLine ではなく clip を使う。ここは「なぜ止めたか」を自分の言葉で書いた場所なので、
- * 箇条書きや行分けに意味がある。受け側は white-space: pre-wrap で出す
- */
-function denialNote(text) {
-  let t = typeof text === 'string' ? text : '';
-  for (const re of DENIAL_NOISE) t = t.replace(re, '');
-  return clip(t, LIMIT.feedback);
-}
-
-/**
- * 選んだ答えを1つの文字列に寄せる。
- *
- * 実測では複数選択でも ", " 連結の文字列で来る（配列は0件）。
- * 将来配列に変わっても読めるように、ここで配列を吸収しておく。
- * 逆に文字列は分割しない。ラベル自体に ", " が入っていると壊れるため
- *
- * @param {unknown} raw ログから読んだ生の値
- * @returns {string|null} 空なら null
- */
-function normalizeAnswer(raw) {
-  if (typeof raw === 'string') return raw.trim() || null;
-  if (Array.isArray(raw)) {
-    const parts = raw.map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean);
-    return parts.length ? parts.join(', ') : null;
-  }
-  return null;
-}
-
-/**
- * tool_result の本文から、その質問の答えを引く（古い版のログ用の経路）。
- *
- * @param {string} question 質問文。これが鍵になる
- * @param {string} text tool_result の本文
- * @returns {string|null} 引けなければ null
- */
-function chosenFromText(question, text) {
-  if (!question || typeof text !== 'string') return null;
-  const needle = `"${question}"="`;
-  const at = text.indexOf(needle);
-  if (at === -1) return null;
-  const rest = text.slice(at + needle.length);
-  const end = rest.indexOf('"');
-  return normalizeAnswer(end === -1 ? rest.slice(0, 300) : rest.slice(0, end));
-}
-
-/**
- * 質問ごとに「何を選んだか」と「その選択肢の説明」を組む。
- *
- * @param {object} input AskUserQuestion への入力（質問と選択肢の控え）
- * @param {object|null} result 対応する tool_result（未回答なら null）
- * @returns {Array} 質問と同じ順の配列
- */
-function pickAnswers(input, result) {
-  const text = typeof result?.text === 'string' ? result.text : '';
-  const dict = result?.structured?.answers;
-  const hasDict = Boolean(dict) && typeof dict === 'object' && !Array.isArray(dict);
-  const out = [];
-
-  for (const q of input?.questions ?? []) {
-    const question = typeof q?.question === 'string' ? q.question : '';
-    const options = Array.isArray(q?.options) ? q.options : [];
-
-    // 辞書が第一候補。質問文に " が入っていても引ける
-    const chosen = (hasDict ? normalizeAnswer(dict[question]) : null)
-      ?? chosenFromText(question, text);
-
-    // 選択肢のラベルと突き合わせる。合えばその description が判断の根拠になる。
-    // 「Other」で自由入力した場合はどれにも合わないので、そのまま文字列として残す。
-    // 含有判定にしているのは複数選択のため。", " 連結の文字列でも複数件が自然に当たる
-    const picked = options.filter((o) => chosen && typeof o?.label === 'string'
-      && (chosen === o.label || chosen.includes(o.label)));
-
-    out.push({
-      question,
-      header: typeof q?.header === 'string' ? q.header : null,
-      multiSelect: q?.multiSelect === true,
-      chosen,
-      // preview は大きいので落とす。label と description だけ持つ。
-      // description は切らない。選んだ理由そのものなので改行ごと残す
-      chosenOptions: picked.map((o) => ({ label: o.label, description: o.description ?? null })),
-      freeText: Boolean(chosen) && picked.length === 0,
-      otherOptions: options
-        .filter((o) => !picked.includes(o))
-        .map((o) => ({ label: o.label ?? '', description: oneLine(o.description, 200) })),
-    });
-  }
-
-  return out;
-}
+import { describeTool } from '../shared/tools.mjs';
+import { LIMIT, TRACE_HEAD, WRITE_TOOLS } from './digest/limits.mjs';
+import { denialNote, pickAnswers } from './digest/answers.mjs';
+import { collectBarriers, waitOf, emptyWaitStats, addWait } from './digest/waits.mjs';
+import { trimItems } from './digest/trim.mjs';
 
 /**
  * サブエージェントの終わりの記録を agentId から引ける表にする。
@@ -288,145 +113,6 @@ function indexResults(entries) {
     }
   }
   return byId;
-}
-
-/**
- * 待ちを跨いだら「連続した1つの待ち」ではなくなる地点の時刻。
- *
- * 文脈の圧縮・スラッシュコマンド（とくに /clear）・中断のあとは、
- * 前の呼び出しの続きとして数えると別の作業だった時間まで足してしまう
- *
- * @param {Array} scoped 対象の行
- * @returns {number[]} 昇順の時刻
- */
-function collectBarriers(scoped) {
-  const out = [];
-  for (const entry of scoped) {
-    const at = timestampOf(entry);
-    if (at === null) continue;
-    if (entry?.type === 'system' && entry.subtype === 'compact_boundary') {
-      out.push(at);
-      continue;
-    }
-    if (entry?.type !== 'user') continue;
-    if (slashCommandOf(entry) || isInterrupt(entry)) out.push(at);
-  }
-  return out.sort((a, b) => a - b);
-}
-
-/**
- * 待ち時間を組む。
- *
- * 取れないときは null を返す。0 と書いてはいけない。
- * 「測れなかった」と「待たせていない」は別のことなので、混ぜると集計が嘘になる
- *
- * @param {string} kind 何を待っていたか（answer / plan / denial / reply / tool）
- * @param {number|null} fromAt 待ち始めた時刻
- * @param {number|null} toAt 待ちが終わった時刻
- * @param {number[]} barriers 跨いだら別の待ちになる地点
- * @returns {object|null} 測れないときは null
- */
-function waitOf(kind, fromAt, toAt, barriers) {
-  if (typeof fromAt !== 'number' || typeof toAt !== 'number') return null;
-  const ms = toAt - fromAt;
-  if (ms < 0) return null;
-  for (const b of barriers) {
-    if (b > fromAt && b < toAt) return null;
-  }
-  return { kind, fromAt, toAt, ms, away: ms >= AWAY_MS };
-}
-
-/** 待ちの集計の初期値。種類ごとに件数・合計・最長を持つ。 */
-function emptyWaitStats() {
-  const bucket = () => ({ count: 0, totalMs: 0, maxMs: 0, away: 0 });
-  return {
-    answer: bucket(),
-    plan: bucket(),
-    denial: bucket(),
-    reply: bucket(),
-    // ふつうのツールの往復。許可待ちと実行時間が混ざるので、上の4つとは足し合わせない
-    tool: bucket(),
-  };
-}
-
-/**
- * 待ちを集計に足す。
- *
- * 4時間超は合計に混ぜず away の件数だけ増やす。
- * 昼をまたいだ空白を混ぜると「回答までの間 合計 9時間」のような無意味な数になる
- *
- * @param {object} waits emptyWaitStats() の結果
- * @param {object|null} wait waitOf() の結果
- */
-function addWait(waits, wait) {
-  if (!wait) return;
-  const b = waits[wait.kind];
-  if (!b) return;
-  if (wait.away) {
-    b.away += 1;
-    return;
-  }
-  b.count += 1;
-  b.totalMs += wait.ms;
-  if (wait.ms > b.maxMs) b.maxMs = wait.ms;
-}
-
-/**
- * 上限を超えた分を落とし、落とした位置に省略の印（elided）を残す。
- *
- * 枠は2つ。足跡は MAX_TRACES の独立枠で、本編は MAX_ITEMS。
- * elided は**どちらの枠の外**に置く。枠の中だと、印を作るために本体をもう1件落とす循環になる
- *
- * @param {Array} items 組み終わった時系列
- * @returns {{items: Array, dropped: number}}
- */
-function trimItems(items) {
-  const traces = items.filter((it) => it.kind === 'trace');
-  const rest = items.length - traces.length;
-  const drop = new Set();
-
-  // 足跡は古いものから落とす。新しい足跡のほうが今の作業に近い
-  for (let k = 0; k < traces.length - MAX_TRACES; k += 1) drop.add(traces[k]);
-
-  let budget = rest - MAX_ITEMS;
-  for (const kinds of DROP_ORDER) {
-    if (budget <= 0) break;
-    for (const item of items) {
-      if (budget <= 0) break;
-      if (drop.has(item) || !kinds.includes(item.kind)) continue;
-      drop.add(item);
-      budget -= 1;
-    }
-  }
-
-  if (drop.size === 0) return { items, dropped: 0 };
-
-  const out = [];
-  let run = null;
-  for (const item of items) {
-    if (drop.has(item)) {
-      // 連続して落ちた区間は1つの印にまとめる。1件ずつ印を出すと本体より数が増える
-      if (!run) {
-        // i は落ちた先頭の位置をそのまま使う。生き残った項目とはぶつからない
-        run = { i: item.i, kind: 'elided', uuid: null, count: 0, fromAt: null, toAt: null, byKind: {} };
-      }
-      run.count += 1;
-      run.byKind[item.kind] = (run.byKind[item.kind] ?? 0) + 1;
-      if (typeof item.at === 'number') {
-        if (run.fromAt === null) run.fromAt = item.at;
-        run.toAt = item.at;
-      }
-      continue;
-    }
-    if (run) {
-      out.push(run);
-      run = null;
-    }
-    out.push(item);
-  }
-  if (run) out.push(run);
-
-  return { items: out, dropped: drop.size };
 }
 
 /**
