@@ -80,8 +80,8 @@
   <div class="scrim" id="scrim"></div>
 
 </div>
-<!-- timeline.js を先に読む。app.js の store の初期値が Timeline.* を呼ぶため -->
-<script src="timeline.js"></script>
-<script src="app.js"></script>
+<!-- ESM なので読み込む順を人が守る必要はない。import が解決の順を決める。
+     読むのはこの1本だけ。増やすと、また順番が意味を持ってしまう -->
+<script type="module" src="js/main.js"></script>
 </body>
 </html>

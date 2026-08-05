@@ -1,124 +1,24 @@
 /* 詳細ペインの時系列。
  *
- * app.js から切り出したもの。切った理由は行数だけではない。
+ * 分けてある理由は行数だけではない。
  * 時系列は「絞り込む → 1行を組む → 器だけ差し替える」で完結していて、
  * 詳細ペインの他のパネル（回答・TODO・ファイル・状態）とは材料も描き直しの周期も違う。
  *
- * 依存は一方向にする。
- *   timeline.js → app.js の小道具（el / since / dur / num / ymd / hms / mark）と store / syncQuery
- *   app.js      → このファイルの Timeline.* だけ
- * app.js からこのファイルの中の名前を直に呼ばない。逆向きに呼びたくなったら、
- * それは Timeline の口に足すべきものか、そもそも時系列の仕事ではないかのどちらか。
+ * 依存は一方向にする。層2。
+ *   このファイル → 層0（util / perf / timeline/kinds）と層1（store）
+ *   main.js      → このファイルが export した名前だけ
+ * main.js からこのファイルの中の名前を直に呼ばない。呼びたくなったら、
+ * それは export に足すべきものか、そもそも時系列の仕事ではないかのどちらか。
  *
- * 読み込む順は index.html で timeline.js → app.js。
- * app.js の store の初期値が Timeline.initialHiddenKinds() を呼ぶので、
- * このファイルが先に評価されていないと立ち上がらない。
+ * 種類の語彙（ラベル・隠す種類の既定）は timeline/kinds.js に置いてある。
+ * store.js が初期値を決めるのにそれを要るので、層0 に下ろして循環を切った。
  *
  * 文字列は必ず textContent で入れる（innerHTML を使わない）。ここはログ本文を直に出す側。
  */
-'use strict';
-
-/* --------------------------------------------------------------- 隠す種類 */
-
-/**
- * 時系列で既定から隠す種類。
- *
- * 足跡（trace）は件数が桁で多い。既定で出すと判断の記録が埋もれる。
- *
- * 拒否リストで持つのが要点。許可リストにすると、サーバが新しい種類を足したときに
- * 既定で見えなくなる。「未知の形で落ちない」は、黙って消えないことも含む。
- * 副産物として「足跡は既定オフ」が特別扱いではなく初期値1つで済む
- */
-const HIDDEN_KINDS_DEFAULT = ['trace'];
-
-/**
- * 隠している種類の初期値を決める。
- *
- * **localStorage には覚えさせない。** ここだけ他の設定（並び順・テーマ・稼働中だけ）と扱いを分ける。
- * 覚えさせると、足跡をいちど押して中を見ただけで既定が永久に壊れる。
- * 「判断の記録が埋もれない」はこのアプリの土台なので、開き直したら既定に戻すほうが安全。
- *
- * 出したままにしたい人は ?hide= を空で付けた URL を開く。
- * 「キーが無い」と「空で付いている」は分けて見るので、空は「何も隠さない」の指定になる。
- * これで「既定のまま」「何も隠さない」「これだけ隠す」の3つを人に渡せる
- *
- * @param {string|null} fromUrl ?hide= の値。付いていなければ null（空文字とは別もの）
- * @returns {Set<string>}
- */
-function initialHiddenKinds(fromUrl = null) {
-  if (fromUrl === null) return new Set(HIDDEN_KINDS_DEFAULT);
-  return new Set(fromUrl.split(',').map((s) => s.trim()).filter(Boolean));
-}
-
-/**
- * ?hide= に書く値。
- *
- * 既定と同じなら null を返す（キーを付けない）。空文字は「何も隠さない」の指定なので、
- * null とは分けて返す。syncQuery() の側でこの2つを見分けてもらう
- * @returns {string|null}
- */
-function hideQueryValue() {
-  const hide = [...store.hiddenKinds].sort().join(',');
-  return hide === [...HIDDEN_KINDS_DEFAULT].sort().join(',') ? null : hide;
-}
-
-/* ------------------------------------------------------------- 種類のラベル */
-
-const KIND_LABELS = {
-  prompt: 'あなたの指示',
-  answer: 'あなたの回答',
-  plan: 'プラン',
-  denial: '却下・不許可',
-  skill: 'スキル',
-  agent: 'サブエージェント',
-  say: 'Claude',
-  compact: '文脈の圧縮',
-  error: 'エラー',
-  slash: 'コマンド',
-  interrupt: 'あなたが中断',
-  // Claude 自身が書いた中間報告。機械的に抜き出した記録ではないので、語を分けておく
-  recap: 'Claude の中間報告',
-  elided: '省略',
-  // ふつうのツール呼び出し。既定では隠している（HIDDEN_KINDS_DEFAULT）。
-  // 絞り込みのチップにも同じ語が出るので、ここを直せば両方が変わる
-  trace: '足跡',
-};
-
-/**
- * サブエージェントのログでだけ意味が変わる種類。
- *
- * 子ログの先頭に入っている user 行は、あなたが打ったものではない。
- * Agent ツールを呼んだ親の Claude が書いた指示文がそのまま入っている。
- * 「あなたの指示」と出すと、自分が言っていないことを言ったことにしてしまう
- */
-const SIDECHAIN_LABELS = {
-  prompt: 'Claude からの指示',
-};
-
-/**
- * 種類のラベルを引く。
- *
- * ctx.labels は差し替えたい種類だけを持つ（全部を書き写すと、KIND_LABELS に
- * 1つ足したときに片方だけ古くなる）
- *
- * @param {string} kind item.kind
- * @param {object} [ctx] timelineItem の ctx
- */
-function labelOf(kind, ctx) {
-  return ctx?.labels?.[kind] ?? KIND_LABELS[kind] ?? kind;
-}
-
-/**
- * 「判断だけ」で残す種類。
- *
- * Claude の説明（say）を落とすと、自分が動かした所だけが縦に並ぶ。
- * 何十往復もしたセッションを思い出すときは、こちらのほうが速い。
- *
- * recap（Claude の中間報告）は入れない。自己申告であって自分の判断ではないため。
- */
-const DECISION_KINDS = new Set([
-  'prompt', 'answer', 'plan', 'denial', 'interrupt', 'slash', 'skill', 'agent', 'error', 'compact',
-]);
+import { el, since, dur, num, ymd, hms } from './util.js';
+import { mark } from './perf.js';
+import { store, syncQuery } from './store.js';
+import { KIND_LABELS, SIDECHAIN_LABELS, labelOf, DECISION_KINDS } from './timeline/kinds.js';
 
 /* ----------------------------------------------------------------- 待ち時間 */
 
@@ -1033,19 +933,19 @@ function renderPlain(items = []) {
   return box;
 }
 
-/**
- * app.js に見せる口。
+/* 外に見せる口。
  *
- * ここに無いものは app.js から呼ばない。逆に、ここに足すときは
- * 「時系列の仕事か」を一度考える。詳細ペイン全体の話なら app.js 側に置く。
+ * ここに無いものは外から呼ばない。逆に、ここに足すときは
+ * 「時系列の仕事か」を一度考える。詳細ペイン全体の話なら main.js 側に置く。
  *
  * answerBlock / planBlock / bodyText / waitFact を外に出しているのは、
  * 時系列の外（「あなたの番」と「あなたが決めたこと」のパネル）でも同じ見せ方をするため。
- * 同じものを2通りに描くと、同じ判断が場所によって違って見える
+ * 同じものを2通りに描くと、同じ判断が場所によって違って見える。
+ *
+ * 隠す種類の初期値（initialHiddenKinds / hideQueryValue）はここに無い。
+ * store.js が timeline/kinds.js から直に取る。層0 に置いてあるので経由する必要がない
  */
-const Timeline = {
-  initialHiddenKinds,
-  hideQueryValue,
+export {
   attach,
   detach,
   setNav,

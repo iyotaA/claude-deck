@@ -1,311 +1,35 @@
-/* ClaudeDeck の画面側。
+/* ClaudeDeck の画面側の入口。index.html が読むのはこの1本だけ。
  *
  * 会話ログの中身をそのまま画面に出すので、文字列は必ず textContent で入れる。
  * innerHTML を使うと、ログに入っていたタグがそのまま解釈されてしまう。
  *
- * 時系列だけは timeline.js に分けてある。呼ぶのは Timeline.* を通してだけで、
- * あちらの中の名前を直に触らない（理由と依存の向きは timeline.js の冒頭に書いてある）。
- * index.html では timeline.js を先に読む。下の store の初期値がそこの関数を呼ぶため。
+ * ESM なので読み込み順を人が守る必要はない。import が解決の順を決める。
+ * 素の <script> を並べていたときは、順番を1つ入れ替えると立ち上がらず、
+ * 同じ名前をトップレベルに2つ置くと SyntaxError で丸ごと落ちていた。
+ *
+ * 依存は上から下へ一方向にだけ流す。逆向きに import したくなったら置き場所が間違っている。
+ *   層0  util.js / perf.js / timeline/kinds.js   誰にも依存しない
+ *   層1  store.js（kinds.js を直に見る）/ rows.js
+ *   層2  timeline.js
+ *   層3  このファイル                            全部を見る
+ *
+ * 時系列は timeline.js に分けてある。呼ぶのは Timeline.* を通してだけで、
+ * あちらの中の名前を直に触らない（理由は timeline.js の冒頭に書いてある）。
+ *
+ * 'use strict' は書かない。module は常に strict で動く。
  */
-'use strict';
-
-const STATE_COLOR = {
-  'needs-answer': 'var(--hot)',
-  'needs-plan-approval': 'var(--hot)',
-  'needs-approval': 'var(--hot)',
-  'awaiting-reply': 'var(--warn)',
-  running: 'var(--calm)',
-  ended: 'var(--off)',
-  unknown: 'var(--off)',
-};
-
-/** 一覧のタグに出さない権限モード。どちらも「特別なことは起きていない」を意味する。 */
-const QUIET_MODES = new Set(['auto', 'default', 'normal', 'acceptEdits']);
-
-/**
- * 一覧の上に出すまとめ。並び順もこの順にする。
- *
- * ラベルの日本語はここに持たない。サーバが meta.stateLabels で渡してくる。
- * 状態を1つ増やしたときに、直す場所が state.mjs だけで済むようにするため。
- */
-const SUMMARY_ORDER = [
-  'needs-answer',
-  'needs-plan-approval',
-  'needs-approval',
-  'awaiting-reply',
-  'running',
-  'ended',
-];
-
-/**
- * URL で開き方を指定できる。
- *
- *  ?session=<id> … そのセッションを開く（見に戻るときのブックマーク用）。
- *                  一覧に無いもの（24時間より古いもの）も開ける
- *  ?theme=dark|light … 配色を固定する
- *  ?only=1 … 時系列を「判断だけ」で開く
- *  ?tq=<語> … 時系列の検索語
- *  ?hide=<種類,種類> … 時系列で隠す種類。空で付けると「何も隠さない」になる
- *  ?nolive=1 … 自動更新をつながない
- *  ?tab=archive … 書庫（終了したものも含む全セッション）を開いた状態にする
- *  ?aq=<語> … 書庫の検索語
- *  ?asort=recent|oldest|size … 書庫の並び順
- */
-const query = new URLSearchParams(location.search);
-
-/** 書庫の並び順。サーバ側（view/archive.mjs の SORTS）と同じ語を使う */
-const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
-
-const dom = {
-  app: document.getElementById('app'),
-  list: document.getElementById('list'),
-  listCount: document.getElementById('list-count'),
-  summary: document.getElementById('summary'),
-  detail: document.getElementById('detail'),
-  live: document.getElementById('live'),
-  reload: document.getElementById('reload'),
-  themeToggle: document.getElementById('theme-toggle'),
-  onlyLive: document.getElementById('only-live'),
-  listPane: document.getElementById('list-pane'),
-  listToggle: document.getElementById('list-toggle'),
-  listClose: document.getElementById('list-close'),
-  scrim: document.getElementById('scrim'),
-  tabLive: document.getElementById('tab-live'),
-  tabArchive: document.getElementById('tab-archive'),
-  liveHead: document.getElementById('live-head'),
-  archiveHead: document.getElementById('archive-head'),
-  archive: document.getElementById('archive'),
-  archiveQ: document.getElementById('archive-q'),
-  archiveDeep: document.getElementById('archive-deep'),
-  archiveSort: document.getElementById('archive-sort'),
-  archiveCount: document.getElementById('archive-count'),
-};
-
-const store = {
-  rows: [],
-  meta: null,
-  selected: null,
-  /**
-   * 選んだ経路。'live' は一覧から、'query' は ?session= から。
-   *
-   * 一覧から選んだものが一覧から消えたら選択を外すが、?session= で直に開いたものは
-   * 一覧に居ないのが正常なので外してはいけない。その区別に使う
-   */
-  selectedFrom: null,
-  /** 選んでいるセッションの詳細（/api/sessions/:id の応答） */
-  detail: null,
-  detailError: null,
-  /**
-   * detailError がどのセッションのものか。
-   *
-   * 選び直すと前のエラーは無関係になる。id を持たずに文字列だけ残すと、
-   * 次のセッションの読み込み中に前のエラーが出てしまう
-   */
-  detailErrorFor: null,
-  /** サーバから来た「今」。経過時間はこれを基準に進める */
-  now: Date.now(),
-  onlyLive: localStorage.getItem('claude-deck.onlyLive') === '1',
-  // 時系列は既定で新しい順。切り替えたあと開いても、いま何が起きているかが上に出る
-  newestFirst: localStorage.getItem('claude-deck.newestFirst') !== '0',
-  onlyDecisions: query.get('only') === '1' || localStorage.getItem('claude-deck.onlyDecisions') === '1',
-  /**
-   * 時系列をいま何件まで出しているか。
-   *
-   * 0 は「まだ整えていない」。最初の描画で1画面ぶんに直る。
-   * ここに数を書かないのは、窓の大きさ（TL_FIRST / TL_MORE）を timeline.js の中に閉じておくため
-   */
-  tlShown: 0,
-  /**
-   * その窓がどのセッションのものか。
-   *
-   * 窓を先頭に戻すのはセッションを選び直したときだけにする。追記で詳細が入れ替わるたびに
-   * 戻すと、動いているセッションでは2秒ごとに「続きを出す」が巻き戻る
-   */
-  tlShownFor: null,
-  /** 時系列の検索語。null は「検索していない」。空文字は作らない */
-  tq: (query.get('tq') ?? '').trim() || null,
-  /**
-   * 時系列で隠している種類（拒否リスト）。
-   *
-   * ここだけ localStorage を見ない。開き直したら既定（足跡を隠す）に戻す。
-   * 理由は timeline.js の initialHiddenKinds に書いた
-   */
-  hiddenKinds: Timeline.initialHiddenKinds(query.get('hide')),
-  /**
-   * 左のペインに出しているもの。'live'（稼働中）か 'archive'（書庫）。
-   *
-   * localStorage には残さない。書庫を開いたまま保存すると、次に開いたときに
-   * 「誰が待っているか」が見えない状態で始まってしまう。
-   * 書庫で固定したい人は ?tab=archive をブックマークする
-   */
-  tab: query.get('tab') === 'archive' ? 'archive' : 'live',
-  /** 書庫の状態。rows はサーバの応答そのまま（logSize と mtimeMs を持つ） */
-  archive: {
-    rows: [],
-    total: 0,
-    page: 1,
-    pages: 1,
-    q: (query.get('aq') ?? '').trim() || null,
-    sort: ARCHIVE_SORTS.has(query.get('asort')) ? query.get('asort') : 'recent',
-    deep: false,
-    meta: null,
-    loading: false,
-    error: null,
-    /** 1度でも引けたか。「まだ引いていない」と「0件だった」を区別するため */
-    loaded: false,
-    /** サーバ側がまだ書庫に対応していない（404）。静かに退く */
-    unavailable: false,
-  },
-};
-
-/* -------------------------------------------------------------- 小道具 */
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined && text !== null) node.textContent = String(text);
-  return node;
-}
-
-/**
- * いまの状態を URL に書き戻す。
- *
- * pushState は使わない。検索欄は1文字ごとにここを通るので、履歴が入力の回数だけ積まれ、
- * 戻るボタンが使えなくなる。replaceState なら今のアドレスだけが差し替わる。
- *
- * 触るキーは session / only / tq / hide / tab / aq / asort だけ。
- * theme と nolive は「開くときの指定」なので、こちらから書き換えない
- */
-function syncQuery() {
-  const params = new URLSearchParams(location.search);
-  const set = (key, value) => {
-    if (value === null || value === undefined || value === '') params.delete(key);
-    else params.set(key, value);
-  };
-
-  set('session', store.selected);
-  set('only', store.onlyDecisions ? '1' : null);
-  set('tq', store.tq);
-  // 隠している種類は「既定と同じなら書かない」。空の指定（何も隠さない）は空文字のまま残す。
-  // set() は空文字を消してしまうので、ここだけ直に書く。
-  // 既定と同じかどうかの判断は timeline.js 側（既定の中身を知っているのはあちら）
-  const hide = Timeline.hideQueryValue();
-  if (hide === null) params.delete('hide');
-  else params.set('hide', hide);
-  set('tab', store.tab === 'archive' ? 'archive' : null);
-  set('aq', store.tab === 'archive' ? store.archive.q : null);
-  // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
-  set('asort', store.tab === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
-
-  const qs = params.toString();
-  const next = qs ? `${location.pathname}?${qs}` : location.pathname;
-  // 中身が同じなら書き換えない。一覧の push ごとにここを通るので、無駄な履歴操作を避ける
-  if (next === `${location.pathname}${location.search}`) return;
-  history.replaceState(null, '', next);
-}
-
-/** 経過時間を読みやすくする。 */
-function since(ms) {
-  if (ms === null || ms === undefined) return '—';
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return `${s}秒`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}分${String(s % 60).padStart(2, '0')}秒`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}時間${String(m % 60).padStart(2, '0')}分`;
-  return `${Math.floor(h / 24)}日${h % 24}時間`;
-}
-
-/**
- * かかった時間。since() と違って秒より下を捨てない。
- *
- * ツールの往復は 200ms で終わるものが多く、since() に渡すと「0秒」が縦に並ぶ。
- * 1秒未満はミリ秒で出し、それ以上は since() に任せる（分・時間の粒度を持っている）。
- * @param {number|null} ms かかった時間。取れていなければ null
- */
-function dur(ms) {
-  if (typeof ms !== 'number') return '—';
-  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
-  return since(ms);
-}
-
-function shortModel(model) {
-  if (!model) return null;
-  return model.replace(/^claude-/, '').replace(/-\d{8}$/, '');
-}
-
-function tokens(n) {
-  if (!n) return null;
-  if (n < 1000) return String(n);
-  return `${Math.round(n / 1000)}k`;
-}
-
-/** そのセッションが実際に動いている時間を、末尾の追記からの経過で出す。 */
-function idleOf(row) {
-  if (row.lastActivityAt) return Math.max(0, store.now - row.lastActivityAt);
-  return row.idleMs ?? null;
-}
-
-/**
- * 一覧から素の行を引く。無ければ書庫の行に落とす。
- *
- * 書庫の行は LIVE_FIELDS（state / idleMs など）を1つも持たないので、
- * headOf の上書きは何も起こさない。逆に logSize は持っているので、
- * 書庫から開いたセッションでも detailStampOf が本物の目印を取れる。
- *
- * @param {string|null} sessionId
- * @returns {object|null} どちらにも居なければ null
- */
-function rowOf(sessionId) {
-  if (!sessionId) return null;
-  return store.rows.find((r) => r.sessionId === sessionId)
-    ?? store.archive.rows.find((r) => r.sessionId === sessionId)
-    ?? null;
-}
-
-/**
- * 詳細ペインが使う項目のうち、一覧の行のほうが新しいもの。
- *
- * 一覧は SSE で毎秒引き直され、詳細は開いた時点のもの。
- * 状態をここで一覧に上書きさせないと、左のカードと右のヘッダが食い違う。
- * 逆に身元（title / model / cwd）は詳細のほうが当たる。
- * 一覧は末尾64KB、詳細は全文を読んで解析しているため。
- *
- * 上書きする項目を配列で名前付けするのは、プロパティの並び順に判断を埋めないため。
- */
-const LIVE_FIELDS = [
-  'state', 'stateLabel', 'ball', 'idleMs', 'lastActivityAt',
-  'waitingFor', 'stateReason', 'stateConfident', 'statusRaw', 'alive', 'pid',
-];
-
-/**
- * 詳細ペインが見る「行に相当するもの」を組む。
- *
- * 一覧の行だけを頼りにすると、一覧に居ないセッション（24時間より古いもの）を
- * 開けない。詳細の応答は身元と状態の項目を同じ形で持っているので、そこから組める。
- *
- * @param {string|null} sessionId
- * @returns {object|null} どちらの出どころも無ければ null
- */
-function headOf(sessionId) {
-  if (!sessionId) return null;
-  const row = rowOf(sessionId);
-  const detail = store.detail?.sessionId === sessionId ? store.detail : null;
-  if (!detail) return row;
-  const head = { ...detail };
-  if (row) {
-    for (const key of LIVE_FIELDS) {
-      if (key in row) head[key] = row[key];
-    }
-  }
-  return head;
-}
+import { el, since, dur, shortModel, tokens, hms, stamp, shortStamp, num, kb, mb, fact } from './util.js';
+import { mark } from './perf.js';
+import {
+  query, dom, store, syncQuery,
+  STATE_COLOR, QUIET_MODES, SUMMARY_ORDER, ARCHIVE_SORTS,
+} from './store.js';
+import { idleOf, rowOf, headOf, visibleRows, detailErrorNow } from './rows.js';
+// 名前空間ごと受ける。Timeline.render() のような呼び方をそのまま残すため。
+// 中をさらに分けても、差し替えるのはこの1行だけで済む
+import * as Timeline from './timeline.js';
 
 /* ---------------------------------------------------------------- 一覧 */
-
-function visibleRows() {
-  return store.onlyLive ? store.rows.filter((r) => r.alive) : store.rows;
-}
 
 function buildCard(row) {
   const li = el('li');
@@ -441,19 +165,6 @@ const ARCHIVE_DEBOUNCE_MS = 200;
 
 let archiveToken = 0;
 let archiveTimer = null;
-
-/** バイト数を KB で。書庫はログの大きさが「どれだけ話したか」の目安になる */
-function kb(bytes) {
-  if (typeof bytes !== 'number') return '';
-  return `${Math.round(bytes / 1024).toLocaleString('ja-JP')} KB`;
-}
-
-/** 書庫の日時。年は同じものが並ぶので落とし、月日と時刻だけにする */
-function shortStamp(at) {
-  if (!at) return '';
-  const d = new Date(at);
-  return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-}
 
 /**
  * 書庫のカード1枚。
@@ -662,11 +373,6 @@ function setTab(tab, { sync = true } = {}) {
 
 /* ---------------------------------------------------------------- 詳細 */
 
-function fact(dl, label, value) {
-  if (value === null || value === undefined || value === '') return;
-  dl.append(el('dt', null, label), el('dd', null, value));
-}
-
 /**
  * パネル1枚。
  *
@@ -704,36 +410,6 @@ function toggle(label, pressed, onClick) {
   b.setAttribute('aria-pressed', String(pressed));
   b.addEventListener('click', onClick);
   return b;
-}
-
-function pad2(n) {
-  return String(n).padStart(2, '0');
-}
-
-/** 日付を yyyy/MM/dd で。 */
-function ymd(d) {
-  return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
-}
-
-/** 時刻を HH:mm:ss で。 */
-function hms(d) {
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-}
-
-/**
- * 日時を1行で。2段に割れない所（title 属性やヘッダの1項目）で使う。
- *
- * toLocaleString だと 2026/8/4 0:11:05 のようにゼロ埋めが落ちて桁がそろわないので、自前で組む。
- * @param {number|string|null} at ミリ秒、または日時文字列
- */
-function stamp(at) {
-  if (!at) return '';
-  const d = new Date(at);
-  return `${ymd(d)} ${hms(d)}`;
-}
-
-function num(n) {
-  return typeof n === 'number' ? n.toLocaleString('ja-JP') : '?';
 }
 
 /**
@@ -1004,11 +680,6 @@ const AGENT_STATUS = {
 /** これを超えたらボタンに大きさを添える。止めはしない、驚かせないだけ */
 const AGENT_BIG_BYTES = 2 * 1024 * 1024;
 
-/** @param {number} bytes バイト数 */
-function mb(bytes) {
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
 /**
  * サブエージェント1件の行。
  *
@@ -1132,36 +803,6 @@ function agentsPanel(subagents, sessionId) {
 
   return { section: p.section, count: items.length };
 }
-
-/* ------------------------------------------------------ 描画にかかった時間 */
-
-/**
- * 描画にかかった時間を直近40回ぶんだけ持つ。
- *
- * 道具は足さない。console から deckPerf() を呼べば p95 が出る。
- * 目安は初回の renderDetail() が 50ms 未満、時系列の描き直しが 16ms 未満（1フレーム）。
- *
- * timeline.js からも mark('timeline', t0) で入れる。測る側を2つに割ると
- * deckPerf() が片方しか見えなくなるので、入れ物はここ1つに保つ
- */
-const perfLog = { detail: [], timeline: [] };
-
-/** @param {'detail'|'timeline'} kind @param {number} t0 performance.now() の値 */
-function mark(kind, t0) {
-  const a = perfLog[kind];
-  a.push(performance.now() - t0);
-  if (a.length > 40) a.shift();
-}
-
-window.deckPerf = () => {
-  const p95 = (a) => {
-    if (!a.length) return null;
-    const sorted = [...a].sort((x, y) => x - y);
-    return Math.round(sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)] * 10) / 10;
-  };
-  const of = (a) => ({ n: a.length, p95: p95(a), last: a.length ? Math.round(a[a.length - 1] * 10) / 10 : null });
-  return { detail: of(perfLog.detail), timeline: of(perfLog.timeline) };
-};
 
 /**
  * 詳細ペインを作り直すかどうかの材料。
@@ -1474,11 +1115,6 @@ function detailStampOf(sessionId) {
   const row = rowOf(sessionId);
   if (row) return row.logSize ?? 0;
   return detailCache.get(sessionId)?.data?.log?.size ?? 0;
-}
-
-/** いま選んでいるセッションの取得エラー。前のセッションのものは無関係なので出さない */
-function detailErrorNow() {
-  return store.detailErrorFor === store.selected ? store.detailError : null;
 }
 
 async function loadDetail(sessionId, { silent = false } = {}) {
