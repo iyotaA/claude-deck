@@ -26,6 +26,7 @@
   --l-hot:       #C2372B;
   --l-warn:      #A8620A;
   --l-calm:      #1F5FD0;
+  --l-done:      #1B7A46;
   --l-off:       #8A99AC;
   --l-shadow: 0 1px 2px rgb(22 32 46 / 6%), 0 4px 12px rgb(22 32 46 / 4%);
 
@@ -44,6 +45,7 @@
   --d-hot:       #FF6B5A;
   --d-warn:      #F2B01E;
   --d-calm:      #4C8DFF;
+  --d-done:      #4ACB84;
   --d-off:       #6F8098;
   --d-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 14px rgb(0 0 0 / 22%);
 
@@ -67,6 +69,7 @@
   --hot:       var(--l-hot);   /* あなたの操作で止まっている */
   --warn:      var(--l-warn);  /* あなたの返信を待っている */
   --calm:      var(--l-calm);  /* Claude が動いている */
+  --done:      var(--l-done);  /* 終わって通っている（TODO の完了） */
   --off:       var(--l-off);   /* 終了・不明 */
   --shadow:    var(--l-shadow);
 
@@ -102,6 +105,7 @@
     --hot:       var(--d-hot);
     --warn:      var(--d-warn);
     --calm:      var(--d-calm);
+    --done:      var(--d-done);
     --off:       var(--d-off);
     --shadow:    var(--d-shadow);
 
@@ -125,6 +129,7 @@
   --hot:       var(--d-hot);
   --warn:      var(--d-warn);
   --calm:      var(--d-calm);
+  --done:      var(--d-done);
   --off:       var(--d-off);
   --shadow:    var(--d-shadow);
 
@@ -1082,7 +1087,7 @@ mark {
   text-underline-offset: 2px;
 }
 
-/* 続きを出すボタン。既定では 120 件だけ組んで、押した人にだけ続きを足す */
+/* 続きを出すボタン。最初は 12 件だけ組んで、押した人にだけ続きを足す */
 .tl-more {
   margin-top: .6rem;
   align-self: stretch;
@@ -1336,6 +1341,11 @@ details.raw > .raw-body {
 .todo li[data-status="in_progress"] .st { border-color: var(--accent); color: var(--accent); }
 .todo li[data-status="completed"] { color: var(--fg-faint); }
 .todo li[data-status="completed"] .subject { text-decoration: line-through; }
+
+/* 通っているものは緑にする。塗るのは印だけで、行の面は塗らない。
+   全部が緑の面になると、残っている1件がどれか目で拾えなくなる */
+.todo li[data-status="completed"] .st { border-color: var(--done); color: var(--done); }
+.todo li[data-status="completed"] .st::before { content: "✓ "; }
 
 /* -------------------------------------------------------------- ファイル */
 

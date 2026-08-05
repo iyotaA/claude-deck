@@ -317,7 +317,7 @@ function searchTextOf(item) {
  * この行を出すのは筋が通らない。隠したのに「足跡」という文字だけが残るので、
  * 隠れていないように見える。
  *
- * 実測した例では、足跡を隠した窓 120 件のうち 36 件がこれだった。
+ * 窓を 120 件にしていたときの実測では、足跡を隠した 120 件のうち 36 件がこれだった。
  * 本編（説明・指示）より省略の目印のほうが多く並ぶ状態になっていた。
  *
  * `byKind` が無い古い形は落とさない。中身が分からないものを黙って消さないため。
@@ -767,21 +767,33 @@ function timelineItem(item, ctx = {}) {
 /* ------------------------------------------------------------- 描き直し */
 
 /**
- * 1回に出す時系列の件数。
+ * 最初に出す件数。
  *
- * 400件を前もって全部組むと初回の描画が重い。窓を掛けて、末尾のボタンで継ぎ足す。
- * 120 はふつうの画面でスクロール数回ぶんに収まる量
+ * 時系列は詳細のいちばん縦に長い場所で、下にあるサブエージェントの記録や
+ * ファイルへ行くのに何度もスクロールすることになっていた。
+ * 12 は「あなたが決めたこと」の縦幅とおおよそ同じに収まる量。
+ *
+ * 全件を前もって組むと初回の描画も重い（400件級のセッションがある）ので、
+ * 窓を掛けて末尾のボタンで継ぎ足す形はそのまま残す
  */
-const TL_PAGE = 120;
+const TL_FIRST = 12;
+
+/**
+ * 「続きを出す」1回で足す件数。
+ *
+ * 最初の12件と同じ刻みにすると、267件のセッションで20回以上押すことになる。
+ * 読み進める人には粗めの刻みのほうが早い
+ */
+const TL_MORE = 60;
 
 /**
  * 窓の外にしか無い種類を数える。
  *
  * 「チップを押したのに何も変わらない」に見えるのを防ぐためのもの。
  * 足跡は間引きで新しい 200 件だけが残る（MAX_TRACES）ので、古い順で見ていると
- * 窓の中に1件も入らないことがある。実測した例では 383 件のうち最初の足跡が 151 件目で、
- * 先頭 120 件には0件だった。この状態で足跡を出すと、見出しの件数と「続きを出す」の
- * 残り数だけが動いて、出ている行は1行も変わらない。
+ * 窓の中に1件も入らないことがある。実測した例では 383 件のうち最初の足跡が 151 件目だった。
+ * この状態で足跡を出すと、見出しの件数と「続きを出す」の残り数だけが動いて、
+ * 出ている行は1行も変わらない。窓を 12 件に縮めたので、この知らせはほぼ毎回出る
  *
  * 窓の中に1件でもある種類は入れない。そちらは押せば目で見て変わるので、言う必要がない。
  *
@@ -939,14 +951,14 @@ function render({ reset = false } = {}) {
   // 窓を先頭に戻すのは、頼まれたときとセッションを選び直したときだけ。
   // 追記で詳細が入れ替わるたびに戻すと、動いているセッションでは2秒ごとに巻き戻る
   if (reset || store.tlShownFor !== store.selected) {
-    store.tlShown = TL_PAGE;
+    store.tlShown = TL_FIRST;
     store.tlShownFor = store.selected;
   }
 
   const all = tlRef.items;
   const matched = filterTimeline(all);
   const ordered = store.newestFirst ? [...matched].reverse() : matched;
-  const shown = ordered.slice(0, Math.max(TL_PAGE, store.tlShown));
+  const shown = ordered.slice(0, Math.max(TL_FIRST, store.tlShown));
   const rest = ordered.length - shown.length;
 
   const box = el('div', 'timeline');
@@ -975,7 +987,7 @@ function render({ reset = false } = {}) {
     const more = el('button', 'btn tl-more', `続きを出す（残り ${num(rest)} 件）`);
     more.type = 'button';
     more.addEventListener('click', () => {
-      store.tlShown = shown.length + TL_PAGE;
+      store.tlShown = shown.length + TL_MORE;
       render();
     });
     nodes.push(more);
