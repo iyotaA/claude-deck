@@ -473,7 +473,9 @@ function lineageNodes(lineage) {
   const disk = lineage.disk;
   if (disk?.text) {
     const d = el('details', 'more');
-    const when = typeof disk.mtimeMs === 'number' ? `　${ymd(disk.mtimeMs)} ${hms(disk.mtimeMs)} 更新` : '';
+    // ymd / hms は Date を受ける。ミリ秒をそのまま渡すと詳細ペインごと落ちる
+    const at = typeof disk.mtimeMs === 'number' ? new Date(disk.mtimeMs) : null;
+    const when = at ? `　${ymd(at)} ${hms(at)} 更新` : '';
     d.append(el('summary', null, `いまのファイルの中身　${num(disk.chars)} 字${when}`));
     d.append(el('pre', null, disk.text));
     out.push(d);
