@@ -18,7 +18,9 @@
  *
  * 'use strict' は書かない。module は常に strict で動く。
  */
-import { el, since, dur, shortModel, tokens, hms, stamp, shortStamp, num, kb, mb, fact } from './util.js';
+import {
+  el, since, dur, shortModel, tokens, hms, stamp, shortStamp, num, kb, mb, fact, agentTag,
+} from './util.js';
 import { mark } from './perf.js';
 import {
   query, dom, store, syncQuery,
@@ -76,6 +78,9 @@ function buildCard(row) {
   for (const skill of row.skills ?? []) {
     meta.append(el('span', 'tag is-skill', `/${skill.skill}`));
   }
+  // 誰かに任せて進めたセッションかどうかは、開く前に見えたほうが読み方が変わる
+  const agents = agentTag(row.subagentCount);
+  if (agents) meta.append(agents);
   const ctx = tokens(row.contextTokens);
   if (ctx) meta.append(el('span', 'tag', `ctx ${ctx}`));
   if (meta.childElementCount > 0) card.append(meta);
@@ -196,6 +201,9 @@ function buildArchiveCard(row) {
   const meta = el('div', 'card-meta');
   if (row.project) meta.append(el('span', 'path', row.project));
   if (row.gitBranch && row.gitBranch !== 'HEAD') meta.append(el('span', 'tag', row.gitBranch));
+  // まだ読んでいない行では null なので何も出ない。中身を読んだ行にだけ付く
+  const agents = agentTag(row.subagentCount);
+  if (agents) meta.append(agents);
   if (meta.childElementCount > 0) card.append(meta);
 
   card.addEventListener('click', () => {

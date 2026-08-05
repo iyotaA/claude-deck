@@ -14,6 +14,9 @@
  *
  * ディレクトリは**親ログの実パスから作る**。slugifyCwd は不可逆変換なので
  * そこから組み立てない、という禁止と同じ理屈。
+ *
+ * `<sessionId>/` があっても `subagents/` が無いことがある。実測 60 件のうち 12 件が
+ * `tool-results/` だけを持っていた。親ディレクトリの有無だけで「使った」と決めてはいけない。
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -109,6 +112,39 @@ export async function listSubagents(transcriptFile, sessionId) {
   }
 
   return { refs, readError: null };
+}
+
+/**
+ * サブエージェントを何件使ったかだけを数える。
+ *
+ * listSubagents との違いは、stat も .meta.json も読まないこと。readdir 1回で終わる。
+ * 一覧（毎秒走る経路）に載せるのはこちら。listSubagents は詳細を開いたときだけ。
+ *
+ * 呼ぶ前に索引の `hasSessionDir` を見ること。`<セッションID>/` が無ければ子も無いので、
+ * readdir を1回も出さずに 0 と決められる。実測では 168 件中 48 件しか持っていない。
+ *
+ * @param {string|null} transcriptFile 親ログの実パス
+ * @param {string|null} sessionId セッションID
+ * @returns {Promise<number|null>} 件数。読めなかったときは null（「不明」。0 とは分ける）
+ */
+export async function countSubagents(transcriptFile, sessionId) {
+  if (!transcriptFile || !sessionId) return null;
+
+  const dir = path.join(path.dirname(transcriptFile), sessionId, 'subagents');
+  let names;
+  try {
+    names = await fs.readdir(dir);
+  } catch (err) {
+    // 1件も使っていないセッションではディレクトリ自体が無い。それは 0 件であって不明ではない
+    if (err?.code === 'ENOENT') return 0;
+    return null;
+  }
+
+  let count = 0;
+  for (const name of names) {
+    if (name.startsWith(PREFIX) && name.endsWith(SUFFIX)) count += 1;
+  }
+  return count;
 }
 
 /**

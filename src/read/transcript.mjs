@@ -37,7 +37,11 @@ function parseLines(lines) {
  * スラッグ化された cwd は不可逆なので、パスから逆算せずに実ファイルを探す。
  * sessionId はファイル名そのものなので一意に決まる。
  *
- * @returns {Promise<Map<string, {file: string, projectDir: string, size: number, mtimeMs: number}>>}
+ * `hasSessionDir` は `<セッションID>/` が隣にあるかどうか。サブエージェントの記録も
+ * ツール結果もその中に入るので、無ければ数えに行くまでもないと分かる。
+ * 同じ readdir の結果から作るので、syscall は1回も増えていない。
+ *
+ * @returns {Promise<Map<string, {file: string, projectDir: string, size: number, mtimeMs: number, hasSessionDir: boolean}>>}
  */
 export async function indexTranscripts() {
   const index = new Map();
@@ -51,14 +55,22 @@ export async function indexTranscripts() {
 
   for (const projectName of projectNames) {
     const dir = path.join(projectsDir, projectName);
-    let names;
+    let ents;
     try {
-      names = await fs.readdir(dir);
+      ents = await fs.readdir(dir, { withFileTypes: true });
     } catch {
       continue;
     }
 
-    for (const name of names) {
+    // 同じ結果から、隣にあるディレクトリ名の集合を作る。
+    // ファイルの絞り込みは今までどおり名前と stat で行う（Dirent は
+    // シンボリックリンクを isFile と言わないため、そこだけで判定すると挙動が変わる）
+    const subdirs = new Set();
+    for (const ent of ents) {
+      if (ent.isDirectory()) subdirs.add(ent.name);
+    }
+
+    for (const { name } of ents) {
       if (!name.endsWith('.jsonl')) continue;
       const file = path.join(dir, name);
       let stat;
@@ -79,6 +91,7 @@ export async function indexTranscripts() {
         projectDir: projectName,
         size: stat.size,
         mtimeMs: stat.mtimeMs,
+        hasSessionDir: subdirs.has(sessionId),
       });
     }
   }

@@ -22,6 +22,7 @@
  * memo を押し出し、次の更新で全ファイルを読み直すことになる。
  */
 import { indexTranscripts, readTail } from '../read/transcript.mjs';
+import { countSubagents } from '../read/subagents.mjs';
 import { extractMeta } from '../parse/meta.mjs';
 
 /** 深い検索で中身を読む上限。理由はファイル冒頭のコメントに書いてある。 */
@@ -90,6 +91,9 @@ export function parseArchiveQuery(params) {
  * 読んだかどうかは read で区別できるので、画面側は「読んでいないから空」と
  * 「本当に空」を混同しない。
  *
+ * サブエージェントの件数もここで数える。1ページ分（最大 50 件）にしか呼ばれないので、
+ * すでに払っている末尾読みに比べれば readdir 1回は誤差。
+ *
  * @param {object} row 書き換える行
  */
 async function fillTitle(row) {
@@ -102,6 +106,8 @@ async function fillTitle(row) {
   } catch {
     /* 読めなくても行そのものは出す。書き込み途中のファイルもここに来る */
   }
+  // 中身が読めなかった行でも件数は取れるので、try の外に置く
+  row.subagentCount = row.hasSessionDir ? await countSubagents(row.file, row.sessionId) : 0;
   row.read = true;
 }
 
@@ -136,6 +142,8 @@ function publicRow(row) {
     gitBranch: row.gitBranch,
     logSize: row.logSize,
     mtimeMs: row.mtimeMs,
+    // まだ読んでいない行では null のまま。「使っていない」ではなく「見ていない」
+    subagentCount: row.subagentCount,
     read: row.read,
   };
 }
@@ -160,6 +168,9 @@ export async function listArchive(q, now = Date.now()) {
       title: null,
       cwd: null,
       gitBranch: null,
+      // 索引がタダで持ってきた印。これが false なら数えに行かない
+      hasSessionDir: rec.hasSessionDir === true,
+      subagentCount: null,
       read: false,
     });
   }

@@ -294,6 +294,14 @@
 .tag.is-skill { border-color: var(--accent); color: var(--accent); }
 .tag.is-plan { border-color: var(--warn); color: var(--warn); }
 
+/* サブエージェントを使った印。状態色（hot / warn / calm / done）は使わない。
+   あれは「どれから手をつけるか」を示す色なので、別の意味を混ぜると読めなくなる。
+   輪郭と文字を1段濃くするだけで、並んだタグの中から目に留まる */
+.tag.is-agents {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
 .empty {
   padding: 2rem 1rem;
   text-align: center;

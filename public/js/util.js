@@ -115,6 +115,24 @@ export function tokens(n) {
   return `${Math.round(n / 1000)}k`;
 }
 
+/* ------------------------------------------------------------------ カードのタグ */
+
+/**
+ * サブエージェントを使った印。一覧と書庫の両方が同じ形で出す。
+ *
+ * 0 と null では何も返さない。「使っていない」をわざわざ書くとタグが全行に並び、
+ * 使ったものを探せなくなる。null は「まだ数えていない」なので、なおさら書けない。
+ *
+ * @param {number|null} count 記録ファイルの件数。null は不明
+ * @returns {HTMLElement|null} 足すものが無ければ null
+ */
+export function agentTag(count) {
+  if (!count) return null;
+  const tag = el('span', 'tag is-agents', `サブエージェント ${num(count)}`);
+  tag.title = 'サブエージェントの記録が残っています。詳細の「サブエージェントの記録」で開けます';
+  return tag;
+}
+
 /* ------------------------------------------------------------------ 定義リスト */
 
 /**
