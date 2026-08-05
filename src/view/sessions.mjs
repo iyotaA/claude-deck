@@ -48,6 +48,19 @@ async function buildRow({ registry, transcript, now }) {
 }
 
 /**
+ * 並び替え用に idleMs を数値へ落とす。
+ *
+ * null は「取れなかった」であって 0 ではない。
+ * 0 に丸めると最も新しいものとして先頭に出てしまうため、末尾へ寄せる。
+ *
+ * @param {{idleMs: number|null}} row
+ * @returns {number}
+ */
+function idleForSort(row) {
+  return row.idleMs ?? Number.POSITIVE_INFINITY;
+}
+
+/**
  * 一覧を作る。
  *
  * @param {number} now
@@ -89,9 +102,9 @@ export async function listSessions(now = Date.now()) {
   rows.sort((a, b) => {
     const rank = (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9);
     if (rank !== 0) return rank;
-    // 同じ状態なら待たされている時間が長い順。放置が長いものを上に出す
-    if (a.state === 'running') return (a.idleMs ?? 0) - (b.idleMs ?? 0);
-    return (b.idleMs ?? 0) - (a.idleMs ?? 0);
+    // 同じ状態なら動きが新しい順。放置が長いものほど下に沈む。
+    // idleMs が取れないものは「不明」なので末尾に置く（0 と混ぜない）
+    return idleForSort(a) - idleForSort(b);
   });
 
   const counts = {};
