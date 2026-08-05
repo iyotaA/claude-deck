@@ -1,0 +1,236 @@
+/**
+ * 書庫（終了したものも含む全セッション）の一覧。
+ *
+ * 一覧（listSessions）は 24 時間より古いものを落とす。ボールの所在を見る場所なので、
+ * もう誰も待っていないセッションを混ぜると読む量だけが増えるため。
+ * その代わり「あのとき何を決めたか」を見に戻る経路が無くなっていた。ここがその経路。
+ *
+ * 材料は indexTranscripts だけ。登録簿は見ない（書庫に出るものは動いていない）。
+ *
+ * ── 検索が2段になっている理由 ──────────────────────────────
+ *
+ * indexTranscripts が持つのは file / projectDir / size / mtimeMs の4つだけで、
+ * タイトルはファイルを開かないと分からない。全件のタイトルを毎回引くと、
+ * 300 ファイルの環境で 300 回の末尾読みが走る。
+ *
+ *  - 既定 … 検索語は sessionId と置き場所のフォルダ名にだけ当てる。
+ *           ファイルを読むのは、そのページに出る分（最大 50 件）だけ
+ *  - deep=1 … 新しい順に ARCHIVE_SCAN_MAX 件までタイトルを引いて、そこも探す
+ *
+ * ARCHIVE_SCAN_MAX を 120 に抑えているのは read/cache.mjs の LRU が全体で
+ * 240 件しか持たないため。ここを 300 にすると深い検索1回で一覧（毎秒走る）の
+ * memo を押し出し、次の更新で全ファイルを読み直すことになる。
+ */
+import { indexTranscripts, readTail } from '../read/transcript.mjs';
+import { countSubagents } from '../read/subagents.mjs';
+import { extractMeta } from '../parse/meta.mjs';
+
+/** 深い検索で中身を読む上限。理由はファイル冒頭のコメントに書いてある。 */
+export const ARCHIVE_SCAN_MAX = 120;
+
+const PER_DEFAULT = 30;
+const PER_MAX = 50;
+/** 並び順の候補。知らない値が来たら既定へ丸める（400 は返さない）。 */
+const SORTS = new Set(['recent', 'oldest', 'size']);
+/** 検索語と絞り込みの文字数上限。長すぎる語は意味を持たないので頭だけ見る。 */
+const TEXT_MAX = 200;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 数値のパラメータを範囲に収める。
+ *
+ * 変な値で 400 を返さない。URL を手で書き換えて壊れるより、黙って既定へ丸めるほうが親切。
+ *
+ * @param {string|null} raw クエリの生の値
+ * @param {number} fallback 取れなかったときの値
+ * @param {number} min 下限
+ * @param {number} max 上限
+ */
+function intOf(raw, fallback, min, max) {
+  const n = Number.parseInt(raw ?? '', 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+/** 文字列のパラメータ。空白だけなら null にする（「検索語なし」と同じ扱い） */
+function textOf(raw) {
+  const t = String(raw ?? '').trim();
+  if (!t) return null;
+  return t.slice(0, TEXT_MAX);
+}
+
+/**
+ * クエリ文字列を、丸めた形の指定に直す。
+ *
+ * fs を触らないのでそのままテストできる。
+ *
+ * @param {URLSearchParams} params
+ * @returns {{page:number, per:number, sort:string, q:string|null, deep:boolean, project:string|null, days:number|null}}
+ */
+export function parseArchiveQuery(params) {
+  const get = (key) => (params && typeof params.get === 'function' ? params.get(key) : null);
+  const sortRaw = get('sort');
+
+  return {
+    page: intOf(get('page'), 1, 1, 1000),
+    per: intOf(get('per'), PER_DEFAULT, 1, PER_MAX),
+    sort: SORTS.has(sortRaw) ? sortRaw : 'recent',
+    q: textOf(get('q')),
+    deep: get('deep') === '1',
+    project: textOf(get('project')),
+    // 既定は期間で絞らない。書庫は「古いものを見に戻る」場所なので、上限を持たせる意味がない
+    days: get('days') === null ? null : intOf(get('days'), null, 1, 3650),
+  };
+}
+
+/**
+ * その行の中身を読んでタイトルを埋める。
+ *
+ * 読めなかった行の title は null のままにする。「（無題）」のような文字列を作らない。
+ * 読んだかどうかは read で区別できるので、画面側は「読んでいないから空」と
+ * 「本当に空」を混同しない。
+ *
+ * サブエージェントの件数もここで数える。1ページ分（最大 50 件）にしか呼ばれないので、
+ * すでに払っている末尾読みに比べれば readdir 1回は誤差。
+ *
+ * @param {object} row 書き換える行
+ */
+async function fillTitle(row) {
+  try {
+    const tail = await readTail(row.file);
+    const meta = extractMeta(tail.entries ?? []);
+    row.title = meta.title ?? meta.lastPrompt ?? meta.lastUserPrompt ?? null;
+    row.cwd = meta.cwd ?? null;
+    row.gitBranch = meta.gitBranch ?? null;
+  } catch {
+    /* 読めなくても行そのものは出す。書き込み途中のファイルもここに来る */
+  }
+  // 中身が読めなかった行でも件数は取れるので、try の外に置く
+  row.subagentCount = row.hasSessionDir ? await countSubagents(row.file, row.sessionId) : 0;
+  row.read = true;
+}
+
+/** 検索語に当たるか。読んでいない行では title が null なので、そこは当たらない */
+function matches(row, needle) {
+  const fields = [row.sessionId, row.projectDir, row.title, row.cwd];
+  return fields.some((f) => typeof f === 'string' && f.toLowerCase().includes(needle));
+}
+
+function sortRows(rows, sort) {
+  const sorted = [...rows];
+  if (sort === 'oldest') sorted.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  else if (sort === 'size') sorted.sort((a, b) => (b.logSize ?? 0) - (a.logSize ?? 0));
+  else sorted.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return sorted;
+}
+
+/**
+ * 画面に渡す形。
+ *
+ * ログの絶対パスは載せない。詳細は sessionId だけで開けるので、要らないものは出さない。
+ */
+function publicRow(row) {
+  return {
+    sessionId: row.sessionId,
+    // cwd が読めていればその末尾。読んでいなければ置き場所のフォルダ名で代える。
+    // slugifyCwd は不可逆なのでパスには戻せないが、見出しには使える
+    project: row.cwd ? row.cwd.split(/[\\/]/).filter(Boolean).pop() : row.projectDir,
+    projectDir: row.projectDir,
+    title: row.title,
+    cwd: row.cwd,
+    gitBranch: row.gitBranch,
+    logSize: row.logSize,
+    mtimeMs: row.mtimeMs,
+    // まだ読んでいない行では null のまま。「使っていない」ではなく「見ていない」
+    subagentCount: row.subagentCount,
+    read: row.read,
+  };
+}
+
+/**
+ * 書庫の一覧を作る。
+ *
+ * @param {object} q parseArchiveQuery の戻り
+ * @param {number} now
+ */
+export async function listArchive(q, now = Date.now()) {
+  const index = await indexTranscripts();
+
+  const all = [];
+  for (const [sessionId, rec] of index) {
+    all.push({
+      sessionId,
+      file: rec.file,
+      projectDir: rec.projectDir,
+      logSize: rec.size,
+      mtimeMs: rec.mtimeMs,
+      title: null,
+      cwd: null,
+      gitBranch: null,
+      // 索引がタダで持ってきた印。これが false なら数えに行かない
+      hasSessionDir: rec.hasSessionDir === true,
+      subagentCount: null,
+      read: false,
+    });
+  }
+
+  let rows = all;
+  if (q.days) {
+    const from = now - q.days * DAY_MS;
+    rows = rows.filter((r) => r.mtimeMs >= from);
+  }
+  if (q.project) {
+    const p = q.project.toLowerCase();
+    rows = rows.filter((r) => r.projectDir.toLowerCase().includes(p));
+  }
+
+  const needle = q.q ? q.q.toLowerCase() : null;
+  let scanned = 0;
+  let scanLimited = false;
+
+  if (needle && q.deep) {
+    // 新しい順に上限まで読む。古いものから切るのは、探しているものが新しい側にある確率が高いため
+    const byRecent = sortRows(rows, 'recent');
+    const scan = byRecent.slice(0, ARCHIVE_SCAN_MAX);
+    scanLimited = byRecent.length > scan.length;
+    await Promise.all(scan.map((r) => fillTitle(r)));
+    scanned += scan.length;
+    rows = scan.filter((r) => matches(r, needle));
+  } else if (needle) {
+    rows = rows.filter((r) => matches(r, needle));
+  }
+
+  rows = sortRows(rows, q.sort);
+
+  const total = rows.length;
+  const pages = Math.max(1, Math.ceil(total / q.per));
+  // 絞り込みで件数が減ると、指定のページが存在しなくなる。空を返すより最後のページを出す
+  const page = Math.min(q.page, pages);
+  const start = (page - 1) * q.per;
+  const shown = rows.slice(start, start + q.per);
+
+  // そのページに出る分だけ中身を読む。深い検索で既に読んだ行は読み直さない
+  const need = shown.filter((r) => !r.read);
+  await Promise.all(need.map((r) => fillTitle(r)));
+  scanned += need.length;
+
+  return {
+    rows: shown.map(publicRow),
+    total,
+    page,
+    pages,
+    per: q.per,
+    sort: q.sort,
+    q: q.q,
+    deep: q.deep,
+    meta: {
+      now,
+      indexed: all.length,
+      // 何件のファイルを開いたか。打ち切ったかどうかも正直に返す
+      scanned,
+      scanLimited,
+      scanMax: ARCHIVE_SCAN_MAX,
+    },
+  };
+}

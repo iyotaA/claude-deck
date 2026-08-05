@@ -1,0 +1,310 @@
+/* ClaudeDeck ── 一覧と書庫のカード（左のペイン） */
+
+/* -------------------------------------------------------------- 一覧（左） */
+
+.list-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+/* 稼働中と書庫の切り替え。押されているほうだけ下に線を1本引く。
+   面は塗らない（一覧のカードと同じ理由で、塗ると重さの差が読めなくなる） */
+.list-tabs {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  padding: .35rem .5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  padding: .35rem .7rem .3rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: .82rem;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+
+.tab:hover { color: var(--fg-muted); }
+
+.tab[aria-pressed="true"] {
+  color: var(--fg);
+  font-weight: 700;
+  border-bottom-color: var(--accent);
+}
+
+/* 閉じるボタンはタブ行の右端。書庫を出しているあいだも同じ位置に残る */
+.list-tabs .drawer-close { margin-left: auto; }
+
+.list-head {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem .75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: .78rem;
+  color: var(--fg-muted);
+}
+
+/* 書庫のヘッダは項目が多い。折り返して2段になっても崩れないようにする */
+.archive-head { flex-wrap: wrap; }
+
+.archive-q {
+  flex: 1 1 9rem;
+  min-width: 0;
+  padding: .3rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: .8rem;
+}
+
+.archive-q:focus-visible { border-color: var(--accent); }
+
+.archive-head select {
+  padding: .25rem .3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: .78rem;
+}
+
+.archive-head #archive-count {
+  flex: 1 0 100%;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+/* 書庫のカードには状態色の帯を出さない。全部終わっているので、
+   色を付けると稼働中の一覧と同じ重さに見えて手をつける順番が読めなくなる */
+.card.is-archive { padding-left: .7rem; }
+.card.is-archive::before { content: none; }
+
+.card .when {
+  font-size: .74rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.archive-more {
+  width: 100%;
+  justify-content: center;
+}
+
+.empty-note {
+  margin-top: .5rem;
+  font-size: .78rem;
+  color: var(--fg-faint);
+}
+
+.list-head #list-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+.list-head label {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  cursor: pointer;
+}
+
+/* 引き出しを閉じるボタン。広い画面には引き出しが無いので出さない */
+.drawer-close {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  margin: -.3rem -.25rem -.3rem 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  font-size: 1.05rem;
+  line-height: 1;
+  color: var(--fg-muted);
+}
+
+.drawer-close:hover { border-color: var(--border-strong); color: var(--fg); }
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: .5rem;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+
+/* hidden 属性で消えるのはブラウザ既定の [hidden] { display: none } によるもので、
+   作者側が display を1つ書いた時点で必ず負ける（詳細度ではなく出どころの優先順）。
+   上の flex がそれに当たるので、消えるほうを明示して書き直す。
+   タブの切り替えは hidden の付け外しだけでやっているため、これが無いと
+   稼働中と書庫の両方が縦に積まれたまま出る */
+.list[hidden],
+.list-head[hidden] { display: none; }
+
+.card {
+  position: relative;
+  display: grid;
+  gap: .3rem;
+  width: 100%;
+  padding: .6rem .7rem .6rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  text-align: left;
+  transition: border-color .12s ease, background .12s ease;
+}
+
+/* 状態は左端の細いバーで示す。面を塗らないので優劣が読める */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: .35rem auto .35rem .3rem;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--state-color, var(--off));
+}
+
+.card:hover { border-color: var(--border-strong); }
+
+.card[aria-current="true"] {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+.card-top {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .76rem;
+  font-weight: 700;
+  color: var(--state-color, var(--off));
+  white-space: nowrap;
+}
+
+.state::before {
+  content: "";
+  width: .45rem;
+  height: .45rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.state[data-guess="true"]::after {
+  content: "?";
+  font-weight: 400;
+  color: var(--fg-faint);
+}
+
+.idle {
+  margin-left: auto;
+  font-size: .74rem;
+  color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.card-title {
+  font-size: .92rem;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.card-title.is-empty { color: var(--fg-faint); font-weight: 400; }
+
+.waiting {
+  display: flex;
+  gap: .4rem;
+  align-items: baseline;
+  padding: .3rem .45rem;
+  border-radius: 6px;
+  background: var(--bg-sunk);
+  font-size: .78rem;
+  color: var(--fg-muted);
+  overflow: hidden;
+}
+
+.waiting .tool {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--state-color, var(--fg));
+  white-space: nowrap;
+}
+
+.waiting .detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem .5rem;
+  font-size: .74rem;
+  color: var(--fg-faint);
+}
+
+.card-meta .path {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.tag {
+  padding: 0 .35rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: .72rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.tag.is-skill { border-color: var(--accent); color: var(--accent); }
+.tag.is-plan { border-color: var(--warn); color: var(--warn); }
+
+/* サブエージェントを使った印。状態色（hot / warn / calm / done）は使わない。
+   あれは「どれから手をつけるか」を示す色なので、別の意味を混ぜると読めなくなる。
+   輪郭と文字を1段濃くするだけで、並んだタグの中から目に留まる */
+.tag.is-agents {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: .85rem;
+}

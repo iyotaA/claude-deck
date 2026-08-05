@@ -54,7 +54,7 @@ node --test test/state.test.mjs  1ファイルだけ走らせる
 Node 22 以降は引数をグロブとして解釈するため、フォルダ名では見つからないと言われる。
 引数なしの `node --test` が両方の版で動く。
 
-見ているのは解析側の4つ。
+見ているのは解析側と、判断だけを切り出した純関数。
 
 | ファイル | 対象 |
 |---|---|
@@ -62,9 +62,24 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `entries.test.mjs` | ログ1行から中身を取り出す小道具 |
 | `digest.test.mjs` | 詳細の時系列。回答の抽出と間引き |
 | `meta.test.mjs` | ログから拾う情報（`ai-title` などの実測した形） |
+| `summary.test.mjs` | 見出しの出どころ。古い自己申告を見出しに使わないこと |
+| `archive.test.mjs` | 書庫のクエリの丸め方 |
+| `entry.test.mjs` | 原文を出すときに伏せる・切る判断 |
+| `plans.test.mjs` | プランのパス検証と本文の突き合わせ |
+| `subagents.test.mjs` | サブエージェントの記録と呼び出しの突き合わせ |
+
+`digest.test.mjs` が呼ぶのは `buildDigest` だけ。
+`parse/digest/` の4枚はその中から呼ばれるので、入口経由で見ていることになる。
+分けたときにテストを1行も直さずに通ったのはこのため。
+ここを分け直すときも、入口の名前と応答の形を変えなければテストは無変更で通る。
 
 テストデータは `test/helpers.mjs` で組む。
 実物の `~/.claude` は読まない。環境によって中身が変わり、前提にできないため。
+
+ディスクを触る側（`listSubagents` / `readPlanFile` / `readHead` / `listArchive`）にはテストが無い。
+`configDir` が import 時に一度だけ評価される定数なので、差し替えるには import 順の細工が要る。
+代わりに**判断（純関数）と I/O（薄い殻）を分ける形**にして、判断だけをテストできるようにしてある。
+`read/` 側に残っているのは「readdir して、名前で絞って、stat して、try/catch で飲む」だけ。
 
 読み取り層（`read/`）と画面側にはテストが無い。
 そこは実物で確かめる。
@@ -83,9 +98,9 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 | 場所 | 役割 | 中身 |
 |---|---|---|
-| `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` |
-| `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` |
-| `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` |
+| `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` `plans` `subagents` |
+| `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） |
+| `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） |
 | `src/os/` | OS を叩く | `focus` |
 
@@ -97,6 +112,19 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - `view/sessions.mjs:listSessions`
 - `view/detail.mjs:getSessionDetail`
 - `os/focus.mjs:focusTerminal`
+
+`digest.mjs` に残しているのは走査の本体（`buildDigest`）と、走査の前に1回だけ作る索引だけ。
+走査から呼ぶ判断は `digest/` の4枚に分けてある。`buildDigest` 本体は分けない
+（1つのループで `items` と `files` と `stats` を同時に埋めているため）。
+
+画面側は `public/` の下に2つ。
+
+| 場所 | 役割 | 中身 |
+|---|---|---|
+| `public/css/` | 見た目 | 7枚。`<link>` の並びがそのまま重ね順になる |
+| `public/js/` | 画面の組み立て | 16枚 ＋ `timeline/` 7枚 |
+
+こちらも import は一方向。層の一覧と、循環を切っている4箇所は「画面側」に書いてある。
 
 `assets/favicon.png` はアイコンの元絵。1.3MB あるので `src/` には置かない。
 
@@ -154,6 +182,9 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 `STATE_RANK` が一覧の並び順。小さいほど上、つまり先に手をつけるべきもの。
 
+同じ状態のあいだは `idleMs` の昇順、つまり動きが新しいものを上に出す。
+`idleMs` が取れないものは「不明」なので末尾へ寄せる（0 に丸めると最新扱いで先頭に出てしまう）。
+
 ## サーバー
 
 `server.mjs`。`node:http` だけで静的配信・JSON API・SSE をやる。
@@ -162,6 +193,9 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 |---|---|
 | `GET /api/sessions` | 一覧を1回返す |
 | `GET /api/sessions/:id` | 詳細（ログ全文を読む） |
+| `GET /api/sessions/:id/entry/:uuid` | ログの1行を原文で返す。鍵らしい値は伏せ、長さと深さで切る。ファイルパスは返さない |
+| `GET /api/sessions/:id/subagents/:agentId` | サブエージェント1件の記録。応答は詳細と同じ形（`digest` ＋ `log`）。ファイルパスは返さない |
+| `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
 | `GET /api/health` | 生存確認。二重起動の判定にも使う |
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
@@ -176,19 +210,92 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 ## 画面側
 
-`public/app.js` はバニラ JS の1ファイル。フレームワークもビルドも無い。
+バニラ JS。フレームワークもビルドも無い。`index.html` が読む `<script>` は1本だけ。
 
-- SSE でつなぎ、`apply()` が一覧・まとめ・詳細をまとめて描き直す
-- 詳細は `detailCache`（`lastActivityAt` を印にした8件のキャッシュ）。中身が変わっていなければ取り直さない
+```html
+<script type="module" src="js/main.js"></script>
+```
+
+ESM なので**読み込み順を人が守る必要はない。** import が解決の順を決める。
+素の `<script>` を2本並べていた頃は、順番を入れ替えると立ち上がらず、
+トップレベルに同じ名前を2つ置くと SyntaxError で丸ごと落ちていた。その危険は無くなっている。
+
+拡張子は `.js` のままにする。`.mjs` を `public/` に置くと `server.mjs` の `MIME` に無く、
+`octet-stream` で返るのでブラウザが module として読まない。
+
+`public/js/` は 16枚 ＋ `timeline/` 7枚。**import は上から下へ一方向にだけ流す。**
+逆向きに import したくなったら、置き場所が間違っている。
+
+| 層 | ファイル | 役割 |
+|---|---|---|
+| 0 | `util.js` | 小道具（`el`・時刻・数値・`fact`） |
+| 0 | `perf.js` | 描画にかかった時間。`window.deckPerf()` |
+| 0 | `timeline/kinds.js` | 時系列の語彙。種類のラベルと、隠す種類の既定 |
+| 1 | `store.js` | 画面側の状態・DOM 参照・URL クエリの同期 |
+| 1 | `panel.js` | 詳細ペインの共通部品（器・見出し・折りたたみ） |
+| 1 | `detail-head.js` | 詳細ペインの頭。パネルより前に出るもの |
+| 2 | `rows.js` | 一覧の行の導出 |
+| 2 | `drawer.js` | 狭い画面の一覧（引き出し） |
+| 2 | `timeline/` | 時系列。外からは `index.js` の1枚として見る |
+| 3 | `detail-wait.js` | 「あなたの番」のパネル |
+| 3 | `detail-panels.js` | 詳細ペインに積むパネル |
+| 3 | `agents.js` | サブエージェントの記録のパネル |
+| 4 | `detail.js` | 詳細ペインの組み立て |
+| 5 | `session.js` | 詳細の取得・保持・選択 |
+| 6 | `list.js` | 稼働中の一覧と、上のバーのまとめ |
+| 7 | `archive.js` | 書庫と、左のペインのタブ |
+| 7 | `stream.js` | SSE でつなぎ、届いた一覧を画面へ流す |
+| 8 | `main.js` | 入口。配線・テーマ・キー操作・起動 |
+
+`timeline/` の中も同じで、`kinds` `waits` → `search` → `blocks` → `item` → `view` → `index` の順。
+**`timeline/` の中のファイルを、外から直に import しない。** 呼びたくなったら `index.js` の口に足すか、
+そもそも時系列の仕事かを考え直す。例外は `kinds.js` だけで、`store.js` が直に見る。
+
+**循環を切っている所が4つある。動かすと立ち上がらない。**
+
+| 切り方 | 切っている循環 |
+|---|---|
+| `hideQueryValue` は隠す種類を引数で受け取る | `store` → `kinds` → `store` |
+| `store.js` は `timeline/kinds.js` を直に見る（`index.js` を経由しない） | `index` → `view` → `store` |
+| `detailErrorNow` は `rows.js` に置く | `detail` ⇄ `session` |
+| `setListOpen` は `drawer.js` に置く | `list` → `main` → `list` |
+
+ふるまいで気をつけている所。
+
+- SSE でつなぎ、`apply()` が一覧・まとめを描き直す。詳細は `renderDetailIfNeeded()` を通し、`detailKeyOf()` の値が動いたときだけ作り直す（毎回作り直すと開いた `<details>` と入力中の caret が消える）
+- 時系列だけは `Timeline.render()` が `.tl-host` を差し替える。絞り込みの帯は器の外に置く（中に入れると1文字ごとに入力欄が作り直される）
+- 描く先は `Timeline.attach()` で預け、`Timeline.detach()` で外す。外から時系列の内部状態を触らない
+- 詳細は `detailCache`（`logSize` を印にした8件のキャッシュ）。中身が変わっていなければ取り直さない。印が `0`（不明）なら必ず取り直す
 - 取り直しのあいだは `silent` で前の内容を出したままにする
 - 狭い画面（860px 以下）では一覧が引き出しになる。閉じているあいだは `inert` で丸ごと触れなくする
-- URL クエリで開き方を指定できる … `?session=<id>` `?theme=dark|light` `?only=1` `?nolive=1`
+- URL クエリで開き方を指定できる … `?session=<id>` `?theme=dark|light` `?only=1` `?nolive=1` `?tab=archive` `?aq=` `?asort=` `?tq=` `?hide=`
+- `?hide=` は「キーが無い」と「空で付いている」を分けて見る。空は「何も隠さない」の指定なので既定に戻さない
+- 隠している種類だけは `localStorage` に覚えさせない。開き直したら既定（足跡を隠す）に戻す。覚えさせると、足跡をいちど押して中を見ただけで既定が永久に壊れる
+- 種類を隠すときは、その種類だけを数えた省略の目印（`elided`）も一緒に落とす。残すと「20 件を省略しました　足跡 20」の文字だけが並び、隠れていないように見える（実測で窓 120 件のうち 36 件がこれだった）
+- **省略は絞り込みのチップに出さない。** 上の通り、出るか出ないかは他のチップ側で決まるので、独立したチップにすると件数が嘘になる。実測では「省略 74」と出しながら1行も出ない状態になっていた（74 件すべてが足跡だけの区間で、足跡は既定で隠れる）。その状態で他を全部隠すと時系列が空になる。目印ごと消す指定は URL に残してある（`?hide=elided`）
+- 窓（`TL_FIRST` = 4 で開き、`TL_MORE` = 60 ずつ継ぎ足す）の外にしか無い種類は名前で伝える。足跡は新しい 200 件だけが残るので、古い順で見ていると窓の中に1件も入らないことがある。黙っていると「押しても変わらない」に見える
+- 描画にかかった時間は `window.deckPerf()` で見る（目安は `renderDetail` が 50ms 未満、時系列の描き直しが 16ms 未満）。測る入れ物は `perf.js` の1つに保つ（2つに割ると `deckPerf()` が片方しか見えない）
 
 状態ラベルの日本語は画面側に持たない。
 `/api/sessions` の `meta.stateLabels`（`STATE_LABELS` そのまま）から引く。
 状態を1つ増やすときに直すのは `parse/state.mjs` だけで済む。
 
-`public/style.css` はライト／ダーク両対応。
+CSS は `public/css/` に7枚ある。`index.html` の `<link>` の並びが、そのまま重ね順になる。
+
+| ファイル | 中身 |
+|---|---|
+| `tokens.css` | 色の実体（`--l-*` / `--d-*`）・意味トークン・暗いほうへの差し替え |
+| `base.css` | リセット・全体の骨・上のバー・共通のボタン |
+| `list.css` | 一覧と書庫のカード |
+| `detail.css` | 詳細ペイン・パネルの器・待ち・判断・facts |
+| `timeline.css` | 時系列 |
+| `panels.css` | TODO・サブエージェントの記録・ファイル |
+| `narrow.css` | 狭い窓向け（`@media (max-width: 860px)`） |
+
+**`<link>` の順番を入れ替えない。** CSS は宣言順で勝ち負けが付く。
+`narrow.css` は上の6枚を上書きするので、必ず最後に読む。
+
+ライト／ダーク両対応。
 色の値は `--l-*`（明）と `--d-*`（暗）に1回だけ書き、`--bg` などの意味トークンがそこを指す。
 画面側は意味トークンだけを使う。
 
@@ -205,11 +312,23 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - **依存パッケージを増やさない。** 同僚にフォルダごと渡して動くことが要件。`dependencies` は空のまま
 - **未知の形で落ちない。** 読んでいるのは Claude Code の内部データで公開仕様ではない。未知のキー・未知の `status`・書き込み途中の壊れた JSON が来ても、黙って飛ばして進む
 - **`innerHTML` を使わない。** ログ本文をそのまま画面に出すので、必ず `textContent` で入れる
+- **`timeline/` の中のファイルを外から直に import しない。** 口は `timeline/index.js` の1枚に絞る。例外は `kinds.js`（層0の語彙）だけで、`index.js` を経由させると `index` → `view` → `store` → `index` の循環になる
+- **`public/` に `.mjs` を置かない。** `server.mjs` の `MIME` に無いので `octet-stream` で返り、ブラウザが module として読まない。画面側の拡張子は `.js`
 - **生死の判定は PID の存在確認だけ。** 登録簿の `updatedAt` は状態が変わったときしか書かれない。古さで終了扱いにすると稼働中のセッションが一覧から消える
 - **`slugifyCwd` の結果からパスを復元しない。** 英数字以外がすべて `-` になる不可逆変換。cwd は登録簿とログの各行から直接取る
 - **`.ps1` は UTF-8 BOM 付きで保存する。** 旧 `powershell.exe` (5.1) は BOM が無いと OS の既定コードページで読み、日本語コメントが化けて構文解析まで壊れる。`pwsh` (7) は通るので気づきにくい
+- **改行は `.gitattributes` が決める。** 既定は LF、`.cmd` と `.ps1` だけ CRLF。手元の `core.autocrlf` に関わらずこちらが勝つので、設定を揃えてもらう必要は無い。BOM は git が触らないので、改行を変換しても残る
 - **`ClaudeDeck.cmd` は ASCII のみ。** `cmd.exe` は解析時のコンソールコードページで読むため、日本語を置くと shift-jis 環境で壊れる。日本語のメッセージは node 側から出す
 - **状態色は点と細いバーだけに使い、面は塗らない。** 全面を塗ると全部が同じ重さに見えて、どれから手をつけるか分からなくなる。色は必ず CSS 変数経由で取る
+- **0 と「不明」を分ける。** 取れなかったものを 0 と書かない。キャッシュの目印にも同じで、`logSize` が `0` なら「不明」として必ず取り直す
+- **`digest.mjs` の `agents.push(rec)` をコピーに変えない。** `items` と同じオブジェクト参照を共有していて、間引きで `items` から消えても `agents` には残る。サブエージェントの一覧がこの参照に依存している
+- **`indexTranscripts` を再帰にしない。** 今は2階層固定なので `<セッションID>/subagents/agent-*.jsonl` を弾けている。再帰にすると 148 ファイルが「セッション」として一覧に流れ込む
+- **`listSubagents` に memo を掛けない。** 印に使えるのはディレクトリの mtime だが、NTFS はファイルが増えたときは変わるのに、既存ファイルが太ったときは変わらない。走っているサブエージェントの大きさが固まって表示が伸びなくなる
+- **サブエージェントの `agentId` をパスに連結しない。** 開くファイルは常に `readdir` が返した名前にする。だからパストラバーサルの検証が要らない。`server.mjs` の正規表現は入口の粗いふるいであって、安全の根拠ではない
+- **プランのファイルは `plansDir` の中を指すことを確かめてから開く。** `filePath` はログ由来の外部入力。比較は `path.relative` で行う（`startsWith` はドライブレターの大小で正しいパスを弾く）
+- **プランの mtime だけで「提出後に変わった」と断定しない。** 実測45件で、ファイルのほうが古い例が28件あった。本文の一致を主判定にする。`planWasEdited` はキーが無いことを「編集なし」と読み替えない
+- **一覧の経路（毎秒走る）に重い処理を足さない。** ここに何かを足すときは、まず「払わずに済む行」を先に落とす。サブエージェントの件数がその形で、`indexTranscripts` が `withFileTypes` でタダで拾った `hasSessionDir` を見て、`<セッションID>/` が無い行は `readdir` を1回も出さずに 0 と決める。実測 168 件中 48 件しか持っていない。全件を数えると `indexTranscripts` が 39.0ms → 78.2ms になり、一覧全体（48.8ms）を超える
+- **件数を数えるのに `listSubagents` を呼ばない。** 一覧は `countSubagents`（`readdir` 1回だけ）。`listSubagents` は 1件ごとに `stat` と `.meta.json` を読むので、詳細を開いたときだけ
 
 ## 要約を AI に差し替えるとき
 

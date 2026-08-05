@@ -37,7 +37,11 @@ function parseLines(lines) {
  * スラッグ化された cwd は不可逆なので、パスから逆算せずに実ファイルを探す。
  * sessionId はファイル名そのものなので一意に決まる。
  *
- * @returns {Promise<Map<string, {file: string, projectDir: string, size: number, mtimeMs: number}>>}
+ * `hasSessionDir` は `<セッションID>/` が隣にあるかどうか。サブエージェントの記録も
+ * ツール結果もその中に入るので、無ければ数えに行くまでもないと分かる。
+ * 同じ readdir の結果から作るので、syscall は1回も増えていない。
+ *
+ * @returns {Promise<Map<string, {file: string, projectDir: string, size: number, mtimeMs: number, hasSessionDir: boolean}>>}
  */
 export async function indexTranscripts() {
   const index = new Map();
@@ -51,14 +55,22 @@ export async function indexTranscripts() {
 
   for (const projectName of projectNames) {
     const dir = path.join(projectsDir, projectName);
-    let names;
+    let ents;
     try {
-      names = await fs.readdir(dir);
+      ents = await fs.readdir(dir, { withFileTypes: true });
     } catch {
       continue;
     }
 
-    for (const name of names) {
+    // 同じ結果から、隣にあるディレクトリ名の集合を作る。
+    // ファイルの絞り込みは今までどおり名前と stat で行う（Dirent は
+    // シンボリックリンクを isFile と言わないため、そこだけで判定すると挙動が変わる）
+    const subdirs = new Set();
+    for (const ent of ents) {
+      if (ent.isDirectory()) subdirs.add(ent.name);
+    }
+
+    for (const { name } of ents) {
       if (!name.endsWith('.jsonl')) continue;
       const file = path.join(dir, name);
       let stat;
@@ -79,6 +91,7 @@ export async function indexTranscripts() {
         projectDir: projectName,
         size: stat.size,
         mtimeMs: stat.mtimeMs,
+        hasSessionDir: subdirs.has(sessionId),
       });
     }
   }
@@ -137,6 +150,58 @@ export async function readTail(file) {
       }
 
       return result;
+    } finally {
+      await handle.close();
+    }
+  });
+}
+
+/**
+ * ログの先頭だけを読む。readTail の鏡像。
+ *
+ * バイト位置で切るので末尾の行が途中で終わりうる。その行は捨てる。
+ * 途中で切れたマルチバイト文字も、その捨てる行に含まれるので影響しない
+ * （readTail は先頭を落とすが、こちらは末尾を落とす）。
+ *
+ * 末尾ではなく先頭を読むのは、サブエージェントのログを開く目的が
+ * 「どうやって結論に至ったか」だから。結論（最終報告）は親ログの結果に既に入っている。
+ * 先頭には受けた指示と最初の調査が入っていて、そちらのほうが価値がある。
+ *
+ * @param {string} file 読むファイル
+ * @param {number} cap 読む上限バイト数
+ * @returns {Promise<{entries: Array, parseErrors: number, truncated: boolean, size: number, mtimeMs: number}>}
+ */
+export async function readHead(file, cap) {
+  let stat;
+  try {
+    stat = await fs.stat(file);
+  } catch {
+    return { entries: [], parseErrors: 0, truncated: false, size: 0, mtimeMs: 0 };
+  }
+
+  return memo(`head:${cap}:${file}`, stampOf(stat), async () => {
+    let handle;
+    try {
+      handle = await fs.open(file, 'r');
+    } catch {
+      return { entries: [], parseErrors: 0, truncated: false, size: stat.size, mtimeMs: stat.mtimeMs };
+    }
+
+    try {
+      const length = Math.min(cap, stat.size);
+      const buf = Buffer.allocUnsafe(length);
+      const { bytesRead } = await handle.read(buf, 0, length, 0);
+
+      let text = buf.subarray(0, bytesRead).toString('utf8');
+      const truncated = length < stat.size;
+      if (truncated) {
+        // 末尾の欠けた行を落とす
+        const nl = text.lastIndexOf('\n');
+        text = nl === -1 ? '' : text.slice(0, nl);
+      }
+
+      const parsed = parseLines(text.split('\n'));
+      return { ...parsed, truncated, size: stat.size, mtimeMs: stat.mtimeMs };
     } finally {
       await handle.close();
     }

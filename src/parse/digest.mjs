@@ -4,117 +4,94 @@
  * 目的は「そのセッションで自分が何を判断したか」と「なぜそう進めているか」を、
  * ログから決定論的に抜いて時系列に並べること。要約はしない。
  *
- * 実測で分かった大事な形:
+ * 決定論であることは性能の前提でもある。
+ * read/cache.mjs の memo と画面側の detailCache が「同じログなら同じ結果」に依存している。
+ * だから現在時刻は受け取らない。進行中の待ちは state.mjs の idleMs が持っているので、
+ * ここでは終わった待ちだけを扱う。
  *
- *  AskUserQuestion の「選んだ答え」は toolUseResult に入っていない。
- *  toolUseResult は質問と選択肢の控えで、実際に選ばれたラベルは
- *  tool_result の本文に次の形で埋まっている。
+ * このファイルに残しているのは、走査の本体（buildDigest）と、
+ * 走査の前に1回だけ作る索引（indexResults / indexNotifications / agentStatus）だけ。
+ * 走査から呼ぶ判断は digest/ の4枚に分けてある。
  *
- *    Your questions have been answered: "質問"="選んだラベル" selected preview:
- *    …（選択肢のプレビュー本文）…
- *    , "質問2"="選んだラベル2". You can now continue with these answers in mind.
+ *   digest/limits.mjs    上限と、超えたときに落とす順
+ *   digest/answers.mjs   選んだ答えの取り出し・却下文の整形（実測した形はこちらに書いた）
+ *   digest/waits.mjs     待ちの区間と集計
+ *   digest/trim.mjs      間引き
  *
- *  質問文は tool_use 側に持っているので、それを鍵にして本文から引く。
- *  引けたラベルを options[].label と照合すれば、その選択肢の description まで出せる。
- *  description は「その選択が何を意味していたか」の説明なので、
- *  あとから読み返したときに判断の理由がそのまま残る。
+ * buildDigest 本体は分けない。1つの走査ループで items と files と stats を同時に埋めており、
+ * 切ると「どの順で何を数えているか」が読めなくなる。
  */
 import {
-  contentBlocks,
   textOf,
   toolUses,
   toolResults,
   timestampOf,
+  uuidOf,
+  agentIdOf,
+  recapOf,
+  taskNotificationOf,
   isUserPrompt,
   isInterrupt,
   isMainline,
+  isSidechain,
+  isToolResultEntry,
   slashCommandOf,
   DENIAL_KINDS,
 } from './entries.mjs';
 import { clip, oneLine } from '../shared/text.mjs';
-import { describeTool, MAX_DETAIL } from '../shared/tools.mjs';
-
-/** 1件あたりの上限。判断の記録になるものは長めに残し、説明文は短くする。 */
-const LIMIT = {
-  prompt: 6000,
-  say: 1200,
-  plan: 24000,
-  // ツールの一行説明と同じ長さ。並べて出るものなので揃える
-  detail: MAX_DETAIL,
-  feedback: 2000,
-};
-
-/** 時系列に並べる項目の上限。超えたら古い説明文から落とす。 */
-const MAX_ITEMS = 400;
-
-/** ファイルを書き換えるツール。「触ったファイル」の判定に使う。 */
-const WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit']);
+import { describeTool } from '../shared/tools.mjs';
+import { LIMIT, TRACE_HEAD, WRITE_TOOLS } from './digest/limits.mjs';
+import { denialNote, pickAnswers } from './digest/answers.mjs';
+import { collectBarriers, waitOf, emptyWaitStats, addWait } from './digest/waits.mjs';
+import { trimItems } from './digest/trim.mjs';
 
 /**
- * 却下されたときに機械的に入る英文。
+ * サブエージェントの終わりの記録を agentId から引ける表にする。
  *
- * 中身は毎回同じで読む価値がないのに長いため、時系列を埋めてしまう。
- * 取り除いて、あとに何か残ればそれだけを出す（自分が添えたコメントがそこに来る）。
+ * 非同期で起動したエージェントは、呼び出しの結果には「起動した」までしか入らない。
+ * 終わりは別の行として差し込まれるので、そこを拾って結び直す。
+ * これがあるので「走っているかどうか」を mtime や推測で当てなくて済む
+ *
+ * @param {Array} scoped 対象の行
+ * @returns {Map<string, {status: string|null, at: number|null}>}
  */
-const DENIAL_NOISE = [
-  /The user doesn't want to proceed with this tool use\./g,
-  /The tool use was rejected \([^)]*\)\./g,
-  /STOP what you are doing and wait for the user to tell you how to proceed\./g,
-  /Note: The user's next message may contain a correction or preference\.[\s\S]*?future sessions\./g,
-  /The user doesn't want to take this action right now\./g,
-  /Permission (?:for this action was denied|to use \S+ was denied)[^.]*\./g,
-  /Tool use was rejected[^.]*\./g,
-];
-
-function denialNote(text) {
-  let t = typeof text === 'string' ? text : '';
-  for (const re of DENIAL_NOISE) t = t.replace(re, '');
-  return oneLine(t, LIMIT.feedback);
+function indexNotifications(scoped) {
+  const byAgent = new Map();
+  for (const entry of scoped) {
+    const note = taskNotificationOf(entry);
+    if (!note) continue;
+    // 同じエージェントが何度も止まると通知も複数出る（差し込みの note 自身がそう書いている）。
+    // あとから来たほうが最後の状態なので上書きする
+    byAgent.set(note.taskId, { status: note.status, at: timestampOf(entry) });
+  }
+  return byAgent;
 }
 
 /**
- * 選ばれた答えを tool_result の本文から取り出す。
+ * サブエージェントの状態を決める。
  *
- * 本文は選択肢のプレビューが挟まって崩れた形なので、全体をパースしない。
- * 質問文を鍵に該当位置だけを読む。
+ * 言い切れないものを言い切らないための関数。上から順に見る。
+ *
+ *  1. 終わりの記録があればそれが最終（completed / killed / failed）
+ *  2. 呼び出しの結果が completed なら、同期で走って報告まで返っている
+ *  3. async_launched のまま終わりの記録が無ければ launched。
+ *     **「走っている」とは言わない。** セッションがもう終わっていれば走ってもいない。
+ *     この記録から言えるのは「起動したところまでは分かる」だけ
+ *  4. 結果そのものが無ければ pending（呼んだ直後で、まだ返ってきていない）
+ *
+ * 知らない値が来たらそのまま返す。黙って既知の値に丸めない
+ *
+ * @param {object|null} result 呼び出しに対応する結果
+ * @param {object|null} done 終わりの記録
+ * @returns {string|null}
  */
-function extractAnswers(input, resultText) {
-  const text = typeof resultText === 'string' ? resultText : '';
-  const out = [];
-
-  for (const q of input?.questions ?? []) {
-    const question = typeof q?.question === 'string' ? q.question : '';
-    const options = Array.isArray(q?.options) ? q.options : [];
-
-    let chosen = null;
-    const needle = `"${question}"="`;
-    const at = question ? text.indexOf(needle) : -1;
-    if (at !== -1) {
-      const rest = text.slice(at + needle.length);
-      const end = rest.indexOf('"');
-      chosen = (end === -1 ? rest.slice(0, 300) : rest.slice(0, end)).trim();
-    }
-
-    // 選択肢のラベルと突き合わせる。合えばその description が判断の根拠になる。
-    // 「Other」で自由入力した場合はどれにも合わないので、そのまま文字列として残す
-    const picked = options.filter((o) => chosen && typeof o?.label === 'string'
-      && (chosen === o.label || chosen.includes(o.label)));
-
-    out.push({
-      question,
-      header: typeof q?.header === 'string' ? q.header : null,
-      multiSelect: q?.multiSelect === true,
-      chosen,
-      // preview は大きいので落とす。label と description だけ持つ
-      chosenOptions: picked.map((o) => ({ label: o.label, description: o.description ?? null })),
-      freeText: Boolean(chosen) && picked.length === 0,
-      otherOptions: options
-        .filter((o) => !picked.includes(o))
-        .map((o) => ({ label: o.label ?? '', description: oneLine(o.description, 200) })),
-    });
-  }
-
-  return out;
+function agentStatus(result, done) {
+  if (done?.status) return done.status;
+  const raw = result?.structured?.status;
+  if (raw === 'completed') return 'completed';
+  if (raw === 'async_launched') return 'launched';
+  if (!result) return 'pending';
+  return typeof raw === 'string' ? raw : null;
 }
 
 /** tool_use_id から結果を引ける表を作る。承認・却下の判定に必要。 */
@@ -130,6 +107,8 @@ function indexResults(entries) {
         denialKind,
         structured: entry?.toolUseResult,
         at: timestampOf(entry),
+        // 原文に戻るとき、呼び出した行ではなく結果の行を開きたい場面がある
+        uuid: uuidOf(entry),
       });
     }
   }
@@ -139,11 +118,19 @@ function indexResults(entries) {
 /**
  * @param {object} params
  * @param {Array} params.entries readAll で読んだ全行
+ * @param {'main'|'sidechain'} [params.scope] どちらの流れを組むか。既定は本流。
+ *   サブエージェントのログは全行が isSidechain:true なので、main のままだと1件も残らない
+ * @param {string|null} [params.agentId] sidechain のとき、この agentId の行だけに絞る。
+ *   1エージェント1ファイルなので通常は要らないが、混ざったログを渡されても正しく組めるようにしておく
  * @returns {object} 詳細ビュー用のデータ
  */
-export function buildDigest({ entries = [] } = {}) {
-  const mainline = entries.filter(isMainline);
-  const results = indexResults(mainline);
+export function buildDigest({ entries = [], scope = 'main', agentId = null } = {}) {
+  const scoped = scope === 'sidechain'
+    ? entries.filter((e) => isSidechain(e) && (agentId === null || agentIdOf(e) === agentId))
+    : entries.filter(isMainline);
+  const results = indexResults(scoped);
+  const barriers = collectBarriers(scoped);
+  const notifications = indexNotifications(scoped);
 
   const items = [];
   const files = new Map();
@@ -162,12 +149,23 @@ export function buildDigest({ entries = [] } = {}) {
     turns: 0,
     firstAt: null,
     lastAt: null,
+    waits: emptyWaitStats(),
   };
 
   let index = 0;
+  /**
+   * 返信待ちの起点。Claude が発言して止まった時刻。
+   *
+   * ここのリセット条件に罠がある。{"type":"system","subtype":"turn_duration"} が
+   * 毎ターンの直後に必ず入る（実測405件）ので、「assistant 以外なら全部リセット」に
+   * すると返信待ちが1件も測れない。リセットするのはツール結果・圧縮・中断・
+   * スラッシュコマンドのときだけにする
+   */
+  let replyFrom = null;
 
-  for (const entry of mainline) {
+  for (const entry of scoped) {
     const at = timestampOf(entry);
+    const uuid = uuidOf(entry);
     if (at !== null) {
       if (stats.firstAt === null || at < stats.firstAt) stats.firstAt = at;
       if (stats.lastAt === null || at > stats.lastAt) stats.lastAt = at;
@@ -180,6 +178,7 @@ export function buildDigest({ entries = [] } = {}) {
         i: index++,
         kind: 'compact',
         at,
+        uuid,
         trigger: m.trigger ?? null,
         preTokens: m.preTokens ?? null,
         postTokens: m.postTokens ?? null,
@@ -187,24 +186,50 @@ export function buildDigest({ entries = [] } = {}) {
       };
       items.push(item);
       compactions.push(item);
+      replyFrom = null;
+      continue;
+    }
+
+    // Claude 自身が書いた中間報告。
+    // これは自己申告であって、機械的に抽出した記録ではない。
+    // 間引きでは落とさない（数が少なく、抜けると「報告があった事実」まで消える）
+    const recap = recapOf(entry);
+    if (recap) {
+      items.push({
+        i: index++,
+        kind: 'recap',
+        at,
+        uuid,
+        text: clip(recap, LIMIT.recap),
+        fullLength: recap.length,
+      });
       continue;
     }
 
     if (entry?.type === 'user') {
       const slash = slashCommandOf(entry);
       if (slash) {
-        items.push({ i: index++, kind: 'slash', at, command: slash.command, args: slash.args || null });
+        items.push({ i: index++, kind: 'slash', at, uuid, command: slash.command, args: slash.args || null });
+        replyFrom = null;
         continue;
       }
       if (isInterrupt(entry)) {
         stats.interrupts += 1;
-        items.push({ i: index++, kind: 'interrupt', at });
+        items.push({ i: index++, kind: 'interrupt', at, uuid });
+        replyFrom = null;
         continue;
       }
       if (isUserPrompt(entry)) {
         stats.prompts += 1;
-        items.push({ i: index++, kind: 'prompt', at, text: clip(textOf(entry), LIMIT.prompt) });
+        // Claude が発言して止まってから、この指示を打つまでの間
+        const wait = waitOf('reply', replyFrom, at, barriers);
+        addWait(stats.waits, wait);
+        items.push({ i: index++, kind: 'prompt', at, uuid, text: clip(textOf(entry), LIMIT.prompt), wait });
+        replyFrom = null;
+        continue;
       }
+      // ツール結果が来たなら Claude は動いている。返信を待っていたわけではない
+      if (isToolResultEntry(entry)) replyFrom = null;
       continue;
     }
 
@@ -213,8 +238,26 @@ export function buildDigest({ entries = [] } = {}) {
     const say = textOf(entry);
     if (say) {
       stats.says += 1;
-      items.push({ i: index++, kind: 'say', at, text: clip(say, LIMIT.say), full: say.length > LIMIT.say });
+      items.push({
+        i: index++,
+        kind: 'say',
+        at,
+        uuid,
+        text: clip(say, LIMIT.say),
+        // 切る前の長さ。切られた本文から長さを計ると「全文」の字数が嘘になる
+        fullLength: say.length,
+      });
+      if (at !== null) replyFrom = at;
     }
+
+    /**
+     * この行ぶんのふつうの呼び出し（足跡の材料）。
+     *
+     * assistant の1行につき1件の足跡にまとめる。1呼び出し1件にすると、
+     * 並列で6本呼んだ行が6件になって、判断の記録が水増しの中に埋もれる。
+     * 却下・質問・プラン・スキル・エージェント・失敗は自分の項目を持つので、ここには入れない
+     */
+    const calls = [];
 
     for (const tu of toolUses(entry)) {
       stats.toolCalls += 1;
@@ -231,24 +274,40 @@ export function buildDigest({ entries = [] } = {}) {
       // あなたが却下した、または権限で止められた呼び出し
       if (result?.denialKind) {
         stats.denials += 1;
+        const wait = waitOf('denial', at, result.at, barriers);
+        addWait(stats.waits, wait);
         items.push({
           i: index++,
           kind: 'denial',
           at,
+          uuid,
+          resultUuid: result.uuid,
           tool: tu.name,
           detail: describeTool(tu.name, tu.input),
           denialKind: result.denialKind,
           denialLabel: DENIAL_KINDS[result.denialKind] ?? result.denialKind,
           // 却下時に添えたコメントがあれば、それが一番知りたい情報になる
           note: denialNote(result.text),
+          wait,
         });
         continue;
       }
 
       if (tu.name === 'AskUserQuestion') {
-        const answers = extractAnswers(tu.input, result?.text);
+        const answers = pickAnswers(tu.input, result);
         stats.answers += answers.length;
-        items.push({ i: index++, kind: 'answer', at, answers, unanswered: !result });
+        const wait = waitOf('answer', at, result?.at ?? null, barriers);
+        addWait(stats.waits, wait);
+        items.push({
+          i: index++,
+          kind: 'answer',
+          at,
+          uuid,
+          resultUuid: result?.uuid ?? null,
+          answers,
+          unanswered: !result,
+          wait,
+        });
         continue;
       }
 
@@ -257,34 +316,88 @@ export function buildDigest({ entries = [] } = {}) {
         const approved = /approved your plan/i.test(text);
         const saved = /saved to:\s*(.+)/.exec(text);
         stats.plans += 1;
+        const wait = waitOf('plan', at, result?.at ?? null, barriers);
+        addWait(stats.waits, wait);
+        const body = tu.input?.plan ?? result?.structured?.plan;
+        // 承認された結果には filePath が必ず入っていた（実測46件すべて）。
+        // 本文から拾う正規表現は、その形が無い古い版のための控え
+        const filePath = typeof result?.structured?.filePath === 'string'
+          ? result.structured.filePath
+          : saved ? saved[1].trim() : null;
         items.push({
           i: index++,
           kind: 'plan',
           at,
-          plan: clip(tu.input?.plan ?? result?.structured?.plan, LIMIT.plan),
+          uuid,
+          resultUuid: result?.uuid ?? null,
+          // 承認された時刻。ファイルの更新時刻と比べるのに使う。
+          // wait.toAt にも同じ値が入るが、区切りを跨ぐと null になるのでこちらに別で持つ
+          resultAt: result?.at ?? null,
+          plan: clip(body, LIMIT.plan),
+          // 切る前の長さ。ディスクの本文と突き合わせるとき、切られた本文で比べると必ず不一致になる
+          planChars: typeof body === 'string' ? body.length : null,
+          // 実測では true のときだけ書かれ、false は一度も出ない。
+          // キーが無いことを「編集なし」と読み替えられないよう、無いときは null で渡す
+          edited: result?.structured?.planWasEdited === true ? true : null,
           approved,
           pending: !result,
-          planFile: saved ? saved[1].trim() : null,
-          // 却下・修正指示のときは本文にその内容が入る
-          feedback: approved ? null : oneLine(text, LIMIT.feedback),
+          planFile: filePath,
+          // 却下・修正指示のときは本文にその内容が入る。次に何をするかの指示なので改行ごと残す
+          feedback: approved ? null : clip(text, LIMIT.feedback),
+          wait,
         });
         continue;
       }
 
+      addWait(stats.waits, waitOf('tool', at, result?.at ?? null, barriers));
+
       if (tu.name === 'Skill') {
-        const rec = { i: index++, kind: 'skill', at, skill: tu.input?.skill ?? '?', args: tu.input?.args || null };
+        const rec = {
+          i: index++,
+          kind: 'skill',
+          at,
+          uuid,
+          skill: tu.input?.skill ?? '?',
+          args: tu.input?.args || null,
+        };
         items.push(rec);
         skills.push(rec);
         continue;
       }
 
       if (tu.name === 'Agent' || tu.name === 'Task') {
+        // 結果には2つの形がある（実測140件）。
+        //   同期  59件 … status:"completed"。content に報告本文、totalDurationMs / totalTokens /
+        //                 totalToolUseCount / toolStats / usage が付く
+        //   非同期 81件 … status:"async_launched"。起動したことしか入らない。
+        //                 終わりは別の <task-notification> の行に出る（indexNotifications で拾う）
+        const s = result?.structured ?? null;
+        const agentId = typeof s?.agentId === 'string' ? s.agentId : null;
+        const done = agentId ? notifications.get(agentId) ?? null : null;
+        // items と agents で同じオブジェクトを共有している。間引きで items から
+        // 消えても agents には残る形にしたいので、ここをコピーに変えてはいけない
+        // （提案10 の subagents.items がこの参照に依存している）
         const rec = {
           i: index++,
           kind: 'agent',
           at,
-          agentType: tu.input?.subagent_type ?? null,
+          uuid,
+          resultUuid: result?.uuid ?? null,
+          // サブエージェントの記録と突き合わせる鍵。呼び出し側の id と、結果に入る agentId
+          toolUseId: tu.id ?? null,
+          agentId,
+          // 呼び出しに subagent_type が無い形もあるので、結果側の agentType にも落とす
+          agentType: tu.input?.subagent_type ?? (typeof s?.agentType === 'string' ? s.agentType : null),
           description: oneLine(tu.input?.description, LIMIT.detail),
+          model: typeof s?.resolvedModel === 'string' ? s.resolvedModel : null,
+          status: agentStatus(result, done),
+          // 同期完了のときだけ入る。取れなければ null（0 と混ぜない）
+          durationMs: typeof s?.totalDurationMs === 'number' ? s.totalDurationMs : null,
+          tokens: typeof s?.totalTokens === 'number' ? s.totalTokens : null,
+          toolUseCount: typeof s?.totalToolUseCount === 'number' ? s.totalToolUseCount : null,
+          // 報告本文そのものは積まない。長さだけ出して、中身は「開く」の応答へ回す
+          reportChars: typeof s?.content === 'string' ? s.content.length : null,
+          doneAt: done?.at ?? null,
         };
         items.push(rec);
         agents.push(rec);
@@ -298,36 +411,52 @@ export function buildDigest({ entries = [] } = {}) {
           i: index++,
           kind: 'error',
           at,
+          uuid,
+          resultUuid: result.uuid,
           tool: tu.name,
           detail: describeTool(tu.name, tu.input),
           message: oneLine(result.text, LIMIT.detail),
         });
-      }
-    }
-  }
-
-  stats.turns = mainline.filter((e) => e?.type === 'assistant').length;
-
-  // 多すぎる場合は説明文から落とす。判断の記録（指示・選択・プラン・却下）は残す
-  let dropped = 0;
-  if (items.length > MAX_ITEMS) {
-    const keepAlways = new Set(['prompt', 'answer', 'plan', 'denial', 'compact', 'slash', 'interrupt']);
-    const trimmed = [];
-    let budget = items.length - MAX_ITEMS;
-    for (const item of items) {
-      if (budget > 0 && !keepAlways.has(item.kind)) {
-        budget -= 1;
-        dropped += 1;
         continue;
       }
-      trimmed.push(item);
+
+      calls.push({
+        tool: tu.name,
+        detail: describeTool(tu.name, tu.input),
+        // 呼んでから結果が返るまで。承認待ちの時間も含む（分けられない）
+        durationMs: typeof at === 'number' && typeof result?.at === 'number' ? result.at - at : null,
+        // 結果がまだ来ていない。いま止まっているのがここだと分かる
+        pending: !result,
+        // 0 と「取れなかった」を分ける。結果が無い行は null にする
+        resultChars: typeof result?.text === 'string' ? result.text.length : null,
+        head: oneLine(result?.text, TRACE_HEAD),
+        resultUuid: result?.uuid ?? null,
+      });
     }
-    items.length = 0;
-    items.push(...trimmed);
+
+    if (calls.length) {
+      // 一番遅い結果まで。1本も測れなければ null。取れた分があればその最長を出す
+      const durations = calls.map((c) => c.durationMs).filter((v) => typeof v === 'number');
+      items.push({
+        i: index++,
+        kind: 'trace',
+        at,
+        uuid,
+        count: calls.length,
+        // 畳んだ見出しに出す。同じツールを並列で呼んだ行を「Read ×4」と読めるようにする
+        tools: [...new Set(calls.map((c) => c.tool))],
+        durationMs: durations.length ? Math.max(...durations) : null,
+        calls,
+      });
+    }
   }
 
+  stats.turns = scoped.filter((e) => e?.type === 'assistant').length;
+
+  const trimmed = trimItems(items);
+
   return {
-    items,
+    items: trimmed.items,
     files: [...files.values()]
       .map((f) => ({ path: f.path, count: f.count, tools: [...f.tools] }))
       .sort((a, b) => b.count - a.count),
@@ -337,7 +466,7 @@ export function buildDigest({ entries = [] } = {}) {
     stats: {
       ...stats,
       elapsedMs: stats.firstAt !== null && stats.lastAt !== null ? stats.lastAt - stats.firstAt : null,
-      droppedItems: dropped,
+      droppedItems: trimmed.dropped,
     },
   };
 }

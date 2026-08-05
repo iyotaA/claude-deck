@@ -12,7 +12,9 @@
  * ── AI 要約に差し替えるときの入り口 ──────────────────────────
  *
  * この summarize() が唯一の差し替え点。detail.mjs は結果の形しか見ていない。
- * 返す形（source / headline / points）を保てば、中身は何で作ってもよい。
+ * 返す形（source / headline / headlineSource / points）を保てば、中身は何で作ってもよい。
+ * headlineSource は「見出しが誰の言葉か」を表す。AI が作った見出しに 'recap' を
+ * 立ててはいけない（画面が「Claude の申告」の印を出すので、意味が変わる）。
  *
  * 置き換えるときに守ること:
  *
@@ -39,7 +41,7 @@
 import { oneLine } from '../shared/text.mjs';
 
 /** 要約に出す点の数。増やすと読む量が増えて、畳んだ意味が薄れる。 */
-const MAX_POINTS = 4;
+const MAX_POINTS = 5;
 
 /** 選んだ答えを「質問 → ラベル」の一行にする。 */
 function answerLine(answer) {
@@ -65,13 +67,50 @@ export function plainSummary(detail) {
   // 最初の指示がこのセッションの目的そのもの。ここが「なぜやっているか」にあたる。
   // 圧縮で消えていることがあるので、無ければタイトルで代える
   const first = prompts[0]?.text ?? null;
-  const headline = oneLine(first, 160) ?? detail?.title ?? null;
+
+  /**
+   * Claude が書いた中間報告は、見出しには使わない。
+   *
+   * ここは「何を頼んだセッションか」を出す場所で、中間報告は
+   * 「いまどこまで進んだか」なので、答えている問いが違う。
+   *
+   * 一度は「報告が最後の指示より新しければ見出しに使う」形にしたが、実物で外した。
+   * 完了報告が目的の欄に居座って、何を頼んだセッションなのかが読めなくなる。
+   * さらに悪いのは、報告のあるセッションと無いセッションで同じ枠に違う種類の
+   * ものが出ること。時刻の前後で中身の種類が変わる枠は、読み手が信用できない。
+   *
+   * 例外は指示もタイトルも取れなかったときだけ。空欄より自己申告のほうがましなので、
+   * 最後の手段として使う。そのときは headlineSource が 'recap' になり、
+   * 画面が「Claude の申告」の印を出す
+   */
+  const recap = detail?.recap ?? null;
+
+  // 見出しの出どころを持ち回す。画面はこれを見て「Claude の申告」の印を出す。
+  // source（誰が作った要約か）とは別の軸なので、混ぜない
+  let headline = oneLine(first, 160);
+  let headlineSource = headline ? 'prompt' : null;
+  let headlineAt = null;
+  if (!headline) {
+    headline = detail?.title ?? null;
+    headlineSource = headline ? 'title' : null;
+  }
+  if (!headline && recap?.text) {
+    headline = oneLine(recap.text, 160);
+    headlineSource = 'recap';
+    // いつの申告かを画面が出せるようにする
+    headlineAt = recap.at ?? null;
+  }
 
   const points = [];
 
   // 途中で目的が変わっていることがあるため、最後の指示も別に出す
   const last = prompts[prompts.length - 1]?.text ?? null;
   if (last && last !== first) points.push({ label: '直近の指示', text: oneLine(last, 120) });
+
+  // 見出しに使わなかった報告は点に回す。捨てると「報告があった事実」まで消える
+  if (recap?.text && headlineSource !== 'recap') {
+    points.push({ label: 'Claude の申告', text: oneLine(recap.text, 120) });
+  }
 
   const lastAnswer = answers[answers.length - 1]?.answers?.slice(-1)[0];
   const decided = lastAnswer ? answerLine(lastAnswer) : null;
@@ -93,8 +132,11 @@ export function plainSummary(detail) {
   const compacted = (detail?.digest?.compactions ?? []).length;
 
   return {
+    // 誰が作った要約か。AI に差し替えたときの判別に使うので、ここは変えない
     source: 'plain',
     headline,
+    headlineSource,
+    headlineAt,
     points: points.slice(0, MAX_POINTS),
     counts: {
       prompts: stats.prompts ?? 0,

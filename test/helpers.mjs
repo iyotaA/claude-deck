@@ -56,6 +56,30 @@ export function call(name, input = {}, { ms = 0, id = 'call-1', uuid, text, ...r
 }
 
 /**
+ * 1行で複数のツールを呼んだ assistant 行。
+ *
+ * Claude は独立した呼び出しを1行にまとめて出すので、実物のログでは並列呼び出しがふつうに出る。
+ * 足跡（trace）が「1行につき1件」であることを確かめるのに使う
+ *
+ * @param {Array} uses [{ name, input, id }] の並び
+ * @param {object} opts ms（T0 からの相対）/ uuid / text（発言を添える）
+ */
+export function multiCall(uses, { ms = 0, uuid, text, ...rest } = {}) {
+  const content = [];
+  if (text) content.push({ type: 'text', text });
+  for (const u of uses) {
+    content.push({ type: 'tool_use', id: u.id, name: u.name, input: u.input ?? {} });
+  }
+  return {
+    type: 'assistant',
+    uuid: uuid ?? nextUuid(),
+    timestamp: at(ms),
+    message: { role: 'assistant', content },
+    ...rest,
+  };
+}
+
+/**
  * ツール結果の行。
  *
  * @param {string} id 対応する tool_use_id

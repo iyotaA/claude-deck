@@ -11,6 +11,8 @@ import { extractMeta } from '../parse/meta.mjs';
 import { buildDigest } from '../parse/digest.mjs';
 import { identity, stateFields } from './shape.mjs';
 import { summarize } from './summary.mjs';
+import { buildPlanLineage } from './plans.mjs';
+import { collectSubagents } from './subagent.mjs';
 
 /**
  * @param {string} sessionId
@@ -40,12 +42,41 @@ export async function getSessionDetail(sessionId, now = Date.now()) {
     readTasks(sessionId),
   ]);
 
+  // ディスクを1回だけ読む。落ちても詳細そのものは返す（プランの系譜が消えるだけ）
+  let planLineage = null;
+  try {
+    planLineage = await buildPlanLineage(digest);
+  } catch {
+    planLineage = null;
+  }
+
+  // サブエージェントの記録。readdir 1回 ＋ stat 数回。詳細を開いたときだけ走る。
+  // 落ちても詳細そのものは返す（パネルが空になるだけ）
+  let subagents = { items: [], counts: null, readError: null };
+  try {
+    subagents = await collectSubagents(transcript?.file ?? null, sessionId, digest);
+  } catch (err) {
+    subagents = { items: [], counts: null, readError: String(err?.message ?? err) };
+  }
+
   const detail = {
     ...identity({ registry, meta, sessionId, transcript }),
     ...stateFields(state),
 
+    // Claude が最後に書いた中間報告。自己申告なので、機械的に抽出した項目とは別のキーに置く。
+    // 無ければ null。機能が1つ消えるだけで、他の表示には影響させない
+    recap: meta.recap ? { text: meta.recap, at: meta.recapAt } : null,
+
     digest,
     tasks,
+
+    // 承認したプランが、いまディスクにあるものと同じか。
+    // 材料が無ければ null。新しいデータ源は「無ければ機能が1つ消えるだけ」に閉じる
+    planLineage,
+
+    // サブエージェントの記録。最終報告の本文は入れない（長さだけ）。
+    // digest の下に置かないのは、間引きの影響を受けないようにするため
+    subagents,
 
     log: {
       file: transcript?.file ?? null,

@@ -15,6 +15,9 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { listSessions } from './src/view/sessions.mjs';
 import { getSessionDetail } from './src/view/detail.mjs';
+import { listArchive, parseArchiveQuery } from './src/view/archive.mjs';
+import { getRawEntry } from './src/view/entry.mjs';
+import { getSubagentDetail } from './src/view/subagent.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
 import { sessionsDir, projectsDir, configDir } from './src/read/paths.mjs';
 
@@ -246,6 +249,47 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/sessions') {
     computeSessions().then(
       (payload) => sendJson(res, 200, payload),
+      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+    );
+    return;
+  }
+
+  // 書庫。一覧と違って毎秒引かれるものではないので、その場で作って返す（push はしない）
+  if (pathname === '/api/archive') {
+    listArchive(parseArchiveQuery(url.searchParams)).then(
+      (payload) => sendJson(res, 200, payload),
+      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+    );
+    return;
+  }
+
+  // 原文の1行。詳細より露出量が多いので、entry.mjs 側で鍵らしい値を伏せて長さを切る。
+  // 下の detailMatch は末尾 $ で閉じていて / を含まないので構造上ぶつからないが、
+  // 読み手が順序を気にしないで済むよう、具体的なほうを手前に置く
+  const entryMatch = /^\/api\/sessions\/([\w.-]{1,80})\/entry\/([\w-]{1,80})$/.exec(pathname);
+  if (entryMatch) {
+    getRawEntry(entryMatch[1], entryMatch[2], { agentId: url.searchParams.get('agent') }).then(
+      (raw) => {
+        if (!raw) sendJson(res, 404, { error: 'その行が見つかりません' });
+        else sendJson(res, 200, raw);
+      },
+      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+    );
+    return;
+  }
+
+  // サブエージェント1件の記録。これも detailMatch より手前に置く（具体的なほうから）。
+  //
+  // ここの [\w-]{1,64} は入口の粗いふるいであって、安全の根拠ではない。
+  // 開くファイルは readdir が返した名前だけで、リクエストの文字列をパスに連結しない。
+  // 理由は view/subagent.mjs の getSubagentDetail の JSDoc に書いてある
+  const agentMatch = /^\/api\/sessions\/([\w.-]{1,80})\/subagents\/([\w-]{1,64})$/.exec(pathname);
+  if (agentMatch) {
+    getSubagentDetail(agentMatch[1], agentMatch[2]).then(
+      (payload) => {
+        if (!payload) sendJson(res, 404, { error: 'その記録が見つかりません' });
+        else sendJson(res, 200, payload);
+      },
       (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
     );
     return;

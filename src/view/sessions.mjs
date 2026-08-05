@@ -9,6 +9,7 @@
  */
 import { readRegistry } from '../read/registry.mjs';
 import { indexTranscripts, readTail } from '../read/transcript.mjs';
+import { countSubagents } from '../read/subagents.mjs';
 import { deriveState, STATE_RANK, STATE_LABELS } from '../parse/state.mjs';
 import { extractMeta } from '../parse/meta.mjs';
 import { identity, stateFields } from './shape.mjs';
@@ -26,6 +27,13 @@ async function buildRow({ registry, transcript, now }) {
   const state = deriveState({ registry, tail, now });
   const sessionId = registry?.sessionId ?? transcript?.sessionId ?? null;
 
+  // サブエージェントを使ったか。<セッションID>/ が無ければ子も無いので readdir を出さずに 0 と決める。
+  // 索引を作ってからここまでの間にディレクトリができた場合は、その回だけ 0 に見える（次の更新で出る）。
+  // ログそのものが無いセッション（立ち上げ直後）は 0 ではなく不明
+  const subagentCount = transcript
+    ? (transcript.hasSessionDir ? await countSubagents(transcript.file, sessionId) : 0)
+    : null;
+
   return {
     // 詳細と共通の項目。ずれると同じセッションが2つの顔を持つので shape.mjs にまとめてある
     ...identity({ registry, meta, sessionId, transcript }),
@@ -36,7 +44,10 @@ async function buildRow({ registry, transcript, now }) {
     lastPrompt: meta.lastPrompt ?? meta.lastUserPrompt ?? null,
     lastAssistantText: meta.lastAssistantText,
     skills: meta.skills,
+    // 末尾 64KB に出てきた呼び出しの記録。直近しか映らないので件数の根拠にはしない
     agents: meta.agents.slice(-3),
+    // 記録ファイルの実数。上の agents とは別物で、こちらが「使ったか否か」の答え
+    subagentCount,
     parseErrors: tail.parseErrors ?? 0,
     logFile: transcript?.file ?? null,
     logSize: transcript?.size ?? null,
@@ -45,6 +56,19 @@ async function buildRow({ registry, transcript, now }) {
     // 中身が「/clear の1行だけ」というファイルが projects 配下に残るため
     substantive: Boolean(meta.model || meta.lastUserPrompt || meta.title),
   };
+}
+
+/**
+ * 並び替え用に idleMs を数値へ落とす。
+ *
+ * null は「取れなかった」であって 0 ではない。
+ * 0 に丸めると最も新しいものとして先頭に出てしまうため、末尾へ寄せる。
+ *
+ * @param {{idleMs: number|null}} row
+ * @returns {number}
+ */
+function idleForSort(row) {
+  return row.idleMs ?? Number.POSITIVE_INFINITY;
 }
 
 /**
@@ -89,9 +113,9 @@ export async function listSessions(now = Date.now()) {
   rows.sort((a, b) => {
     const rank = (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9);
     if (rank !== 0) return rank;
-    // 同じ状態なら待たされている時間が長い順。放置が長いものを上に出す
-    if (a.state === 'running') return (a.idleMs ?? 0) - (b.idleMs ?? 0);
-    return (b.idleMs ?? 0) - (a.idleMs ?? 0);
+    // 同じ状態なら動きが新しい順。放置が長いものほど下に沈む。
+    // idleMs が取れないものは「不明」なので末尾に置く（0 と混ぜない）
+    return idleForSort(a) - idleForSort(b);
   });
 
   const counts = {};
