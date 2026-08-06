@@ -135,6 +135,30 @@ node cli.mjs --all    終了したものも全部出す
 
 **書き込みは一切しません。** 読み取り専用です。
 
+## 使っている技術
+
+外部パッケージはゼロです。
+Node.js とブラウザの標準機能だけで動きます。
+
+| 層 | 使っているもの |
+|---|---|
+| サーバー | Node.js 18 以降・`node:http`（静的配信・JSON API・SSE） |
+| 読み取り | `node:fs` / `node:fs/promises`（`fs.watch` ＋ 2秒ポーリング） |
+| 更新の push | SSE（画面側は `EventSource`） |
+| 画面 | バニラ JS 23 枚（ESM）・素の CSS 7 枚 |
+| テスト | `node:test` ＋ `node:assert/strict`（9 ファイル） |
+| Windows | PowerShell 3 枚・`.cmd` 1 枚 |
+| 依存 | なし（`dependencies` は空） |
+
+ビルド工程はありません。
+保存してブラウザを読み込み直せば反映されます。
+
+PowerShell の3枚は Windows 側の細かい仕事に使っています。
+
+- `focus.ps1` … `user32.dll` でターミナルの窓を前面に出す
+- `build-icons.ps1` … `System.Drawing` で favicon を作る
+- `autostart.ps1` … スタートアップにショートカットを置く
+
 ## 気をつけること
 
 会話ログには業務の内容が入ります。
