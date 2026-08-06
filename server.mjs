@@ -19,6 +19,7 @@ import { listArchive, parseArchiveQuery } from './src/view/archive.mjs';
 import { getRawEntry } from './src/view/entry.mjs';
 import { getSubagentDetail } from './src/view/subagent.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
+import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { sessionsDir, projectsDir, configDir } from './src/read/paths.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -79,6 +80,13 @@ async function serveStatic(res, pathname) {
 /* ---------------------------------------------------------------- 一覧の配信 */
 
 const clients = new Set();
+/**
+ * 回答待ちを Slack へ知らせる係。
+ *
+ * 設定が無ければ全部が空振りになるので、有効かどうかをここで分岐しない。
+ * 起動時に1回だけ設定を読む（毎秒の経路で fs を叩かないため）。
+ */
+const notifier = createNotifier();
 let lastPayload = null;
 let lastSerialized = '';
 let refreshTimer = null;
@@ -103,6 +111,11 @@ async function refresh(force = false) {
   refreshing = true;
   try {
     const payload = await computeSessions();
+
+    // 通知は一覧より格下。ここで落とすと下の catch が broadcast('error') を出し、
+    // 通知側のバグで画面が空白になる。この try/catch は任意ではなく必須
+    try { notifier.observe(payload.rows, payload.meta.now); } catch { /* 見送る */ }
+
     // idleMs と now は毎回変わるので、差分判定からは外す。
     // これを入れると内容が同じでも毎回 push してしまう
     const serialized = JSON.stringify(payload.rows.map((r) => ({
@@ -313,7 +326,9 @@ const server = http.createServer((req, res) => {
   }
 
   if (pathname === '/api/health') {
-    sendJson(res, 200, { ok: true, configDir, clients: clients.size });
+    // 自動起動されたサーバーの設定を確かめる唯一の手段。
+    // notify.target はマスク済みしか入っていない（notify/index.mjs の health）
+    sendJson(res, 200, { ok: true, configDir, clients: clients.size, notify: notifier.health() });
     return;
   }
 
@@ -368,7 +383,16 @@ function listen(port, attemptsLeft = 12) {
     console.log(`  ${url}`);
     console.log(`  読み取り元: ${configDir}`);
     if (!w.okProjects) console.log('  （ファイル監視が使えないため定期確認のみで動きます）');
+    // 通知の行は有効なときと、書き間違えているときだけ出る。設定していなければ黙る
+    const notifyLine = notifier.banner();
+    if (notifyLine) console.log(`  ${notifyLine}`);
     console.log('  終了するには Ctrl+C');
+
+    // 深いリンクに使う。ポートはずれることがあるので、決まってから渡す
+    notifier.setBaseUrl(url);
+    // 送信は refresh() とは別の時計で回す。flush は refresh を呼ばず、待たない
+    setInterval(() => { notifier.flush(); }, FLUSH_MS).unref();
+
     refresh(true);
     if (!noOpen) openBrowser(url);
   });

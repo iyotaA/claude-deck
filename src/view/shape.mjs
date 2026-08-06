@@ -63,5 +63,9 @@ export function stateFields(state) {
     stateReason: state.reason,
     stateConfident: state.confident,
     statusRaw: state.statusRaw,
+    // 通知が「同じ待ちかどうか」と「人に聞きに来ているか」を判断するのに使う。
+    // 意味は parse/state.mjs の base のコメントを見ること
+    anchorId: state.anchorId,
+    byStatus: state.byStatus,
   };
 }

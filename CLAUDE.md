@@ -68,6 +68,11 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `plans.test.mjs` | プランのパス検証と本文の突き合わせ |
 | `subagents.test.mjs` | サブエージェントの記録と呼び出しの突き合わせ |
 | `appdata.test.mjs` | 書き込み先の解決。ログと設定が同じ場所を指すこと |
+| `notify-watch.test.mjs` | いつ何を送るかの状態機械（通知の本丸） |
+| `notify-message.test.mjs` | 通知の本文。載せないものと、URL のマスク |
+| `notify-config.test.mjs` | 設定の優先順と URL の検証 |
+| `notify-slack.test.mjs` | Slack の応答をどう読むか |
+| `notify-index.test.mjs` | 通知の配線。とくに失敗したときのふるまい |
 
 `digest.test.mjs` が呼ぶのは `buildDigest` だけ。
 `parse/digest/` の4枚はその中から呼ばれるので、入口経由で見ていることになる。
@@ -94,7 +99,7 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 
 ## ファイルの置き場所
 
-`src/` は役割ごとに4つに分けてある。
+`src/` は役割ごとに5つに分けてある。
 import は上から下へ一方向にだけ流れる。逆向きに import したくなったら、置き場所が間違っている。
 
 | 場所 | 役割 | 中身 |
@@ -102,16 +107,22 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` `plans` `subagents` |
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） |
+| `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（設定） `slack`（送信） |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） `appdata`（書き込み先） |
 | `src/os/` | OS を叩く | `focus` |
 
-流れは `read` → `parse` → `view`。
+流れは `read` → `parse` → `view` → `notify`。
 `shared` はどこからでも使えるが、逆に `shared` から他を import してはいけない。
 
-入口は3つだけ。ここの名前と応答の形は変えない。
+`notify/` は末端に足した層で、**`view/` を import しない。**
+`listSessions()` が返した行（ただの JSON）を受け取るだけにしてある。
+これで向きが一方向のまま保たれ、テストも行のリテラルを渡すだけで書ける。
+
+入口は4つだけ。ここの名前と応答の形は変えない。
 
 - `view/sessions.mjs:listSessions`
 - `view/detail.mjs:getSessionDetail`
+- `notify/index.mjs:createNotifier`
 - `os/focus.mjs:focusTerminal`
 
 `digest.mjs` に残しているのは走査の本体（`buildDigest`）と、走査の前に1回だけ作る索引だけ。
@@ -186,6 +197,115 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 同じ状態のあいだは `idleMs` の昇順、つまり動きが新しいものを上に出す。
 `idleMs` が取れないものは「不明」なので末尾へ寄せる（0 に丸めると最新扱いで先頭に出てしまう）。
 
+## 通知（回答待ちを Slack へ）
+
+`src/notify/`。席を外している間に質問が出て止まっても、戻るまで気づけない。
+そこを埋めるためだけの機能で、**設定しなければ何も起きない。**
+
+このアプリ初の外向き通信なので、`view/summary.mjs` 冒頭の作法をそのまま守る。
+鍵が無ければ黙って何もしない。失敗しても本体を落とさない。
+
+### どの状態を送るか
+
+`notify/watch.mjs` の `NOTIFY_RULES` が一覧。状態ごとに扱いが違う。
+
+| 状態 | 落ち着き待ち | 追加の条件 |
+|---|---|---|
+| `needs-answer`（質問待ち） | 6秒 | なし |
+| `needs-plan-approval`（プラン承認待ち） | 6秒 | なし |
+| `needs-approval`（承認待ち） | 6秒 | `byStatus` が真のときだけ |
+| `awaiting-reply`（返信待ち） | 2分 | `stateConfident` が真のときだけ |
+
+**質問待ちは、ほぼ発火しない。**
+実測（2026-08-06）で、Claude Code は質問を出しているあいだ
+`tool_use(AskUserQuestion)` の行をディスクに書かないことが分かった。
+書かれるのは答えたときで、それまでは直前の地の文までしか載っていない。
+
+Claude Code は assistant の1ターンを thinking / text / tool_use と
+別々の行に分けて書く。質問中はその text の行までで止まる。
+だから dangling が見つからず、2分8秒の待ちがまるごと `awaiting-reply` に見えていた。
+500ms 間隔で 494 回の観測を取り、そのあいだ一度も `tool=AskUserQuestion` が出なかった。
+ログを行860（質問の直前の地の文）で切ると、サーバーが出し続けていた
+`awaiting-reply / 応答を返し終えて停止` が理由の文字列まで完全に再現できる。
+
+**なので実際に鳴るのは `awaiting-reply` の経路。**
+質問待ちの2行は、Claude Code 側が書くようになったときに先に立って速く鳴るための備え。
+ここを消さない。
+
+`needs-approval` に条件が付いているのは、経路が2つあるため。
+
+- 登録簿の status が待ち系 ＋ 静か ＋ dangling → `byStatus` が真。Claude が自分で「動いていない」と言っている
+- dangling が15秒（`APPROVAL_MS`）放置 → `byStatus` は偽。**50秒走る Bash も同じ形になる**（実測）
+
+auto mode で Claude が自分で承認した分はそもそも止まらないので、
+`byStatus` の側だけを見れば「人に聞きに来て止まっている」ものだけが残る。
+
+### 何を「1つの待ち」と数えるか
+
+**鍵は `sessionId` ＋ `tool_use.id`。この鍵1つにつき生涯1通。**
+
+待っているツールが無い `awaiting-reply` は `tool_use.id` を持たない。
+そこは `deriveState` が出す `anchorId`（ログの最後の行の uuid）で代える。
+**セッション ID だけで鍵を作ってはいけない。** 鍵が生涯1つになり、
+1通鳴ったきり2回目以降の返信待ちが黙って落ちる。
+追記が止まっているのが返信待ちの条件なので、待っているあいだ錨は動かない。
+
+`lastActivityAt` を鍵にしてはいけない。
+`Math.max(tail.mtimeMs, 最終エントリ時刻)` で作られる値なので、
+サブエージェントが走って親ログに追記が続くと、質問は同じなのに鍵が変わる。
+
+`id` を鍵にすると、次の3つが同時に解ける。
+
+- 状態のばたつき … `registry.mjs` は書き込み途中の壊れた JSON を飛ばす。飛ぶと `ended` に落ち、次の走査で戻る。鍵が同じなら何度往復しても1通
+- セッションの復活 … PID は使い回されるので鍵に使えない。`sessionId` は `--resume` しても同じ
+- 連続した質問 … Q1 に答えてすぐ Q2 が出ても、`id` が違うので別の待ちになる
+
+### 時計とタイミング
+
+| 定数 | 既定 | 理由 |
+|---|---|---|
+| `SETTLE_MS` | 6000 | `POLL_MS` の3倍。最低2回の独立した走査で「まだ待っている」を確認する。目の前にいて即答した分はここで落ちる |
+| `IDLE_SETTLE_MS` | 120000 | 返信待ちだけの落ち着き待ち。席を外したときだけ鳴らしたいので長く取る。短くすると、目の前で少し考えているだけで鳴る。0 で返信待ちを丸ごと切れる |
+| `FLUSH_MS` | 1000 | 送信タイマ。`refresh()` とは別の時計で回す |
+| `GRACE_MS` | 10000 | 起動から10秒以内に見えた待ちは種まき（送らず既通知にする） |
+| `MAX_PER_HOUR` | 30 | 暴走止め。超えたら止めて、止めたこと自体を1通だけ送る |
+| `TIMEOUT_MS` | 5000 | `askRunning` の 1500ms は localhost 向けで、社外 HTTPS には短い |
+| 再送 | 1回・4秒後 | 429・5xx・ネットワークのみ。400・401・403 は再送しない。404・410 は1回で止める |
+| `FAIL_LIMIT` | 5 | 連続5通失敗で停止。理由を `/api/health` に出す |
+| `QUEUE_MAX` | 20 | 溢れたら古いほうを捨て、捨てた数を次に届いた通知の末尾に添える |
+
+種まきがあるのは、ログオン時の自動起動が前提だから。
+これが無いと朝ログオンするたびに昨夜からの待ちが全部飛ぶ。
+単に「30秒黙る」より優れているのは、種まきした鍵と新しい待ちの鍵が別物なので、
+起動3秒後に始まった待ちを取りこぼさない点。
+
+### 設定
+
+環境変数を優先し、無ければ `%LOCALAPPDATA%\ClaudeDeck\config.json`。
+起動時に1回だけ読む。変えたら再起動する。
+
+| 環境変数 | 既定 | 意味 |
+|---|---|---|
+| `CLAUDE_DECK_SLACK_WEBHOOK` | なし | Webhook URL。これが唯一の有効化スイッチ |
+| `CLAUDE_DECK_NOTIFY_SETTLE` | 6 | 落ち着き待ちの秒数。0 で即時 |
+| `CLAUDE_DECK_NOTIFY_IDLE` | 2 | 返信待ちの落ち着き待ちの分。0 で返信待ちを通知しない |
+| `CLAUDE_DECK_NOTIFY_REMIND` | 0 | 放置リマインドの分。0 で無効 |
+| `CLAUDE_DECK_NOTIFY_DETAIL` | full | `none` にすると質問文を落とす |
+
+```json
+{ "notify": { "slackWebhookUrl": "https://hooks.slack.com/services/...", "settleSec": 6, "idleMin": 2, "remindMin": 0, "detail": "full" } }
+```
+
+`CLAUDE_DECK_NOTIFY_IDLE` を 0 にすると、実質すべての通知が止まる。
+上に書いたとおり、実際に鳴っているのは返信待ちの経路だけだから。
+うるさいと感じたときは 0 にする前に、まず分を伸ばすほうを試す。
+
+Webhook の作り方は `docs/slack-webhook-setup.html` にある。
+
+設定ミスに気づけるよう、有効なら起動時に1行出す。URL はマスク済みしか出さない。
+自動起動されたサーバーにはターミナルで `set` した環境変数が届かないので、
+`/api/health` の `notify` が裏で動いているサーバーの設定を確かめる唯一の手段になる。
+
 ## サーバー
 
 `server.mjs`。`node:http` だけで静的配信・JSON API・SSE をやる。
@@ -198,11 +318,15 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/sessions/:id/subagents/:agentId` | サブエージェント1件の記録。応答は詳細と同じ形（`digest` ＋ `log`）。ファイルパスは返さない |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
-| `GET /api/health` | 生存確認。二重起動の判定にも使う |
+| `GET /api/health` | 生存確認。二重起動の判定にも使う。通知の設定と数えもここに出る |
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
 
 更新の押し出しは差分判定つき。`idleMs` と `lastActivityAt` は毎回変わるので比較対象から外す。
 入れてしまうと内容が同じでも毎秒 push することになる。
+
+通知の差し込みは4箇所だけ。`createNotifier()`・`refresh()` の1行・`FLUSH_MS` のタイマ・`/api/health`。
+`refresh()` の中の `notifier.observe()` は `try/catch` で囲む。これは任意ではなく必須で、
+外すと通知側のバグが `refresh()` の catch まで抜けて `broadcast('error')` になり、画面が空白になる。
 
 監視は `fs.watch` と2秒ポーリングの二重。watch が効かない環境でもポーリングで動く。
 
@@ -330,6 +454,13 @@ CSS は `public/css/` に7枚ある。`index.html` の `<link>` の並びが、�
 - **プランの mtime だけで「提出後に変わった」と断定しない。** 実測45件で、ファイルのほうが古い例が28件あった。本文の一致を主判定にする。`planWasEdited` はキーが無いことを「編集なし」と読み替えない
 - **一覧の経路（毎秒走る）に重い処理を足さない。** ここに何かを足すときは、まず「払わずに済む行」を先に落とす。サブエージェントの件数がその形で、`indexTranscripts` が `withFileTypes` でタダで拾った `hasSessionDir` を見て、`<セッションID>/` が無い行は `readdir` を1回も出さずに 0 と決める。実測 168 件中 48 件しか持っていない。全件を数えると `indexTranscripts` が 39.0ms → 78.2ms になり、一覧全体（48.8ms）を超える
 - **件数を数えるのに `listSubagents` を呼ばない。** 一覧は `countSubagents`（`readdir` 1回だけ）。`listSubagents` は 1件ごとに `stat` と `.meta.json` を読むので、詳細を開いたときだけ
+- **通知の本文に `cwd`・`logFile`・`gitBranch`・`title`・`lastPrompt` を載せない。** 載せてよいのは `project`（フォルダ名だけ）まで。`watch.mjs` の `snapshot()` が写し取る時点で落としてあるので、`message.mjs` からは載せようがない。安全装置がそこにあることを知らずに `snapshot()` へ項目を足さない
+- **Webhook の URL を戻り値のどこにも入れない。** 表に出るのは `maskWebhook()` を通したものだけ。`fetch` の失敗メッセージには URL が埋め込まれ得るので、`postToSlack` は理由を返す前に自分で `scrubError()` を通す（呼ぶ側に伏せ忘れの余地を残さない）。弾いた URL も返さない。別サービスの鍵を貼り間違えている可能性がある
+- **送り先は `hooks.slack.com` に固定する。** タイポで別のホストへ業務内容を POST する事故を、機能として防ぐ。この検証を緩めない
+- **`notify/watch.mjs` に I/O を入れない。** 時刻も外から `now` で渡す。ここが純粋だから「送るかどうか」の全分岐をテストで通せる。`observe()` は同期に保つ（`await` を挟むと `refresh()` が `refreshing` を立てている区間が延びる）
+- **返信待ちの鍵をセッション ID だけで作らない。** `anchorId`（ログの最後の行の uuid）を混ぜる。混ぜないと鍵が生涯1つになり、1通鳴ったきり2回目以降が黙って落ちる。この壊れ方はテストを書いていないと気づけない（鳴らないだけで、どこにもエラーが出ない）
+- **`needs-approval` を `byStatus` の裏づけ無しで通知しない。** しきい値だけが根拠の側は、長く走る Bash と区別がつかない（実測で50秒の Bash が同じ形になった）。auto mode で Claude が自分で承認した分を誤報として送ることになる
+- **通知済みの記録をファイルに残さない。** メモリだけで足りる。種まきで重複は消えるので、書き込み失敗・壊れた JSON・古い記録の掃除という失敗経路を3つ増やす価値がない
 
 ## 要約を AI に差し替えるとき
 

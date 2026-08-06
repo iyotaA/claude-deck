@@ -297,3 +297,80 @@ test('ボールの持ち主の割り当て', () => {
   assert.equal(ballOf('needs-approval'), 'master');
   assert.equal(ballOf('awaiting-reply'), 'master');
 });
+
+// --- 通知が使う2つの手がかり ---
+//
+// anchorId … 待っているツールが無い状態でも「同じ待ちかどうか」を数えるための錨
+// byStatus … 承認待ちの2つの経路（登録簿の裏づけ / しきい値だけ）の見分け
+
+test('錨はログの最後の行の uuid', () => {
+  const s = deriveState({
+    registry: reg({ status: 'idle' }),
+    tail: tail([say('はじめ', { uuid: 'u-1' }), say('おわり', { ms: 1000, uuid: 'u-2' })]),
+    now: nowAfter(60_000),
+  });
+  assert.equal(s.kind, 'awaiting-reply');
+  assert.equal(s.anchorId, 'u-2');
+});
+
+test('ターンが進めば錨も変わる', () => {
+  // ここが変わらないと、通知の鍵がセッションに1つきりになって
+  // 2回目以降の返信待ちが黙って落ちる
+  const first = [say('1ターン目', { uuid: 'u-1' })];
+  const a = deriveState({ registry: reg({ status: 'idle' }), tail: tail(first), now: nowAfter(60_000) });
+
+  const second = [...first, prompt('つぎ', { ms: 1000 }), say('2ターン目', { ms: 2000, uuid: 'u-3' })];
+  const b = deriveState({ registry: reg({ status: 'idle' }), tail: tail(second), now: nowAfter(60_000) });
+
+  assert.equal(a.anchorId, 'u-1');
+  assert.equal(b.anchorId, 'u-3');
+});
+
+test('待っているあいだ錨は動かない', () => {
+  // 追記が止まっているのが返信待ちの条件なので、時刻を進めても錨は同じ
+  const entries = [say('おわり', { uuid: 'u-9' })];
+  const early = deriveState({ registry: reg({ status: 'idle' }), tail: tail(entries), now: nowAfter(5000) });
+  const late = deriveState({ registry: reg({ status: 'idle' }), tail: tail(entries), now: nowAfter(600_000) });
+  assert.equal(early.anchorId, late.anchorId);
+});
+
+test('登録簿が待ちと言っている承認待ちには裏づけが付く', () => {
+  const s = deriveState({
+    registry: reg({ status: 'idle' }),
+    tail: tail([call('Bash', { command: 'npm run build' })]),
+    now: nowAfter(QUIET_MS + 1000),
+  });
+  assert.equal(s.kind, 'needs-approval');
+  assert.equal(s.byStatus, true);
+});
+
+test('しきい値だけが根拠の承認待ちには裏づけが付かない', () => {
+  // 長く走る Bash がこの形になる。通知はこちらを送らない
+  const s = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('Bash', { command: 'npm run build' })]),
+    now: nowAfter(APPROVAL_MS + 1000),
+  });
+  assert.equal(s.kind, 'needs-approval');
+  assert.equal(s.byStatus, false);
+});
+
+test('実行中には裏づけを立てない', () => {
+  const s = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('Bash', { command: 'sleep 50' })]),
+    now: nowAfter(1000),
+  });
+  assert.equal(s.kind, 'running');
+  assert.equal(s.byStatus, false);
+});
+
+test('錨が取れない形でも落ちない', () => {
+  const s = deriveState({
+    registry: reg({ status: 'idle' }),
+    tail: tail([{ type: 'assistant', timestamp: at(0), message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] } }]),
+    now: nowAfter(60_000),
+  });
+  // 取れなかったものを空文字などで埋めない。無いものは null
+  assert.equal(s.anchorId, null);
+});
