@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slack の Incoming Webhook を作る — ClaudeDeck</title>
+<style>
+/* ==========================================================================
+   トークン
+   面 3 段（paper / surface / surface-2）、文字 3 段（ink / ink-2 / ink-3）、
+   線 2 段（line / line-soft）、強調 2 段（accent / accent-2）、
+   優先度 4 段（p-must / p-high / p-rec / p-opt）と ok。
+   コンポーネントは必ずここ経由で色を取る。直書きしない。
+   ========================================================================== */
+:root {
+  --paper:      #f2f5f7;
+  --surface:    #ffffff;
+  --surface-2:  #e9eef2;
+  --ink:        #10202c;
+  --ink-2:      #4a5c6a;
+  --ink-3:      #74848f;
+  --line:       #d3dde4;
+  --line-soft:  #e3eaef;
+  --accent:     #14568c;
+  --accent-2:   #e4eef7;
+  --p-must:     #b8322a;
+  --p-high:     #b5601a;
+  --p-rec:      #8a6c0d;
+  --p-opt:      #64757f;
+  --ok:         #1d6b4f;
+
+  --f-display: "BIZ UDPGothic", "Yu Gothic UI", "Meiryo", "Hiragino Kaku Gothic ProN", sans-serif;
+  --f-body:    "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+  --f-mono:    Consolas, "Cascadia Mono", "SFMono-Regular", "Courier New", monospace;
+
+  color-scheme: light;
+}
+
+/* OS の設定を既定の合図にする */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper:      #0d171e;
+    --surface:    #14232d;
+    --surface-2:  #1b2f3c;
+    --ink:        #e4ecf2;
+    --ink-2:      #9bb0be;
+    --ink-3:      #7b909e;
+    --line:       #263b49;
+    --line-soft:  #1e303c;
+    --accent:     #6fb2e8;
+    --accent-2:   #16303f;
+    --p-must:     #f2736a;
+    --p-high:     #e89b54;
+    --p-rec:      #d7b646;
+    --p-opt:      #8a9aa6;
+    --ok:         #57bf94;
+
+    color-scheme: dark;
+  }
+}
+
+/* 閲覧側の切替が両方向で勝つようにする。片方だけだと切り戻せない */
+:root[data-theme="dark"] {
+  --paper:      #0d171e;
+  --surface:    #14232d;
+  --surface-2:  #1b2f3c;
+  --ink:        #e4ecf2;
+  --ink-2:      #9bb0be;
+  --ink-3:      #7b909e;
+  --line:       #263b49;
+  --line-soft:  #1e303c;
+  --accent:     #6fb2e8;
+  --accent-2:   #16303f;
+  --p-must:     #f2736a;
+  --p-high:     #e89b54;
+  --p-rec:      #d7b646;
+  --p-opt:      #8a9aa6;
+  --ok:         #57bf94;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --paper:      #f2f5f7;
+  --surface:    #ffffff;
+  --surface-2:  #e9eef2;
+  --ink:        #10202c;
+  --ink-2:      #4a5c6a;
+  --ink-3:      #74848f;
+  --line:       #d3dde4;
+  --line-soft:  #e3eaef;
+  --accent:     #14568c;
+  --accent-2:   #e4eef7;
+  --p-must:     #b8322a;
+  --p-high:     #b5601a;
+  --p-rec:      #8a6c0d;
+  --p-opt:      #64757f;
+  --ok:         #1d6b4f;
+
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.85;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ==========================================================================
+   外枠。目次と本文の 2 カラム
+   minmax(0,1fr) と min-width:0 は外さない。外すと表が本文ごと横に伸びる
+   ========================================================================== */
+.page {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  gap: 3rem;
+  max-width: 74rem;
+  margin: 0 auto;
+  padding: 0 1.75rem 6rem;
+  align-items: start;
+}
+
+/* ---------- 目次（左固定） ---------- */
+.toc {
+  position: sticky;
+  top: 0;
+  max-height: 100vh;
+  overflow-y: auto;
+  padding: 2.5rem 0;
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+.toc-label {
+  font-family: var(--f-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--line);
+  display: block;
+}
+.toc ol {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  counter-reset: toc;
+}
+.toc li { counter-increment: toc; }
+.toc a {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr;
+  gap: 0.3rem;
+  padding: 0.3rem 0.4rem;
+  color: var(--ink-2);
+  text-decoration: none;
+  border-radius: 3px;
+}
+.toc a::before {
+  content: counter(toc, decimal-leading-zero);
+  font-family: var(--f-mono);
+  font-size: 0.76rem;
+  color: var(--ink-3);
+}
+.toc a:hover { background: var(--accent-2); color: var(--accent); }
+.toc a:hover::before { color: var(--accent); }
+
+/* ---------- 本文 ---------- */
+main { padding-top: 2.5rem; min-width: 0; }
+
+.masthead {
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 1.5rem;
+  margin-bottom: 2.5rem;
+  background-image:
+    linear-gradient(to right, var(--line-soft) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--line-soft) 1px, transparent 1px);
+  background-size: 1.25rem 1.25rem;
+  background-position: right -0.5rem top -0.5rem;
+  background-repeat: repeat;
+}
+.masthead > * { background: transparent; }
+.eyebrow {
+  font-family: var(--f-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+  margin: 0 0 0.5rem;
+}
+h1 {
+  font-family: var(--f-display);
+  font-size: clamp(1.7rem, 4vw, 2.5rem);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.75rem;
+  text-wrap: balance;
+}
+.lede {
+  margin: 0;
+  max-width: 46rem;
+  color: var(--ink-2);
+  font-size: 1.02rem;
+}
+.meta {
+  margin: 0.9rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.4rem;
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  color: var(--ink-2);
+}
+.meta b { color: var(--ink-3); font-weight: 400; padding-right: 0.4rem; }
+
+section { margin-bottom: 3.5rem; scroll-margin-top: 1.5rem; }
+
+h2 {
+  font-family: var(--f-display);
+  font-size: 1.4rem;
+  line-height: 1.4;
+  margin: 0 0 1.25rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: 2.4rem 1fr;
+  gap: 0.4rem;
+  align-items: baseline;
+  text-wrap: balance;
+}
+h2 .num {
+  font-family: var(--f-mono);
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+h3 {
+  font-family: var(--f-display);
+  font-size: 1.05rem;
+  margin: 2rem 0 0.75rem;
+}
+p { margin: 0 0 1rem; max-width: 46rem; }
+main ul, main ol { margin: 0 0 1rem; padding-left: 1.4rem; max-width: 46rem; }
+main li { margin-bottom: 0.15rem; }
+a { color: var(--accent); }
+a:focus-visible, .toc a:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+strong { font-weight: 700; }
+
+/* ---------- 表 ---------- */
+.scroll {
+  overflow-x: auto;
+  margin: 0 0 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 30rem;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+th, td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid var(--line-soft);
+  line-height: 1.65;
+}
+thead th {
+  background: var(--surface-2);
+  font-family: var(--f-display);
+  font-size: 0.82rem;
+  color: var(--ink);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+tbody tr:last-child td { border-bottom: none; }
+td.num, th.num { font-family: var(--f-mono); white-space: nowrap; }
+
+/* ---------- コード ---------- */
+pre {
+  overflow-x: auto;
+  margin: 0 0 1.5rem;
+  padding: 1rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+  line-height: 1.7;
+  color: var(--ink);
+}
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+code {
+  font-family: var(--f-mono);
+  font-size: 0.88em;
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+  padding: 0.08em 0.32em;
+  word-break: break-word;
+}
+
+/* ---------- ノート ---------- */
+.note {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 1rem 1.15rem;
+  margin: 0 0 1.5rem;
+  max-width: 46rem;
+}
+.note.warn { border-left-color: var(--p-must); }
+.note.good { border-left-color: var(--ok); }
+.note > :last-child { margin-bottom: 0; }
+.note-title {
+  font-family: var(--f-display);
+  font-size: 0.92rem;
+  margin: 0 0 0.4rem;
+  display: block;
+}
+
+/* ---------- 優先度・区分バッジ ---------- */
+.badge {
+  display: inline-block;
+  font-family: var(--f-display);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  padding: 0.05rem 0.5rem;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.b-must { color: var(--p-must); }
+.b-high { color: var(--p-high); }
+.b-rec  { color: var(--p-rec); }
+.b-opt  { color: var(--p-opt); }
+.b-ok   { color: var(--ok); }
+.b-none { color: var(--ink-3); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 1.5rem; padding: 0; list-style: none; }
+.chips li {
+  font-size: 0.85rem;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  margin: 0;
+}
+
+/* ---------- フロー ---------- */
+.flow { list-style: none; margin: 0 0 1.5rem; padding: 0; max-width: 46rem; }
+.flow li {
+  display: grid;
+  grid-template-columns: 4.4rem 1fr;
+  gap: 0.8rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px dashed var(--line);
+  margin: 0;
+}
+.flow li:last-child { border-bottom: none; }
+.flow .step {
+  font-family: var(--f-mono);
+  font-size: 0.8rem;
+  color: var(--accent);
+  padding-top: 0.2rem;
+  white-space: nowrap;
+}
+.flow .what { font-family: var(--f-display); }
+.flow .sub { color: var(--ink-2); font-size: 0.9rem; display: block; }
+.flow li.opt .step { color: var(--ink-3); }
+
+/* ---------- 折りたたみ ---------- */
+details {
+  border-bottom: 1px solid var(--line);
+  max-width: 46rem;
+}
+details:first-of-type { border-top: 1px solid var(--line); }
+summary {
+  cursor: pointer;
+  padding: 0.7rem 0.2rem;
+  font-family: var(--f-display);
+  font-size: 0.96rem;
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1.1rem 1fr;
+  gap: 0.4rem;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: "+";
+  font-family: var(--f-mono);
+  color: var(--accent);
+}
+details[open] > summary::before { content: "\2212"; }
+details > :not(summary) { padding-left: 1.5rem; padding-bottom: 0.3rem; }
+
+hr { border: none; border-top: 1px solid var(--line); margin: 3rem 0; }
+
+.foot {
+  color: var(--ink-2);
+  font-size: 0.88rem;
+  max-width: 46rem;
+}
+
+/* ---------- 狭い窓 ---------- */
+@media (max-width: 60rem) {
+  .page { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .toc {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding: 2rem 0 0;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 1rem;
+  }
+  .toc ol { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); }
+  main { padding-top: 1.5rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+@media print {
+  body { background: #fff; color: #000; }
+  .page { display: block; max-width: none; padding: 0; }
+  .toc { position: static; max-height: none; overflow: visible; }
+  pre, .scroll, .note { break-inside: avoid; }
+  details { display: block; }
+  details > :not(summary) { display: block !important; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<nav class="toc" aria-label="目次">
+  <span class="toc-label">Contents</span>
+  <ol>
+    <li><a href="#s1">この手順は何か</a></li>
+    <li><a href="#s2">Webhook を作る</a></li>
+    <li><a href="#s3">送り先をどこにするか</a></li>
+    <li><a href="#s4">動くかどうか確かめる</a></li>
+    <li><a href="#s5">スマホに届くようにする</a></li>
+    <li><a href="#s6">URL の扱い</a></li>
+    <li><a href="#s7">ClaudeDeck 側の設定</a></li>
+    <li><a href="#s8">詰まったとき</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<header class="masthead">
+  <p class="eyebrow">SETUP GUIDE</p>
+  <h1>Slack の Incoming Webhook を作る</h1>
+  <p class="lede">
+    ClaudeDeck が「あなたの返事待ち」を Slack へ飛ばすための下準備です。
+    Slack 側に送り先をひとつ作り、その URL を控えるところまでを説明します。
+  </p>
+  <ul class="meta">
+    <li><b>対象</b>ClaudeDeck の通知機能</li>
+    <li><b>作成日</b>2026-08-06</li>
+    <li><b>所要</b>10 分ほど</li>
+  </ul>
+</header>
+
+<!-- ========================= 1 ========================= -->
+<section id="s1">
+<h2><span class="num">01</span><span>この手順は何か</span></h2>
+
+<p>
+  ClaudeDeck は、待っているセッションを一覧で見せる画面です。
+  ただし見るには画面を開いている必要があります。
+</p>
+
+<p>
+  席を外しているあいだにセッションが質問を出して止まると、戻るまで誰も気づきません。
+  そこで Slack へ通知を飛ばします。
+</p>
+
+<h3>Incoming Webhook とは</h3>
+
+<p>
+  Slack が発行する、投函口の住所のようなものです。
+  郵便受けの住所を知っている人は誰でも投げ込めます。
+</p>
+
+<p>
+  逆向きには使えません。
+  この URL から Slack の中を読むことはできません。
+</p>
+
+<div class="note good">
+  <span class="note-title">安心してよいこと</span>
+  <p>
+    一方通行なので、Slack 側から手元のパソコンをのぞかれることはありません。
+    ClaudeDeck が外へ出す通信も、この投函口への送信だけです。
+  </p>
+</div>
+
+<h3>要るもの</h3>
+
+<ul>
+  <li>Slack ワークスペースのアカウント</li>
+  <li>ブラウザ</li>
+  <li>通知を受け取るチャンネル、または自分あての DM</li>
+</ul>
+</section>
+
+<!-- ========================= 2 ========================= -->
+<section id="s2">
+<h2><span class="num">02</span><span>Webhook を作る</span></h2>
+
+<ol class="flow">
+  <li>
+    <span class="step">Step 1</span>
+    <span><span class="what"><a href="https://api.slack.com/apps">api.slack.com/apps</a> を開く</span>
+    <span class="sub">Slack にログインしているブラウザで開きます。</span></span>
+  </li>
+  <li>
+    <span class="step">Step 2</span>
+    <span><span class="what">Create New App から From scratch を選ぶ</span>
+    <span class="sub">名前は ClaudeDeck などで構いません。使うワークスペースも選びます。</span></span>
+  </li>
+  <li>
+    <span class="step">Step 3</span>
+    <span><span class="what">左メニューの Incoming Webhooks を開き、スイッチを On にする</span>
+    <span class="sub">既定では Off です。On にしないと次のボタンが出ません。</span></span>
+  </li>
+  <li>
+    <span class="step">Step 4</span>
+    <span><span class="what">Add New Webhook to Workspace を押す</span>
+    <span class="sub">投稿先のチャンネルを選んで Allow を押します。</span></span>
+  </li>
+  <li>
+    <span class="step">Step 5</span>
+    <span><span class="what">表示された URL をコピーする</span>
+    <span class="sub"><code>https://hooks.slack.com/services/</code> ではじまる長い文字列です。</span></span>
+  </li>
+</ol>
+
+<div class="note warn">
+  <span class="note-title">チャンネルはあとから変えられません</span>
+  <p>
+    Webhook 1 本につき、投稿先はひとつに固定されます。
+    別のチャンネルへ送りたくなったら、Step 4 からもう 1 本作ります。
+  </p>
+  <p>
+    最初にどこへ送るかを決めてから進めてください。
+    決め方は次の節にあります。
+  </p>
+</div>
+</section>
+
+<!-- ========================= 3 ========================= -->
+<section id="s3">
+<h2><span class="num">03</span><span>送り先をどこにするか</span></h2>
+
+<p>
+  通知には、Claude から聞かれた質問の本文がそのまま流れます。
+  つまり業務の中身が見える場所に置くことになります。
+</p>
+
+<div class="scroll">
+<table>
+  <thead>
+    <tr><th>送り先</th><th>向き</th><th>理由</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>自分だけの private チャンネル</td>
+      <td><span class="badge b-ok">おすすめ</span></td>
+      <td>ほかの人に見えません。あとから見返せます。チャンネル単位で通知の強さを変えられます。</td>
+    </tr>
+    <tr>
+      <td>自分あての DM</td>
+      <td><span class="badge b-rec">使える</span></td>
+      <td>作る手間がかかりません。ただし DM 一覧に埋もれやすく、あとから探しにくくなります。</td>
+    </tr>
+    <tr>
+      <td>チームの共有チャンネル</td>
+      <td><span class="badge b-must">やめる</span></td>
+      <td>質問の本文が全員に流れます。自分あての通知でもあるので、まわりにも通知が飛びます。</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  private チャンネルを新しく作る場合は、Slack で「新規チャンネル」から作ります。
+  名前は <code>my-claude</code> のように、自分だけが分かるもので構いません。
+</p>
+
+<div class="note">
+  <span class="note-title">会社の Slack では止められることがあります</span>
+  <p>
+    アプリの作成が管理者の承認制になっている場合があります。
+    Step 2 で先へ進めないときは、この設定が原因です。
+  </p>
+  <p>
+    その場合は管理者に申請します。
+    詳しくは 08 の「詰まったとき」を見てください。
+  </p>
+</div>
+</section>
+
+<!-- ========================= 4 ========================= -->
+<section id="s4">
+<h2><span class="num">04</span><span>動くかどうか確かめる</span></h2>
+
+<p>
+  URL を控えたら、その場で送れるか試します。
+  PowerShell に次を貼り付けてください。
+</p>
+
+<pre><code>$url = 'ここに Step 5 でコピーした URL を貼る'
+$body = [System.Text.Encoding]::UTF8.GetBytes('{"text":"ClaudeDeck テスト"}')
+Invoke-RestMethod -Uri $url -Method Post -ContentType 'application/json; charset=utf-8' -Body $body</code></pre>
+
+<div class="note good">
+  <span class="note-title">成功したとき</span>
+  <p>
+    画面に <code>ok</code> とだけ返り、Slack のチャンネルに「ClaudeDeck テスト」が届きます。
+    これで Slack 側の準備は終わりです。
+  </p>
+</div>
+
+<h3>なぜ本文をバイト列にしているのか</h3>
+
+<p>
+  文字列のまま渡すと、PowerShell の版によっては日本語が化けて届きます。
+  UTF-8 のバイト列に直してから渡すと、どの版でも同じ結果になります。
+</p>
+
+<p>
+  うまくいかないときの返り値は 08 にまとめてあります。
+</p>
+</section>
+
+<!-- ========================= 5 ========================= -->
+<section id="s5">
+<h2><span class="num">05</span><span>スマホに届くようにする</span></h2>
+
+<p>
+  Webhook を作っただけでは、スマホが鳴るとは限りません。
+  Slack 側の通知設定が別にあるためです。
+</p>
+
+<p>
+  席を外しているときに気づくのが目的なので、ここも合わせて確認します。
+</p>
+
+<ul>
+  <li>チャンネルの通知を「すべての新規メッセージ」にする</li>
+  <li>スマホの Slack アプリで通知を許可する</li>
+  <li>おやすみモードの時間帯を確認する</li>
+  <li>パソコンを使っているあいだはモバイル通知を止める設定を切る</li>
+</ul>
+
+<p>
+  最後のひとつは見落としやすい項目です。
+  Slack の既定では、パソコンで操作しているあいだスマホへ送りません。
+</p>
+
+<p>
+  席を立った直後に届いてほしいので、この設定は短めにしておきます。
+  Slack の設定から「通知」を開き、モバイルへ送るまでの待ち時間を変えられます。
+</p>
+</section>
+
+<!-- ========================= 6 ========================= -->
+<section id="s6">
+<h2><span class="num">06</span><span>URL の扱い</span></h2>
+
+<div class="note warn">
+  <span class="note-title">この URL は鍵そのものです</span>
+  <p>
+    ユーザー名もパスワードもありません。
+    URL を知っている人は、誰でもそのチャンネルへ好きな内容を投稿できます。
+  </p>
+</div>
+
+<p>
+  守ることは 4 つです。
+</p>
+
+<ul>
+  <li>チャットに貼らない。Claude に相談するときも貼らない</li>
+  <li>Git にコミットしない。設定ファイルは <code>.gitignore</code> の外に置かない</li>
+  <li>スクリーンショットに写さない</li>
+  <li>人に渡さない。必要なら相手に自分の分を作ってもらう</li>
+</ul>
+
+<h3>ClaudeDeck の画面では伏せますが、ログには残ります</h3>
+
+<p>
+  ClaudeDeck は原文を返す口で、この形の URL を「（伏せました）」に置き換えます。
+  ただしこれは画面に出さないだけの処理です。
+</p>
+
+<p>
+  Claude Code の会話ログそのものには、貼った文字がそのまま残ります。
+  だから貼らないことが対策になります。
+</p>
+
+<h3>もし漏らしてしまったとき</h3>
+
+<p>
+  古い Webhook を消せば、その URL は使えなくなります。
+  <a href="https://api.slack.com/apps">api.slack.com/apps</a> から作ったアプリを開き、Incoming Webhooks の一覧で削除します。
+</p>
+
+<p>
+  そのあと Step 4 から作り直し、新しい URL に差し替えます。
+</p>
+</section>
+
+<!-- ========================= 7 ========================= -->
+<section id="s7">
+<h2><span class="num">07</span><span>ClaudeDeck 側の設定</span></h2>
+
+<div class="note">
+  <span class="note-title">通知の本体はまだ入っていません</span>
+  <p>
+    この節に書いた設定は、通知機能の実装が入ってから有効になります。
+    いま設定しても害はありませんが、まだ何も飛びません。
+  </p>
+</div>
+
+<p>
+  設定の入れ方は 2 通りあります。
+  環境変数が優先で、無ければ設定ファイルを読みます。
+</p>
+
+<h3>環境変数で入れる</h3>
+
+<pre><code>setx CLAUDE_DECK_SLACK_WEBHOOK "コピーした URL"</code></pre>
+
+<p>
+  <code>setx</code> は次に開いたウィンドウから効きます。
+  自動起動しているサーバーには届かないので、いちど終了させて起動し直します。
+</p>
+
+<h3>設定ファイルで入れる</h3>
+
+<p>
+  置き場所は <code>%LOCALAPPDATA%\ClaudeDeck\config.json</code> です。
+  自動起動のログと同じフォルダになります。
+</p>
+
+<pre><code>{
+  "notify": {
+    "slackWebhookUrl": "コピーした URL",
+    "settleSec": 6,
+    "remindMin": 0,
+    "detail": "full"
+  }
+}</code></pre>
+
+<div class="scroll">
+<table>
+  <thead>
+    <tr><th>キー</th><th>既定</th><th>意味</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>slackWebhookUrl</code></td><td class="num">なし</td><td>Webhook の URL。これが入っているときだけ通知が動きます。</td></tr>
+    <tr><td><code>settleSec</code></td><td class="num">6</td><td>待ちに入ってから送るまでの秒数。目の前にいてすぐ答えた分は送りません。</td></tr>
+    <tr><td><code>remindMin</code></td><td class="num">0</td><td>放置したときの再通知までの分。0 で無効です。</td></tr>
+    <tr><td><code>detail</code></td><td class="num">full</td><td><code>none</code> にすると質問の本文を落とし、状態だけ送ります。</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>効いているかを見る</h3>
+
+<p>
+  設定したのに動かない、という事故がいちばん起きやすい場所です。
+  次の口で確かめられます。
+</p>
+
+<pre><code>curl http://127.0.0.1:4317/api/health</code></pre>
+
+<p>
+  返ってくる中身の <code>notify.enabled</code> が <code>true</code> になっていれば読めています。
+  URL は伏せた形でしか出ません。
+</p>
+</section>
+
+<!-- ========================= 8 ========================= -->
+<section id="s8">
+<h2><span class="num">08</span><span>詰まったとき</span></h2>
+
+<details>
+<summary>Create New App が押せない。作っても承認待ちになる</summary>
+<p>
+  会社のワークスペースでは、アプリの追加が管理者の承認制になっていることがあります。
+  この場合は自分だけでは進められません。
+</p>
+<p>
+  申請するときは、次を添えると通りやすくなります。
+</p>
+<ul>
+  <li>用途は自分あての通知だけであること</li>
+  <li>投稿先は自分の private チャンネル 1 つに限ること</li>
+  <li>Incoming Webhook は投稿専用で、Slack の中を読む権限を持たないこと</li>
+</ul>
+</details>
+
+<details>
+<summary>投稿先のチャンネルを変えたい</summary>
+<p>
+  既存の Webhook の投稿先は変えられません。
+  Step 4 の Add New Webhook to Workspace からもう 1 本作り、新しい URL に差し替えます。
+</p>
+<p>
+  古いほうは使わなくなるので、一覧から削除しておきます。
+</p>
+</details>
+
+<details>
+<summary>invalid_payload が返る</summary>
+<p>
+  送った中身が JSON として読めていません。
+  引用符の対応が崩れているか、日本語が化けている可能性があります。
+</p>
+<p>
+  04 のコードをそのまま貼り直し、URL の部分だけを差し替えてください。
+</p>
+</details>
+
+<details>
+<summary>no_service や 404 が返る</summary>
+<p>
+  URL が違うか、その Webhook がすでに削除されています。
+  コピーしたときに末尾が欠けていないかを確かめてください。
+</p>
+<p>
+  それでも直らないときは、作り直したほうが早いです。
+</p>
+</details>
+
+<details>
+<summary>channel_not_found が返る</summary>
+<p>
+  投稿先のチャンネルが消えているか、アプリがそのチャンネルから外されています。
+  チャンネルを作り直した場合は、Webhook も作り直しになります。
+</p>
+</details>
+
+<details>
+<summary>社内のプロキシを通さないと外へ出られない</summary>
+<p>
+  ClaudeDeck は外部のパッケージを使わない方針なので、プロキシには対応していません。
+  Node.js の <code>fetch</code> は <code>HTTPS_PROXY</code> を見ないためです。
+</p>
+<p>
+  04 のテストが失敗し、ブラウザからは Slack が見えるという場合は、これが原因の可能性があります。
+</p>
+</details>
+
+<details>
+<summary>テストは届いたのに、スマホが鳴らない</summary>
+<p>
+  Slack 側の通知設定です。
+  05 の 4 項目をひとつずつ確かめてください。
+</p>
+<p>
+  とくに「パソコンを使っているあいだはモバイルへ送らない」の待ち時間が長いと、席を立った直後には鳴りません。
+</p>
+</details>
+
+<hr>
+
+<p class="foot">
+  ここまでで Slack 側の準備は終わりです。
+  控えた URL は 07 の手順で入れ、通知の本体が入ったら 04 と同じ形で届くようになります。
+</p>
+</section>
+
+</main>
+</div>
+</body>
+</html>
