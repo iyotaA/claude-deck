@@ -67,6 +67,7 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `entry.test.mjs` | 原文を出すときに伏せる・切る判断 |
 | `plans.test.mjs` | プランのパス検証と本文の突き合わせ |
 | `subagents.test.mjs` | サブエージェントの記録と呼び出しの突き合わせ |
+| `appdata.test.mjs` | 書き込み先の解決。ログと設定が同じ場所を指すこと |
 
 `digest.test.mjs` が呼ぶのは `buildDigest` だけ。
 `parse/digest/` の4枚はその中から呼ばれるので、入口経由で見ていることになる。
@@ -101,7 +102,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` `plans` `subagents` |
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） |
-| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） |
+| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） `appdata`（書き込み先） |
 | `src/os/` | OS を叩く | `focus` |
 
 流れは `read` → `parse` → `view`。
@@ -307,7 +308,7 @@ CSS は `public/css/` に7枚ある。`index.html` の `<link>` の並びが、�
 
 このプロジェクトは制約のほうが設計を決めている。以下は理由つきで守る。
 
-- **`~/.claude` 配下へ書き込まない。** 読み取り専用が前提。ログの出力先は `%LOCALAPPDATA%\ClaudeDeck\`
+- **`~/.claude` 配下へ書き込まない。** 読み取り専用が前提。書き込み先は `%LOCALAPPDATA%\ClaudeDeck\`。場所の決め方は `src/shared/appdata.mjs` の1箇所に寄せてある（2箇所に書くと必ず片方が古くなり、設定したのに読まれない事故になる）
 - **listen は `127.0.0.1` 固定。** 会話ログに業務内容が入るため、社内ネットから見えてはいけない
 - **依存パッケージを増やさない。** 同僚にフォルダごと渡して動くことが要件。`dependencies` は空のまま
 - **未知の形で落ちない。** 読んでいるのは Claude Code の内部データで公開仕様ではない。未知のキー・未知の `status`・書き込み途中の壊れた JSON が来ても、黙って飛ばして進む

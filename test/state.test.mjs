@@ -49,17 +49,61 @@ test('AskUserQuestion が結果待ちなら、status が busy で追記が直近
   });
   assert.equal(s.kind, 'needs-answer');
   assert.equal(s.confident, true);
-  assert.deepEqual(s.waitingFor, { tool: 'AskUserQuestion', detail: 'どっちにする？' });
+  assert.deepEqual(s.waitingFor, { id: 'q1', tool: 'AskUserQuestion', detail: 'どっちにする？' });
 });
 
 test('ExitPlanMode が結果待ちならプラン承認待ち', () => {
   const s = deriveState({
     registry: reg({ status: 'busy' }),
-    tail: tail([call('ExitPlanMode', { plan: '# 手順' }, { id: 'p1' })]),
+    tail: tail([call('ExitPlanMode', { plan: '# 手順\n1. やる' }, { id: 'p1' })]),
     now: nowAfter(200),
   });
   assert.equal(s.kind, 'needs-plan-approval');
   assert.equal(s.confident, true);
+  // 入力は {plan} だけ。既定の枝では拾えず、ここが長らく null になっていた
+  assert.deepEqual(s.waitingFor, { id: 'p1', tool: 'ExitPlanMode', detail: '# 手順 1. やる' });
+});
+
+test('プラン本文が無くてもプラン承認待ちは成り立つ', () => {
+  // 本文は結果側にしか無い形が実物にある（digest はそちらから拾っている）。
+  // 一覧は tool_use しか見ないので、説明が取れないことがある
+  const s = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('ExitPlanMode', {}, { id: 'p1' })]),
+    now: nowAfter(200),
+  });
+  assert.equal(s.kind, 'needs-plan-approval');
+  assert.deepEqual(s.waitingFor, { id: 'p1', tool: 'ExitPlanMode', detail: null });
+});
+
+test('waitingFor は tool_use の id を持ち回す', () => {
+  // 同じ待ちを二重に数えないための鍵。呼び出しごとに一意
+  const s = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('AskUserQuestion', { questions: [{ question: 'どれ？' }] }, { id: 'toolu_abc123' })]),
+    now: nowAfter(200),
+  });
+  assert.equal(s.waitingFor.id, 'toolu_abc123');
+});
+
+test('id を持たない呼び出しでも落ちず、id は不明として null を返す', () => {
+  // 実測したログには必ず入っていたが、読んでいるのは公開仕様ではない。
+  // 無い形が来ても判定そのものは成り立たせる（call ヘルパーは既定の id を入れるので生で組む）
+  const s = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([{
+      type: 'assistant',
+      uuid: 'a1',
+      timestamp: at(0),
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', name: 'AskUserQuestion', input: { questions: [{ question: 'どれ？' }] } }],
+      },
+    }]),
+    now: nowAfter(200),
+  });
+  assert.equal(s.kind, 'needs-answer');
+  assert.equal(s.waitingFor.id, null);
 });
 
 test('登録簿が待ち系 ＋ 追記停止 ＋ 結果待ちあり → 承認待ち', () => {
@@ -72,7 +116,7 @@ test('登録簿が待ち系 ＋ 追記停止 ＋ 結果待ちあり → 承認�
   assert.equal(s.confident, true);
   assert.match(s.reason, /status が idle/);
   // 待っている中身は description を優先して出す。command より人が読んで分かりやすいため
-  assert.deepEqual(s.waitingFor, { tool: 'Bash', detail: 'テストを走らせる' });
+  assert.deepEqual(s.waitingFor, { id: 't1', tool: 'Bash', detail: 'テストを走らせる' });
 });
 
 test('登録簿が待ち系 ＋ 追記停止 ＋ 結果待ちなし → 返信待ち', () => {
@@ -104,7 +148,7 @@ test('結果待ちのまま APPROVAL_MS を超えたら承認待ち', () => {
   });
   assert.equal(s.kind, 'needs-approval');
   assert.equal(s.confident, true);
-  assert.deepEqual(s.waitingFor, { tool: 'Edit', detail: 'C:\\work\\a.mjs' });
+  assert.deepEqual(s.waitingFor, { id: 't1', tool: 'Edit', detail: 'C:\\work\\a.mjs' });
 });
 
 test('結果待ちでも APPROVAL_MS 未満なら実行中（長く走る Bash と区別する）', () => {
@@ -234,7 +278,7 @@ test('Skill の結果待ちは スキル名と引数を出す', () => {
     tail: tail([call('Skill', { skill: 'pr-review', args: '1234' }, { id: 't1' })]),
     now: nowAfter(5000),
   });
-  assert.deepEqual(s.waitingFor, { tool: 'Skill', detail: 'pr-review (1234)' });
+  assert.deepEqual(s.waitingFor, { id: 't1', tool: 'Skill', detail: 'pr-review (1234)' });
 });
 
 test('返しうる状態はすべてラベルと並び順を持っている', () => {

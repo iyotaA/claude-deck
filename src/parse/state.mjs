@@ -125,7 +125,21 @@ export function deriveState({ registry, tail, now = Date.now() }) {
     lastActivityAt,
     statusRaw,
     // 判定の根拠を持たせておく。表示の説明にも、しきい値を詰めるときの手がかりにも使う
-    waitingFor: dangling ? { tool: dangling.name, detail: describeTool(dangling.name, dangling.input) } : null,
+    waitingFor: dangling
+      ? {
+        // tool_use の id。呼び出しごとに一意なので「同じ待ちかどうか」の鍵になる。
+        //
+        // 通知はこの id で重複を弾く。lastActivityAt では弾けない。
+        // あれは Math.max(ファイルの更新時刻, 最終エントリ時刻) なので（上の行を参照）、
+        // サブエージェントが走っているあいだ親ログに追記が続いて動き続ける。
+        // 質問は1つのままなのに鍵だけが変わり、同じ質問で何通も飛ぶことになる。
+        //
+        // 実測したログには必ず入っていたが、無い形が来ても落ちないように null に倒す
+        id: dangling.id ?? null,
+        tool: dangling.name,
+        detail: describeTool(dangling.name, dangling.input),
+      }
+      : null,
   };
 
   // 登録簿に居ない、またはプロセスが死んでいる

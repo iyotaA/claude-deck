@@ -55,6 +55,19 @@ test('sk- や ghp_ や xoxb- の形も拾う', () => {
   for (const line of s.value) assert.ok(line.includes('（伏せました）'));
 });
 
+test('Slack の Incoming Webhook も伏せる', () => {
+  // 通知の設定中に、自分の Webhook URL を会話へ貼ることが実際にある。
+  // URL 全体がそのまま鍵なので、知っていれば誰でもそのチャンネルへ投稿できる
+  const s = sanitizeEntry({
+    command: 'set CLAUDE_DECK_SLACK_WEBHOOK=https://hooks.slack.com/services/T00AB/B11CD/xyz123abc456',
+  });
+  assert.ok(!s.value.command.includes('T00AB'));
+  assert.ok(!s.value.command.includes('xyz123abc456'));
+  // 前の https:// までは残る。行ごと消すと何をしていたのか読めなくなる
+  assert.ok(s.value.command.includes('set CLAUDE_DECK_SLACK_WEBHOOK=https://'));
+  assert.equal(s.masked, true);
+});
+
 test('同じ形が何度も出てきても全部伏せる', () => {
   // g 付きの正規表現を使い回すので、lastIndex を戻し忘れると2つ目以降が抜ける
   const s = sanitizeEntry({ text: 'sk-aaaaaaaaaaaaaaaaaaaa と sk-bbbbbbbbbbbbbbbbbbbb' });
