@@ -48,6 +48,26 @@ export const NOTIFY_RULES = {
 /** 通知する状態の名前。表示や診断で使う。 */
 export const NOTIFY_STATES = new Set(Object.keys(NOTIFY_RULES));
 
+/**
+ * どの状態を送るかの入り切りを、既定（全部入り）に重ねて整える。
+ *
+ * 知らないキーは落とす。設定ファイルは人が手で書ける場所なので、
+ * 書き間違えた名前がそのまま残ると「設定したのに効かない」になる。
+ *
+ * 既定を全部入りにしてあるのは、質問待ちのように「いまは鳴らないが
+ * Claude Code 側が直れば鳴る」ものを、黙って切ったままにしないため。
+ *
+ * @param {*} raw 設定から来た値。object でなければ既定を返す
+ * @returns {object} 状態名 → boolean
+ */
+export function normalizeStates(raw) {
+  const out = {};
+  for (const key of NOTIFY_STATES) {
+    out[key] = raw && typeof raw === 'object' && typeof raw[key] === 'boolean' ? raw[key] : true;
+  }
+  return out;
+}
+
 /** 落ち着き待ち。POLL_MS = 2000 の3倍で、最低2回の独立した走査を挟める。 */
 export const SETTLE_MS = 6000;
 
@@ -132,20 +152,31 @@ function snapshot(row, key) {
  * @param {number} [opts.idleSettleMs] 返信待ちの落ち着き待ち。0 で返信待ちを通知しない
  * @param {number} [opts.graceMs] 起動直後の種まき期間
  * @param {number} [opts.remindMs] 放置リマインド。0 で無効
+ * @param {object} [opts.states] 状態ごとの入り切り。省略すると全部入り
  * @param {number} [opts.queueMax] 送信待ちの上限
  * @param {number} [opts.maxPerHour] 1時間に送れる通数
  * @param {number} [opts.bootAt] 起動時刻。種まきの基準
- * @returns {object} observe / takeReady / giveBack / stats
+ * @returns {object} observe / takeReady / giveBack / stats / configure / rearm
  */
 export function createNotifyWatch({
   settleMs = SETTLE_MS,
   idleSettleMs = IDLE_SETTLE_MS,
   graceMs = GRACE_MS,
   remindMs = 0,
+  states = null,
   queueMax = QUEUE_MAX,
   maxPerHour = MAX_PER_HOUR,
   bootAt = 0,
 } = {}) {
+  // 設定は configure() で差し替える。この器ごと作り直さないのが要点で、
+  // 作り直すと下の known が空になり、いま待っている分が全部もう一度鳴る
+  let settle = settleMs;
+  let idleSettle = idleSettleMs;
+  let remind = remindMs;
+  let allowed = normalizeStates(states);
+  /** 種まきの起点。rearm() で今に戻せる */
+  let graceFrom = bootAt;
+
   /** 鍵 → {item, firstSeenAt}。落ち着き待ちの最中のもの */
   const pending = new Map();
   /** 送信を待っている項目。古い順 */
@@ -171,8 +202,10 @@ export function createNotifyWatch({
   function ruleFor(row) {
     const rule = NOTIFY_RULES[row?.state];
     if (!rule) return null;
+    // 画面で切られている状態は見ない
+    if (allowed[row.state] === false) return null;
     // 返信待ちは 0 分の設定で丸ごと切れる
-    if (rule.slow && idleSettleMs <= 0) return null;
+    if (rule.slow && idleSettle <= 0) return null;
     // 承認待ちのうち、しきい値だけが根拠の側は送らない（長く走る Bash と区別がつかない）
     if (rule.requireByStatus && row.byStatus !== true) return null;
     if (rule.requireConfident && row.stateConfident !== true) return null;
@@ -217,7 +250,7 @@ export function createNotifyWatch({
     for (const [key, { row, rule }] of seen) {
       if (known.has(key)) {
         // 放置リマインド。既定は無効で、設定で分を入れたときだけ1回だけ出す
-        if (remindMs > 0 && !reminded.has(key) && (row.idleMs ?? 0) >= remindMs) {
+        if (remind > 0 && !reminded.has(key) && (row.idleMs ?? 0) >= remind) {
           reminded.add(key);
           stats.reminded += 1;
           push({ ...snapshot(row, key), kind: 'remind' }, now);
@@ -234,13 +267,13 @@ export function createNotifyWatch({
 
       // 起動直後に見えていたものは「いま待ちに入った」ではない。
       // 朝ログオンするたびに昨夜からの待ちが全部飛ぶのを防ぐ
-      if (now - bootAt < graceMs) {
+      if (now - graceFrom < graceMs) {
         known.add(key);
         stats.seeded += 1;
         continue;
       }
       // 落ち着き待ちは状態ごとに違う。返信待ちだけ長いほうで測る
-      const wait = rule.slow ? idleSettleMs : settleMs;
+      const wait = rule.slow ? idleSettle : settle;
       pending.set(key, { item: snapshot(row, key), firstSeenAt: now, settleMs: wait });
     }
 
@@ -331,6 +364,39 @@ export function createNotifyWatch({
   }
 
   /**
+   * 設定だけを差し替える。器は作り直さない。
+   *
+   * 画面から保存されたときにここを通る。作り直してしまうと known が空になり、
+   * いま待っている分が保存した瞬間に全部もう一度鳴る。
+   *
+   * 渡されなかった項目は今の値のままにする。
+   *
+   * @param {object} [next]
+   * @param {number} [next.settleMs] 落ち着き待ち
+   * @param {number} [next.idleSettleMs] 返信待ちの落ち着き待ち
+   * @param {number} [next.remindMs] 放置リマインド
+   * @param {object} [next.states] 状態ごとの入り切り
+   */
+  function configure({ settleMs: s, idleSettleMs: i, remindMs: r, states: st } = {}) {
+    if (typeof s === 'number' && Number.isFinite(s) && s >= 0) settle = s;
+    if (typeof i === 'number' && Number.isFinite(i) && i >= 0) idleSettle = i;
+    if (typeof r === 'number' && Number.isFinite(r) && r >= 0) remind = r;
+    if (st && typeof st === 'object') allowed = normalizeStates(st);
+  }
+
+  /**
+   * 種まきの起点を今に戻す。
+   *
+   * 無効から有効へ切り替えたときに呼ぶ。これが無いと、何時間も前から
+   * 待っているセッションが保存した瞬間に一斉に飛ぶ。
+   *
+   * @param {number} now いまの時刻
+   */
+  function rearm(now) {
+    graceFrom = now;
+  }
+
+  /**
    * /api/health に載せる数え。
    *
    * @returns {object}
@@ -345,5 +411,5 @@ export function createNotifyWatch({
     };
   }
 
-  return { observe, takeReady, giveBack, stats: statsOf };
+  return { observe, takeReady, giveBack, stats: statsOf, configure, rearm };
 }

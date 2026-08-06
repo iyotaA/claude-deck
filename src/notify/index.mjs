@@ -13,7 +13,7 @@
  */
 import { loadNotifyConfig } from './config.mjs';
 import { createNotifyWatch } from './watch.mjs';
-import { buildText } from './message.mjs';
+import { buildText, scrubError } from './message.mjs';
 import { postToSlack, TIMEOUT_MS } from './slack.mjs';
 
 /** 送信タイマの間隔。refresh() とは別の時計で回す。 */
@@ -26,13 +26,20 @@ const FAIL_LIMIT = 5;
 const RETRY_MS = 4000;
 
 /**
+ * テスト送信の間隔。押した人が結果を見ているので短くてよいが、
+ * 連打で Slack を叩き続けないだけの間は空ける。
+ */
+const TEST_COOLDOWN_MS = 3000;
+
+/**
  * 通知器を作る。設定が無ければ、何もしない器を返す。
  *
  * @param {object} [opts]
  * @param {object} [opts.config] 設定。テストから差し替える
  * @param {number} [opts.bootAt] 起動時刻。種まきの基準
  * @param {Function} [opts.post] 送信関数。テストから差し替える
- * @returns {object} observe / flush / setBaseUrl / health / banner
+ * @returns {object} observe / flush / setBaseUrl / health / banner /
+ *                   applyConfig / settings / sendTest
  */
 export function createNotifier({
   config = loadNotifyConfig(),
@@ -53,15 +60,19 @@ export function createNotifier({
   let lastError = null;
   /** すでに本文へ書いた「捨てた件数」。差分だけを伝えるための印 */
   let reportedDropped = 0;
+  /** 最後にテスト送信した時刻。連打止め */
+  let lastTestAt = 0;
 
-  const watch = config.enabled
-    ? createNotifyWatch({
-      settleMs: config.settleMs,
-      idleSettleMs: config.idleSettleMs,
-      remindMs: config.remindMs,
-      bootAt,
-    })
-    : null;
+  // watch は設定が無くても必ず作る。有効かどうかの分岐は state だけで見る。
+  // 画面から設定されたときに作り直さずに済ませるための形で、作り直すと
+  // known が空になり、いま待っている分が保存した瞬間に全部もう一度鳴る
+  const watch = createNotifyWatch({
+    settleMs: config.settleMs,
+    idleSettleMs: config.idleSettleMs,
+    remindMs: config.remindMs,
+    states: config.states,
+    bootAt,
+  });
 
   /**
    * 機能ごと止める。理由は /api/health から読める。
@@ -185,7 +196,7 @@ export function createNotifier({
    * @returns {object}
    */
   function health() {
-    const s = watch?.stats() ?? null;
+    const s = watch.stats();
     return {
       enabled: config.enabled,
       source: config.source,
@@ -194,10 +205,10 @@ export function createNotifier({
       reason,
       sent,
       failed,
-      skipped: (s?.seeded ?? 0) + (s?.vanished ?? 0),
-      pending: s?.pending ?? 0,
-      queued: s?.waiting ?? 0,
-      dropped: s?.dropped ?? 0,
+      skipped: s.seeded + s.vanished,
+      pending: s.pending,
+      queued: s.waiting,
+      dropped: s.dropped,
       lastOkAt,
       lastErrorAt,
       lastError,
@@ -221,5 +232,120 @@ export function createNotifier({
     return `Slack 通知: 有効（${where} / ${config.urlMasked}）`;
   }
 
-  return { observe, flush, setBaseUrl, health, banner };
+  /**
+   * 設定を差し替える。再起動せずに効かせるための口。
+   *
+   * watch は作り直さない。作り直すと送信済みの記憶（known）が消えて、
+   * いま待っている分が保存した瞬間に全部もう一度鳴る。
+   *
+   * 無効から有効へ変わったときだけ種まきし直す。
+   * これが無いと、すでに何時間も待っているセッションが一斉に飛ぶ。
+   *
+   * @param {object} next 新しい設定（parseNotifyConfig の戻り）
+   * @param {number} [now] いまの時刻
+   */
+  function applyConfig(next, now = Date.now()) {
+    const wasOn = state === 'ok';
+    config = next;
+    watch.configure({
+      settleMs: config.settleMs,
+      idleSettleMs: config.idleSettleMs,
+      remindMs: config.remindMs,
+      states: config.states,
+    });
+
+    if (config.enabled) {
+      // 止まっていたなら解く。設定を直したのに止まったまま、を避ける
+      state = 'ok';
+      reason = null;
+      failStreak = 0;
+      if (!wasOn) watch.rearm(now);
+    } else {
+      state = 'off';
+      reason = config.error ?? null;
+    }
+  }
+
+  /**
+   * 設定モーダルへ返す形。
+   *
+   * 生の URL はどの経路でも返さない。出すのは urlMasked だけ。
+   *
+   * @returns {object}
+   */
+  function settings() {
+    return {
+      enabled: config.enabled,
+      source: config.source,
+      target: config.urlMasked,
+      settleSec: Math.round(config.settleMs / 1000),
+      idleMin: Math.round(config.idleSettleMs / 60000),
+      remindMin: Math.round(config.remindMs / 60000),
+      detail: config.detail,
+      states: { ...config.states },
+      sources: { ...config.sources },
+      envSet: { ...config.envSet },
+      off: config.off === true,
+      configPath: config.configPath ?? null,
+      error: config.error ?? null,
+      health: health(),
+    };
+  }
+
+  /**
+   * テスト送信を1通。設定の配線を、2分待たずに確かめるためのもの。
+   *
+   * 1時間の上限には数えない。押した本人が結果を見ているので、
+   * 暴走止めの対象にする意味がない。代わりに短いクールダウンを置く。
+   *
+   * 止まっている（disabled / paused）状態でも送れるようにしてある。
+   * まさにそこが「直したので確かめたい」場面だから。
+   *
+   * @param {number} [now] いまの時刻
+   * @returns {Promise<{ok: boolean, reason?: string}>}
+   */
+  async function sendTest(now = Date.now()) {
+    if (!config.url) {
+      return { ok: false, reason: config.error ?? 'Webhook の URL が設定されていません' };
+    }
+    if (now - lastTestAt < TEST_COOLDOWN_MS) {
+      return { ok: false, reason: '少し待ってからもう一度押してください' };
+    }
+    if (sending) return { ok: false, reason: '送信中です。少し待ってからもう一度押してください' };
+
+    lastTestAt = now;
+    sending = true;
+    try {
+      const lines = ['*ClaudeDeck* テスト送信', 'この形で通知が届きます。'];
+      if (baseUrl) lines.push(`<${baseUrl}|ClaudeDeck を開く>`);
+      const r = await post(config.url, lines.join('\n'), { timeoutMs: TIMEOUT_MS });
+
+      if (r.ok) {
+        sent += 1;
+        failStreak = 0;
+        lastOkAt = now;
+        // 通ったのだから止めておく理由が無い。押した人が結果を見ている
+        if (state !== 'ok') {
+          state = 'ok';
+          reason = null;
+        }
+        return { ok: true };
+      }
+
+      failed += 1;
+      lastErrorAt = now;
+      lastError = r.reason ?? '理由が取れませんでした';
+      return { ok: false, reason: lastError };
+    } catch (err) {
+      failed += 1;
+      lastErrorAt = now;
+      // 例外の文言には URL が埋め込まれ得る。返す前に必ず伏せる
+      lastError = scrubError(`送信で例外が出ました: ${err?.message ?? err}`, config.url);
+      return { ok: false, reason: lastError };
+    } finally {
+      sending = false;
+    }
+  }
+
+  return { observe, flush, setBaseUrl, health, banner, applyConfig, settings, sendTest };
 }

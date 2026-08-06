@@ -20,6 +20,9 @@ import { getRawEntry } from './src/view/entry.mjs';
 import { getSubagentDetail } from './src/view/subagent.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
 import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
+import { loadNotifyConfig } from './src/notify/config.mjs';
+import { validateSettings, writeSettings } from './src/notify/settings.mjs';
+import { isTrustedWrite } from './src/shared/origin.mjs';
 import { sessionsDir, projectsDir, configDir } from './src/read/paths.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +30,16 @@ const publicDir = path.join(here, 'public');
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 4317;
+/** 書き込みの本文の上限。設定は小さい JSON しか来ない。 */
+const BODY_MAX = 8 * 1024;
+
+/**
+ * 実際に listen できたポート。
+ *
+ * 埋まっていると +1 してずらすので、起動前には決まらない。
+ * 書き込みの門番が host と origin を照合するのに要る。
+ */
+let boundPort = 0;
 /** 取りこぼし対策の定期確認。fs.watch が効かない環境でもこれで動く。 */
 const POLL_MS = 2000;
 /** 変更通知が連続で飛んでくるのをまとめる。 */
@@ -219,6 +232,135 @@ async function handleFocus(res, pid) {
   }
 }
 
+/* -------------------------------------------------------------- 書き込み口 */
+
+/**
+ * 本文を JSON として読む。上限を超えたら受け取らずに切る。
+ *
+ * @param {object} req リクエスト
+ * @returns {Promise<object>} 本文が空なら {}
+ */
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let over = false;
+    req.on('data', (c) => {
+      if (over) return;
+      size += c.length;
+      if (size > BODY_MAX) {
+        over = true;
+        // ここで req.destroy() を呼ぶと、断りの 400 を書く前に接続が切れる。
+        // 溜めるのをやめて捨てるだけにして、応答は呼び側に書かせる
+        req.resume();
+        reject(new Error('本文が大きすぎます'));
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      if (over) return;
+      const text = Buffer.concat(chunks).toString('utf8').trim();
+      if (!text) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(text));
+      } catch {
+        reject(new Error('本文が JSON ではありません'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+/**
+ * 通知の設定を保存して、その場で効かせる。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ */
+async function handleSaveSettings(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    return;
+  }
+
+  const checked = validateSettings(body);
+  if (!checked.ok) {
+    sendJson(res, 400, { ok: false, reason: checked.error });
+    return;
+  }
+
+  try {
+    writeSettings(checked.patch);
+    // 書いたものを読み直して渡す。丸めや既定の反映を1箇所（config.mjs）に任せる
+    notifier.applyConfig(loadNotifyConfig());
+  } catch (err) {
+    sendJson(res, 500, { ok: false, reason: `設定を保存できませんでした: ${err?.message ?? err}` });
+    return;
+  }
+
+  sendJson(res, 200, { ok: true, settings: notifier.settings() });
+}
+
+/**
+ * テスト送信。送れなくてもリクエスト自体は成功なので 200 で返す。
+ *
+ * @param {object} res レスポンス
+ */
+async function handleTestNotify(res) {
+  try {
+    const r = await notifier.sendTest();
+    sendJson(res, 200, { ...r, settings: notifier.settings() });
+  } catch (err) {
+    sendJson(res, 500, { ok: false, reason: String(err?.message ?? err) });
+  }
+}
+
+/**
+ * GET と HEAD 以外は、すべてここを通す。
+ *
+ * 127.0.0.1 で listen していても、それは守りにならない。
+ * 利用者が開いた任意のページから、そのブラウザ経由でここへ POST できるため。
+ * 判断は src/shared/origin.mjs に純関数で置いてある。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ * @param {string} pathname パス
+ * @param {URL} url クエリを読む用
+ */
+function handleWrite(req, res, pathname, url) {
+  const gate = isTrustedWrite(req.headers, boundPort);
+  if (!gate.ok) {
+    sendJson(res, gate.status, { ok: false, reason: gate.reason });
+    return;
+  }
+  if (req.method !== 'POST') {
+    res.writeHead(405).end('method not allowed');
+    return;
+  }
+
+  if (pathname === '/api/focus') {
+    handleFocus(res, Number(url.searchParams.get('pid')));
+    return;
+  }
+  if (pathname === '/api/settings/notify') {
+    handleSaveSettings(req, res);
+    return;
+  }
+  if (pathname === '/api/settings/notify/test') {
+    handleTestNotify(res);
+    return;
+  }
+
+  sendJson(res, 404, { ok: false, reason: 'そのような窓口はありません' });
+}
+
 /* ------------------------------------------------------------------ 監視 */
 
 const watchers = [];
@@ -248,14 +390,9 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${HOST}`);
   const { pathname } = url;
 
-  // 窓を前面に出すのだけが POST。読み取り以外の操作はこれ1つに閉じている
-  if (req.method === 'POST' && pathname === '/api/focus') {
-    handleFocus(res, Number(url.searchParams.get('pid')));
-    return;
-  }
-
+  // 読み取り以外はすべて門番を通す。窓の前面化も設定の保存も同じ扱いにする
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    res.writeHead(405).end('method not allowed');
+    handleWrite(req, res, pathname, url);
     return;
   }
 
@@ -325,6 +462,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 設定モーダルが開いたときに1回だけ引く。生の Webhook URL は入らない
+  if (pathname === '/api/settings/notify') {
+    sendJson(res, 200, notifier.settings());
+    return;
+  }
+
   if (pathname === '/api/health') {
     // 自動起動されたサーバーの設定を確かめる唯一の手段。
     // notify.target はマスク済みしか入っていない（notify/index.mjs の health）
@@ -378,6 +521,8 @@ function listen(port, attemptsLeft = 12) {
 
   server.listen(port, HOST, () => {
     const url = `http://${HOST}:${port}/`;
+    // 書き込みの門番が host と origin を照合するのに要る。決まってから入れる
+    boundPort = server.address()?.port ?? port;
     const w = startWatching();
     console.log('ClaudeDeck');
     console.log(`  ${url}`);

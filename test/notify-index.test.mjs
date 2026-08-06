@@ -290,3 +290,176 @@ test('起動直後に見えていた待ちは送らない', async () => {
   assert.equal(s.calls.length, 0);
   assert.equal(n.health().skipped, 1);
 });
+
+// --- 画面から設定を差し替える ---
+//
+// 再起動せずに効かせるための口。ここで作り直してしまうと、
+// いま待っている分が保存した瞬間に全部もう一度鳴る。
+
+test('設定を差し替えても、送信済みの記憶は消えない', async () => {
+  const s = spy();
+  const n = mk(s.fn);
+
+  n.observe([row()], T0);
+  await n.flush(T0);
+  assert.equal(s.calls.length, 1);
+
+  n.applyConfig(on({ settleMs: 0, idleSettleMs: 300_000 }), T0 + 1000);
+
+  // 同じ待ちがまだ続いている。ここで2通目が飛んだら作り直してしまっている
+  n.observe([row()], T0 + 2000);
+  await n.flush(T0 + 2000);
+  assert.equal(s.calls.length, 1);
+});
+
+test('差し替えた落ち着き待ちがその場で効く', async () => {
+  const s = spy();
+  const n = mk(s.fn);
+  n.applyConfig(on({ settleMs: 6000 }), T0);
+
+  n.observe([row()], T0);
+  await n.flush(T0);
+  assert.equal(s.calls.length, 0);
+
+  n.observe([row()], T0 + 6000);
+  await n.flush(T0 + 6000);
+  assert.equal(s.calls.length, 1);
+});
+
+test('無効にすると黙る', async () => {
+  const s = spy();
+  const n = mk(s.fn);
+  n.applyConfig({ ...on(), enabled: false, url: null, urlMasked: null }, T0);
+
+  n.observe([row()], T0);
+  await n.flush(T0);
+  assert.equal(s.calls.length, 0);
+  assert.equal(n.health().state, 'off');
+});
+
+test('無効から有効へ戻したとき、すでに待っている分は飛ばない', async () => {
+  // 席を外している間の待ちが、保存した瞬間に一斉に鳴るのを防ぐ
+  const s = spy();
+  const n = createNotifier({
+    config: { enabled: false, source: 'none', url: null, urlMasked: null, settleMs: 0, remindMs: 0, detail: 'full', error: null },
+    bootAt: 0,
+    post: s.fn,
+  });
+  n.setBaseUrl('http://127.0.0.1:4317/');
+
+  n.applyConfig(on(), T0);
+  n.observe([row()], T0);
+  await n.flush(T0);
+
+  assert.equal(s.calls.length, 0);
+  assert.equal(n.health().skipped, 1);
+
+  // 種まきを抜けたあとの待ちはちゃんと鳴る
+  n.observe([row('toolu_2')], T0 + 10_000);
+  await n.flush(T0 + 10_000);
+  assert.equal(s.calls.length, 1);
+});
+
+test('止まっていた通知は、設定を直せば動き出す', async () => {
+  const s = spy({ ok: false, retry: false, stop: true, reason: 'Webhook が見つかりません' });
+  const n = mk(s.fn);
+  n.observe([row()], T0);
+  await n.flush(T0);
+  assert.equal(n.health().state, 'disabled');
+
+  n.applyConfig(on(), T0 + 1000);
+  assert.equal(n.health().state, 'ok');
+  assert.equal(n.health().reason, null);
+});
+
+// --- 設定モーダルへ返す形 ---
+
+test('settings は生の URL を返さない', () => {
+  const n = mk(spy().fn);
+  const s = n.settings();
+  assert.ok(!JSON.stringify(s).includes('xyz123abc456'));
+  assert.equal(s.target, 'https://hooks.slack.com/services/T00A…/B11C…/****');
+});
+
+test('settings は画面が使う単位で返す', () => {
+  const n = mk(spy().fn, on({ settleMs: 15_000, idleSettleMs: 300_000, remindMs: 1_800_000 }));
+  const s = n.settings();
+  assert.equal(s.settleSec, 15);
+  assert.equal(s.idleMin, 5);
+  assert.equal(s.remindMin, 30);
+});
+
+test('settings には状態の入り切りが入る', () => {
+  const n = mk(spy().fn, on({ states: { 'awaiting-reply': false } }));
+  assert.equal(n.settings().states['awaiting-reply'], false);
+});
+
+// --- テスト送信 ---
+
+test('テスト送信は1通投げて成功を返す', async () => {
+  const s = spy();
+  const n = mk(s.fn);
+  const r = await n.sendTest(T0);
+
+  assert.equal(r.ok, true);
+  assert.equal(s.calls.length, 1);
+  assert.match(s.calls[0].text, /テスト送信/);
+  assert.match(s.calls[0].text, /127\.0\.0\.1:4317/);
+});
+
+test('テスト送信は連打できない', async () => {
+  const s = spy();
+  const n = mk(s.fn);
+  await n.sendTest(T0);
+  const r = await n.sendTest(T0 + 2999);
+
+  assert.equal(r.ok, false);
+  assert.equal(s.calls.length, 1);
+  assert.ok(r.reason);
+
+  await n.sendTest(T0 + 3000);
+  assert.equal(s.calls.length, 2);
+});
+
+test('URL が無ければテスト送信は投げずに理由を返す', async () => {
+  const s = spy();
+  const n = createNotifier({
+    config: { enabled: false, source: 'none', url: null, urlMasked: null, settleMs: 0, remindMs: 0, detail: 'full', error: null },
+    bootAt: 0,
+    post: s.fn,
+  });
+  const r = await n.sendTest(T0);
+
+  assert.equal(r.ok, false);
+  assert.equal(s.calls.length, 0);
+  assert.match(r.reason, /設定されていません/);
+});
+
+test('止まっていてもテスト送信はできる。通れば動き出す', async () => {
+  // まさにそこが「直したので確かめたい」場面
+  let verdict = { ok: false, retry: false, stop: true, reason: 'Webhook が見つかりません' };
+  const n = mk(async () => verdict);
+  n.observe([row()], T0);
+  await n.flush(T0);
+  assert.equal(n.health().state, 'disabled');
+
+  verdict = { ok: true, retry: false, stop: false, reason: null };
+  const r = await n.sendTest(T0 + 10_000);
+  assert.equal(r.ok, true);
+  assert.equal(n.health().state, 'ok');
+});
+
+test('テスト送信が失敗しても落ちない', async () => {
+  const n = mk(async () => { throw new Error('切れた'); });
+  const r = await n.sendTest(T0);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /切れた/);
+  assert.equal(n.health().failed, 1);
+});
+
+test('テスト送信の失敗理由に URL を含めない', async () => {
+  const n = mk(async () => { throw new Error(`request to ${WEBHOOK} failed`); });
+  const r = await n.sendTest(T0);
+  assert.ok(!r.reason.includes('xyz123abc456'));
+  assert.ok(!JSON.stringify(n.health()).includes('xyz123abc456'));
+});

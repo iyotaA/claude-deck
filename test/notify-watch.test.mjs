@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createNotifyWatch, keyOf, NOTIFY_STATES } from '../src/notify/watch.mjs';
+import { createNotifyWatch, keyOf, normalizeStates, NOTIFY_STATES } from '../src/notify/watch.mjs';
 
 /** 基準時刻。ここから相対で組む。 */
 const T0 = 1_700_000_000_000;
@@ -460,4 +460,121 @@ test('byStatus が無い形が来ても鳴らさない', () => {
   const w = bare();
   w.observe([approvalRow({ byStatus: undefined })], AFTER_BOOT);
   assert.deepEqual(w.takeReady(AFTER_BOOT), []);
+});
+
+// --- 設定の差し替え（画面から保存されたとき） ---
+//
+// 器ごと作り直すと known が空になり、いま待っている分が保存した瞬間に
+// 全部もう一度鳴る。だから値だけを差し替える口を持たせてある。
+
+test('知らない状態名は落として、既定を全部入りにする', () => {
+  assert.deepEqual(normalizeStates(null), {
+    'needs-answer': true,
+    'needs-plan-approval': true,
+    'needs-approval': true,
+    'awaiting-reply': true,
+  });
+  const s = normalizeStates({ 'awaiting-reply': false, 'needs-coffee': false });
+  assert.equal(s['awaiting-reply'], false);
+  assert.equal('needs-coffee' in s, false);
+  // 触られていないものは既定のまま
+  assert.equal(s['needs-answer'], true);
+});
+
+test('真偽値でない値は既定に倒す', () => {
+  // 設定ファイルは人が手で書ける。'false' という文字列で切ったつもりにさせない
+  assert.equal(normalizeStates({ 'awaiting-reply': 'false' })['awaiting-reply'], true);
+});
+
+test('切られている状態は鳴らない', () => {
+  const w = bare({ states: { 'needs-answer': false } });
+  w.observe([row()], AFTER_BOOT);
+  assert.deepEqual(w.takeReady(AFTER_BOOT), []);
+  // 見ていないので保留にも積まない
+  assert.equal(w.stats().pending, 0);
+});
+
+test('切られていない状態はそのまま鳴る', () => {
+  const w = bare({ states: { 'awaiting-reply': false } });
+  w.observe([row()], AFTER_BOOT);
+  assert.equal(w.takeReady(AFTER_BOOT).length, 1);
+});
+
+test('configure で状態を切れる', () => {
+  const w = bare();
+  w.configure({ states: { 'needs-answer': false } });
+  w.observe([row()], AFTER_BOOT);
+  assert.deepEqual(w.takeReady(AFTER_BOOT), []);
+});
+
+test('configure で落ち着き待ちを伸ばせる', () => {
+  const w = bare();
+  w.configure({ settleMs: 6000 });
+  w.observe([row()], AFTER_BOOT);
+  assert.deepEqual(w.takeReady(AFTER_BOOT + 5999), []);
+  w.observe([row()], AFTER_BOOT + 6000);
+  assert.equal(w.takeReady(AFTER_BOOT + 6000).length, 1);
+});
+
+test('configure で返信待ちを丸ごと切れる', () => {
+  const w = slow();
+  w.configure({ idleSettleMs: 0 });
+  w.observe([idleRow()], AFTER_BOOT);
+  assert.deepEqual(w.takeReady(AFTER_BOOT + 3_600_000), []);
+});
+
+test('configure は渡されなかった項目を変えない', () => {
+  const w = slow();
+  w.configure({ settleMs: 1 });
+  w.observe([idleRow()], AFTER_BOOT);
+  // 返信待ちの 2分 はそのまま残っている
+  assert.deepEqual(w.takeReady(AFTER_BOOT + 6000), []);
+  w.observe([idleRow()], AFTER_BOOT + IDLE_MS);
+  assert.equal(w.takeReady(AFTER_BOOT + IDLE_MS).length, 1);
+});
+
+test('configure に変な値を渡しても今の設定を壊さない', () => {
+  const w = bare();
+  w.configure({ settleMs: -1, idleSettleMs: 'すぐ', remindMs: NaN, states: 'ぜんぶ' });
+  w.observe([row()], AFTER_BOOT);
+  assert.equal(w.takeReady(AFTER_BOOT).length, 1);
+});
+
+test('configure を引数なしで呼んでも落ちない', () => {
+  const w = bare();
+  w.configure();
+  w.observe([row()], AFTER_BOOT);
+  assert.equal(w.takeReady(AFTER_BOOT).length, 1);
+});
+
+test('設定を差し替えても、送信済みの記憶は消えない', () => {
+  // ここが要点。作り直していたら、この2通目が鳴ってしまう
+  const w = bare();
+  w.observe([row()], AFTER_BOOT);
+  assert.equal(w.takeReady(AFTER_BOOT).length, 1);
+
+  w.configure({ settleMs: 0 });
+  w.observe([row()], AFTER_BOOT + 60_000);
+  assert.deepEqual(w.takeReady(AFTER_BOOT + 60_000), []);
+});
+
+test('rearm すると、すでに待っている分は種まきになる', () => {
+  // 無効から有効へ切り替えた瞬間に、何時間も前からの待ちが一斉に飛ぶのを防ぐ
+  const w = createNotifyWatch({ settleMs: 0, graceMs: 10_000, bootAt: T0 });
+  const now = T0 + 3_600_000;
+  w.rearm(now);
+  w.observe([row()], now);
+  assert.deepEqual(w.takeReady(now), []);
+  assert.equal(w.stats().seeded, 1);
+});
+
+test('rearm した猶予を抜けたあとの待ちは鳴る', () => {
+  const w = createNotifyWatch({ settleMs: 0, graceMs: 10_000, bootAt: T0 });
+  const now = T0 + 3_600_000;
+  w.rearm(now);
+  w.observe([row()], now);
+  w.observe([row({ id: 'toolu_2' })], now + 10_000);
+  const got = w.takeReady(now + 10_000);
+  assert.equal(got.length, 1);
+  assert.equal(got[0].key, 'sess-a::toolu_2');
 });
