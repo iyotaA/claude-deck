@@ -78,6 +78,23 @@ export const dom = {
   archiveDeep: document.getElementById('archive-deep'),
   archiveSort: document.getElementById('archive-sort'),
   archiveCount: document.getElementById('archive-count'),
+  // 通知の設定モーダル。settings.js だけが使う
+  settings: document.getElementById('settings'),
+  settingsOpen: document.getElementById('settings-open'),
+  settingsClose: document.getElementById('settings-close'),
+  settingsState: document.getElementById('settings-state'),
+  settingsPath: document.getElementById('settings-path'),
+  settingsMsg: document.getElementById('settings-msg'),
+  settingsSave: document.getElementById('settings-save'),
+  settingsTest: document.getElementById('settings-test'),
+  setUrl: document.getElementById('set-url'),
+  setUrlClear: document.getElementById('set-url-clear'),
+  setUrlHint: document.getElementById('set-url-hint'),
+  setSettle: document.getElementById('set-settle'),
+  setIdle: document.getElementById('set-idle'),
+  setRemind: document.getElementById('set-remind'),
+  setDetail: document.getElementById('set-detail'),
+  setStates: document.getElementById('set-states'),
 };
 
 export const store = {
