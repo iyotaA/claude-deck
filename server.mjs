@@ -70,7 +70,16 @@ function sendJson(res, status, body) {
 
 /** public 配下のファイルを返す。パスは外に出られないよう正規化してから確認する。 */
 async function serveStatic(res, pathname) {
-  const rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
+  let rel;
+  try {
+    rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
+  } catch {
+    // decodeURIComponent は壊れた %（/%ZZ など）で URIError を投げる。
+    // ここを素通ししていたころは、その例外が拾われずにプロセスごと落ちていた。
+    // GET なので書き込みの門番を通らず、他所のページの <img src> だけで撃てる
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' }).end('bad request');
+    return;
+  }
   const target = path.resolve(publicDir, rel);
   if (target !== publicDir && !target.startsWith(publicDir + path.sep)) {
     res.writeHead(403).end('forbidden');
@@ -475,7 +484,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  serveStatic(res, pathname);
+  // 他の非同期の窓口と同じく、失敗の受け皿を必ず付ける。
+  // async 関数の拒否を拾わないと unhandled rejection になり、Node がプロセスを殺す
+  serveStatic(res, pathname).catch(() => {
+    if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('server error');
+  });
 });
 
 /**
@@ -555,6 +569,25 @@ function openBrowser(url) {
   } catch {
     /* 開けなくても URL は表示済み */
   }
+}
+
+/*
+ * 最後の受け皿。「未知の形で落ちない」を、拾い漏らした例外にも効かせる。
+ *
+ * Node 18 以降は拾われなかった例外・拒否でプロセスが終わる。
+ * このアプリでそれが起きると、画面が死ぬだけでなく通知も黙って止まる。
+ * 「返事待ちに気づけない」を埋めるための道具が、気づけないまま止まるのがいちばん困る。
+ *
+ * 一般には「状態が壊れたまま走らせるな」で終了が正しい。
+ * ここで生かすほうを選べるのは、読み取り専用のローカル画面で、
+ * 壊れて困る書き込み中の状態を持たないため（設定の保存だけが例外で、
+ * そちらは一時ファイルへ書いてから rename している）。
+ */
+for (const [event, label] of [['uncaughtException', '想定外の例外'], ['unhandledRejection', '拾われなかった失敗']]) {
+  process.on(event, (err) => {
+    console.error(`${label}: ${err?.stack ?? err}`);
+    console.error('  （落とさずに続けます）');
+  });
 }
 
 const port = Number(process.env.CLAUDE_DECK_PORT) || DEFAULT_PORT;

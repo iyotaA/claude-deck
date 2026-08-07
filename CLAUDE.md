@@ -376,6 +376,25 @@ Webhook の作り方は `docs/slack-webhook-setup.html` にある。
 **そこで `req.destroy()` を呼ばない。** 断りの 400 を書く前に接続が切れて、
 呼び出し側には「応答が空」としか見えなくなる。溜めるのをやめて捨てるだけにする。
 
+### 落ちない口の作り方
+
+`async` の窓口には**必ず失敗の受け皿を付ける。** 付け忘れると unhandled rejection になり、
+Node 18 以降はプロセスごと終わる。画面が死ぬだけでなく通知も黙って止まるので、
+「返事待ちに気づけない」を埋めるための道具が、気づけないまま止まることになる。
+
+実際に1件そうなっていた。`serveStatic` の `decodeURIComponent(pathname)` は
+`/%ZZ` のような壊れた `%` で `URIError` を投げる。呼び出し側が `.catch()` を付けていなかったため、
+**この1行でサーバーが即死した**（実測。`/api/health` も応答しなくなる）。
+
+これは GET なので**書き込みの門番を通らない。** 他所のページに
+`<img src="http://127.0.0.1:4317/%ZZ">` が1行あるだけで撃てる。
+`<img>` は CORS の事前確認なしに飛ぶので、読めなくても届けば成立する。
+いまは復号を `try` で囲んで 400 を返し、呼び出し側にも `.catch()` を付けてある。
+
+受け皿は最上位にも1枚置いてある（`uncaughtException` / `unhandledRejection` で記録して続行）。
+一般には「状態が壊れたまま走らせるな」で終了が正しいが、ここは読み取り専用のローカル画面で、
+壊れて困る書き込み中の状態を持たない。唯一の例外である設定の保存は一時ファイル ＋ `rename`。
+
 更新の押し出しは差分判定つき。`idleMs` と `lastActivityAt` は毎回変わるので比較対象から外す。
 入れてしまうと内容が同じでも毎秒 push することになる。
 
@@ -503,6 +522,8 @@ CSS は `public/css/` に8枚ある。`index.html` の `<link>` の並びが、�
 - **`GET` と `HEAD` 以外はすべて `isTrustedWrite()` を通す。** `127.0.0.1` は守りではない。ブラウザで開いた任意のページが `<form method="post">` で届く。通す口を増やすときは `handleWrite` の中に足す（門番の外側に窓口を作らない）
 - **依存パッケージを増やさない。** 同僚にフォルダごと渡して動くことが要件。`dependencies` は空のまま
 - **未知の形で落ちない。** 読んでいるのは Claude Code の内部データで公開仕様ではない。未知のキー・未知の `status`・書き込み途中の壊れた JSON が来ても、黙って飛ばして進む
+- **`async` の窓口を `.catch()` 無しで呼ばない。** 拾われなかった拒否は Node 18 以降でプロセスを殺す。実測で `GET /%ZZ` の1発が `serveStatic` の `decodeURIComponent` からサーバーを落としていた。GET は門番を通らないので、他所のページの `<img src>` だけで撃てる（詳しくは「落ちない口の作り方」）
+- **`ClaudeDeck/` を `.gitignore` から外さない。** リポジトリは public。`appdata.mjs` は `LOCALAPPDATA` も `XDG_STATE_HOME` も `HOME` も無いときアプリ直下へ倒れるので、そこに落ちる `config.json`（**生の Webhook URL 入り**）が `git add -A` で公開リポジトリに乗る
 - **`innerHTML` を使わない。** ログ本文をそのまま画面に出すので、必ず `textContent` で入れる
 - **`timeline/` の中のファイルを外から直に import しない。** 口は `timeline/index.js` の1枚に絞る。例外は `kinds.js`（層0の語彙）だけで、`index.js` を経由させると `index` → `view` → `store` → `index` の循環になる
 - **`public/` に `.mjs` を置かない。** `server.mjs` の `MIME` に無いので `octet-stream` で返り、ブラウザが module として読まない。画面側の拡張子は `.js`
