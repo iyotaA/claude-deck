@@ -17,13 +17,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { appDataDir } from '../src/shared/appdata.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(here, '..');
 const serverFile = path.join(appDir, 'server.mjs');
 
-const base = process.env.LOCALAPPDATA || process.env.XDG_STATE_HOME || process.env.HOME || appDir;
-const logDir = path.join(base, 'ClaudeDeck');
+// 場所の決め方は appdata.mjs に寄せてある。設定ファイルも同じところを使う
+const logDir = appDataDir(appDir);
 fs.mkdirSync(logDir, { recursive: true });
 const logFile = path.join(logDir, 'autostart.log');
 

@@ -49,6 +49,10 @@ export function describeTool(name, input, max = MAX_DETAIL) {
       const q = Array.isArray(it.questions) ? it.questions[0] : null;
       return oneLine(q?.question, max);
     }
+    case 'ExitPlanMode':
+      // 入力は {plan} だけ。既定の枝は description / file_path / command / url を見るので
+      // すべて undefined になり、プラン承認待ちの「何を待っているか」が空だった
+      return oneLine(it.plan, max);
     case 'WebFetch':
       return oneLine(it.url, max);
     default:

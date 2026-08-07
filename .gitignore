@@ -1,0 +1,25 @@
+# 追跡しないもの
+#
+# このリポジトリは public。
+# 事故で秘密が入るのは「うっかり git add -A」なので、そこを先に塞いでおく。
+
+# 設定の保存先。中に Slack Webhook URL が生のまま入る。
+#
+# ふだんの書き込み先は %LOCALAPPDATA%\ClaudeDeck\ なのでここには現れない。
+# ただし src/shared/appdata.mjs は LOCALAPPDATA / XDG_STATE_HOME / HOME の
+# どれも無いときにアプリ直下へ倒れる（フォルダごと渡して動かす形のための逃げ道）。
+# そのときの落ち先がここになる
+/ClaudeDeck/
+
+# 依存は入れない方針だが、npm を叩いた拍子にできることがある
+node_modules/
+
+# 動かしているうちに出る雑多なもの
+*.log
+*.tmp
+npm-debug.log*
+
+# OS が勝手に置くもの
+Thumbs.db
+desktop.ini
+.DS_Store

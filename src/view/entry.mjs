@@ -42,6 +42,10 @@ const SECRET_VALUE = [
   /ghp_[A-Za-z0-9]{16,}/g,
   /xox[baprs]-[A-Za-z0-9-]{10,}/g,
   /Bearer\s+[A-Za-z0-9._-]{16,}/gi,
+  // Slack の Incoming Webhook。上の xox… とは形がまったく違うので別に要る。
+  // URL 全体がそのまま鍵で、知っていれば誰でもそのチャンネルへ投稿できる。
+  // 通知の設定中にこの URL を会話へ貼ることが実際にあるため、伏せる側に入れておく
+  /hooks\.slack\.com\/services\/[A-Za-z0-9/_-]{10,}/g,
 ];
 
 /** 伏せたところに入れる文字。 */

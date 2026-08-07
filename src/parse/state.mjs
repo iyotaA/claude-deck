@@ -18,6 +18,7 @@ import {
   toolResults,
   textOf,
   timestampOf,
+  uuidOf,
   isMainline,
 } from './entries.mjs';
 import { describeTool } from '../shared/tools.mjs';
@@ -120,12 +121,43 @@ export function deriveState({ registry, tail, now = Date.now() }) {
   const busy = statusRaw !== null && BUSY_STATUSES.has(statusRaw);
   const waitingByStatus = statusRaw !== null && WAITING_STATUSES.has(statusRaw);
 
+  const lastEntry = entries[entries.length - 1] ?? null;
+
   const base = {
     idleMs,
     lastActivityAt,
     statusRaw,
+    // 「いまのターン」を指す錨。ログの最後の行の uuid。
+    //
+    // 通知は sessionId ＋ tool_use.id を鍵にするが、返信待ちには待っている
+    // ツールが無いので id が取れない。セッション ID だけで鍵を作ると
+    // 生涯1つになり、2回目以降の返信待ちが黙って落ちる。
+    // 追記が止まっているあいだ最後の行は動かないので、待ちのあいだ安定する
+    anchorId: uuidOf(lastEntry),
+    // 登録簿自身が「動いていない」と言っているか。
+    //
+    // needs-approval には経路が2つある。これはその見分け。
+    //   true  … Claude が自分で止まったと言っている＝マスターの判断を待っている
+    //   false … しきい値（APPROVAL_MS）だけが根拠。長く走る Bash も同じ形になる
+    // auto mode で Claude が自分で承認した分はそもそも止まらないので、
+    // true の側だけを見れば「人に聞きに来ている承認待ち」だけを拾える
+    byStatus: waitingByStatus && quiet,
     // 判定の根拠を持たせておく。表示の説明にも、しきい値を詰めるときの手がかりにも使う
-    waitingFor: dangling ? { tool: dangling.name, detail: describeTool(dangling.name, dangling.input) } : null,
+    waitingFor: dangling
+      ? {
+        // tool_use の id。呼び出しごとに一意なので「同じ待ちかどうか」の鍵になる。
+        //
+        // 通知はこの id で重複を弾く。lastActivityAt では弾けない。
+        // あれは Math.max(ファイルの更新時刻, 最終エントリ時刻) なので（上の行を参照）、
+        // サブエージェントが走っているあいだ親ログに追記が続いて動き続ける。
+        // 質問は1つのままなのに鍵だけが変わり、同じ質問で何通も飛ぶことになる。
+        //
+        // 実測したログには必ず入っていたが、無い形が来ても落ちないように null に倒す
+        id: dangling.id ?? null,
+        tool: dangling.name,
+        detail: describeTool(dangling.name, dangling.input),
+      }
+      : null,
   };
 
   // 登録簿に居ない、またはプロセスが死んでいる
@@ -167,8 +199,7 @@ export function deriveState({ registry, tail, now = Date.now() }) {
   }
 
   // dangling が無い＝ツールの往復は終わっている。末尾が assistant の発言なら返信待ち
-  const last = entries[entries.length - 1];
-  if (last?.type === 'assistant' && textOf(last)) {
+  if (lastEntry?.type === 'assistant' && textOf(lastEntry)) {
     if (quiet) {
       return { ...base, kind: 'awaiting-reply', confident: true, reason: '応答を返し終えて停止' };
     }

@@ -49,17 +49,61 @@ test('AskUserQuestion が結果待ちなら、status が busy で追記が直近
   });
   assert.equal(s.kind, 'needs-answer');
   assert.equal(s.confident, true);
-  assert.deepEqual(s.waitingFor, { tool: 'AskUserQuestion', detail: 'どっちにする？' });
+  assert.deepEqual(s.waitingFor, { id: 'q1', tool: 'AskUserQuestion', detail: 'どっちにする？' });
 });
 
 test('ExitPlanMode が結果待ちならプラン承認待ち', () => {
   const s = deriveState({
     registry: reg({ status: 'busy' }),
-    tail: tail([call('ExitPlanMode', { plan: '# 手順' }, { id: 'p1' })]),
+    tail: tail([call('ExitPlanMode', { plan: '# 手順\n1. やる' }, { id: 'p1' })]),
     now: nowAfter(200),
   });
   assert.equal(s.kind, 'needs-plan-approval');
   assert.equal(s.confident, true);
+  // 入力は {plan} だけ。既定の枝では拾えず、ここが長らく null になっていた
+  assert.deepEqual(s.waitingFor, { id: 'p1', tool: 'ExitPlanMode', detail: '# 手順 1. やる' });
+});
+
+test('プラン本文が無くてもプラン承認待ちは成り立つ', () => {
+  // 本文は結果側にしか無い形が実物にある（digest はそちらから拾っている）。
+  // 一覧は tool_use しか見ないので、説明が取れないことがある
+  const s = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('ExitPlanMode', {}, { id: 'p1' })]),
+    now: nowAfter(200),
+  });
+  assert.equal(s.kind, 'needs-plan-approval');
+  assert.deepEqual(s.waitingFor, { id: 'p1', tool: 'ExitPlanMode', detail: null });
+});
+
+test('waitingFor は tool_use の id を持ち回す', () => {
+  // 同じ待ちを二重に数えないための鍵。呼び出しごとに一意
+  const s = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('AskUserQuestion', { questions: [{ question: 'どれ？' }] }, { id: 'toolu_abc123' })]),
+    now: nowAfter(200),
+  });
+  assert.equal(s.waitingFor.id, 'toolu_abc123');
+});
+
+test('id を持たない呼び出しでも落ちず、id は不明として null を返す', () => {
+  // 実測したログには必ず入っていたが、読んでいるのは公開仕様ではない。
+  // 無い形が来ても判定そのものは成り立たせる（call ヘルパーは既定の id を入れるので生で組む）
+  const s = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([{
+      type: 'assistant',
+      uuid: 'a1',
+      timestamp: at(0),
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', name: 'AskUserQuestion', input: { questions: [{ question: 'どれ？' }] } }],
+      },
+    }]),
+    now: nowAfter(200),
+  });
+  assert.equal(s.kind, 'needs-answer');
+  assert.equal(s.waitingFor.id, null);
 });
 
 test('登録簿が待ち系 ＋ 追記停止 ＋ 結果待ちあり → 承認待ち', () => {
@@ -72,7 +116,7 @@ test('登録簿が待ち系 ＋ 追記停止 ＋ 結果待ちあり → 承認�
   assert.equal(s.confident, true);
   assert.match(s.reason, /status が idle/);
   // 待っている中身は description を優先して出す。command より人が読んで分かりやすいため
-  assert.deepEqual(s.waitingFor, { tool: 'Bash', detail: 'テストを走らせる' });
+  assert.deepEqual(s.waitingFor, { id: 't1', tool: 'Bash', detail: 'テストを走らせる' });
 });
 
 test('登録簿が待ち系 ＋ 追記停止 ＋ 結果待ちなし → 返信待ち', () => {
@@ -104,7 +148,7 @@ test('結果待ちのまま APPROVAL_MS を超えたら承認待ち', () => {
   });
   assert.equal(s.kind, 'needs-approval');
   assert.equal(s.confident, true);
-  assert.deepEqual(s.waitingFor, { tool: 'Edit', detail: 'C:\\work\\a.mjs' });
+  assert.deepEqual(s.waitingFor, { id: 't1', tool: 'Edit', detail: 'C:\\work\\a.mjs' });
 });
 
 test('結果待ちでも APPROVAL_MS 未満なら実行中（長く走る Bash と区別する）', () => {
@@ -234,7 +278,7 @@ test('Skill の結果待ちは スキル名と引数を出す', () => {
     tail: tail([call('Skill', { skill: 'pr-review', args: '1234' }, { id: 't1' })]),
     now: nowAfter(5000),
   });
-  assert.deepEqual(s.waitingFor, { tool: 'Skill', detail: 'pr-review (1234)' });
+  assert.deepEqual(s.waitingFor, { id: 't1', tool: 'Skill', detail: 'pr-review (1234)' });
 });
 
 test('返しうる状態はすべてラベルと並び順を持っている', () => {
@@ -252,4 +296,81 @@ test('ボールの持ち主の割り当て', () => {
   assert.equal(ballOf('needs-plan-approval'), 'master');
   assert.equal(ballOf('needs-approval'), 'master');
   assert.equal(ballOf('awaiting-reply'), 'master');
+});
+
+// --- 通知が使う2つの手がかり ---
+//
+// anchorId … 待っているツールが無い状態でも「同じ待ちかどうか」を数えるための錨
+// byStatus … 承認待ちの2つの経路（登録簿の裏づけ / しきい値だけ）の見分け
+
+test('錨はログの最後の行の uuid', () => {
+  const s = deriveState({
+    registry: reg({ status: 'idle' }),
+    tail: tail([say('はじめ', { uuid: 'u-1' }), say('おわり', { ms: 1000, uuid: 'u-2' })]),
+    now: nowAfter(60_000),
+  });
+  assert.equal(s.kind, 'awaiting-reply');
+  assert.equal(s.anchorId, 'u-2');
+});
+
+test('ターンが進めば錨も変わる', () => {
+  // ここが変わらないと、通知の鍵がセッションに1つきりになって
+  // 2回目以降の返信待ちが黙って落ちる
+  const first = [say('1ターン目', { uuid: 'u-1' })];
+  const a = deriveState({ registry: reg({ status: 'idle' }), tail: tail(first), now: nowAfter(60_000) });
+
+  const second = [...first, prompt('つぎ', { ms: 1000 }), say('2ターン目', { ms: 2000, uuid: 'u-3' })];
+  const b = deriveState({ registry: reg({ status: 'idle' }), tail: tail(second), now: nowAfter(60_000) });
+
+  assert.equal(a.anchorId, 'u-1');
+  assert.equal(b.anchorId, 'u-3');
+});
+
+test('待っているあいだ錨は動かない', () => {
+  // 追記が止まっているのが返信待ちの条件なので、時刻を進めても錨は同じ
+  const entries = [say('おわり', { uuid: 'u-9' })];
+  const early = deriveState({ registry: reg({ status: 'idle' }), tail: tail(entries), now: nowAfter(5000) });
+  const late = deriveState({ registry: reg({ status: 'idle' }), tail: tail(entries), now: nowAfter(600_000) });
+  assert.equal(early.anchorId, late.anchorId);
+});
+
+test('登録簿が待ちと言っている承認待ちには裏づけが付く', () => {
+  const s = deriveState({
+    registry: reg({ status: 'idle' }),
+    tail: tail([call('Bash', { command: 'npm run build' })]),
+    now: nowAfter(QUIET_MS + 1000),
+  });
+  assert.equal(s.kind, 'needs-approval');
+  assert.equal(s.byStatus, true);
+});
+
+test('しきい値だけが根拠の承認待ちには裏づけが付かない', () => {
+  // 長く走る Bash がこの形になる。通知はこちらを送らない
+  const s = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('Bash', { command: 'npm run build' })]),
+    now: nowAfter(APPROVAL_MS + 1000),
+  });
+  assert.equal(s.kind, 'needs-approval');
+  assert.equal(s.byStatus, false);
+});
+
+test('実行中には裏づけを立てない', () => {
+  const s = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('Bash', { command: 'sleep 50' })]),
+    now: nowAfter(1000),
+  });
+  assert.equal(s.kind, 'running');
+  assert.equal(s.byStatus, false);
+});
+
+test('錨が取れない形でも落ちない', () => {
+  const s = deriveState({
+    registry: reg({ status: 'idle' }),
+    tail: tail([{ type: 'assistant', timestamp: at(0), message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] } }]),
+    now: nowAfter(60_000),
+  });
+  // 取れなかったものを空文字などで埋めない。無いものは null
+  assert.equal(s.anchorId, null);
 });

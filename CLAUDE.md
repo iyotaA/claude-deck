@@ -67,6 +67,14 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `entry.test.mjs` | 原文を出すときに伏せる・切る判断 |
 | `plans.test.mjs` | プランのパス検証と本文の突き合わせ |
 | `subagents.test.mjs` | サブエージェントの記録と呼び出しの突き合わせ |
+| `appdata.test.mjs` | 書き込み先の解決。ログと設定が同じ場所を指すこと |
+| `origin.test.mjs` | 書き込み口の門番。どのヘッダの組み合わせを断るか |
+| `notify-watch.test.mjs` | いつ何を送るかの状態機械（通知の本丸） |
+| `notify-message.test.mjs` | 通知の本文。載せないものと、URL のマスク |
+| `notify-config.test.mjs` | 設定の優先順と URL の検証 |
+| `notify-settings.test.mjs` | 画面から来た設定の検証と併合。書き込む側の本丸 |
+| `notify-slack.test.mjs` | Slack の応答をどう読むか |
+| `notify-index.test.mjs` | 通知の配線。とくに失敗したときのふるまい |
 
 `digest.test.mjs` が呼ぶのは `buildDigest` だけ。
 `parse/digest/` の4枚はその中から呼ばれるので、入口経由で見ていることになる。
@@ -93,7 +101,7 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 
 ## ファイルの置き場所
 
-`src/` は役割ごとに4つに分けてある。
+`src/` は役割ごとに5つに分けてある。
 import は上から下へ一方向にだけ流れる。逆向きに import したくなったら、置き場所が間違っている。
 
 | 場所 | 役割 | 中身 |
@@ -101,16 +109,22 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` `plans` `subagents` |
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） |
-| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） |
+| `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） |
+| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） `appdata`（書き込み先） `origin`（書き込み口の門番） |
 | `src/os/` | OS を叩く | `focus` |
 
-流れは `read` → `parse` → `view`。
+流れは `read` → `parse` → `view` → `notify`。
 `shared` はどこからでも使えるが、逆に `shared` から他を import してはいけない。
 
-入口は3つだけ。ここの名前と応答の形は変えない。
+`notify/` は末端に足した層で、**`view/` を import しない。**
+`listSessions()` が返した行（ただの JSON）を受け取るだけにしてある。
+これで向きが一方向のまま保たれ、テストも行のリテラルを渡すだけで書ける。
+
+入口は4つだけ。ここの名前と応答の形は変えない。
 
 - `view/sessions.mjs:listSessions`
 - `view/detail.mjs:getSessionDetail`
+- `notify/index.mjs:createNotifier`
 - `os/focus.mjs:focusTerminal`
 
 `digest.mjs` に残しているのは走査の本体（`buildDigest`）と、走査の前に1回だけ作る索引だけ。
@@ -121,8 +135,8 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 | 場所 | 役割 | 中身 |
 |---|---|---|
-| `public/css/` | 見た目 | 7枚。`<link>` の並びがそのまま重ね順になる |
-| `public/js/` | 画面の組み立て | 16枚 ＋ `timeline/` 7枚 |
+| `public/css/` | 見た目 | 8枚。`<link>` の並びがそのまま重ね順になる |
+| `public/js/` | 画面の組み立て | 17枚 ＋ `timeline/` 7枚 |
 
 こちらも import は一方向。層の一覧と、循環を切っている4箇所は「画面側」に書いてある。
 
@@ -185,6 +199,141 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 同じ状態のあいだは `idleMs` の昇順、つまり動きが新しいものを上に出す。
 `idleMs` が取れないものは「不明」なので末尾へ寄せる（0 に丸めると最新扱いで先頭に出てしまう）。
 
+## 通知（回答待ちを Slack へ）
+
+`src/notify/`。席を外している間に質問が出て止まっても、戻るまで気づけない。
+そこを埋めるためだけの機能で、**設定しなければ何も起きない。**
+
+このアプリ初の外向き通信なので、`view/summary.mjs` 冒頭の作法をそのまま守る。
+鍵が無ければ黙って何もしない。失敗しても本体を落とさない。
+
+### どの状態を送るか
+
+`notify/watch.mjs` の `NOTIFY_RULES` が一覧。状態ごとに扱いが違う。
+
+| 状態 | 落ち着き待ち | 追加の条件 |
+|---|---|---|
+| `needs-answer`（質問待ち） | 6秒 | なし |
+| `needs-plan-approval`（プラン承認待ち） | 6秒 | なし |
+| `needs-approval`（承認待ち） | 6秒 | `byStatus` が真のときだけ |
+| `awaiting-reply`（返信待ち） | 2分 | `stateConfident` が真のときだけ |
+
+**質問待ちは、ほぼ発火しない。**
+実測（2026-08-06）で、Claude Code は質問を出しているあいだ
+`tool_use(AskUserQuestion)` の行をディスクに書かないことが分かった。
+書かれるのは答えたときで、それまでは直前の地の文までしか載っていない。
+
+Claude Code は assistant の1ターンを thinking / text / tool_use と
+別々の行に分けて書く。質問中はその text の行までで止まる。
+だから dangling が見つからず、2分8秒の待ちがまるごと `awaiting-reply` に見えていた。
+500ms 間隔で 494 回の観測を取り、そのあいだ一度も `tool=AskUserQuestion` が出なかった。
+ログを行860（質問の直前の地の文）で切ると、サーバーが出し続けていた
+`awaiting-reply / 応答を返し終えて停止` が理由の文字列まで完全に再現できる。
+
+**なので実際に鳴るのは `awaiting-reply` の経路。**
+質問待ちの2行は、Claude Code 側が書くようになったときに先に立って速く鳴るための備え。
+ここを消さない。
+
+`needs-approval` に条件が付いているのは、経路が2つあるため。
+
+- 登録簿の status が待ち系 ＋ 静か ＋ dangling → `byStatus` が真。Claude が自分で「動いていない」と言っている
+- dangling が15秒（`APPROVAL_MS`）放置 → `byStatus` は偽。**50秒走る Bash も同じ形になる**（実測）
+
+auto mode で Claude が自分で承認した分はそもそも止まらないので、
+`byStatus` の側だけを見れば「人に聞きに来て止まっている」ものだけが残る。
+
+### 何を「1つの待ち」と数えるか
+
+**鍵は `sessionId` ＋ `tool_use.id`。この鍵1つにつき生涯1通。**
+
+待っているツールが無い `awaiting-reply` は `tool_use.id` を持たない。
+そこは `deriveState` が出す `anchorId`（ログの最後の行の uuid）で代える。
+**セッション ID だけで鍵を作ってはいけない。** 鍵が生涯1つになり、
+1通鳴ったきり2回目以降の返信待ちが黙って落ちる。
+追記が止まっているのが返信待ちの条件なので、待っているあいだ錨は動かない。
+
+`lastActivityAt` を鍵にしてはいけない。
+`Math.max(tail.mtimeMs, 最終エントリ時刻)` で作られる値なので、
+サブエージェントが走って親ログに追記が続くと、質問は同じなのに鍵が変わる。
+
+`id` を鍵にすると、次の3つが同時に解ける。
+
+- 状態のばたつき … `registry.mjs` は書き込み途中の壊れた JSON を飛ばす。飛ぶと `ended` に落ち、次の走査で戻る。鍵が同じなら何度往復しても1通
+- セッションの復活 … PID は使い回されるので鍵に使えない。`sessionId` は `--resume` しても同じ
+- 連続した質問 … Q1 に答えてすぐ Q2 が出ても、`id` が違うので別の待ちになる
+
+### 時計とタイミング
+
+| 定数 | 既定 | 理由 |
+|---|---|---|
+| `SETTLE_MS` | 6000 | `POLL_MS` の3倍。最低2回の独立した走査で「まだ待っている」を確認する。目の前にいて即答した分はここで落ちる |
+| `IDLE_SETTLE_MS` | 120000 | 返信待ちだけの落ち着き待ち。席を外したときだけ鳴らしたいので長く取る。短くすると、目の前で少し考えているだけで鳴る。0 で返信待ちを丸ごと切れる |
+| `FLUSH_MS` | 1000 | 送信タイマ。`refresh()` とは別の時計で回す |
+| `GRACE_MS` | 10000 | 起動から10秒以内に見えた待ちは種まき（送らず既通知にする） |
+| `MAX_PER_HOUR` | 30 | 暴走止め。超えたら止めて、止めたこと自体を1通だけ送る |
+| `TIMEOUT_MS` | 5000 | `askRunning` の 1500ms は localhost 向けで、社外 HTTPS には短い |
+| 再送 | 1回・4秒後 | 429・5xx・ネットワークのみ。400・401・403 は再送しない。404・410 は1回で止める |
+| `FAIL_LIMIT` | 5 | 連続5通失敗で停止。理由を `/api/health` に出す |
+| `QUEUE_MAX` | 20 | 溢れたら古いほうを捨て、捨てた数を次に届いた通知の末尾に添える |
+
+種まきがあるのは、ログオン時の自動起動が前提だから。
+これが無いと朝ログオンするたびに昨夜からの待ちが全部飛ぶ。
+単に「30秒黙る」より優れているのは、種まきした鍵と新しい待ちの鍵が別物なので、
+起動3秒後に始まった待ちを取りこぼさない点。
+
+### 設定
+
+**画面から保存した値がいちばん強い。**
+
+```
+値は  画面（config.json） > 環境変数 > 既定
+```
+
+以前は逆（環境変数が勝つ）だった。
+画面から設定できるようにした時点で反転している。
+保存したのに環境変数に負ける、では設定画面の意味が無い。
+
+読むのは `notify/config.mjs`、書くのは `notify/settings.mjs`。
+書き先は `%LOCALAPPDATA%\ClaudeDeck\config.json` だけ。
+
+反転で穴が1つ空く。環境変数で通知を止める手段が無くなる。
+`config.json` に URL が入っている限り、環境変数を空にしても止まらない。
+そこを埋めるために、**止めるためだけの環境変数**を1本持たせてある。
+
+| 環境変数 | 既定 | 意味 |
+|---|---|---|
+| `CLAUDE_DECK_NOTIFY_OFF` | なし | **何より強い。** `1` で全部止める。値は上書きできないが、機能ごと止めることはできる |
+| `CLAUDE_DECK_SLACK_WEBHOOK` | なし | Webhook URL。画面でまだ設定していないときの初期値 |
+| `CLAUDE_DECK_NOTIFY_SETTLE` | 6 | 落ち着き待ちの秒数。0 で即時 |
+| `CLAUDE_DECK_NOTIFY_IDLE` | 2 | 返信待ちの落ち着き待ちの分。0 で返信待ちを通知しない |
+| `CLAUDE_DECK_NOTIFY_REMIND` | 0 | 放置リマインドの分。0 で無効 |
+| `CLAUDE_DECK_NOTIFY_DETAIL` | full | `none` にすると質問文を落とす |
+
+```json
+{ "notify": { "slackWebhookUrl": "https://hooks.slack.com/services/...", "settleSec": 6, "idleMin": 2, "remindMin": 0, "detail": "full",
+              "states": { "needs-answer": true, "needs-plan-approval": true, "needs-approval": true, "awaiting-reply": true } } }
+```
+
+`states` は画面と `config.json` にしか無い。**環境変数を用意しない。**
+組み合わせを1本の文字列で表す環境変数は、書き間違えても気づけないため。
+
+`config.json` を手で書き換えたときは再起動が要る。ファイルの監視はしていない。
+画面から保存したぶんは `applyConfig()` を通るので、再起動せずに効く。
+
+`CLAUDE_DECK_NOTIFY_IDLE` を 0 にすると、実質すべての通知が止まる。
+上に書いたとおり、実際に鳴っているのは返信待ちの経路だけだから。
+うるさいと感じたときは 0 にする前に、まず分を伸ばすほうを試す。
+
+Webhook の作り方は `docs/slack-webhook-setup.html` にある。
+
+設定ミスに気づけるよう、有効なら起動時に1行出す。URL はマスク済みしか出さない。
+自動起動されたサーバーにはターミナルで `set` した環境変数が届かないので、
+`/api/health` の `notify` が裏で動いているサーバーの設定を確かめる唯一の手段になる。
+
+画面側は `sources`（どこから来た値か）と `envSet`（立っているが負けている環境変数）を受け取り、
+両方が立っているときは「環境変数もあるが画面の値が勝っている」と書く。
+黙って勝つと、前に踏んだ「設定したのに鳴らない」と同じ迷い方をすることになる。
+
 ## サーバー
 
 `server.mjs`。`node:http` だけで静的配信・JSON API・SSE をやる。
@@ -197,11 +346,61 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/sessions/:id/subagents/:agentId` | サブエージェント1件の記録。応答は詳細と同じ形（`digest` ＋ `log`）。ファイルパスは返さない |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
-| `GET /api/health` | 生存確認。二重起動の判定にも使う |
+| `GET /api/health` | 生存確認。二重起動の判定にも使う。通知の設定と数えもここに出る |
+| `GET /api/settings/notify` | 通知の設定。URL はマスク済み。出どころ（`sources` / `envSet`）も返す |
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
+| `POST /api/settings/notify` | 保存して即反映。応答は GET と同じ形 |
+| `POST /api/settings/notify/test` | テスト送信を1通。3秒のクールダウン付き |
+
+### 書き込み口の門番
+
+**`GET` と `HEAD` 以外はすべて `shared/origin.mjs` の `isTrustedWrite()` を通す。**
+`server.mjs` の分岐は1箇所（`handleWrite`）に寄せてあり、窓の前面化も設定の保存も同じ扱い。
+
+`127.0.0.1` で listen していても、ブラウザで開いた**任意のページ**がここへ POST できる。
+`<form method="post">` は CORS の事前確認なしに飛ぶ。
+放っておくと、悪意のあるページが Webhook を自分のものに書き換えられる。
+以後の質問文がまるごとそちらへ流れるので、実害のある穴として塞いである。
+
+見るのは4つ。
+
+- `content-type` が `application/json` で始まること（`<form>` はこれを名乗れない）
+- `origin` があるなら `127.0.0.1:<port>` か `localhost:<port>` であること（`'null'` は自分ではないので断る）
+- `host` が同じであること（DNS 再バインド対策）
+- `sec-fetch-site` があるなら `same-origin` か `none` であること
+
+照合に使うポートは `boundPort`。`server.listen` のコールバックで代入する。
+定数の `PORT` を使ってはいけない。埋まっていたらずらす作りなので、実際に listen した番号と食い違う。
+
+本文は 8KB（`BODY_MAX`）を超えたら受け取らない。
+**そこで `req.destroy()` を呼ばない。** 断りの 400 を書く前に接続が切れて、
+呼び出し側には「応答が空」としか見えなくなる。溜めるのをやめて捨てるだけにする。
+
+### 落ちない口の作り方
+
+`async` の窓口には**必ず失敗の受け皿を付ける。** 付け忘れると unhandled rejection になり、
+Node 18 以降はプロセスごと終わる。画面が死ぬだけでなく通知も黙って止まるので、
+「返事待ちに気づけない」を埋めるための道具が、気づけないまま止まることになる。
+
+実際に1件そうなっていた。`serveStatic` の `decodeURIComponent(pathname)` は
+`/%ZZ` のような壊れた `%` で `URIError` を投げる。呼び出し側が `.catch()` を付けていなかったため、
+**この1行でサーバーが即死した**（実測。`/api/health` も応答しなくなる）。
+
+これは GET なので**書き込みの門番を通らない。** 他所のページに
+`<img src="http://127.0.0.1:4317/%ZZ">` が1行あるだけで撃てる。
+`<img>` は CORS の事前確認なしに飛ぶので、読めなくても届けば成立する。
+いまは復号を `try` で囲んで 400 を返し、呼び出し側にも `.catch()` を付けてある。
+
+受け皿は最上位にも1枚置いてある（`uncaughtException` / `unhandledRejection` で記録して続行）。
+一般には「状態が壊れたまま走らせるな」で終了が正しいが、ここは読み取り専用のローカル画面で、
+壊れて困る書き込み中の状態を持たない。唯一の例外である設定の保存は一時ファイル ＋ `rename`。
 
 更新の押し出しは差分判定つき。`idleMs` と `lastActivityAt` は毎回変わるので比較対象から外す。
 入れてしまうと内容が同じでも毎秒 push することになる。
+
+通知の差し込みは4箇所だけ。`createNotifier()`・`refresh()` の1行・`FLUSH_MS` のタイマ・`/api/health`。
+`refresh()` の中の `notifier.observe()` は `try/catch` で囲む。これは任意ではなく必須で、
+外すと通知側のバグが `refresh()` の catch まで抜けて `broadcast('error')` になり、画面が空白になる。
 
 監視は `fs.watch` と2秒ポーリングの二重。watch が効かない環境でもポーリングで動く。
 
@@ -223,7 +422,7 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 拡張子は `.js` のままにする。`.mjs` を `public/` に置くと `server.mjs` の `MIME` に無く、
 `octet-stream` で返るのでブラウザが module として読まない。
 
-`public/js/` は 16枚 ＋ `timeline/` 7枚。**import は上から下へ一方向にだけ流す。**
+`public/js/` は 17枚 ＋ `timeline/` 7枚。**import は上から下へ一方向にだけ流す。**
 逆向きに import したくなったら、置き場所が間違っている。
 
 | 層 | ファイル | 役割 |
@@ -245,6 +444,7 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 | 6 | `list.js` | 稼働中の一覧と、上のバーのまとめ |
 | 7 | `archive.js` | 書庫と、左のペインのタブ |
 | 7 | `stream.js` | SSE でつなぎ、届いた一覧を画面へ流す |
+| 7 | `settings.js` | 通知の設定モーダル |
 | 8 | `main.js` | 入口。配線・テーマ・キー操作・起動 |
 
 `timeline/` の中も同じで、`kinds` `waits` → `search` → `blocks` → `item` → `view` → `index` の順。
@@ -275,12 +475,17 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 - **省略は絞り込みのチップに出さない。** 上の通り、出るか出ないかは他のチップ側で決まるので、独立したチップにすると件数が嘘になる。実測では「省略 74」と出しながら1行も出ない状態になっていた（74 件すべてが足跡だけの区間で、足跡は既定で隠れる）。その状態で他を全部隠すと時系列が空になる。目印ごと消す指定は URL に残してある（`?hide=elided`）
 - 窓（`TL_FIRST` = 4 で開き、`TL_MORE` = 60 ずつ継ぎ足す）の外にしか無い種類は名前で伝える。足跡は新しい 200 件だけが残るので、古い順で見ていると窓の中に1件も入らないことがある。黙っていると「押しても変わらない」に見える
 - 描画にかかった時間は `window.deckPerf()` で見る（目安は `renderDetail` が 50ms 未満、時系列の描き直しが 16ms 未満）。測る入れ物は `perf.js` の1つに保つ（2つに割ると `deckPerf()` が片方しか見えない）
+- 設定モーダルは `<dialog>` ＋ `showModal()`。Esc・背面の膜・焦点の閉じ込めがタダで付く。中身は**開いたときに1回だけ**引く。ここを毎秒更新しない
+- モーダルを `<form>` で囲まない。囲うと入力欄で Enter を押した瞬間に閉じる（保存したつもりで消える）。Enter → 保存は `settings.js` が自分で拾う
+- URL の入力欄は常に空で開き、いまの値はマスクして `placeholder` に出す。`****` のような偽の値を `value` に置くと、それをそのまま保存して URL を壊す。空欄＝「変えない」、消すのは「消す」ボタンだけの役目
+- 数値の欄も空ならキーごと送らない。サーバー側が「キーが無い＝触らない」なので、そこに乗る
+- `.settings` に `padding` を持たせない。持たせるとその余白を押したのが背面を押したのと区別できず、`ev.target === dialog` での判定が崩れる
 
 状態ラベルの日本語は画面側に持たない。
 `/api/sessions` の `meta.stateLabels`（`STATE_LABELS` そのまま）から引く。
 状態を1つ増やすときに直すのは `parse/state.mjs` だけで済む。
 
-CSS は `public/css/` に7枚ある。`index.html` の `<link>` の並びが、そのまま重ね順になる。
+CSS は `public/css/` に8枚ある。`index.html` の `<link>` の並びが、そのまま重ね順になる。
 
 | ファイル | 中身 |
 |---|---|
@@ -290,10 +495,15 @@ CSS は `public/css/` に7枚ある。`index.html` の `<link>` の並びが、�
 | `detail.css` | 詳細ペイン・パネルの器・待ち・判断・facts |
 | `timeline.css` | 時系列 |
 | `panels.css` | TODO・サブエージェントの記録・ファイル |
+| `settings.css` | 通知の設定モーダル |
 | `narrow.css` | 狭い窓向け（`@media (max-width: 860px)`） |
 
 **`<link>` の順番を入れ替えない。** CSS は宣言順で勝ち負けが付く。
-`narrow.css` は上の6枚を上書きするので、必ず最後に読む。
+`narrow.css` は上の7枚を上書きするので、必ず最後に読む。
+
+`settings.css` は狭い窓向けの指定を自分で持つ（`min()` と `max-width: 34rem` のグリッド畳み）。
+モーダルの都合を `narrow.css` に散らさないため。`<dialog>` の既定は `canvas` / `canvastext` という
+別系統の色を使うので、意味トークンで塗り替えないと配色を暗くしてもモーダルだけ白く残る。
 
 ライト／ダーク両対応。
 色の値は `--l-*`（明）と `--d-*`（暗）に1回だけ書き、`--bg` などの意味トークンがそこを指す。
@@ -307,10 +517,13 @@ CSS は `public/css/` に7枚ある。`index.html` の `<link>` の並びが、�
 
 このプロジェクトは制約のほうが設計を決めている。以下は理由つきで守る。
 
-- **`~/.claude` 配下へ書き込まない。** 読み取り専用が前提。ログの出力先は `%LOCALAPPDATA%\ClaudeDeck\`
+- **`~/.claude` 配下へ書き込まない。** 読み取り専用が前提。書き込み先は `%LOCALAPPDATA%\ClaudeDeck\`。場所の決め方は `src/shared/appdata.mjs` の1箇所に寄せてある（2箇所に書くと必ず片方が古くなり、設定したのに読まれない事故になる）
 - **listen は `127.0.0.1` 固定。** 会話ログに業務内容が入るため、社内ネットから見えてはいけない
+- **`GET` と `HEAD` 以外はすべて `isTrustedWrite()` を通す。** `127.0.0.1` は守りではない。ブラウザで開いた任意のページが `<form method="post">` で届く。通す口を増やすときは `handleWrite` の中に足す（門番の外側に窓口を作らない）
 - **依存パッケージを増やさない。** 同僚にフォルダごと渡して動くことが要件。`dependencies` は空のまま
 - **未知の形で落ちない。** 読んでいるのは Claude Code の内部データで公開仕様ではない。未知のキー・未知の `status`・書き込み途中の壊れた JSON が来ても、黙って飛ばして進む
+- **`async` の窓口を `.catch()` 無しで呼ばない。** 拾われなかった拒否は Node 18 以降でプロセスを殺す。実測で `GET /%ZZ` の1発が `serveStatic` の `decodeURIComponent` からサーバーを落としていた。GET は門番を通らないので、他所のページの `<img src>` だけで撃てる（詳しくは「落ちない口の作り方」）
+- **`ClaudeDeck/` を `.gitignore` から外さない。** リポジトリは public。`appdata.mjs` は `LOCALAPPDATA` も `XDG_STATE_HOME` も `HOME` も無いときアプリ直下へ倒れるので、そこに落ちる `config.json`（**生の Webhook URL 入り**）が `git add -A` で公開リポジトリに乗る
 - **`innerHTML` を使わない。** ログ本文をそのまま画面に出すので、必ず `textContent` で入れる
 - **`timeline/` の中のファイルを外から直に import しない。** 口は `timeline/index.js` の1枚に絞る。例外は `kinds.js`（層0の語彙）だけで、`index.js` を経由させると `index` → `view` → `store` → `index` の循環になる
 - **`public/` に `.mjs` を置かない。** `server.mjs` の `MIME` に無いので `octet-stream` で返り、ブラウザが module として読まない。画面側の拡張子は `.js`
@@ -329,6 +542,15 @@ CSS は `public/css/` に7枚ある。`index.html` の `<link>` の並びが、�
 - **プランの mtime だけで「提出後に変わった」と断定しない。** 実測45件で、ファイルのほうが古い例が28件あった。本文の一致を主判定にする。`planWasEdited` はキーが無いことを「編集なし」と読み替えない
 - **一覧の経路（毎秒走る）に重い処理を足さない。** ここに何かを足すときは、まず「払わずに済む行」を先に落とす。サブエージェントの件数がその形で、`indexTranscripts` が `withFileTypes` でタダで拾った `hasSessionDir` を見て、`<セッションID>/` が無い行は `readdir` を1回も出さずに 0 と決める。実測 168 件中 48 件しか持っていない。全件を数えると `indexTranscripts` が 39.0ms → 78.2ms になり、一覧全体（48.8ms）を超える
 - **件数を数えるのに `listSubagents` を呼ばない。** 一覧は `countSubagents`（`readdir` 1回だけ）。`listSubagents` は 1件ごとに `stat` と `.meta.json` を読むので、詳細を開いたときだけ
+- **通知の本文に `cwd`・`logFile`・`gitBranch`・`title`・`lastPrompt` を載せない。** 載せてよいのは `project`（フォルダ名だけ）まで。`watch.mjs` の `snapshot()` が写し取る時点で落としてあるので、`message.mjs` からは載せようがない。安全装置がそこにあることを知らずに `snapshot()` へ項目を足さない
+- **Webhook の URL を戻り値のどこにも入れない。** 表に出るのは `maskWebhook()` を通したものだけ。`fetch` の失敗メッセージには URL が埋め込まれ得るので、`postToSlack` は理由を返す前に自分で `scrubError()` を通す（呼ぶ側に伏せ忘れの余地を残さない）。弾いた URL も返さない。別サービスの鍵を貼り間違えている可能性がある
+- **`/api/settings/notify` の応答に生の URL を入れない。** GET も POST も同じ。ここが漏れると、モーダルを開いただけで鍵がブラウザの履歴とメモリに乗る。だから画面側は「変えない（空欄）」と「消す（空文字）」の2つだけで足り、生の値を持たずに済んでいる
+- **送り先は `hooks.slack.com` に固定する。** タイポで別のホストへ業務内容を POST する事故を、機能として防ぐ。この検証を緩めない
+- **`notify/watch.mjs` に I/O を入れない。** 時刻も外から `now` で渡す。ここが純粋だから「送るかどうか」の全分岐をテストで通せる。`observe()` は同期に保つ（`await` を挟むと `refresh()` が `refreshing` を立てている区間が延びる）
+- **返信待ちの鍵をセッション ID だけで作らない。** `anchorId`（ログの最後の行の uuid）を混ぜる。混ぜないと鍵が生涯1つになり、1通鳴ったきり2回目以降が黙って落ちる。この壊れ方はテストを書いていないと気づけない（鳴らないだけで、どこにもエラーが出ない）
+- **`needs-approval` を `byStatus` の裏づけ無しで通知しない。** しきい値だけが根拠の側は、長く走る Bash と区別がつかない（実測で50秒の Bash が同じ形になった）。auto mode で Claude が自分で承認した分を誤報として送ることになる
+- **設定を変えても `watch.mjs` を作り直さない。** 値だけ差し替える（`configure()`）。作り直すと送信済みの記憶（`known`）が消えて、いま待っているぶんが保存した瞬間に全部もう一度鳴る。無効から有効へ変わったときだけ `rearm()` で種まきし直す（これが無いと、何時間も待っていたセッションが一斉に飛ぶ）
+- **通知済みの記録をファイルに残さない。** メモリだけで足りる。種まきで重複は消えるので、書き込み失敗・壊れた JSON・古い記録の掃除という失敗経路を3つ増やす価値がない
 
 ## 要約を AI に差し替えるとき
 

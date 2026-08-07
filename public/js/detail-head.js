@@ -22,7 +22,12 @@ export function detailActions(row) {
       focus.disabled = true;
       hint.textContent = '呼んでいます…';
       try {
-        const res = await fetch(`/api/focus?pid=${encodeURIComponent(row.pid)}`, { method: 'POST' });
+        // content-type は必須。書き込み口の門番がここを見て、
+        // 他所のページからの <form> による送信を弾いている（src/shared/origin.mjs）
+        const res = await fetch(`/api/focus?pid=${encodeURIComponent(row.pid)}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+        });
         const data = await res.json();
         if (!data.ok) {
           hint.textContent = `出せません: ${data.reason}`;
