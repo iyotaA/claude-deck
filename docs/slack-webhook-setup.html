@@ -744,18 +744,60 @@ Invoke-RestMethod -Uri $url -Method Post -ContentType 'application/json; charset
 <section id="s7">
 <h2><span class="num">07</span><span>ClaudeDeck 側の設定</span></h2>
 
-<div class="note">
-  <span class="note-title">通知の本体はまだ入っていません</span>
-  <p>
-    この節に書いた設定は、通知機能の実装が入ってから有効になります。
-    いま設定しても害はありませんが、まだ何も飛びません。
-  </p>
-</div>
+<h3>画面から入れる（おすすめ）</h3>
 
 <p>
-  設定の入れ方は 2 通りあります。
-  環境変数が優先で、無ければ設定ファイルを読みます。
+  ClaudeDeck を開き、上のバーの「設定」を押します。
+  いちばん上の欄にコピーした URL を貼り、「保存」を押すだけです。
 </p>
+
+<p>
+  再起動は要りません。その場で効きます。
+  同じ画面の「テスト送信」を押すと、1 通すぐ届くので確かめられます。
+</p>
+
+<p>
+  貼った URL が画面に出てくることはありません。
+  次に開いたときは <code>T0AB…/B12…/****</code> のように伏せた形で表示されます。
+</p>
+
+<h3>設定ファイルで入れる</h3>
+
+<p>
+  置き場所は <code>%LOCALAPPDATA%\ClaudeDeck\config.json</code> です。
+  画面から保存したものも、ここに入ります。
+  自動起動のログと同じフォルダになります。
+</p>
+
+<pre><code>{
+  "notify": {
+    "slackWebhookUrl": "コピーした URL",
+    "settleSec": 6,
+    "idleMin": 2,
+    "remindMin": 0,
+    "detail": "full"
+  }
+}</code></pre>
+
+<p>
+  手で書いたときだけ、あとで ClaudeDeck を起動し直してください。
+  ファイルの見張りはしていません。
+</p>
+
+<div class="scroll">
+<table>
+  <thead>
+    <tr><th>キー</th><th>既定</th><th>意味</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>slackWebhookUrl</code></td><td class="num">なし</td><td>Webhook の URL。これが入っているときだけ通知が動きます。</td></tr>
+    <tr><td><code>settleSec</code></td><td class="num">6</td><td>待ちに入ってから送るまでの秒数。目の前にいてすぐ答えた分は送りません。</td></tr>
+    <tr><td><code>idleMin</code></td><td class="num">2</td><td>返信待ちで送るまでの分。0 で返信待ちを送りません。</td></tr>
+    <tr><td><code>remindMin</code></td><td class="num">0</td><td>放置したときの再通知までの分。0 で無効です。</td></tr>
+    <tr><td><code>detail</code></td><td class="num">full</td><td><code>none</code> にすると質問の本文を落とし、状態だけ送ります。</td></tr>
+  </tbody>
+</table>
+</div>
 
 <h3>環境変数で入れる</h3>
 
@@ -766,41 +808,25 @@ Invoke-RestMethod -Uri $url -Method Post -ContentType 'application/json; charset
   自動起動しているサーバーには届かないので、いちど終了させて起動し直します。
 </p>
 
-<h3>設定ファイルで入れる</h3>
-
 <p>
-  置き場所は <code>%LOCALAPPDATA%\ClaudeDeck\config.json</code> です。
-  自動起動のログと同じフォルダになります。
+  環境変数は、画面でまだ設定していないときの初期値という扱いです。
+  画面から保存すると、そちらが勝ちます。
 </p>
 
-<pre><code>{
-  "notify": {
-    "slackWebhookUrl": "コピーした URL",
-    "settleSec": 6,
-    "remindMin": 0,
-    "detail": "full"
-  }
-}</code></pre>
-
-<div class="scroll">
-<table>
-  <thead>
-    <tr><th>キー</th><th>既定</th><th>意味</th></tr>
-  </thead>
-  <tbody>
-    <tr><td><code>slackWebhookUrl</code></td><td class="num">なし</td><td>Webhook の URL。これが入っているときだけ通知が動きます。</td></tr>
-    <tr><td><code>settleSec</code></td><td class="num">6</td><td>待ちに入ってから送るまでの秒数。目の前にいてすぐ答えた分は送りません。</td></tr>
-    <tr><td><code>remindMin</code></td><td class="num">0</td><td>放置したときの再通知までの分。0 で無効です。</td></tr>
-    <tr><td><code>detail</code></td><td class="num">full</td><td><code>none</code> にすると質問の本文を落とし、状態だけ送ります。</td></tr>
-  </tbody>
-</table>
-</div>
+<p>
+  ただし <code>CLAUDE_DECK_NOTIFY_OFF</code> に <code>1</code> を入れたときだけは別で、
+  設定に関係なく通知が全部止まります。
+</p>
 
 <h3>効いているかを見る</h3>
 
 <p>
   設定したのに動かない、という事故がいちばん起きやすい場所です。
-  次の口で確かめられます。
+  画面の「設定」を開くと、いまの状態と送った数・失敗した数が上に出ます。
+</p>
+
+<p>
+  画面を開かずに見たいときは、次の口があります。
 </p>
 
 <pre><code>curl http://127.0.0.1:4317/api/health</code></pre>
