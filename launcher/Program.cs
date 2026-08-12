@@ -150,12 +150,12 @@ static class Program
 
         Console.WriteLine();
         Console.WriteLine("■ いまの状態");
-        // 紙が無くても、既定のポートは念のため見る。紙だけを信じない側の裏返し
-        var port = info?.Port ?? 4317;
-        var health = await ServerProcess.HealthAsync(port);
-        if (health is null)
+        // 紙が無くても探す。ここを紙だけで決めると、
+        // 紙を書かない古いサーバーが動いていても「動いていません」と出る
+        var running = await ServerProcess.FindRunningAsync();
+        if (running is null)
         {
-            Console.WriteLine($"  ポート {port} では動いていません");
+            Console.WriteLine("  動いていません");
             if (info is not null)
             {
                 Console.WriteLine("  ※ 記録は残っていますが応答がありません。前回の名残です");
@@ -163,10 +163,14 @@ static class Program
         }
         else
         {
-            Console.WriteLine($"  動いています  : http://127.0.0.1:{port}/");
-            Console.WriteLine($"  版            : {health.Version ?? "(返していない = 入れ替え前のもの)"}");
-            Console.WriteLine($"  読み取り元    : {health.ConfigDir}");
-            Console.WriteLine($"  つないでいる窓: {health.Clients}");
+            Console.WriteLine($"  動いています  : http://127.0.0.1:{running.Port}/");
+            Console.WriteLine($"  版            : {running.Health.Version ?? "(返していない = 入れ替え前のもの)"}");
+            Console.WriteLine($"  読み取り元    : {running.Health.ConfigDir}");
+            Console.WriteLine($"  つないでいる窓: {running.Health.Clients}");
+            if (info is null)
+            {
+                Console.WriteLine("  ※ port.json がありません。入れ替え前のサーバーが動いています");
+            }
         }
 
         return ExitCode.Ok;
