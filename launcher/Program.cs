@@ -80,10 +80,11 @@ static class Program
             "--open" => await RunNormalAsync(openWindow: true),
             "--stop" => await RunStopAsync(),
             "--status" => await RunStatusAsync(),
+            "--check-update" => await RunCheckUpdateAsync(),
 
             // ここから下は段を分けて足す。いまは「無い」と正直に言う。
             // 黙って 0 を返すと、呼んだ側は成功したと思い込む
-            "--check-update" or "--apply-update" or "--restarted"
+            "--apply-update" or "--restarted"
                 or "--install-startup" or "--uninstall-startup" => NotImplemented(command),
 
             _ => NotImplemented(command),
@@ -105,9 +106,37 @@ static class Program
             return ExitCode.ServerFailed;
         }
 
-        if (!openWindow) return ExitCode.Ok;
+        var code = ExitCode.Ok;
+        if (openWindow && !EdgeWindow.Open(port)) code = ExitCode.WindowFailed;
 
-        return EdgeWindow.Open(port) ? ExitCode.Ok : ExitCode.WindowFailed;
+        // 窓を開けてから確認する。逆にすると、回線が細い日に窓が最大20秒遅れて出る。
+        // 結果は終了コードに混ぜない。更新を確認できないことは起動の失敗ではないので、
+        // ここで 0 以外を返すと「回線が細いとアプリが立たない」に化ける
+        await Updates.CheckQuietlyAsync();
+
+        return code;
+    }
+
+    /// <summary>
+    /// 更新を確認して結果を出すだけ。落としも入れ替えもしない。
+    ///
+    /// 人が自分で叩いたときは前回からの間隔を無視する。
+    /// 「いま確かめたい」に「30分待って」と返す道具は使い物にならない。
+    /// </summary>
+    static async Task<int> RunCheckUpdateAsync()
+    {
+        Log.AttachToParentConsole();
+
+        var state = await Updates.CheckAsync(force: true);
+
+        Console.WriteLine(Updates.Describe(state.State));
+        Console.WriteLine($"  いまの版: {state.Current}");
+        if (state.Available is not null) Console.WriteLine($"  新しい版: {state.Available}");
+        if (state.Error is not null) Console.WriteLine($"  理由    : {state.Error}");
+        Console.WriteLine($"  記録    : {Paths.UpdateFile}");
+
+        // 確認そのものができなかったときだけ 0 以外を返す。「最新だった」は失敗ではない
+        return state.State is "unreachable" or "failed" ? ExitCode.UpdateFailed : ExitCode.Ok;
     }
 
     static async Task<int> RunStopAsync()
@@ -173,6 +202,24 @@ static class Program
             }
         }
 
+        Console.WriteLine();
+        Console.WriteLine("■ 更新");
+        // ここでは取りに行かない。前回の記録を読むだけ（--status を通信で待たせない）
+        var update = Updates.ReadState();
+        if (update is null)
+        {
+            Console.WriteLine(Updates.IsOff()
+                ? "  確認は止めてあります（CLAUDE_DECK_UPDATE_OFF）"
+                : "  まだ確認していません");
+        }
+        else
+        {
+            Console.WriteLine($"  {Updates.Describe(update.State)}");
+            Console.WriteLine($"  いまの版: {update.Current}");
+            if (update.Available is not null) Console.WriteLine($"  新しい版: {update.Available}");
+            if (update.Error is not null) Console.WriteLine($"  理由    : {update.Error}");
+        }
+
         return ExitCode.Ok;
     }
 
@@ -184,7 +231,7 @@ static class Program
         Log.Line(message);
         Log.AttachToParentConsole();
         Console.WriteLine(message);
-        Console.WriteLine("使えるもの: (引数なし) / --background / --open / --stop / --status");
+        Console.WriteLine("使えるもの: (引数なし) / --background / --open / --stop / --status / --check-update");
         return ExitCode.NotImplemented;
     }
 

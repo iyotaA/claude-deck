@@ -1,0 +1,83 @@
+/* 更新のお知らせ。
+ *
+ * 読む順は settings.css の後・narrow.css の前。
+ * narrow.css が上を全部上書きするので、あれより後ろには置けない。
+ */
+
+/* 上のバーの版。
+ *
+ * .topbar-actions の先頭に置く。新しい版が無くても常に出す
+ * （渡された側が自分の版を確かめられる場所が、画面にはここしか無い） */
+.ver {
+  font-family: var(--font-mono);
+  font-size: .75rem;
+  color: var(--fg-faint);
+  /* 触ると説明が出ることを、形で知らせる */
+  cursor: help;
+  white-space: nowrap;
+}
+
+/* hidden は display: inline-flex に負ける。必ず自分で消す */
+.ver[hidden] { display: none; }
+
+/* 状態の印。
+ *
+ * 点だけにして、面は塗らない。全面を塗ると版のラベルが主役になってしまう。
+ *
+ * 点は文字の前に置く。隣にいる .live も ::before なので、後ろに付けると
+ * 点が2つ隣り合って（v0.1.0 ● ● 自動更新なし）どちらの印か分からなくなる */
+.ver[data-update='new'],
+.ver[data-update='bad'] {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+
+.ver[data-update='new']::before,
+.ver[data-update='bad']::before {
+  content: '';
+  width: .5rem;
+  height: .5rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* 確認できていない側は、新しい版があるのと同じ色にしない */
+.ver[data-update='bad']::before { background: var(--warn); }
+
+/* お知らせの帯。
+ *
+ * 置き場所は <header class="topbar"> の中。.app 直下ではない。
+ * .app は grid-template-rows に2行しか宣言していないので、
+ * 3つ目の子を足すと高さの配分が崩れる。
+ * .topbar は既に flex-wrap: wrap なので、幅いっぱいを取れば自分の行へ折り返す */
+.update {
+  flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  gap: .6rem 1rem;
+  flex-wrap: wrap;
+  margin-top: .6rem;
+  padding: .5rem .7rem;
+  border: 1px solid var(--border);
+  /* 面は塗らず、左の1本だけで知らせる */
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  font-size: .8rem;
+}
+
+/* display: flex は hidden より強い。これが無いと隠しても出たままになる */
+.update[hidden] { display: none; }
+
+.update-text { font-weight: 600; }
+
+/* できないことの断り。本文より控えめに置く */
+.update-note {
+  color: var(--fg-muted);
+  /* 狭い窓では改行させたいので、伸び縮みを許す */
+  flex: 1 1 12rem;
+}
+
+/* 閉じるは右端へ寄せる */
+.update-close { margin-left: auto; }

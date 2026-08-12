@@ -15,7 +15,7 @@
  *   層4  detail.js
  *   層5  session.js
  *   層6  list.js
- *   層7  archive.js / stream.js / settings.js
+ *   層7  archive.js / stream.js / settings.js / update.js
  *   層8  このファイル
  *
  * timeline/ の中も6枚で層をなしているが、外から見るときは index.js の1枚として扱う。
@@ -40,6 +40,7 @@ import { initTabs } from './archive.js';
 import { select, detailCache } from './session.js';
 import { setLive, fetchOnce, connect } from './stream.js';
 import { initSettings } from './settings.js';
+import { initUpdate } from './update.js';
 
 function initTheme() {
   const forced = query.get('theme');
@@ -91,6 +92,7 @@ initTheme();
 initListDrawer();
 initTabs();
 initSettings();
+initUpdate();
 initListKeys(dom.list, 'live');
 initListKeys(dom.archive, 'archive');
 

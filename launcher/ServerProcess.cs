@@ -64,14 +64,14 @@ static class ServerProcess
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return null;
 
-            var port = GetInt(root, "port");
+            var port = JsonRead.GetInt(root, "port");
             if (port <= 0) return null;
 
             return new PortInfo(
                 port,
-                GetInt(root, "pid"),
-                GetString(root, "version"),
-                GetLong(root, "startedAt"));
+                JsonRead.GetInt(root, "pid"),
+                JsonRead.GetString(root, "version"),
+                JsonRead.GetLong(root, "startedAt"));
         }
         catch
         {
@@ -92,9 +92,9 @@ static class ServerProcess
             if (!root.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True) return null;
 
             return new HealthInfo(
-                GetString(root, "version"),
-                GetString(root, "configDir"),
-                GetInt(root, "clients"));
+                JsonRead.GetString(root, "version"),
+                JsonRead.GetString(root, "configDir"),
+                JsonRead.GetInt(root, "clients"));
         }
         catch
         {
@@ -382,13 +382,4 @@ static class ServerProcess
             // 消せなくても実害は無い（読む側は health で裏を取る）
         }
     }
-
-    static int GetInt(JsonElement root, string name) =>
-        root.TryGetProperty(name, out var v) && v.TryGetInt32(out var n) ? n : 0;
-
-    static long GetLong(JsonElement root, string name) =>
-        root.TryGetProperty(name, out var v) && v.TryGetInt64(out var n) ? n : 0;
-
-    static string? GetString(JsonElement root, string name) =>
-        root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 }

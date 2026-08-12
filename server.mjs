@@ -22,6 +22,7 @@ import { focusTerminal } from './src/os/focus.mjs';
 import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
 import { validateSettings, writeSettings } from './src/notify/settings.mjs';
+import { loadUpdateState, parseUpdateState } from './src/update/state.mjs';
 import { isTrustedWrite } from './src/shared/origin.mjs';
 import { VERSION } from './src/shared/appinfo.mjs';
 import { resolvePortFile, writePortFile, removePortFile } from './src/shared/portfile.mjs';
@@ -358,6 +359,29 @@ function handleQuit(res) {
 }
 
 /**
+ * 更新の状態を読む。
+ *
+ * 書いているのは C# ランチャ（launcher/Updates.cs）で、ここは読むだけ。
+ * 判断をこちらに持ってくると、server.mjs の uncaughtException が
+ * 失敗を握り潰して「画面は元気なのに何も変わらない」に化ける。
+ *
+ * loadUpdateState は自分で try を持っているが、
+ * 置き場所の解決だけは環境変数しだいで投げうる。
+ * ここで投げると 500 になり、更新が見えないだけのはずが窓口ごと落ちる。
+ *
+ * @returns {object} src/update/state.mjs の parseUpdateState の戻り
+ */
+function readUpdate() {
+  try {
+    return loadUpdateState({ version: VERSION });
+  } catch {
+    // 紙が読めないのと同じ扱いにする。形は parseUpdateState に作らせて、
+    // 「読めなかったときの形」を2箇所に書かない
+    return parseUpdateState(null, { version: VERSION });
+  }
+}
+
+/**
  * GET と HEAD 以外は、すべてここを通す。
  *
  * 127.0.0.1 で listen していても、それは守りにならない。
@@ -507,11 +531,22 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 更新の状態。画面が読み込み時と30分ごとに引く。
+  // そのつど紙を読み直してよい程度の頻度なので、起動時に1回だけ持つ形にはしない
+  // （持つと、ランチャが裏で書き換えても画面が古いまま固まる）
+  if (pathname === '/api/update') {
+    sendJson(res, 200, readUpdate());
+    return;
+  }
+
   if (pathname === '/api/health') {
     // 自動起動されたサーバーの設定を確かめる唯一の手段。
     // notify.target はマスク済みしか入っていない（notify/index.mjs の health）
+    const update = readUpdate();
     sendJson(res, 200, {
       ok: true, version: VERSION, configDir, clients: clients.size, notify: notifier.health(),
+      // 短い形だけ載せる。全部入りは /api/update
+      update: { state: update.state, available: update.available },
     });
     return;
   }

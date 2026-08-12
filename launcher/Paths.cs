@@ -49,6 +49,14 @@ static class Paths
     public static string ServerLog => Path.Combine(DataDir, "server.log");
 
     /// <summary>
+    /// 更新の確認結果を置く紙。
+    ///
+    /// 書くのはここ（C#）だけ、読むのは Node（src/update/state.mjs）だけ。
+    /// 向きを一方通行にしてあるので、両側に同じ判断を持たずに済む。
+    /// </summary>
+    public static string UpdateFile => Path.Combine(DataDir, "update.json");
+
+    /// <summary>
     /// Edge に持たせるプロファイル。
     ///
     /// 普段のプロファイルと分ける。画面側が localStorage に配色・onlyLive・
