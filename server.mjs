@@ -23,6 +23,8 @@ import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
 import { validateSettings, writeSettings } from './src/notify/settings.mjs';
 import { isTrustedWrite } from './src/shared/origin.mjs';
+import { VERSION } from './src/shared/appinfo.mjs';
+import { resolvePortFile, writePortFile, removePortFile } from './src/shared/portfile.mjs';
 import { sessionsDir, projectsDir, configDir } from './src/read/paths.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -45,8 +47,17 @@ const POLL_MS = 2000;
 /** 変更通知が連続で飛んでくるのをまとめる。 */
 const DEBOUNCE_MS = 250;
 
-const args = new Set(process.argv.slice(2));
+const argv = process.argv.slice(2);
+const args = new Set(argv);
 const noOpen = args.has('--no-open');
+/**
+ * 実ポートを置いておく紙の場所。
+ *
+ * ランチャは `--port-file <path>` で明示してくる。
+ * 無ければ既定（%LOCALAPPDATA%\ClaudeDeck\port.json）に書くので、
+ * npm start も autostart.ps1 もこれまでどおり動く。
+ */
+const portFile = resolvePortFile(argv);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -332,6 +343,21 @@ async function handleTestNotify(res) {
 }
 
 /**
+ * 外から行儀よく止める。更新のときにランチャが使う。
+ *
+ * 応答を書き終えてから畳む。ここで即 exit すると、
+ * 止めた側には「応答が無い」としか分からず、
+ * 止まったのか届かなかったのかを区別できない。
+ *
+ * @param {object} res レスポンス
+ */
+function handleQuit(res) {
+  sendJson(res, 200, { ok: true, pid: process.pid });
+  // 応答が相手に届く間を置いてから畳む
+  setTimeout(() => shutdown(0), 100);
+}
+
+/**
  * GET と HEAD 以外は、すべてここを通す。
  *
  * 127.0.0.1 で listen していても、それは守りにならない。
@@ -364,6 +390,10 @@ function handleWrite(req, res, pathname, url) {
   }
   if (pathname === '/api/settings/notify/test') {
     handleTestNotify(res);
+    return;
+  }
+  if (pathname === '/api/quit') {
+    handleQuit(res);
     return;
   }
 
@@ -480,7 +510,9 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/health') {
     // 自動起動されたサーバーの設定を確かめる唯一の手段。
     // notify.target はマスク済みしか入っていない（notify/index.mjs の health）
-    sendJson(res, 200, { ok: true, configDir, clients: clients.size, notify: notifier.health() });
+    sendJson(res, 200, {
+      ok: true, version: VERSION, configDir, clients: clients.size, notify: notifier.health(),
+    });
     return;
   }
 
@@ -537,11 +569,28 @@ function listen(port, attemptsLeft = 12) {
     const url = `http://${HOST}:${port}/`;
     // 書き込みの門番が host と origin を照合するのに要る。決まってから入れる
     boundPort = server.address()?.port ?? port;
+
+    // 実ポートが決まってから置く。外から 4317 決め打ちで探されないように。
+    // 書けなくてもサーバーは動くべきなので、失敗を致命扱いにしない
+    let portFileError = null;
+    try {
+      writePortFile(portFile, {
+        port: boundPort,
+        pid: process.pid,
+        url: `http://${HOST}:${boundPort}/`,
+        version: VERSION,
+        startedAt: Date.now(),
+      });
+    } catch (err) {
+      portFileError = err?.message ?? String(err);
+    }
+
     const w = startWatching();
     console.log('ClaudeDeck');
     console.log(`  ${url}`);
     console.log(`  読み取り元: ${configDir}`);
     if (!w.okProjects) console.log('  （ファイル監視が使えないため定期確認のみで動きます）');
+    if (portFileError) console.log(`  （実ポートを書き出せませんでした: ${portFileError}）`);
     // 通知の行は有効なときと、書き間違えているときだけ出る。設定していなければ黙る
     const notifyLine = notifier.banner();
     if (notifyLine) console.log(`  ${notifyLine}`);
@@ -593,12 +642,31 @@ for (const [event, label] of [['uncaughtException', '想定外の例外'], ['unh
 const port = Number(process.env.CLAUDE_DECK_PORT) || DEFAULT_PORT;
 listen(port);
 
+/** 畳んでいる最中かどうか。Ctrl+C の連打や、quit と signal の重なりで二重に走らせない。 */
+let shuttingDown = false;
+
+/**
+ * 行儀よく畳む。
+ *
+ * 入口は3つ（Ctrl+C・SIGTERM・POST /api/quit）あるが、やることは同じなのでここに寄せる。
+ *
+ * @param {number} [code] 終了コード
+ */
+function shutdown(code = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  for (const w of watchers) {
+    try { w.close(); } catch { /* すでに閉じている */ }
+  }
+  // 助言として置いた紙なので、畳めるときは消しておく。
+  // 消し損ねても読む側は /api/health で裏を取る作りなので、そこは致命にならない
+  removePortFile(portFile);
+
+  server.close(() => process.exit(code));
+  setTimeout(() => process.exit(code), 500);
+}
+
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => {
-    for (const w of watchers) {
-      try { w.close(); } catch { /* すでに閉じている */ }
-    }
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 500);
-  });
+  process.on(sig, () => shutdown(0));
 }
