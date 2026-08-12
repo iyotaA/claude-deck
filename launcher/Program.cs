@@ -15,7 +15,19 @@ static class ExitCode
 
 static class Program
 {
-    static async Task<int> Main(string[] args)
+    /// <summary>
+    /// 入口。ここは同期のまま保つ。
+    ///
+    /// async Task&lt;int&gt; Main にしてはいけない。
+    /// コンパイラが本体を状態機械へ畳むので、Run() の呼び出しが
+    /// &lt;Main&gt;d__0::MoveNext() の中へ移る。
+    /// vpk pack がそれを見つけて「入口に見えない」と警告を出す（実測）。
+    /// 同期で受けて続きを別のメソッドへ渡せば、Run() は正真正銘いちばん最初になる。
+    ///
+    /// WinExe には既定の SynchronizationContext が無いので、
+    /// GetResult() で待っても行き詰まらない。
+    /// </summary>
+    static int Main(string[] args)
     {
         // ここが最初。ちょうど1回。
         //
@@ -24,6 +36,11 @@ static class Program
         // 自前の引数解析をこれより前に置くと、その引数を「未知のもの」として扱ってしまう。
         VelopackApp.Build().Run();
 
+        return MainAsync(args).GetAwaiter().GetResult();
+    }
+
+    static async Task<int> MainAsync(string[] args)
+    {
         Log.Open();
         Log.Line($"ClaudeDeck {Paths.Version} 引数=[{string.Join(' ', args)}]");
         Log.Line($"  自分    : {Environment.ProcessPath}");
