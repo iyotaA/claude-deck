@@ -33,17 +33,28 @@ const NOTES_MAX = 2000;
 /**
  * 状態の日本語。画面はこれを引くだけにして、日本語を持たない。
  *
- * 上の6つはランチャが書くもの、下の3つはここで足すもの。
+ * 上の9つはランチャが書くもの、下の3つはここで足すもの。
  * ランチャ側のコンソール用の文言は launcher/Updates.cs の Describe が持つ。
  * 同じ意味を2箇所に書いているので、片方を直したらもう片方も見る。
+ *
+ * failed と unreachable は確認と適用の両方から書かれる。
+ * だから「確認に失敗」「確認できません」と言い切ると、当てるほうで失敗したときに嘘になる。
+ * unreachable は起きたこと（届かなかった）だけを言い、何をしていたかは言わない
+ * （細かいことは error に入るので、そちらで伝わる）。
  */
 export const UPDATE_LABELS = {
   off: '更新の確認は止めてあります',
   'not-installed': 'この起動の仕方では更新できません',
   none: '最新です',
   available: '新しい版があります',
-  unreachable: '更新を確認できませんでした',
-  failed: '更新の確認に失敗しました',
+  unreachable: 'GitHub につながりませんでした',
+  failed: '更新に失敗しました',
+
+  // ここから3つは適用（--apply-update）の道中。
+  // 押してから戻るまでのあいだ、画面はこの紙だけを見て進み方を知る
+  downloading: '新しい版を取り寄せています',
+  applying: '入れ替えています',
+  done: '入れ替えました',
 
   idle: 'まだ確認していません',
   stale: '更新の記録が古いようです',
@@ -92,8 +103,9 @@ function stamp(v) {
 /**
  * update.json の中身を、画面へ渡せる形に整える。純関数。
  *
- * ランチャが書く状態は6つ（off / not-installed / none / available /
- * unreachable / failed）。ここで足すのが3つ。
+ * ランチャが書く状態は9つ（off / not-installed / none / available /
+ * unreachable / failed ＋ 当てる道中の downloading / applying / done）。
+ * ここで足すのが3つ。
  *
  *  - idle    … 紙がまだ無い（一度も確認していない）
  *  - stale   … 紙はあるが、書かれたときの版といまの版が食い違う
@@ -109,13 +121,14 @@ function stamp(v) {
  * @param {string|null} [opts.version] いま動いているサーバーの版
  * @param {boolean} [opts.missing] 紙がまだ無いか
  * @param {string|null} [opts.path] 紙の置き場所。診断のときに人へ見せる
- * @returns {object} state / label / current / available / notes /
+ * @returns {object} state / label / current / available / requested / notes /
  *                   checkedAt / changedAt / error / path
  */
 export function parseUpdateState(raw, { version = null, missing = false, path: file = null } = {}) {
   const base = {
     current: version,
     available: null,
+    requested: null,
     notes: null,
     checkedAt: null,
     changedAt: null,
@@ -133,6 +146,9 @@ export function parseUpdateState(raw, { version = null, missing = false, path: f
     state,
     label: updateLabel(state),
     available: str(raw.available),
+    // 当てようとした版。再起動後の照合はランチャ側でやるので、ここは運ぶだけ。
+    // 画面は done のときに「何に入れ替わったか」を出すのに使う
+    requested: str(raw.requested),
     notes: clip(raw.notes, NOTES_MAX),
     checkedAt: stamp(raw.checkedAt),
     changedAt: stamp(raw.changedAt),

@@ -81,14 +81,30 @@ static class Program
             "--stop" => await RunStopAsync(),
             "--status" => await RunStatusAsync(),
             "--check-update" => await RunCheckUpdateAsync(),
+            "--apply-update" => await Updates.ApplyAsync(WaitPid(args)),
+            "--restarted" => await RunRestartedAsync(),
 
             // ここから下は段を分けて足す。いまは「無い」と正直に言う。
             // 黙って 0 を返すと、呼んだ側は成功したと思い込む
-            "--apply-update" or "--restarted"
-                or "--install-startup" or "--uninstall-startup" => NotImplemented(command),
+            "--install-startup" or "--uninstall-startup" => NotImplemented(command),
 
             _ => NotImplemented(command),
         };
+    }
+
+    /// <summary>
+    /// --wait-pid の値を取り出す。
+    ///
+    /// server が自分の process.pid を書いて渡してくる。
+    /// 掴んだままのファイルは差し替えられないので、これが消えてから入れ替える。
+    /// </summary>
+    /// <param name="args">コマンドラインの引数すべて。</param>
+    /// <returns>待つ PID。指定が無い・読めないときは 0。</returns>
+    static int WaitPid(string[] args)
+    {
+        var at = Array.IndexOf(args, "--wait-pid");
+        if (at < 0 || at + 1 >= args.Length) return 0;
+        return int.TryParse(args[at + 1], out var pid) && pid > 0 ? pid : 0;
     }
 
     /// <summary>ふつうの起動。立っていなければ立てて、必要なら窓を開く。</summary>
@@ -97,7 +113,7 @@ static class Program
         int port;
         try
         {
-            port = await ServerProcess.EnsureRunningAsync();
+            port = await ServerProcess.EnsureRunningAsync(preferPort: 0);
         }
         catch (Exception ex)
         {
@@ -137,6 +153,57 @@ static class Program
 
         // 確認そのものができなかったときだけ 0 以外を返す。「最新だった」は失敗ではない
         return state.State is "unreachable" or "failed" ? ExitCode.UpdateFailed : ExitCode.Ok;
+    }
+
+    /// <summary>
+    /// 入れ替わった後の起き直し。Velopack がこの引数で呼んでくる。
+    ///
+    /// ふつうの起動と3つ違う。
+    ///
+    /// 1. 版の照合を先にやる。
+    ///    入れ替えそのものは Velopack の中で走るので、成否を見る手立ては
+    ///    「起き直した自分の版」しかない。
+    ///
+    /// 2. **更新の確認をしない。**
+    ///    done は IsSettled に入っていないので、ここで CheckQuietlyAsync を呼ぶと
+    ///    間隔の見張りが効かず即座に確認が走る。結果 none で上書きされて、
+    ///    「入れ替えました」の帯が一度も出ないまま消える。
+    ///
+    /// 3. **窓を開かない。**
+    ///    更新を押せたということは、押した窓が生きている。
+    ///    同じポートに戻せば人が何もしなくても復帰するので、開き直すと2つになる。
+    /// </summary>
+    /// <returns>終了コード。</returns>
+    static async Task<int> RunRestartedAsync()
+    {
+        var prevPort = Updates.ConfirmRestart();
+
+        try
+        {
+            var port = await ServerProcess.EnsureRunningAsync(preferPort: prevPort);
+
+            // 戻せなかったときだけ窓を開ける。開いたままの窓は前の URL を叩き続けるので、
+            // 番号が変わったなら誰かが開き直すしかない。人にやらせるより自分でやる
+            if (prevPort > 0 && port != prevPort)
+            {
+                Log.Line($"前のポート {prevPort} に戻せませんでした（いま {port}）。窓を開き直します");
+                if (!EdgeWindow.Open(port)) return ExitCode.WindowFailed;
+            }
+            else
+            {
+                Log.Line($"ポート {port} で戻りました。窓は開きません（押した窓がそのまま復帰します）");
+            }
+
+            return ExitCode.Ok;
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal(ex);
+            // 押した本人が画面を見ている場面なので、--background と違って黙らない。
+            // 何も出さないと「更新したら二度と開かなくなった」になる
+            Log.Box("更新後にサーバーを起動できませんでした", ex.Message);
+            return ExitCode.ServerFailed;
+        }
     }
 
     static async Task<int> RunStopAsync()
@@ -181,7 +248,7 @@ static class Program
         Console.WriteLine("■ いまの状態");
         // 紙が無くても探す。ここを紙だけで決めると、
         // 紙を書かない古いサーバーが動いていても「動いていません」と出る
-        var running = await ServerProcess.FindRunningAsync();
+        var running = await ServerProcess.FindRunningAsync(preferPort: 0);
         if (running is null)
         {
             Console.WriteLine("  動いていません");
@@ -231,7 +298,8 @@ static class Program
         Log.Line(message);
         Log.AttachToParentConsole();
         Console.WriteLine(message);
-        Console.WriteLine("使えるもの: (引数なし) / --background / --open / --stop / --status / --check-update");
+        Console.WriteLine("使えるもの: (引数なし) / --background / --open / --stop / --status");
+        Console.WriteLine("            --check-update / --apply-update [--wait-pid <PID>] / --restarted");
         return ExitCode.NotImplemented;
     }
 

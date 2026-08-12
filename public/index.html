@@ -48,6 +48,10 @@
     <div class="update" id="update" role="status" hidden>
       <span class="update-text" id="update-text"></span>
       <span class="update-note" id="update-note"></span>
+      <!-- 押せることは状態によって変わる（更新する／もう一度／読み込み直す）。
+           ボタンを3つ置いて出し分けるより、1つの札を書き換えるほうが
+           「いま押せるのはこれ1つ」が形で伝わる -->
+      <button class="btn update-act" id="update-act" type="button" hidden></button>
       <button class="btn update-close" id="update-close" type="button">閉じる</button>
     </div>
   </header>

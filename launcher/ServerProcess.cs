@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -116,9 +117,11 @@ static class ServerProcess
     /// 画面には「サーバーが起動できませんでした」と出るが、実際は最初から動いている。
     /// いちばん分かりにくい壊れ方なので、探す口をここ1つに寄せる。
     /// </summary>
-    public static async Task<RunningInfo?> FindRunningAsync()
+    /// <param name="preferPort">先に見てほしいポート。分からなければ 0。</param>
+    /// <returns>見つかったサーバー。誰も居なければ null。</returns>
+    public static async Task<RunningInfo?> FindRunningAsync(int preferPort)
     {
-        foreach (var port in CandidatePorts())
+        foreach (var port in CandidatePorts(preferPort))
         {
             var health = await HealthAsync(port);
             if (health is not null) return new(port, health);
@@ -129,15 +132,17 @@ static class ServerProcess
     /// <summary>
     /// 既存を探しに行くポートの候補。同じ番号は1回だけ返す。
     ///
-    /// 既定の 4317 まで見るので、実質1〜3回で済む。
+    /// 既定の 4317 まで見るので、実質1〜4回で済む。
     /// 埋まっていたときにずれる先（+1 を12回）までは追わない。
     /// server.mjs は「相手が ClaudeDeck ならずらさずに終わる」ので、
     /// ずれた先に ClaudeDeck が居ることはない。
     /// </summary>
-    static IEnumerable<int> CandidatePorts()
+    /// <param name="preferPort">先頭に置くポート。0 なら足さない。</param>
+    /// <returns>試す順に並んだポート。</returns>
+    static IEnumerable<int> CandidatePorts(int preferPort)
     {
         var seen = new HashSet<int>();
-        foreach (var port in new[] { ReadPortFile()?.Port ?? 0, EnvPort(), DefaultPort })
+        foreach (var port in new[] { preferPort, ReadPortFile()?.Port ?? 0, EnvPort(), DefaultPort })
         {
             if (port > 0 && seen.Add(port)) yield return port;
         }
@@ -150,10 +155,16 @@ static class ServerProcess
     /// 立っていなければ立てる。実ポートを返す。
     ///
     /// 立ち上げられなかったときは例外。呼ぶ側が理由を人に見せる。
+    ///
+    /// preferPort は更新の再起動（--restarted）のためにある。
+    /// 開いたままの Edge の窓は前の URL を握っているので、
+    /// 同じ番号に戻せば人が何もしなくても復帰する。
     /// </summary>
-    public static async Task<int> EnsureRunningAsync()
+    /// <param name="preferPort">戻したいポート。こだわらないなら 0。</param>
+    /// <returns>実際に動いているポート。</returns>
+    public static async Task<int> EnsureRunningAsync(int preferPort)
     {
-        var running = await FindRunningAsync();
+        var running = await FindRunningAsync(preferPort);
         if (running is not null)
         {
             Log.Line($"すでに動いています ポート={running.Port} 版={running.Health.Version ?? "(不明)"}");
@@ -170,11 +181,14 @@ static class ServerProcess
             return running.Port;
         }
 
-        return await StartAsync(ReadPortFile()?.StartedAt ?? 0);
+        return await StartAsync(ReadPortFile()?.StartedAt ?? 0, preferPort);
     }
 
     /// <summary>node を起こして、応答するまで待つ。</summary>
-    static async Task<int> StartAsync(long previousStartedAt)
+    /// <param name="previousStartedAt">起動前に紙にあった時刻。これより新しくなるのを待つ。</param>
+    /// <param name="preferPort">使ってほしいポート。0 なら server 側の決め方に任せる。</param>
+    /// <returns>実際に listen したポート。</returns>
+    static async Task<int> StartAsync(long previousStartedAt, int preferPort)
     {
         if (Paths.NodeExe is null)
         {
@@ -215,6 +229,15 @@ static class ServerProcess
         };
         // server 側はこれがあるときだけ「更新できる起動のされ方だ」と判断する
         psi.Environment["CLAUDE_DECK_LAUNCHER"] = Paths.LauncherExe;
+
+        // 更新の再起動でだけ立つ。番号を戻せば、開いたままの Edge の窓が自力で復帰する。
+        //
+        // 「必ずこの番号になる」ではない点に注意。埋まっていれば server 側が +1 でずらす。
+        // だから戻り値は port.json から読み直したものを使う（この値をそのまま返さない）
+        if (preferPort > 0)
+        {
+            psi.Environment["CLAUDE_DECK_PORT"] = preferPort.ToString(CultureInfo.InvariantCulture);
+        }
 
         Directory.CreateDirectory(Paths.DataDir);
         Log.Line($"node を起動します: {Paths.NodeExe}");
@@ -302,7 +325,7 @@ static class ServerProcess
     {
         // ここも紙で決めない。紙を書かない古いサーバーを「動いていない」と見て、
         // 止めたつもりで残す形になる（--stop したのに画面が生きている）
-        var running = await FindRunningAsync();
+        var running = await FindRunningAsync(preferPort: 0);
         if (running is null)
         {
             Log.Line("動いていません");
@@ -347,7 +370,60 @@ static class ServerProcess
         return KillByPid(pid);
     }
 
+    /// <summary>
+    /// この PID が消えるまで待つ。最後の保険。
+    ///
+    /// StopAsync は port.json の PID を見るが、紙は消えていることも古いこともある。
+    /// こちらが受け取る PID は server 自身が自分の process.pid を書いて渡したもので、
+    /// 出どころとして最も確かなので、紙が当てにならない場面はこれで埋める。
+    ///
+    /// 更新で必要になる理由は1つ。**掴んだままのファイルは差し替えられない。**
+    /// node がまだ current\runtime\node.exe を握っていると、
+    /// Velopack の入れ替えが途中で転ぶか、黙って半端な状態になる。
+    /// </summary>
+    /// <param name="pid">消えるのを待つ PID。0 以下なら何もしない。</param>
+    /// <returns>消えていれば true。落としきれなければ false。</returns>
+    public static async Task<bool> EnsureGoneAsync(int pid)
+    {
+        if (pid <= 0) return true;
+
+        var deadline = Environment.TickCount64 + StopTimeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            if (!IsAlive(pid)) return true;
+            await Task.Delay(PollMs);
+        }
+
+        Log.Line($"PID {pid} がまだ残っています。力ずくで止めます");
+        return KillByPid(pid);
+    }
+
+    /// <summary>
+    /// その PID の node がまだ居るか。
+    ///
+    /// 名前まで見るのは PID が使い回されるため。
+    /// 別のものが同じ番号を持っていたら、こちらの node は消えている。
+    /// </summary>
+    /// <param name="pid">見る PID。</param>
+    /// <returns>node が生きていれば true。</returns>
+    static bool IsAlive(int pid)
+    {
+        try
+        {
+            using var proc = Process.GetProcessById(pid);
+            return !proc.HasExited
+                && string.Equals(proc.ProcessName, "node", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            // 居なければ ArgumentException。それが望みの状態なので、黙って居ないと答える
+            return false;
+        }
+    }
+
     /// <summary>port.json に書かれていた PID を落とす。相手が node でなければ何もしない。</summary>
+    /// <param name="pid">落とす PID。</param>
+    /// <returns>落とせたら true。</returns>
     static bool KillByPid(int pid)
     {
         if (pid <= 0) return false;

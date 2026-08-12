@@ -382,6 +382,94 @@ function readUpdate() {
 }
 
 /**
+ * 更新を当てられる起動のされ方か。
+ *
+ * 判断の材料は環境変数1つだけ。ランチャが node を立てるときに置いていく。
+ * リポジトリから npm start したときは無いので、更新の窓口は正直に断る。
+ *
+ * 紙（update.json）は %LOCALAPPDATA% で共用なので、
+ * 入れた版が「新しい版があります」と書いた紙を、開発中の npm start が読むことがある。
+ * そのとき当てられない理由は紙の中には無い。ここで環境から見るしかない。
+ *
+ * @returns {string|null} ランチャの場所。当てられないときは null
+ */
+function launcherPath() {
+  const p = process.env.CLAUDE_DECK_LAUNCHER;
+  return typeof p === 'string' && p.trim() ? p : null;
+}
+
+/**
+ * 当てる作業が走っている見込みの終わり。0 は「走っていない」。
+ *
+ * 札を立てっぱなしにしない。ランチャが「新しい版は無かった」と判断して
+ * 何もせず終わることがあり、そのとき誰も札を降ろせない。
+ * 画面の見張りと同じ 120 秒で自然に切れるようにして、
+ * 見張りが諦めた時点でもう一度押せる状態に戻す。
+ */
+let applyGuardUntil = 0;
+const APPLY_GUARD_MS = 120000;
+
+/**
+ * 更新を当てる。ランチャを起こして、あとは任せる。
+ *
+ * ここで作業そのものをしない。node 自身が更新の対象（runtime\node.exe ごと
+ * 差し替わる）なので、自分を置き換える手続きを自分の中に持たせない。
+ *
+ * 成否は spawn の結果をそのまま返す。**作業前に {ok:true} を書かない。**
+ * 書いてしまうと、ランチャが起きていないのに画面が「更新しています」を出し、
+ * 120 秒黙ってから時間切れになる。原因が spawn だったことは誰にも分からない。
+ *
+ * @param {object} res レスポンス
+ */
+function handleApplyUpdate(res) {
+  const launcher = launcherPath();
+  if (!launcher) {
+    sendJson(res, 409, {
+      ok: false,
+      reason: 'この起動の仕方では更新できません（インストールした ClaudeDeck から起動してください）',
+    });
+    return;
+  }
+
+  const now = Date.now();
+  if (now < applyGuardUntil) {
+    sendJson(res, 409, { ok: false, reason: 'すでに更新を始めています', state: 'applying' });
+    return;
+  }
+  applyGuardUntil = now + APPLY_GUARD_MS;
+
+  // 自分の PID を渡す。ランチャは /api/quit で止めるのを先に試し、
+  // それでも残っていたときの最後の保険としてこれを使う
+  const argv = ['--apply-update', '--wait-pid', String(process.pid)];
+  let child;
+  try {
+    // detached にするのが要点。ランチャはこのサーバーを殺してから作業するので、
+    // 親の寿命に縛られていると自分の足場ごと消える
+    child = spawn(launcher, argv, { detached: true, stdio: 'ignore', windowsHide: true });
+    child.unref();
+  } catch (err) {
+    applyGuardUntil = 0;
+    sendJson(res, 500, { ok: false, reason: `更新を始められませんでした: ${err?.message ?? err}` });
+    return;
+  }
+
+  // spawn と error はどちらか片方だけが必ず来る。両方待てば起動の成否が確定する。
+  // 実行ファイルが無いときは同期では投げず、error にだけ来る
+  let settled = false;
+  child.once('spawn', () => {
+    if (settled) return;
+    settled = true;
+    sendJson(res, 202, { ok: true, state: 'applying', pid: child.pid ?? null });
+  });
+  child.once('error', (err) => {
+    if (settled) return;
+    settled = true;
+    applyGuardUntil = 0;
+    sendJson(res, 500, { ok: false, reason: `更新を始められませんでした: ${err?.message ?? err}` });
+  });
+}
+
+/**
  * GET と HEAD 以外は、すべてここを通す。
  *
  * 127.0.0.1 で listen していても、それは守りにならない。
@@ -418,6 +506,10 @@ function handleWrite(req, res, pathname, url) {
   }
   if (pathname === '/api/quit') {
     handleQuit(res);
+    return;
+  }
+  if (pathname === '/api/update/apply') {
+    handleApplyUpdate(res);
     return;
   }
 
@@ -535,7 +627,10 @@ const server = http.createServer((req, res) => {
   // そのつど紙を読み直してよい程度の頻度なので、起動時に1回だけ持つ形にはしない
   // （持つと、ランチャが裏で書き換えても画面が古いまま固まる）
   if (pathname === '/api/update') {
-    sendJson(res, 200, readUpdate());
+    // canApply だけは紙の中身ではなく、いまの起動のされ方の話。
+    // だから parseUpdateState には持たせず、ここで足す。
+    // これが無いと画面は押してみるまで分からず、押せない場所に更新ボタンが出る
+    sendJson(res, 200, { ...readUpdate(), canApply: Boolean(launcherPath()) });
     return;
   }
 

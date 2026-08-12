@@ -77,6 +77,13 @@
  * 「うまくいっていない側」の色をこの画面で1つに保つ */
 .update[data-tone='warn'] { border-left-color: var(--warn); }
 
+/* 作業中（取り寄せ・入れ替え）。
+ *
+ * 一覧の「実行中」と同じ色を使う。この画面で「いま動いている」を表す色を1つに保つ。
+ * 新しい色は作らない。足すと tokens.css の二重定義（prefers-color-scheme 側と
+ * [data-theme="dark"] 側）を両方直す義務が生まれる */
+.update[data-tone='work'] { border-left-color: var(--calm); }
+
 .update-text { font-weight: 600; }
 
 /* できないことの断り。本文より控えめに置く */

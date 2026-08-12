@@ -100,6 +100,7 @@ export const dom = {
   update: document.getElementById('update'),
   updateText: document.getElementById('update-text'),
   updateNote: document.getElementById('update-note'),
+  updateAct: document.getElementById('update-act'),
   updateClose: document.getElementById('update-close'),
 };
 

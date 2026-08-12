@@ -20,9 +20,15 @@ namespace ClaudeDeck;
 ///    current\runtime\node.exe ごと差し替わるので、
 ///    自分を置き換える手続きを自分の中に持たせない。
 ///
-/// この段でやるのは確認だけ。落としも入れ替えもしない。
-/// 「見えるようになる」と「動くようになる」を混ぜると、
-/// 失敗したときに更新の失敗なのか表示の失敗なのか切り分けられなくなる。
+/// 入口は3つ。役割がはっきり違うので混ぜない。
+///
+///   CheckAsync        確認だけ。落としも入れ替えもしない
+///   ApplyAsync        取り寄せて、サーバーを止めて、入れ替える（--apply-update）
+///   ConfirmRestart    入れ替わった後に版を照合する（--restarted）
+///
+/// ConfirmRestart が要点になる。入れ替えそのものは Velopack の中で走るので、
+/// こちらから成否を見る手立ては「起き直した自分の版」しかない。
+/// **これが「当てたと言ったのに何も起きていない」を捕まえる唯一の網。**
 /// </summary>
 static class Updates
 {
@@ -51,32 +57,51 @@ static class Updates
     const int CauseDepth = 5;
 
     /// <summary>
+    /// 取り寄せの進み方を記録に落とす刻み（％）。
+    ///
+    /// Velopack は1％ごとに呼んでくるので、素で書くと1回の更新で100行出る。
+    /// 診断に要るのは「どのあたりで止まったか」なので、10行で足りる。
+    /// </summary>
+    const int ProgressStep = 10;
+
+    /// <summary>
     /// update.json の中身。
     ///
-    /// State に入るのはこの6つだけ。
-    /// off / not-installed / none / available / unreachable / failed
+    /// State に入るのはこの9つだけ。
+    ///
+    ///   確認   off / not-installed / none / available / unreachable / failed
+    ///   適用   downloading / applying / done（失敗は確認と同じ failed）
     ///
     /// 「確認中（checking）」は書かない。途中で殺されると永久に確認中で固まるので、
     /// 終わった状態だけを書く。
     ///
+    /// 適用の3つはこの理屈から外れる。途中で殺されうるのは同じだが、
+    /// 押してから戻るまでのあいだ、画面はこの紙だけを見て進み方を知る。
+    /// 黙っていると120秒の見張りが時間切れになるまで何も分からない。
+    /// 固まったときは「入れ替えています」のまま止まるので、そこは見張りが拾う。
+    ///
     /// 読む側（src/update/state.mjs）はこれに3つ足す。
     /// idle（紙が無い）・stale（版が食い違う）・unknown（読めない）。
     /// </summary>
-    /// <param name="State">いまの状態。上の6つのどれか。</param>
+    /// <param name="State">いまの状態。上の9つのどれか。</param>
     /// <param name="Current">確認したときに動いていた版。</param>
     /// <param name="Available">見つかった新しい版。無ければ null。</param>
+    /// <param name="Requested">当てようとした版。再起動後の照合に使う。</param>
     /// <param name="Notes">更新の説明。無ければ null。</param>
     /// <param name="CheckedAt">確認した時刻（Unix ミリ秒）。</param>
     /// <param name="ChangedAt">状態が変わった時刻（Unix ミリ秒）。</param>
     /// <param name="Error">失敗の理由。成功なら null。</param>
+    /// <param name="PrevPort">止める前に server が使っていたポート。分からなければ 0。</param>
     public record UpdateState(
         string State,
         string Current,
         string? Available,
+        string? Requested,
         string? Notes,
         long CheckedAt,
         long ChangedAt,
-        string? Error);
+        string? Error,
+        int PrevPort);
 
     /// <summary>
     /// 確認して update.json を書く。
@@ -89,7 +114,8 @@ static class Updates
     /// <returns>書いた状態。</returns>
     public static async Task<UpdateState> CheckAsync(bool force)
     {
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        // 1回の確認のあいだは同じ時刻を使う。書く紙が1枚なので揃えておく
+        var now = Now();
         var previous = ReadState();
 
         // 止めるためだけの環境変数。画面からは止められない
@@ -161,6 +187,187 @@ static class Updates
     }
 
     /// <summary>
+    /// 取り寄せて、サーバーを止めて、入れ替える。--apply-update の本体。
+    ///
+    /// server から detached で spawn される。呼んだ側は待たない（待てない。
+    /// 途中でその server を落とすので、待っていたら自分の死を待つことになる）。
+    /// だから進み方は update.json にだけ書き、画面はそれを読む。
+    ///
+    /// 最後の ApplyUpdatesAndRestart から先は戻ってこない。
+    /// Velopack が別のプロセスを起こして、このプロセスごと終わらせる。
+    /// 戻ってきたら、それは「始まらなかった」ということ。
+    ///
+    /// **止めた後で転んだときの後始末がここの肝。**
+    /// サーバーを落としてから入れ替えに失敗すると、画面もサーバーも無い状態で人を放り出す。
+    /// しかも failed を書いても読ませる相手が居ない。だから最後に起こし直す。
+    /// </summary>
+    /// <param name="waitPid">止まるのを待つ node の PID。server が自分の PID を渡してくる。</param>
+    /// <returns>終了コード。</returns>
+    public static async Task<int> ApplyAsync(int waitPid)
+    {
+        var previous = ReadState();
+
+        if (IsOff())
+        {
+            Log.Line("更新は止めてあります（CLAUDE_DECK_UPDATE_OFF）。何もしません");
+            Save(previous, Make("off", Now()));
+            return ExitCode.Ok;
+        }
+
+        // 落としたかどうかを覚えておく。転んだときに起こし直すかの分かれ目になる
+        var stopped = false;
+        var stoppedPort = 0;
+        string? requested = null;
+
+        try
+        {
+            var source = new GithubSource(RepoUrl, accessToken: null, prerelease: false);
+            var manager = new UpdateManager(source, options: null, locator: null);
+
+            if (!manager.IsInstalled)
+            {
+                Log.Line("インストールされた版ではありません。入れ替えられません");
+                Save(previous, Make("not-installed", Now()));
+                return ExitCode.UpdateFailed;
+            }
+
+            // 画面が見ていた紙を信じず、ここで確かめ直す。
+            // 押すまでのあいだに取り下げられていることがあるし、
+            // 失敗した後の「もう一度」もこの経路で最初からやり直せる
+            var info = await WithTimeoutAsync(manager.CheckForUpdatesAsync());
+            if (info is null)
+            {
+                Log.Line("新しい版はありませんでした");
+                Save(previous, Make("none", Now()));
+                return ExitCode.Ok;
+            }
+
+            var target = info.TargetFullRelease;
+            requested = target?.Version?.ToString();
+            var notes = Clip(target?.NotesMarkdown, NotesMax);
+            Log.Line($"取り寄せます: {requested ?? "(版が読めない)"}");
+
+            previous = Save(previous, Make("downloading", Now(),
+                available: requested, requested: requested, notes: notes));
+
+            await manager.DownloadUpdatesAsync(info, LogProgress(), CancellationToken.None);
+
+            // 落とす前にポートを控える。port.json は /api/quit で消えるので、止めた後では遅い。
+            // この番号で起き直せば、開いたままの Edge の窓が同じ URL に戻ってくる
+            stoppedPort = (await ServerProcess.FindRunningAsync(preferPort: 0))?.Port ?? 0;
+
+            // ここから先、画面はこの紙を読めない（読ませる相手を落とすので）。
+            // だから止める前に書く。新しい版が起き直したときに、続きから読める
+            previous = Save(previous, Make("applying", Now(),
+                available: requested, requested: requested, notes: notes, prevPort: stoppedPort));
+
+            stopped = true;
+            await ServerProcess.StopAsync();
+            // 掴んだままのファイルは差し替えられない。紙が当てにならないときの最後の保険
+            await ServerProcess.EnsureGoneAsync(waitPid);
+
+            Log.Line($"入れ替えます（ポート {stoppedPort} で起き直します）");
+            manager.ApplyUpdatesAndRestart(target, ["--restarted"]);
+
+            // ここへ来たということは、入れ替えが始まらなかったということ。
+            // 黙って 0 を返すと「当てたのに何も起きていない」がそのまま通る
+            throw new InvalidOperationException("入れ替えが始まりませんでした。");
+        }
+        catch (Exception ex)
+        {
+            var state = IsNetworkTrouble(ex) ? "unreachable" : "failed";
+            Log.Line($"入れ替えに失敗しました（{state}）: {ex.GetType().Name}: {ex.Message}");
+            Save(previous, Make(state, Now(),
+                requested: requested, error: Clip(ex.Message, ErrorMax), prevPort: stoppedPort));
+
+            if (stopped) await RecoverAsync(stoppedPort);
+            return ExitCode.UpdateFailed;
+        }
+    }
+
+    /// <summary>
+    /// 入れ替わった後の版の照合。--restarted で最初に通る。
+    ///
+    /// **これが「当てたと言ったのに何も起きていない」を捕まえる唯一の網。**
+    /// 入れ替えそのものは Velopack の中で走るので、こちらから成否を見る手立ては
+    /// 「起き直した自分の版」しかない。
+    ///
+    /// 通信しないので同期でよい。触るのは紙だけ。
+    /// </summary>
+    /// <returns>止める前に使っていたポート。分からなければ 0。</returns>
+    public static int ConfirmRestart()
+    {
+        var previous = ReadState();
+        var requested = previous?.Requested;
+        var prevPort = previous?.PrevPort ?? 0;
+
+        // 紙が消えている・手で書き換えられた。当たったかどうか言い切れないので何も書かない。
+        // ここで failed と断定すると、次の確認で上書きされるまで嘘が残る
+        if (requested is null)
+        {
+            Log.Line("求めた版が分かりません。版の照合は飛ばします");
+            return prevPort;
+        }
+
+        if (string.Equals(requested, Paths.Version, StringComparison.Ordinal))
+        {
+            Log.Line($"入れ替わりました: {Paths.Version}");
+            Save(previous, Make("done", Now(), requested: requested, prevPort: prevPort));
+            return prevPort;
+        }
+
+        var message = $"当てましたが版が変わっていません（いま {Paths.Version} / 求めた {requested}）";
+        Log.Line(message);
+        Save(previous, Make("failed", Now(),
+            requested: requested, error: message, prevPort: prevPort));
+        return prevPort;
+    }
+
+    /// <summary>
+    /// 落とした後で転んだときに、サーバーを起こし直す。
+    ///
+    /// ここで失敗しても投げない。呼ぶ側は既に失敗を紙に書き終えていて、
+    /// ここで throw すると、その理由が「起こし直せなかった」に置き換わってしまう。
+    /// </summary>
+    /// <param name="port">戻したいポート。分からなければ 0。</param>
+    static async Task RecoverAsync(int port)
+    {
+        try
+        {
+            var revived = await ServerProcess.EnsureRunningAsync(preferPort: port);
+            Log.Line($"サーバーを起こし直しました（ポート {revived}）");
+        }
+        catch (Exception ex)
+        {
+            Log.Line($"サーバーを起こし直せませんでした: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 取り寄せの進み方を記録に落とす受け皿。
+    ///
+    /// 紙には書かない。update.json を毎パーセント書き換えると、
+    /// 読む側が半端な状態を掴む機会をただ増やすだけになる。
+    /// 進み方が要るのは後から「どこで止まったか」を調べるときなので、記録で足りる。
+    /// </summary>
+    /// <returns>Velopack に渡す進捗の受け皿。</returns>
+    static Action<int> LogProgress()
+    {
+        var lastStep = -1;
+        return percent =>
+        {
+            var step = percent / ProgressStep;
+            if (step == lastStep) return;
+            lastStep = step;
+            Log.Line($"  取り寄せ {percent}%");
+        };
+    }
+
+    /// <summary>いまの時刻（Unix ミリ秒）。</summary>
+    /// <returns>Unix ミリ秒。</returns>
+    static long Now() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+    /// <summary>
     /// 状態を人の言葉にする。--check-update と --status がコンソールへ出すためのもの。
     ///
     /// 画面に出す日本語は src/update/state.mjs の UPDATE_LABELS が持つ。
@@ -174,8 +381,13 @@ static class Updates
         "not-installed" => "この起動の仕方では更新できません（インストールされた版ではありません）",
         "none" => "最新です",
         "available" => "新しい版があります",
-        "unreachable" => "更新を確認できませんでした（GitHub に届きませんでした）",
-        "failed" => "更新の確認に失敗しました",
+        // unreachable と failed は確認と適用の両方から書かれる。
+        // 「確認できませんでした」と言い切ると、当てるほうで転んだときに嘘になる
+        "unreachable" => "GitHub につながりませんでした",
+        "failed" => "更新に失敗しました",
+        "downloading" => "新しい版を取り寄せています",
+        "applying" => "入れ替えています",
+        "done" => "入れ替えました",
         _ => "状態が分かりません",
     };
 
@@ -214,10 +426,12 @@ static class Updates
                 state,
                 JsonRead.GetString(root, "current") ?? "",
                 JsonRead.GetString(root, "available"),
+                JsonRead.GetString(root, "requested"),
                 JsonRead.GetString(root, "notes"),
                 JsonRead.GetLong(root, "checkedAt"),
                 JsonRead.GetLong(root, "changedAt"),
-                JsonRead.GetString(root, "error"));
+                JsonRead.GetString(root, "error"),
+                JsonRead.GetInt(root, "prevPort"));
         }
         catch
         {
@@ -252,11 +466,19 @@ static class Updates
     /// <param name="state">状態の語。</param>
     /// <param name="now">いまの時刻（Unix ミリ秒）。</param>
     /// <param name="available">見つかった新しい版。</param>
+    /// <param name="requested">当てようとした版。</param>
     /// <param name="notes">更新の説明。</param>
     /// <param name="error">失敗の理由。</param>
+    /// <param name="prevPort">止める前のポート。</param>
     static UpdateState Make(
-        string state, long now, string? available = null, string? notes = null, string? error = null) =>
-        new(state, Paths.Version, available, notes, now, now, error);
+        string state,
+        long now,
+        string? available = null,
+        string? requested = null,
+        string? notes = null,
+        string? error = null,
+        int prevPort = 0) =>
+        new(state, Paths.Version, available, requested, notes, now, now, error, prevPort);
 
     /// <summary>
     /// 一時ファイル → rename で書く。読む側が半端な JSON を掴まないようにする。
@@ -280,10 +502,13 @@ static class Updates
                 writer.WriteString("state", state.State);
                 writer.WriteString("current", state.Current);
                 WriteText(writer, "available", state.Available);
+                WriteText(writer, "requested", state.Requested);
                 WriteText(writer, "notes", state.Notes);
                 writer.WriteNumber("checkedAt", state.CheckedAt);
                 writer.WriteNumber("changedAt", state.ChangedAt);
                 WriteText(writer, "error", state.Error);
+                // 読むのは自分だけ（--restarted で戻すポート）。Node 側は運びもしない
+                writer.WriteNumber("prevPort", state.PrevPort);
                 writer.WriteEndObject();
             }
 

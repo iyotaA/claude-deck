@@ -115,11 +115,60 @@ test('available 以外は版が食い違っても触らない', () => {
 
 test('知らない状態は通す。言い方だけ落とす', () => {
   // ランチャが先に新しい状態を書くようになったとき、
-  // ここで unknown へ潰すと「読めませんでした」と嘘をつくことになる
-  const got = parseUpdateState({ state: 'downloading' }, {});
-  assert.equal(got.state, 'downloading');
+  // ここで unknown へ潰すと「読めませんでした」と嘘をつくことになる。
+  //
+  // ここに書く語は「まだ実装していないもの」でなければ意味がない。
+  // 以前は downloading を使っていたが、当てる道中の状態として実装した時点で
+  // このテストが落ちた。語を足すときは、こちらも架空のものへ寄せ直す
+  const got = parseUpdateState({ state: 'rolling-back' }, {});
+  assert.equal(got.state, 'rolling-back');
   assert.equal(got.label, UPDATE_LABELS.unknown);
-  assert.equal(updateLabel('downloading'), UPDATE_LABELS.unknown);
+  assert.equal(updateLabel('rolling-back'), UPDATE_LABELS.unknown);
+});
+
+test('当てる道中の3つは、それぞれの言い方を持つ', () => {
+  // 押してから戻るまでのあいだ、画面はこの紙だけを見て進み方を知る。
+  // unknown に潰れると「状態が分かりません」と出て、更新が壊れたように見える
+  for (const state of ['downloading', 'applying', 'done']) {
+    assert.notEqual(updateLabel(state), UPDATE_LABELS.unknown, state);
+  }
+});
+
+test('当てようとした版を運ぶ', () => {
+  // done のとき、画面は「何に入れ替わったか」をここから出す。
+  // 照合そのものはランチャ側でやるので、ここは通すだけ
+  const got = parseUpdateState({
+    state: 'done',
+    current: '0.2.1',
+    requested: '0.2.1',
+    changedAt: 1785750043110,
+  }, { version: '0.2.1' });
+
+  assert.equal(got.state, 'done');
+  assert.equal(got.requested, '0.2.1');
+  assert.equal(got.changedAt, 1785750043110);
+});
+
+test('当てたのに版が変わっていなければ failed。理由も運ぶ', () => {
+  // 「apply は成功と言ったのに何も起きていない」を捕まえる唯一の網。
+  // requested と current が食い違ったままここへ来る形になる
+  const got = parseUpdateState({
+    state: 'failed',
+    current: '0.2.0',
+    requested: '0.2.1',
+    error: '当てましたが版が変わっていません（いま 0.2.0 / 求めた 0.2.1）',
+  }, { version: '0.2.0' });
+
+  assert.equal(got.state, 'failed');
+  assert.equal(got.requested, '0.2.1');
+  assert.match(got.error, /0\.2\.1/);
+  // failed は当てるほうでも使う。「確認に失敗」と言い切らない
+  assert.doesNotMatch(got.label, /確認/);
+});
+
+test('求めた版が読めなければ null。空文字を作らない', () => {
+  const got = parseUpdateState({ state: 'applying', requested: '   ' }, {});
+  assert.equal(got.requested, null);
 });
 
 test('時刻の 0 は「不明」として null にする', () => {
