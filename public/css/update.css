@@ -70,6 +70,13 @@
 /* display: flex は hidden より強い。これが無いと隠しても出たままになる */
 .update[hidden] { display: none; }
 
+/* このサーバが古い、の知らせ。新しい版があるのと同じ色にしない。
+ *
+ * あちらは「よければどうぞ」だが、こちらは手を打たないと直らない。
+ * 版の脇の印（.ver[data-update='bad']）と同じ色を使って、
+ * 「うまくいっていない側」の色をこの画面で1つに保つ */
+.update[data-tone='warn'] { border-left-color: var(--warn); }
+
 .update-text { font-weight: 600; }
 
 /* できないことの断り。本文より控えめに置く */

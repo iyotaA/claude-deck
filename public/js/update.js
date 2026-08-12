@@ -12,6 +12,9 @@
  * 判断はぜんぶサーバ側（src/update/state.mjs）で済んでいる。
  * こちらの仕事は、来た state を見て出すか出さないかを決めるだけ。
  * 「新しい版か」も「紙が古いか」も画面側では判定しない。
+ *
+ * 例外が1つだけある。サーバが古くて /api/update そのものが無いとき（404）。
+ * そのときはサーバに判断させようが無いので、画面側で 'outdated' を組む。
  */
 import { query, dom, store } from './store.js';
 import { stamp } from './util.js';
@@ -30,6 +33,29 @@ const POLL_MS = 30 * 60 * 1000;
 
 /** 閉じたお知らせを覚える鍵。版そのものを入れるので、版が上がればまた出る */
 const SEEN_KEY = 'claude-deck.updateSeen';
+
+/**
+ * サーバが古くて窓口ごと無いときに、画面側で組む状態。
+ *
+ * /api/update が 404 を返すのは「このサーバは窓口を知らない」＝古い、以外にありえない。
+ * 実際にこれで1度つまずいている（2026-08-12）。6日前に立てたサーバが 4317 を掴んだままで、
+ * npm start も ClaudeDeck.exe も「もう動いている」を見つけて窓を開くだけで終わるため、
+ * 直したはずのコードが一度も走らなかった。画面はいつもどおりに見えるので気づけない。
+ *
+ * 形は /api/update の応答に合わせる。読む側（render / fillVersion）に分岐を増やさないため。
+ * 版は入れない。取れなかったものを埋めると、古いサーバの版を知っているように見えてしまう
+ */
+const OUTDATED = Object.freeze({
+  state: 'outdated',
+  label: 'このサーバーは古い版です',
+  current: null,
+  available: null,
+  notes: null,
+  checkedAt: null,
+  changedAt: null,
+  error: null,
+  path: null,
+});
 
 /** 閉じられた版。「二度と出さない」ではなく「この版はもう見た」の意味 */
 let dismissed = localStorage.getItem(SEEN_KEY);
@@ -85,21 +111,30 @@ function fillVersion(up) {
   dom.ver.dataset.update = markOf(up.state);
 }
 
-/** 応答を画面へ反映する。出すか出さないかもここで決める。 */
-function render() {
-  const up = store.update;
-  fillVersion(up);
-
-  // 帯を出すのは「新しい版がある」ときだけ。確認できなかったことまで帯にすると、
-  // 回線の細い日に毎回じゃまをする。そちらは版の脇の印と --status に任せる。
+/**
+ * 帯に出す中身の鍵。閉じたかどうかの判定にも使う。
+ *
+ * 帯を出すのは「新しい版がある」ときと「このサーバが古い」ときだけ。
+ * 確認できなかったことまで帯にすると、回線の細い日に毎回じゃまをする。
+ * そちらは版の脇の印と --status に任せる。
+ *
+ * @param {object|null} up /api/update の応答
+ * @returns {string|null} 出さないなら null
+ */
+function bannerKey(up) {
+  if (up?.state === OUTDATED.state) return OUTDATED.state;
   // 版が読めない紙（available が空）でも知らせる意味はあるので、そこは '?' で通す
-  const version = up?.state === 'available' ? (up.available || '?') : null;
-  const show = version !== null && version !== dismissed;
+  if (up?.state === 'available') return up.available || '?';
+  return null;
+}
 
-  dom.update.hidden = !show;
-  if (!show) return;
-
-  shown = version;
+/**
+ * 「新しい版があります」の帯を書く。
+ *
+ * @param {object} up /api/update の応答
+ */
+function fillAvailableBanner(up) {
+  dom.update.dataset.tone = 'new';
   dom.updateText.textContent = up.available
     ? `新しい版があります（${up.available}）`
     : '新しい版があります';
@@ -109,15 +144,52 @@ function render() {
 }
 
 /**
+ * 「このサーバは古い」の帯を書く。
+ *
+ * 直し方まで書く。窓を閉じて開き直しても直らないので、そこを言わないと
+ * 何度も開き直すことになる（画面は普通に動いて見えるので、なおさら分かりにくい）。
+ */
+function fillOutdatedBanner() {
+  dom.update.dataset.tone = 'warn';
+  dom.updateText.textContent = 'このサーバーは古い版です';
+  dom.updateNote.textContent = '窓を開き直しても直りません。サーバーを立ち上げ直してください';
+}
+
+/** 応答を画面へ反映する。出すか出さないかもここで決める。 */
+function render() {
+  const up = store.update;
+  fillVersion(up);
+
+  const key = bannerKey(up);
+  const show = key !== null && key !== dismissed;
+
+  dom.update.hidden = !show;
+  if (!show) return;
+
+  shown = key;
+  if (key === OUTDATED.state) fillOutdatedBanner();
+  else fillAvailableBanner(up);
+}
+
+/**
  * 紙を1回読む。
  *
  * 失敗しても黙って退く。更新が見えないだけで本体は動くので、
  * ここで画面にエラーを出すと、直せないことを毎回知らせるだけになる。
- * 古いサーバは 404 を返す（書庫の unavailable と同じ扱い）。
+ *
+ * 404 だけは別。書庫（archive.js）が 404 で静かに退くのは
+ * 「機能が1つ無いだけで、他は正常」だからで、こちらは事情が違う。
+ * この窓口はこの版で足したものなので、404 は「見ている画面そのものが古い」を意味する。
+ * 黙って退くと、直したはずのものが直っていない理由が画面のどこにも出なくなる。
  */
 async function fetchUpdate() {
   try {
     const res = await fetch('/api/update');
+    if (res.status === 404) {
+      store.update = OUTDATED;
+      render();
+      return;
+    }
     if (!res.ok) return;
     store.update = await res.json();
     render();
@@ -131,7 +203,9 @@ export function initUpdate() {
   dom.updateClose.addEventListener('click', () => {
     // 版を覚える。版が上がればまた出る
     dismissed = shown;
-    if (dismissed) localStorage.setItem(SEEN_KEY, dismissed);
+    // 古い版の知らせだけは覚えない。立ち上げ直すまで直らないので、
+    // 開き直すたびに出るのが正しい（覚えると、一度閉じた人には二度と出なくなる）
+    if (dismissed && dismissed !== OUTDATED.state) localStorage.setItem(SEEN_KEY, dismissed);
     dom.update.hidden = true;
   });
 

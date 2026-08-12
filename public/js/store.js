@@ -182,6 +182,7 @@ export const store = {
    * 更新の状態（/api/update の応答）。null は「まだ引けていない」。
    *
    * 判断はサーバ側（src/update/state.mjs）で済んでいるので、ここは受け取った形を持つだけ。
+   * 例外は「サーバが古くて窓口ごと無い」（404）ときで、そこだけ update.js が同じ形を組んで入れる。
    * SSE では来ない（毎秒の押し出しに混ぜる値ではない）ので、update.js が自分で引く
    */
   update: null,
