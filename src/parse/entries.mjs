@@ -137,6 +137,76 @@ export function uuidOf(entry) {
 }
 
 /**
+ * その行がどの API 応答に属するかの識別子。
+ *
+ * **1回の応答が複数行に分かれて書かれる。** thinking / text / tool_use が別々の行になり、
+ * そのすべてが同じ requestId と、同じ message.usage を持つ（実測）。
+ * 素で足すと消費が2倍前後に膨らむので、数えるときは必ずこれで重複を潰す。
+ *
+ * 持っていないのは <synthetic> の行だけだった。実測 108 件を全ログで数え、
+ * 「requestId 無し」「model が <synthetic>」「usage が全ゼロ」の3つが完全に一致した
+ * （食い違いは0件）。だから requestId の有無だけで synthetic を弾ける。
+ *
+ * @param {object} entry 会話ログの1行
+ * @returns {string|null}
+ */
+export function requestIdOf(entry) {
+  return typeof entry?.requestId === 'string' ? entry.requestId : null;
+}
+
+/**
+ * assistant 行の usage を、数えやすい形に直して返す。
+ *
+ * 実測した形（キーはすべて省略されうるので、無ければ0として扱う）:
+ *
+ *   usage = {
+ *     input_tokens, output_tokens,
+ *     cache_read_input_tokens, cache_creation_input_tokens,
+ *     cache_creation: { ephemeral_5m_input_tokens, ephemeral_1h_input_tokens },
+ *     iterations: [...], service_tier, speed, ...
+ *   }
+ *
+ * キャッシュ書き込みは平坦な cache_creation_input_tokens と入れ子の cache_creation の
+ * 2箇所にある。**両方を信じてはいけない。** 実データに、平坦が 0 なのに
+ * 入れ子が 132,640 という行がある。大きいほうを採る。
+ *
+ * 平坦のほうが大きいときは内訳が分からないので、差分を5分ぶんとして数える。
+ * 1時間ぶんと見なすと、重みが 1.25 から 2.0 に変わって消費を過大に見積もることになる。
+ * 既定が5分なので、そちらへ倒すのが安全側。
+ *
+ * usage.iterations は見ない。実測で常に長さ1で、
+ * サーバ側のフォールバック時の記録らしく、ローカルでは中身が本体と同じだった。
+ *
+ * @param {object} entry 会話ログの1行
+ * @returns {{in: number, cacheRead: number, cacheWrite5m: number, cacheWrite1h: number, out: number}|null}
+ *          usage を持たない行では null
+ */
+export function usageOf(entry) {
+  const u = entry?.message?.usage;
+  if (!u || typeof u !== 'object') return null;
+
+  // 負の値・NaN・文字列は 0 として扱う。公開仕様ではないので、
+  // 知らない形が来ても落ちずに「取れなかった＝0」へ倒す
+  const n = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+
+  const nested5m = n(u.cache_creation?.ephemeral_5m_input_tokens);
+  const nested1h = n(u.cache_creation?.ephemeral_1h_input_tokens);
+  const flat = n(u.cache_creation_input_tokens);
+
+  let cacheWrite5m = nested5m;
+  const cacheWrite1h = nested1h;
+  if (flat > nested5m + nested1h) cacheWrite5m += flat - nested5m - nested1h;
+
+  return {
+    in: n(u.input_tokens),
+    cacheRead: n(u.cache_read_input_tokens),
+    cacheWrite5m,
+    cacheWrite1h,
+    out: n(u.output_tokens),
+  };
+}
+
+/**
  * その行を書いたサブエージェントの識別子。
  *
  * サブエージェントのログは全行が持っている（実測59行すべて）。
