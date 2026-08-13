@@ -406,6 +406,14 @@ Webhook の作り方は `docs/slack-webhook-setup.html` にある。
 `launcher/` と `src/update/`。直すたびにフォルダを配り直す形をやめるための機能。
 使う人が増えるほど古い版が残り続けるので、そこを埋める。
 
+**2回目以降は delta だけが降りる。実測 37.2KB**（0.2.0 → 0.2.1）。
+full は 42.7MB なので 1/1000 以下になる。
+`vpk` のログは `0086 files. 0005 patched, 0081 unchanged, 0000 new, 0000 removed`。
+
+node.exe（83MB）を同梱しているが、**更新のたびにそれが落ちてくるわけではない。**
+差し替わらなかったファイルは前の版から持ってくる。
+だから `vpk download github` を pack の前に必ず通す（前の版が手元に無いと、毎回 full になる）。
+
 ### 器を2つに分けてある
 
 **`--packId ClaudeDeckApp` ／ `--packTitle ClaudeDeck`。**

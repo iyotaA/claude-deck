@@ -23,19 +23,19 @@ namespace ClaudeDeck;
 static class Startup
 {
     /// <summary>ログオン時に走らせるものを並べる場所。HKCU なので管理者権限は要らない。</summary>
-    const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    const string RUN_KEY = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
     /// <summary>値の名前。これが自分の枠になる。</summary>
-    const string ValueName = "ClaudeDeck";
+    const string VALUE_NAME = "ClaudeDeck";
 
     /// <summary>旧方式のショートカット。</summary>
-    const string LegacyName = "ClaudeDeck.lnk";
+    const string LEGACY_NAME = "ClaudeDeck.lnk";
 
     /// <summary>無効にした後の名前。消さずに残すので、利用者が戻せる。</summary>
-    const string DisabledName = "ClaudeDeck.lnk.disabled";
+    const string DISABLED_NAME = "ClaudeDeck.lnk.disabled";
 
     /// <summary>紙に載せる理由の長さ。update.json と揃えてある。</summary>
-    const int ErrorMax = 300;
+    const int ERROR_MAX = 300;
 
     /// <summary>登録する中身。窓は出さない（ログオン直後に人は見ていない）。</summary>
     static string Command => $"\"{Paths.LauncherExe}\" --background";
@@ -104,8 +104,8 @@ static class Startup
     {
         try
         {
-            using var key = Registry.CurrentUser.CreateSubKey(RunKey, writable: true);
-            var current = key?.GetValue(ValueName) as string;
+            using var key = Registry.CurrentUser.CreateSubKey(RUN_KEY, writable: true);
+            var current = key?.GetValue(VALUE_NAME) as string;
 
             if (string.IsNullOrWhiteSpace(current))
             {
@@ -118,7 +118,7 @@ static class Startup
                 return false;
             }
 
-            key?.DeleteValue(ValueName, throwOnMissingValue: false);
+            key?.DeleteValue(VALUE_NAME, throwOnMissingValue: false);
             Log.Line("自動起動を解除しました");
 
             // 紙も直す。残すと、消したのに画面が「起動します」と言い続ける
@@ -143,8 +143,8 @@ static class Startup
 
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            var current = key?.GetValue(ValueName) as string;
+            using var key = Registry.CurrentUser.OpenSubKey(RUN_KEY);
+            var current = key?.GetValue(VALUE_NAME) as string;
 
             if (string.IsNullOrWhiteSpace(current)) return ("off", legacy);
             return (Same(current, Command) ? "on" : "foreign", legacy);
@@ -175,7 +175,7 @@ static class Startup
     {
         "none" => "ありません",
         "active" => "残っています（入れて使っていないので触っていません）",
-        "disabled" => $"無効にしました（{DisabledName} として残してあります）",
+        "disabled" => $"無効にしました（{DISABLED_NAME} として残してあります）",
         "failed" => "残っていますが、無効にできませんでした",
         _ => "分かりません",
     };
@@ -186,13 +186,13 @@ static class Startup
     {
         try
         {
-            using var key = Registry.CurrentUser.CreateSubKey(RunKey, writable: true);
+            using var key = Registry.CurrentUser.CreateSubKey(RUN_KEY, writable: true);
             if (key is null) return ("foreign", "登録先を開けませんでした");
 
-            var before = key.GetValue(ValueName) as string;
+            var before = key.GetValue(VALUE_NAME) as string;
             if (Same(before, Command)) return ("on", null);
 
-            key.SetValue(ValueName, Command, RegistryValueKind.String);
+            key.SetValue(VALUE_NAME, Command, RegistryValueKind.String);
             Log.Line(string.IsNullOrWhiteSpace(before)
                 ? $"自動起動を登録しました: {Command}"
                 : $"自動起動を書き直しました: {before} → {Command}");
@@ -201,7 +201,7 @@ static class Startup
         catch (Exception ex)
         {
             Log.Line($"自動起動を登録できませんでした: {ex.Message}");
-            return ("foreign", Clip(ex.Message, ErrorMax));
+            return ("foreign", Clip(ex.Message, ERROR_MAX));
         }
     }
 
@@ -217,13 +217,13 @@ static class Startup
         string? current;
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            current = key?.GetValue(ValueName) as string;
+            using var key = Registry.CurrentUser.OpenSubKey(RUN_KEY);
+            current = key?.GetValue(VALUE_NAME) as string;
         }
         catch (Exception ex)
         {
             Log.Line($"自動起動の登録を読めませんでした: {ex.Message}");
-            return ("foreign", Clip(ex.Message, ErrorMax));
+            return ("foreign", Clip(ex.Message, ERROR_MAX));
         }
 
         // 無いものは足さない。自分で外した人の選択を毎回ひっくり返さない
@@ -254,7 +254,7 @@ static class Startup
         try
         {
             File.Move(lnk, disabled, overwrite: true);
-            Log.Line($"旧方式の自動起動を無効にしました: {lnk} → {DisabledName}");
+            Log.Line($"旧方式の自動起動を無効にしました: {lnk} → {DISABLED_NAME}");
             Log.Line("  （新しい方式で登録し直すので、二重に立つことはありません）");
             return ("disabled", true);
         }
@@ -283,7 +283,7 @@ static class Startup
         {
             var dir = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
             if (string.IsNullOrWhiteSpace(dir)) return (null, null);
-            return (Path.Combine(dir, LegacyName), Path.Combine(dir, DisabledName));
+            return (Path.Combine(dir, LEGACY_NAME), Path.Combine(dir, DISABLED_NAME));
         }
         catch
         {

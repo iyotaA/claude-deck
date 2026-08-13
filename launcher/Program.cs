@@ -5,13 +5,13 @@ namespace ClaudeDeck;
 /// <summary>終了コード。-Action status などから機械的に読めるように意味を持たせる。</summary>
 static class ExitCode
 {
-    public const int Ok = 0;
-    public const int ServerFailed = 1;
-    public const int WindowFailed = 2;
-    public const int UpdateFailed = 3;
-    public const int StartupFailed = 4;
-    public const int NotImplemented = 8;
-    public const int Fatal = 9;
+    public const int OK = 0;
+    public const int SERVER_FAILED = 1;
+    public const int WINDOW_FAILED = 2;
+    public const int UPDATE_FAILED = 3;
+    public const int STARTUP_FAILED = 4;
+    public const int NOT_IMPLEMENTED = 8;
+    public const int FATAL = 9;
 }
 
 static class Program
@@ -84,7 +84,7 @@ static class Program
             {
                 Log.Box("ClaudeDeck を起動できませんでした", ex.Message);
             }
-            return ExitCode.Fatal;
+            return ExitCode.FATAL;
         }
         finally
         {
@@ -152,7 +152,7 @@ static class Program
         Console.WriteLine($"  前のやり方  : {Startup.DescribeLegacy(legacy)}");
         Console.WriteLine($"  記録        : {Paths.LauncherLog}");
 
-        return ok ? ExitCode.Ok : ExitCode.StartupFailed;
+        return ok ? ExitCode.OK : ExitCode.STARTUP_FAILED;
     }
 
     /// <summary>ふつうの起動。立っていなければ立てて、必要なら窓を開く。</summary>
@@ -173,11 +173,11 @@ static class Program
         {
             Log.Fatal(ex);
             if (openWindow) Log.Box("ClaudeDeck を起動できませんでした", ex.Message);
-            return ExitCode.ServerFailed;
+            return ExitCode.SERVER_FAILED;
         }
 
-        var code = ExitCode.Ok;
-        if (openWindow && !EdgeWindow.Open(port)) code = ExitCode.WindowFailed;
+        var code = ExitCode.OK;
+        if (openWindow && !EdgeWindow.Open(port)) code = ExitCode.WINDOW_FAILED;
 
         // 窓を開けてから確認する。逆にすると、回線が細い日に窓が最大20秒遅れて出る。
         // 結果は終了コードに混ぜない。更新を確認できないことは起動の失敗ではないので、
@@ -206,7 +206,7 @@ static class Program
         Console.WriteLine($"  記録    : {Paths.UpdateFile}");
 
         // 確認そのものができなかったときだけ 0 以外を返す。「最新だった」は失敗ではない
-        return state.State is "unreachable" or "failed" ? ExitCode.UpdateFailed : ExitCode.Ok;
+        return state.State is "unreachable" or "failed" ? ExitCode.UPDATE_FAILED : ExitCode.OK;
     }
 
     /// <summary>
@@ -241,14 +241,14 @@ static class Program
             if (prevPort > 0 && port != prevPort)
             {
                 Log.Line($"前のポート {prevPort} に戻せませんでした（いま {port}）。窓を開き直します");
-                if (!EdgeWindow.Open(port)) return ExitCode.WindowFailed;
+                if (!EdgeWindow.Open(port)) return ExitCode.WINDOW_FAILED;
             }
             else
             {
                 Log.Line($"ポート {port} で戻りました。窓は開きません（押した窓がそのまま復帰します）");
             }
 
-            return ExitCode.Ok;
+            return ExitCode.OK;
         }
         catch (Exception ex)
         {
@@ -256,13 +256,13 @@ static class Program
             // 押した本人が画面を見ている場面なので、--background と違って黙らない。
             // 何も出さないと「更新したら二度と開かなくなった」になる
             Log.Box("更新後にサーバーを起動できませんでした", ex.Message);
-            return ExitCode.ServerFailed;
+            return ExitCode.SERVER_FAILED;
         }
     }
 
     static async Task<int> RunStopAsync()
     {
-        return await ServerProcess.StopAsync() ? ExitCode.Ok : ExitCode.ServerFailed;
+        return await ServerProcess.StopAsync() ? ExitCode.OK : ExitCode.SERVER_FAILED;
     }
 
     /// <summary>
@@ -352,7 +352,7 @@ static class Program
             Console.WriteLine("  ※ 登録するには ClaudeDeck.exe --install-startup");
         }
 
-        return ExitCode.Ok;
+        return ExitCode.OK;
     }
 
     static int NotImplemented(string command)
@@ -366,7 +366,7 @@ static class Program
         Console.WriteLine("使えるもの: (引数なし) / --background / --open / --stop / --status");
         Console.WriteLine("            --check-update / --apply-update [--wait-pid <PID>] / --restarted");
         Console.WriteLine("            --install-startup / --uninstall-startup");
-        return ExitCode.NotImplemented;
+        return ExitCode.NOT_IMPLEMENTED;
     }
 
     static bool IsBackground(string[] args) =>
