@@ -129,6 +129,16 @@ export const store = {
    * 次のセッションの読み込み中に前のエラーが出てしまう
    */
   detailErrorFor: null,
+  /**
+   * 選んでいるセッションの数値（/api/sessions/:id/usage の応答）。
+   *
+   * 詳細とは別の窓口から来る。詳細の応答に混ぜると、数値を見ない人まで
+   * 詳細を開く速度が落ちるため、サーバー側で分けてある
+   */
+  usage: null,
+  usageError: null,
+  /** usageError がどのセッションのものか。detailErrorFor と同じ理由で持つ */
+  usageErrorFor: null,
   /** サーバから来た「今」。経過時間はこれを基準に進める */
   now: Date.now(),
   onlyLive: localStorage.getItem('claude-deck.onlyLive') === '1',

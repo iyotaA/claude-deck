@@ -54,6 +54,14 @@ export const ITE_WEIGHTS = {
 const TOOLS_MAX = 24;
 
 /**
+ * 文脈保有量の系列を、いくつの点まで返すか。
+ *
+ * 画面のスパークラインを描くためだけの値。700要求のセッションで 700 個返しても
+ * 幅 320px の絵に 700 点は乗らないので、応答を太らせるだけになる。
+ */
+const SERIES_MAX = 120;
+
+/**
  * 1要求ぶんの ITE。
  *
  * @param {{in: number, cacheRead: number, cacheWrite5m: number, cacheWrite1h: number, out: number}} u
@@ -297,6 +305,26 @@ function percentile(sorted, p) {
 }
 
 /**
+ * 長い配列を等間隔に間引く。先頭と末尾は必ず残す。
+ *
+ * **形を見るためだけのもので、ここから最大値や合計を出さない。**
+ * 間引いた点は落ちるので、山や谷をまたぐことがある
+ * （最大値は peak、伸び方の分布は growth を別に持っている）。
+ *
+ * @param {number[]} values
+ * @param {number} max 返す点の数の上限（2以上）
+ * @returns {number[]}
+ */
+function downsample(values, max) {
+  if (values.length <= max) return values;
+  const out = [];
+  for (let i = 0; i < max; i += 1) {
+    out.push(values[Math.round((i * (values.length - 1)) / (max - 1))]);
+  }
+  return out;
+}
+
+/**
  * 使ったモデルの内訳。最頻のものを代表として返す。
  *
  * 実ログには7種類が混在する。命中率のようにモデルまたぎで比べてはいけない指標があるので、
@@ -347,11 +375,13 @@ export function buildUsage(entries, { sidechain = false } = {}) {
   }
   totals.ite = Math.round(totals.ite);
 
-  // 文脈保有量。合計はしない。最後の値と最大値、それと伸び方の分布だけを出す
+  // 文脈保有量。合計はしない。最後の値と最大値、伸び方の分布、それと形だけを出す
   let peak = null;
   const growth = [];
+  const contexts = [];
   for (let i = 0; i < requests.length; i += 1) {
     const c = requests[i].context;
+    contexts.push(c);
     if (peak === null || c > peak) peak = c;
     if (i > 0) growth.push(c - requests[i - 1].context);
   }
@@ -373,9 +403,15 @@ export function buildUsage(entries, { sidechain = false } = {}) {
     duplicateLines,
     syntheticSkipped,
     totals,
+    // 重みも一緒に返す。画面が内訳の表を出すのに要る値で、
+    // ここで渡さないと同じ比率が画面側にもう1本生きることになる（必ず片方が古くなる）
+    iteWeights: { ...ITE_WEIGHTS },
     context: {
       last: requests.length ? requests[requests.length - 1].context : null,
       peak,
+      // 絵にするための系列。要求が1件も無ければ [] ではなく null
+      // （「測って0件だった」ではなく「測りようがない」ため）
+      series: contexts.length ? downsample(contexts, SERIES_MAX) : null,
       growth: growth.length
         ? {
             median: percentile(sortedGrowth, 0.5),
