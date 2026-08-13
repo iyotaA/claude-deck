@@ -95,6 +95,10 @@ export const dom = {
   setRemind: document.getElementById('set-remind'),
   setDetail: document.getElementById('set-detail'),
   setStates: document.getElementById('set-states'),
+  startupState: document.getElementById('startup-state'),
+  startupLegacy: document.getElementById('startup-legacy'),
+  startupError: document.getElementById('startup-error'),
+  startupHow: document.getElementById('startup-how'),
   // 更新のお知らせ。update.js だけが使う
   ver: document.getElementById('ver'),
   update: document.getElementById('update'),

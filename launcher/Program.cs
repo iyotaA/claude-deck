@@ -9,6 +9,7 @@ static class ExitCode
     public const int ServerFailed = 1;
     public const int WindowFailed = 2;
     public const int UpdateFailed = 3;
+    public const int StartupFailed = 4;
     public const int NotImplemented = 8;
     public const int Fatal = 9;
 }
@@ -29,24 +30,47 @@ static class Program
     /// </summary>
     static int Main(string[] args)
     {
-        // ここが最初。ちょうど1回。
+        // ログは Run() より前に開ける。
         //
-        // インストール・更新・アンインストールのときに Velopack が --veloapp-* を付けて
-        // 自分自身を呼ぶ。その処理はここで済んで、そのまま exit する。
-        // 自前の引数解析をこれより前に置くと、その引数を「未知のもの」として扱ってしまう。
-        VelopackApp.Build().Run();
-
-        return MainAsync(args).GetAwaiter().GetResult();
-    }
-
-    static async Task<int> MainAsync(string[] args)
-    {
+        // 下のフック（WithFirstRun / WithBeforeUninstallFastCallback）は Run() の中で走る。
+        // Log.Line は開く前でも例外にならず**黙って捨てる**ので、後で開けても落ちはしない。
+        // 落ちない代わりに「登録した」「解除した」の記録が1行も残らなくなる。
+        // 初回起動では Run() の後に MainAsync が append:false で開き直すため、
+        // 仮に残っていても上書きで消える。
+        //
+        // これは引数の解析ではないので、すぐ下のきまりには触れない。
         Log.Open();
         Log.Line($"ClaudeDeck {Paths.Version} 引数=[{string.Join(' ', args)}]");
         Log.Line($"  自分    : {Environment.ProcessPath}");
         Log.Line($"  app     : {Paths.AppDir ?? "(見つからない)"}");
         Log.Line($"  node    : {Paths.NodeExe ?? "(見つからない)"}{(Paths.NodeBundled ? "（同梱）" : "")}");
 
+        // ここが最初。ちょうど1回。
+        //
+        // インストール・更新・アンインストールのときに Velopack が --veloapp-* を付けて
+        // 自分自身を呼ぶ。その処理はここで済んで、そのまま exit する。
+        // 自前の引数解析をこれより前に置くと、その引数を「未知のもの」として扱ってしまう。
+        //
+        // フックの中で投げると、インストーラ側から見て「入れられなかった」になる。
+        // 自動起動は入れられなくても本体は使えるので、Startup 側で全部飲んで真偽で返す。
+        //
+        // OnFirstRun は**入れた直後の1回だけ**で、更新では呼ばれない。
+        // 登録先は動かないスタブなので、更新のたびに書き直す必要も無い。
+        // ずれたときは通常起動の Startup.Sync() が直す。
+        //
+        // OnBeforeUninstallFastCallback は走り終えると Velopack が
+        // そのまま Environment.Exit を呼ぶ（30秒の制限つき）。
+        // Log は AutoFlush なので、Close を通らなくても記録は残る。
+        VelopackApp.Build()
+            .OnFirstRun(_ => Startup.Install())
+            .OnBeforeUninstallFastCallback(_ => Startup.Uninstall())
+            .Run();
+
+        return MainAsync(args).GetAwaiter().GetResult();
+    }
+
+    static async Task<int> MainAsync(string[] args)
+    {
         try
         {
             return await DispatchAsync(args);
@@ -83,10 +107,8 @@ static class Program
             "--check-update" => await RunCheckUpdateAsync(),
             "--apply-update" => await Updates.ApplyAsync(WaitPid(args)),
             "--restarted" => await RunRestartedAsync(),
-
-            // ここから下は段を分けて足す。いまは「無い」と正直に言う。
-            // 黙って 0 を返すと、呼んだ側は成功したと思い込む
-            "--install-startup" or "--uninstall-startup" => NotImplemented(command),
+            "--install-startup" => RunStartup(install:true),
+            "--uninstall-startup" => RunStartup(install:false),
 
             _ => NotImplemented(command),
         };
@@ -107,9 +129,41 @@ static class Program
         return int.TryParse(args[at + 1], out var pid) && pid > 0 ? pid : 0;
     }
 
+    /// <summary>
+    /// 自動起動を登録・解除する。人が手で叩くためのもの。
+    ///
+    /// 画面からは触らせない。押した結果を返せないため。
+    /// スタブ（&lt;install&gt;\ClaudeDeck.exe）は子の終了コードを伝えないので（実測）、
+    /// server から叩いても成否が分からず、いつも「できました」と言うことになる。
+    /// </summary>
+    /// <param name="install">true なら登録、false なら解除。</param>
+    /// <returns>終了コード。</returns>
+    static int RunStartup(bool install)
+    {
+        Log.AttachToParentConsole();
+
+        var ok = install ? Startup.Install() : Startup.Uninstall();
+        var (state, legacy) = Startup.Peek();
+
+        Console.WriteLine(install
+            ? (ok ? "自動起動を登録しました。" : "自動起動を登録できませんでした。")
+            : (ok ? "自動起動を解除しました。" : "自動起動を解除できませんでした。"));
+        Console.WriteLine($"  いま        : {Startup.Describe(state)}");
+        Console.WriteLine($"  前のやり方  : {Startup.DescribeLegacy(legacy)}");
+        Console.WriteLine($"  記録        : {Paths.LauncherLog}");
+
+        return ok ? ExitCode.Ok : ExitCode.StartupFailed;
+    }
+
     /// <summary>ふつうの起動。立っていなければ立てて、必要なら窓を開く。</summary>
     static async Task<int> RunNormalAsync(bool openWindow)
     {
+        // サーバーより先にやる。ここで転んでも起動は止めない作りなので順番に危険は無く、
+        // 逆に後ろへ置くと、サーバーが立たなかった日に旧方式が畳まれないまま残る。
+        // 旧方式が残っていると次のログオンで node が二重に立ち、
+        // 後から立ったほうが 4318 へずれて「画面は出るのに設定が反映されない」になる
+        Startup.Sync();
+
         int port;
         try
         {
@@ -287,6 +341,17 @@ static class Program
             if (update.Error is not null) Console.WriteLine($"  理由    : {update.Error}");
         }
 
+        Console.WriteLine();
+        Console.WriteLine("■ 自動起動");
+        // ここも読むだけ。--status で状態を変えない（見に来ただけで登録が動くと驚く）
+        var (startup, legacy) = Startup.Peek();
+        Console.WriteLine($"  {Startup.Describe(startup)}");
+        Console.WriteLine($"  前のやり方: {Startup.DescribeLegacy(legacy)}");
+        if (startup is "off")
+        {
+            Console.WriteLine("  ※ 登録するには ClaudeDeck.exe --install-startup");
+        }
+
         return ExitCode.Ok;
     }
 
@@ -300,6 +365,7 @@ static class Program
         Console.WriteLine(message);
         Console.WriteLine("使えるもの: (引数なし) / --background / --open / --stop / --status");
         Console.WriteLine("            --check-update / --apply-update [--wait-pid <PID>] / --restarted");
+        Console.WriteLine("            --install-startup / --uninstall-startup");
         return ExitCode.NotImplemented;
     }
 

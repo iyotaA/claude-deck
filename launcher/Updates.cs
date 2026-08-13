@@ -363,9 +363,9 @@ static class Updates
         };
     }
 
-    /// <summary>いまの時刻（Unix ミリ秒）。</summary>
+    /// <summary>いまの時刻（Unix ミリ秒）。紙に押すものなので Paper と同じ刻み方にする。</summary>
     /// <returns>Unix ミリ秒。</returns>
-    static long Now() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    static long Now() => Paper.Now();
 
     /// <summary>
     /// 状態を人の言葉にする。--check-update と --status がコンソールへ出すためのもの。
@@ -481,61 +481,23 @@ static class Updates
         new(state, Paths.Version, available, requested, notes, now, now, error, prevPort);
 
     /// <summary>
-    /// 一時ファイル → rename で書く。読む側が半端な JSON を掴まないようにする。
-    /// notify/settings.mjs と同じ作法。
+    /// 更新の紙を書く。書き方の作法（一時ファイル → rename）は Paper に寄せてある。
+    /// 書けなくても起動は続ける。読む側は紙が無ければ idle と読む。
     /// </summary>
     /// <param name="state">書く状態。</param>
-    static void WriteState(UpdateState state)
+    static void WriteState(UpdateState state) => Paper.Write(Paths.UpdateFile, writer =>
     {
-        var temp = Paths.UpdateFile + ".tmp";
-        try
-        {
-            Directory.CreateDirectory(Paths.DataDir);
-
-            // JsonSerializer は使わない。反射で型を見る作りなので、
-            // PublishTrimmed で必要な情報が黙って削られ、実行時にだけ落ちる。
-            // Utf8JsonWriter なら反射を通らず、エスケープも自分で気にせずに済む
-            using (var stream = File.Create(temp))
-            using (var writer = new Utf8JsonWriter(stream))
-            {
-                writer.WriteStartObject();
-                writer.WriteString("state", state.State);
-                writer.WriteString("current", state.Current);
-                WriteText(writer, "available", state.Available);
-                WriteText(writer, "requested", state.Requested);
-                WriteText(writer, "notes", state.Notes);
-                writer.WriteNumber("checkedAt", state.CheckedAt);
-                writer.WriteNumber("changedAt", state.ChangedAt);
-                WriteText(writer, "error", state.Error);
-                // 読むのは自分だけ（--restarted で戻すポート）。Node 側は運びもしない
-                writer.WriteNumber("prevPort", state.PrevPort);
-                writer.WriteEndObject();
-            }
-
-            File.Move(temp, Paths.UpdateFile, overwrite: true);
-        }
-        catch (Exception ex)
-        {
-            // 書けなくても起動は続ける。読む側は紙が無ければ idle と読む
-            Log.Line($"更新の記録を書けませんでした: {ex.Message}");
-            TryDelete(temp);
-        }
-    }
-
-    /// <summary>
-    /// null なら null を、そうでなければ文字列を書く。
-    ///
-    /// WriteString(name, (string)null) が何を書くかに頼らず、自分で分ける。
-    /// キーごと消えると、読む側で「無い」と「null」の区別が付かなくなる。
-    /// </summary>
-    /// <param name="writer">書き出し先。</param>
-    /// <param name="name">キー。</param>
-    /// <param name="value">値。null 可。</param>
-    static void WriteText(Utf8JsonWriter writer, string name, string? value)
-    {
-        if (value is null) writer.WriteNull(name);
-        else writer.WriteString(name, value);
-    }
+        writer.WriteString("state", state.State);
+        writer.WriteString("current", state.Current);
+        Paper.Text(writer, "available", state.Available);
+        Paper.Text(writer, "requested", state.Requested);
+        Paper.Text(writer, "notes", state.Notes);
+        writer.WriteNumber("checkedAt", state.CheckedAt);
+        writer.WriteNumber("changedAt", state.ChangedAt);
+        Paper.Text(writer, "error", state.Error);
+        // 読むのは自分だけ（--restarted で戻すポート）。Node 側は運びもしない
+        writer.WriteNumber("prevPort", state.PrevPort);
+    });
 
     /// <summary>
     /// 間隔の見張りを効かせてよい状態か。
@@ -600,19 +562,5 @@ static class Updates
         var end = max;
         if (char.IsHighSurrogate(text[end - 1])) end--;
         return text[..end] + "…";
-    }
-
-    /// <summary>消せなくても構わないファイルを消す。</summary>
-    /// <param name="file">消すファイル。</param>
-    static void TryDelete(string file)
-    {
-        try
-        {
-            File.Delete(file);
-        }
-        catch
-        {
-            // 次に書くとき上書きするので、残っていても実害は無い
-        }
     }
 }

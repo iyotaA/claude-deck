@@ -23,6 +23,7 @@ import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
 import { validateSettings, writeSettings } from './src/notify/settings.mjs';
 import { loadUpdateState, parseUpdateState } from './src/update/state.mjs';
+import { loadStartupState, parseStartupState } from './src/startup/state.mjs';
 import { isTrustedWrite } from './src/shared/origin.mjs';
 import { VERSION } from './src/shared/appinfo.mjs';
 import { resolvePortFile, writePortFile, removePortFile } from './src/shared/portfile.mjs';
@@ -382,6 +383,30 @@ function readUpdate() {
 }
 
 /**
+ * 自動起動の様子を読む。
+ *
+ * 書いているのは C# ランチャ（launcher/Startup.cs）で、ここは読むだけ。
+ * 登録・解除の口はこちらに作らない。スタブは子の終了コードを伝えない（実測）ので、
+ * 押した結果を返せず、いつも「できました」と言うことになる。
+ * 入切は ClaudeDeck.exe --install-startup / --uninstall-startup の役目。
+ *
+ * readUpdate と同じく、置き場所の解決だけは環境変数しだいで投げうる。
+ * ここで投げると /api/health ごと 500 になり、
+ * 「生きているかの最短の確認」が自動起動の都合で使えなくなる。
+ *
+ * @returns {object} src/startup/state.mjs の parseStartupState の戻り
+ */
+function readStartup() {
+  try {
+    return loadStartupState();
+  } catch {
+    // 紙が読めないのと同じ扱いにする。形は parseStartupState に作らせて、
+    // 「読めなかったときの形」を2箇所に書かない
+    return parseStartupState(null, {});
+  }
+}
+
+/**
  * 更新を当てられる起動のされ方か。
  *
  * 判断の材料は環境変数1つだけ。ランチャが node を立てるときに置いていく。
@@ -642,6 +667,9 @@ const server = http.createServer((req, res) => {
       ok: true, version: VERSION, configDir, clients: clients.size, notify: notifier.health(),
       // 短い形だけ載せる。全部入りは /api/update
       update: { state: update.state, available: update.available },
+      // こちらは丸ごと。自動起動には専用の窓口が無いので、短くすると見る手段が消える。
+      // 設定の画面もここから1行を組む
+      startup: readStartup(),
     });
     return;
   }

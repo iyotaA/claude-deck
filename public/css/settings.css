@@ -149,6 +149,17 @@
 .settings-state[data-on="1"]::before { background: var(--done); }
 .settings-state[data-on="0"]::before { background: var(--hot); }
 
+/* 自動起動。読むだけの節なので、線で区切って通知の設定とはっきり分ける。
+   分けないと、下の「保存」がこちらにも効くように見える */
+.settings-startup {
+  margin-top: 1.3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+/* この節の状態の1行はすぐ下に補足が続く。既定の 1rem だと離れて見える */
+.settings-startup .settings-state { margin-bottom: .3rem; }
+
 /* 保存先。人に見せるためだけの1行なので、いちばん弱く出す */
 .settings-path {
   margin: 1.1rem 0 0;

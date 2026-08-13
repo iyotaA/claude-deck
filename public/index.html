@@ -38,7 +38,7 @@
       <span class="ver" id="ver" hidden></span>
       <span class="live" id="live" data-live="wait">接続中</span>
       <button class="btn" id="reload" type="button">再読み込み</button>
-      <button class="btn" id="settings-open" type="button" aria-label="通知の設定を開く">設定</button>
+      <button class="btn" id="settings-open" type="button" aria-label="設定を開く">設定</button>
       <button class="btn" id="theme-toggle" type="button" aria-label="配色を切り替える">配色</button>
     </div>
 
@@ -100,13 +100,13 @@
 
 </div>
 
-<!-- 通知の設定。showModal() で開くと Esc・背面の膜・焦点の閉じ込めがタダで付く。
+<!-- 設定。showModal() で開くと Esc・背面の膜・焦点の閉じ込めがタダで付く。
      <form> で囲まないのは、入力欄で Enter を押したときに閉じてしまわないようにするため。
      Enter で保存する配線は settings.js が持つ -->
 <dialog class="settings" id="settings" aria-labelledby="settings-title">
 
   <div class="settings-head">
-    <h2 id="settings-title">通知の設定</h2>
+    <h2 id="settings-title">設定</h2>
     <button class="settings-x" id="settings-close" type="button" aria-label="閉じる">&#215;</button>
   </div>
 
@@ -168,6 +168,17 @@
     </section>
 
     <p class="settings-path" id="settings-path"></p>
+
+    <!-- 自動起動。ここは読むだけで、入切はコマンドの役目。
+         押した結果を返せないため（スタブが子の終了コードを伝えない）、
+         同期的に成否を返すボタンはそもそも作れない -->
+    <section class="settings-sec settings-startup">
+      <h3 class="settings-h3">自動起動</h3>
+      <p class="settings-state" id="startup-state" data-on="">読み込み中…</p>
+      <p class="settings-hint" id="startup-legacy" hidden></p>
+      <p class="settings-hint" id="startup-error" hidden></p>
+      <p class="settings-hint" id="startup-how"></p>
+    </section>
   </div>
 
   <div class="settings-foot">

@@ -40,6 +40,14 @@ static class Paths
     /// </summary>
     public static string LauncherExe { get; }
 
+    /// <summary>
+    /// 入れて使われているか（&lt;install&gt;\current\ の中にいるか）。
+    ///
+    /// 自動起動の登録は配布形のときだけやる。開発中のビルド出力を
+    /// ログオン時に立てても、次に消したら二度と立たない値が残るだけになる。
+    /// </summary>
+    public static bool IsDeployed { get; }
+
     /// <summary>書き込み先。ここだけは何があっても消さない（利用者のもの）。</summary>
     public static string DataDir { get; }
 
@@ -55,6 +63,15 @@ static class Paths
     /// 向きを一方通行にしてあるので、両側に同じ判断を持たずに済む。
     /// </summary>
     public static string UpdateFile => Path.Combine(DataDir, "update.json");
+
+    /// <summary>
+    /// 自動起動の様子を置く紙。update.json と同じ向き（C# が書き、Node が読む）。
+    ///
+    /// レジストリを Node からも見に行けば1枚減らせるが、
+    /// そうすると「どこに何を登録したか」の知識が C# と Node の2箇所に生きる。
+    /// 片方が古くなる形は作らない。
+    /// </summary>
+    public static string StartupFile => Path.Combine(DataDir, "startup.json");
 
     /// <summary>
     /// Edge に持たせるプロファイル。
@@ -73,7 +90,7 @@ static class Paths
         ExeDir = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? Directory.GetCurrentDirectory();
         AppDir = FindAppDir(ExeDir);
         (NodeExe, NodeBundled) = FindNode(ExeDir);
-        LauncherExe = FindLauncherExe(ExeDir);
+        (LauncherExe, IsDeployed) = FindLauncherExe(ExeDir);
         DataDir = FindDataDir();
         Version = FindVersion();
     }
@@ -118,8 +135,10 @@ static class Paths
         return (null, false);
     }
 
-    /// <summary>更新のときに叩く入口を決める。</summary>
-    static string FindLauncherExe(string exeDir)
+    /// <summary>更新のときに叩く入口と、配布形かどうかを決める。</summary>
+    /// <param name="exeDir">自分が置かれている場所。</param>
+    /// <returns>入口のパスと、配布形なら true。</returns>
+    static (string, bool) FindLauncherExe(string exeDir)
     {
         // 配布形かどうかは、自分が current\ の中にいるかで見る。
         // パスの存在だけで判断すると、開発中に隣の何かを拾う余地が残る
@@ -129,9 +148,11 @@ static class Paths
         if (isDeployed)
         {
             var stub = Path.GetFullPath(Path.Combine(exeDir, "..", "ClaudeDeck.exe"));
-            if (File.Exists(stub)) return stub;
+            // スタブが実在するときだけ配布形と認める。
+            // ここを指せば、更新で current\ が丸ごと入れ替わっても登録は動かない
+            if (File.Exists(stub)) return (stub, true);
         }
-        return Environment.ProcessPath ?? "";
+        return (Environment.ProcessPath ?? "", false);
     }
 
     static string FindDataDir()
