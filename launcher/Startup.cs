@@ -73,7 +73,7 @@ static class Startup
     }
 
     /// <summary>
-    /// 登録する。インストール直後（WithFirstRun）と --install-startup から呼ぶ。
+    /// 登録する。インストール直後（OnFirstRun）と --install-startup から呼ぶ。
     /// </summary>
     /// <returns>登録できたら true。</returns>
     public static bool Install()
@@ -93,7 +93,7 @@ static class Startup
     }
 
     /// <summary>
-    /// 解除する。アンインストール直前（WithBeforeUninstallFastCallback）と
+    /// 解除する。アンインストール直前（OnBeforeUninstallFastCallback）と
     /// --uninstall-startup から呼ぶ。
     ///
     /// **自分たちを指している値だけ消す。** 別の場所を指しているなら、
