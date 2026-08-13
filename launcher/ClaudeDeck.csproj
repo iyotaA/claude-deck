@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ClaudeDeck のランチャ。
+
+    やることは3つだけ。node を立てる・Edge の窓を開く・更新を当てる。
+    画面もロジックも Node 側にあるので、ここは薄いままに保つ。
+
+    .sln は作らない。プロジェクトが1つしかないので、あっても二重管理になるだけ。
+    ビルドは `dotnet build launcher\ClaudeDeck.csproj` で足りる。
+
+    net9.0 ではなく net10.0 を指す。
+    .NET 9 は STS で 2026-05 にサポートが終わっている。10 は LTS（2028-11 まで）。
+    手元のランチムも 10.0.10 が入っているので、開発時に追加のダウンロードが要らない。
+  -->
+
+  <PropertyGroup>
+    <!-- WinExe。黒い窓を出さない。ログオン直後に一瞬でも窓が出ると目障りなので -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <!-- 配布先に .NET を入れさせない。同梱する node.exe が 88MB なので、ここの十数MBは誤差 -->
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <!--
+      partial にする。full だと IsTrimmable を宣言していないアセンブリまで削られ、
+      反射で動く部分が「例外も出さずに何もしない」形で壊れる。
+      Velopack がどこまで反射に頼っているか分からないうちは、削らないほうを既定にする。
+    -->
+    <TrimMode>partial</TrimMode>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- .pdb を配らない。配布物に入れても読む人がいない -->
+    <DebugType>none</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
+    <AssemblyName>ClaudeDeck</AssemblyName>
+    <RootNamespace>ClaudeDeck</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!--
+      LibraryImport（Log.cs の MessageBox / AttachConsole）が要求する。
+      あれは呼び出しの受け渡しコードを生成する仕組みで、生成物が unsafe を使う。
+      自分で unsafe を書くわけではない。
+    -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- 絵を増やさない。画面側と同じものを使う -->
+    <ApplicationIcon>..\public\favicon.ico</ApplicationIcon>
+
+    <!--
+      版の出所は package.json ただ1つ。ここには書き写さない。
+      scripts\release.ps1 が -p:Version=<v> で上書きする。
+
+      渡されなかったとき（開発中の dotnet build / dotnet run）は 0.0.0-dev のままにする。
+      それらしい番号を既定にすると、開発ビルドがリリース版の顔をしてしまう。
+    -->
+    <Version>0.0.0-dev</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+
+</Project>

@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="favicon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="favicon-192.png">
 <!-- CSS は宣言順で勝ち負けが付く。この順番を入れ替えない。
-     narrow.css は上の7枚を上書きするので必ず最後 -->
+     narrow.css は上の8枚を上書きするので必ず最後 -->
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/list.css">
@@ -18,6 +18,7 @@
 <link rel="stylesheet" href="css/timeline.css">
 <link rel="stylesheet" href="css/panels.css">
 <link rel="stylesheet" href="css/settings.css">
+<link rel="stylesheet" href="css/update.css">
 <link rel="stylesheet" href="css/narrow.css">
 </head>
 <body>
@@ -32,10 +33,26 @@
     <h1>ClaudeDeck<span class="sub">セッションの状態</span></h1>
     <div class="summary" id="summary"></div>
     <div class="topbar-actions">
+      <!-- いまの版。触ると更新の確認の結果が出る。
+           渡された側が自分の版を確かめられる場所が、画面にはここしか無い -->
+      <span class="ver" id="ver" hidden></span>
       <span class="live" id="live" data-live="wait">接続中</span>
       <button class="btn" id="reload" type="button">再読み込み</button>
-      <button class="btn" id="settings-open" type="button" aria-label="通知の設定を開く">設定</button>
+      <button class="btn" id="settings-open" type="button" aria-label="設定を開く">設定</button>
       <button class="btn" id="theme-toggle" type="button" aria-label="配色を切り替える">配色</button>
+    </div>
+
+    <!-- 更新のお知らせ。.app 直下ではなく topbar の中に置く。
+         .app は grid-template-rows に2行しか宣言していないので、3つ目の子を足すと
+         高さの配分が崩れる。topbar は flex-wrap: wrap なので、幅いっぱいを取れば自分の行へ折り返す -->
+    <div class="update" id="update" role="status" hidden>
+      <span class="update-text" id="update-text"></span>
+      <span class="update-note" id="update-note"></span>
+      <!-- 押せることは状態によって変わる（更新する／もう一度／読み込み直す）。
+           ボタンを3つ置いて出し分けるより、1つの札を書き換えるほうが
+           「いま押せるのはこれ1つ」が形で伝わる -->
+      <button class="btn update-act" id="update-act" type="button" hidden></button>
+      <button class="btn update-close" id="update-close" type="button">閉じる</button>
     </div>
   </header>
 
@@ -83,13 +100,13 @@
 
 </div>
 
-<!-- 通知の設定。showModal() で開くと Esc・背面の膜・焦点の閉じ込めがタダで付く。
+<!-- 設定。showModal() で開くと Esc・背面の膜・焦点の閉じ込めがタダで付く。
      <form> で囲まないのは、入力欄で Enter を押したときに閉じてしまわないようにするため。
      Enter で保存する配線は settings.js が持つ -->
 <dialog class="settings" id="settings" aria-labelledby="settings-title">
 
   <div class="settings-head">
-    <h2 id="settings-title">通知の設定</h2>
+    <h2 id="settings-title">設定</h2>
     <button class="settings-x" id="settings-close" type="button" aria-label="閉じる">&#215;</button>
   </div>
 
@@ -151,6 +168,17 @@
     </section>
 
     <p class="settings-path" id="settings-path"></p>
+
+    <!-- 自動起動。ここは読むだけで、入切はコマンドの役目。
+         押した結果を返せないため（スタブが子の終了コードを伝えない）、
+         同期的に成否を返すボタンはそもそも作れない -->
+    <section class="settings-sec settings-startup">
+      <h3 class="settings-h3">自動起動</h3>
+      <p class="settings-state" id="startup-state" data-on="">読み込み中…</p>
+      <p class="settings-hint" id="startup-legacy" hidden></p>
+      <p class="settings-hint" id="startup-error" hidden></p>
+      <p class="settings-hint" id="startup-how"></p>
+    </section>
   </div>
 
   <div class="settings-foot">

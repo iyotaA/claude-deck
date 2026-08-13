@@ -14,6 +14,15 @@
 # 依存は入れない方針だが、npm を叩いた拍子にできることがある
 node_modules/
 
+# ランチャ（C#）のビルド中間物
+launcher/bin/
+launcher/obj/
+
+# 配布物の組み立て場所。
+# ここに同梱用の node.exe（88MB）と Setup.exe が落ちる。
+# 追跡すると 2.3MB のリポジトリが一気に 100MB を超える
+/build/
+
 # 動かしているうちに出る雑多なもの
 *.log
 *.tmp

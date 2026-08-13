@@ -1,4 +1,9 @@
-/* 通知の設定モーダル。層7。
+/* 設定モーダル。層7。
+ *
+ * 中身は2つ。通知（読んで書ける）と自動起動（読むだけ）。
+ * 自動起動に入切のボタンを置かないのは、押した結果を返せないため。
+ * スタブ（<install>\ClaudeDeck.exe）は子の終了コードを伝えない（実測）ので、
+ * 窓口を作ってもいつも「できました」と言うことになる。
  *
  * 実際に見ているのは層0（util）と層1（store）だけなので、もっと下にも置ける。
  * それでもここに置いているのは、archive.js や stream.js と同じ「main.js が
@@ -183,6 +188,73 @@ async function load() {
 }
 
 /**
+ * 自動起動を登録できる起動のされ方か。
+ *
+ * ランチャが書く4つのうち、この3つは「入れた ClaudeDeck が動いている」を意味する。
+ * 知らない状態が増えたときは登録できない側に倒す。
+ * 「できます」と書いて実は登録できないほうが、逆より迷わせる。
+ */
+const STARTUP_DEPLOYED = new Set(['on', 'off', 'foreign']);
+
+/**
+ * 自動起動の節を書き換える。
+ *
+ * 日本語のラベルは持たない。state も legacy もサーバ（src/startup/state.mjs）から
+ * 文字列で来るので、こちらは並べ方だけを決める。
+ *
+ * @param {object|null} s /api/health の startup。読めなかったときは null
+ */
+function fillStartup(s) {
+  if (!s || !s.state) {
+    // 読めなかったことを「登録されていません」に読み替えない。
+    // 足の1行には出さない（保存が失敗したように見えるため）
+    dom.startupState.textContent = '自動起動の様子を読めませんでした';
+    dom.startupState.dataset.on = '';
+    dom.startupLegacy.hidden = true;
+    dom.startupError.hidden = true;
+    dom.startupHow.textContent = '';
+    return;
+  }
+
+  dom.startupState.textContent = s.label;
+  // 緑は登録できているときだけ。off は「まだ登録していない」であって異常ではないので、
+  // 赤にするのは別の場所が登録されている（＝直せなかった）ときに絞る
+  dom.startupState.dataset.on = s.state === 'on' ? '1' : s.state === 'foreign' ? '0' : '';
+
+  // none と unknown は書かない。「残っていません」「分かりません」の1行が常に出ると、
+  // 旧方式を使っていなかった人にまで前のやり方の話を読ませることになる
+  const legacy = s.legacy !== 'none' && s.legacy !== 'unknown';
+  dom.startupLegacy.hidden = !legacy;
+  dom.startupLegacy.textContent = legacy
+    ? `前のやり方（スタートアップのショートカット）: ${s.legacyLabel}`
+    : '';
+
+  dom.startupError.hidden = !s.error;
+  dom.startupError.textContent = s.error ?? '';
+
+  dom.startupHow.textContent = STARTUP_DEPLOYED.has(s.state)
+    ? '入切は ClaudeDeck.exe --install-startup / --uninstall-startup で切り替えます'
+    : 'インストーラから入れた ClaudeDeck で起動したときだけ登録できます';
+}
+
+/**
+ * 自動起動の様子を引く。
+ *
+ * 通知の設定とは別の窓口（/api/health）なので、こちらが読めなくても
+ * 通知の設定は出す。開いたときに1回だけ。ここを毎秒更新しない。
+ */
+async function loadStartup() {
+  try {
+    const res = await fetch('/api/health');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = await res.json();
+    fillStartup(body?.startup ?? null);
+  } catch {
+    fillStartup(null);
+  }
+}
+
+/**
  * 入力欄の中身を、送る形に組み立てる。
  *
  * 空欄の項目はキーごと送らない。サーバ側で「キーが無い＝変えない」になっている。
@@ -283,7 +355,10 @@ function open() {
   dom.setUrl.value = '';
   say('');
   dom.settings.showModal();
+  // 別々の窓口なので、片方が転んでももう片方は出る。
+  // どちらも中で受け止めているので、await せずに投げてよい
   load();
+  loadStartup();
 }
 
 /** 設定モーダルを配線する。main.js から1回だけ呼ぶ。 */

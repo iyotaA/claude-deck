@@ -95,6 +95,17 @@ export const dom = {
   setRemind: document.getElementById('set-remind'),
   setDetail: document.getElementById('set-detail'),
   setStates: document.getElementById('set-states'),
+  startupState: document.getElementById('startup-state'),
+  startupLegacy: document.getElementById('startup-legacy'),
+  startupError: document.getElementById('startup-error'),
+  startupHow: document.getElementById('startup-how'),
+  // 更新のお知らせ。update.js だけが使う
+  ver: document.getElementById('ver'),
+  update: document.getElementById('update'),
+  updateText: document.getElementById('update-text'),
+  updateNote: document.getElementById('update-note'),
+  updateAct: document.getElementById('update-act'),
+  updateClose: document.getElementById('update-close'),
 };
 
 export const store = {
@@ -172,6 +183,14 @@ export const store = {
     /** サーバ側がまだ書庫に対応していない（404）。静かに退く */
     unavailable: false,
   },
+  /**
+   * 更新の状態（/api/update の応答）。null は「まだ引けていない」。
+   *
+   * 判断はサーバ側（src/update/state.mjs）で済んでいるので、ここは受け取った形を持つだけ。
+   * 例外は「サーバが古くて窓口ごと無い」（404）ときで、そこだけ update.js が同じ形を組んで入れる。
+   * SSE では来ない（毎秒の押し出しに混ぜる値ではない）ので、update.js が自分で引く
+   */
+  update: null,
 };
 
 /**

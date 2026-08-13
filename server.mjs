@@ -22,7 +22,11 @@ import { focusTerminal } from './src/os/focus.mjs';
 import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
 import { validateSettings, writeSettings } from './src/notify/settings.mjs';
+import { loadUpdateState, parseUpdateState } from './src/update/state.mjs';
+import { loadStartupState, parseStartupState } from './src/startup/state.mjs';
 import { isTrustedWrite } from './src/shared/origin.mjs';
+import { VERSION } from './src/shared/appinfo.mjs';
+import { resolvePortFile, writePortFile, removePortFile } from './src/shared/portfile.mjs';
 import { sessionsDir, projectsDir, configDir } from './src/read/paths.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -45,8 +49,17 @@ const POLL_MS = 2000;
 /** 変更通知が連続で飛んでくるのをまとめる。 */
 const DEBOUNCE_MS = 250;
 
-const args = new Set(process.argv.slice(2));
+const argv = process.argv.slice(2);
+const args = new Set(argv);
 const noOpen = args.has('--no-open');
+/**
+ * 実ポートを置いておく紙の場所。
+ *
+ * ランチャは `--port-file <path>` で明示してくる。
+ * 無ければ既定（%LOCALAPPDATA%\ClaudeDeck\port.json）に書くので、
+ * npm start も autostart.ps1 もこれまでどおり動く。
+ */
+const portFile = resolvePortFile(argv);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -332,6 +345,156 @@ async function handleTestNotify(res) {
 }
 
 /**
+ * 外から行儀よく止める。更新のときにランチャが使う。
+ *
+ * 応答を書き終えてから畳む。ここで即 exit すると、
+ * 止めた側には「応答が無い」としか分からず、
+ * 止まったのか届かなかったのかを区別できない。
+ *
+ * @param {object} res レスポンス
+ */
+function handleQuit(res) {
+  sendJson(res, 200, { ok: true, pid: process.pid });
+  // 応答が相手に届く間を置いてから畳む
+  setTimeout(() => shutdown(0), 100);
+}
+
+/**
+ * 更新の状態を読む。
+ *
+ * 書いているのは C# ランチャ（launcher/Updates.cs）で、ここは読むだけ。
+ * 判断をこちらに持ってくると、server.mjs の uncaughtException が
+ * 失敗を握り潰して「画面は元気なのに何も変わらない」に化ける。
+ *
+ * loadUpdateState は自分で try を持っているが、
+ * 置き場所の解決だけは環境変数しだいで投げうる。
+ * ここで投げると 500 になり、更新が見えないだけのはずが窓口ごと落ちる。
+ *
+ * @returns {object} src/update/state.mjs の parseUpdateState の戻り
+ */
+function readUpdate() {
+  try {
+    return loadUpdateState({ version: VERSION });
+  } catch {
+    // 紙が読めないのと同じ扱いにする。形は parseUpdateState に作らせて、
+    // 「読めなかったときの形」を2箇所に書かない
+    return parseUpdateState(null, { version: VERSION });
+  }
+}
+
+/**
+ * 自動起動の様子を読む。
+ *
+ * 書いているのは C# ランチャ（launcher/Startup.cs）で、ここは読むだけ。
+ * 登録・解除の口はこちらに作らない。スタブは子の終了コードを伝えない（実測）ので、
+ * 押した結果を返せず、いつも「できました」と言うことになる。
+ * 入切は ClaudeDeck.exe --install-startup / --uninstall-startup の役目。
+ *
+ * readUpdate と同じく、置き場所の解決だけは環境変数しだいで投げうる。
+ * ここで投げると /api/health ごと 500 になり、
+ * 「生きているかの最短の確認」が自動起動の都合で使えなくなる。
+ *
+ * @returns {object} src/startup/state.mjs の parseStartupState の戻り
+ */
+function readStartup() {
+  try {
+    return loadStartupState();
+  } catch {
+    // 紙が読めないのと同じ扱いにする。形は parseStartupState に作らせて、
+    // 「読めなかったときの形」を2箇所に書かない
+    return parseStartupState(null, {});
+  }
+}
+
+/**
+ * 更新を当てられる起動のされ方か。
+ *
+ * 判断の材料は環境変数1つだけ。ランチャが node を立てるときに置いていく。
+ * リポジトリから npm start したときは無いので、更新の窓口は正直に断る。
+ *
+ * 紙（update.json）は %LOCALAPPDATA% で共用なので、
+ * 入れた版が「新しい版があります」と書いた紙を、開発中の npm start が読むことがある。
+ * そのとき当てられない理由は紙の中には無い。ここで環境から見るしかない。
+ *
+ * @returns {string|null} ランチャの場所。当てられないときは null
+ */
+function launcherPath() {
+  const p = process.env.CLAUDE_DECK_LAUNCHER;
+  return typeof p === 'string' && p.trim() ? p : null;
+}
+
+/**
+ * 当てる作業が走っている見込みの終わり。0 は「走っていない」。
+ *
+ * 札を立てっぱなしにしない。ランチャが「新しい版は無かった」と判断して
+ * 何もせず終わることがあり、そのとき誰も札を降ろせない。
+ * 画面の見張りと同じ 120 秒で自然に切れるようにして、
+ * 見張りが諦めた時点でもう一度押せる状態に戻す。
+ */
+let applyGuardUntil = 0;
+const APPLY_GUARD_MS = 120000;
+
+/**
+ * 更新を当てる。ランチャを起こして、あとは任せる。
+ *
+ * ここで作業そのものをしない。node 自身が更新の対象（runtime\node.exe ごと
+ * 差し替わる）なので、自分を置き換える手続きを自分の中に持たせない。
+ *
+ * 成否は spawn の結果をそのまま返す。**作業前に {ok:true} を書かない。**
+ * 書いてしまうと、ランチャが起きていないのに画面が「更新しています」を出し、
+ * 120 秒黙ってから時間切れになる。原因が spawn だったことは誰にも分からない。
+ *
+ * @param {object} res レスポンス
+ */
+function handleApplyUpdate(res) {
+  const launcher = launcherPath();
+  if (!launcher) {
+    sendJson(res, 409, {
+      ok: false,
+      reason: 'この起動の仕方では更新できません（インストールした ClaudeDeck から起動してください）',
+    });
+    return;
+  }
+
+  const now = Date.now();
+  if (now < applyGuardUntil) {
+    sendJson(res, 409, { ok: false, reason: 'すでに更新を始めています', state: 'applying' });
+    return;
+  }
+  applyGuardUntil = now + APPLY_GUARD_MS;
+
+  // 自分の PID を渡す。ランチャは /api/quit で止めるのを先に試し、
+  // それでも残っていたときの最後の保険としてこれを使う
+  const argv = ['--apply-update', '--wait-pid', String(process.pid)];
+  let child;
+  try {
+    // detached にするのが要点。ランチャはこのサーバーを殺してから作業するので、
+    // 親の寿命に縛られていると自分の足場ごと消える
+    child = spawn(launcher, argv, { detached: true, stdio: 'ignore', windowsHide: true });
+    child.unref();
+  } catch (err) {
+    applyGuardUntil = 0;
+    sendJson(res, 500, { ok: false, reason: `更新を始められませんでした: ${err?.message ?? err}` });
+    return;
+  }
+
+  // spawn と error はどちらか片方だけが必ず来る。両方待てば起動の成否が確定する。
+  // 実行ファイルが無いときは同期では投げず、error にだけ来る
+  let settled = false;
+  child.once('spawn', () => {
+    if (settled) return;
+    settled = true;
+    sendJson(res, 202, { ok: true, state: 'applying', pid: child.pid ?? null });
+  });
+  child.once('error', (err) => {
+    if (settled) return;
+    settled = true;
+    applyGuardUntil = 0;
+    sendJson(res, 500, { ok: false, reason: `更新を始められませんでした: ${err?.message ?? err}` });
+  });
+}
+
+/**
  * GET と HEAD 以外は、すべてここを通す。
  *
  * 127.0.0.1 で listen していても、それは守りにならない。
@@ -364,6 +527,14 @@ function handleWrite(req, res, pathname, url) {
   }
   if (pathname === '/api/settings/notify/test') {
     handleTestNotify(res);
+    return;
+  }
+  if (pathname === '/api/quit') {
+    handleQuit(res);
+    return;
+  }
+  if (pathname === '/api/update/apply') {
+    handleApplyUpdate(res);
     return;
   }
 
@@ -477,10 +648,29 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 更新の状態。画面が読み込み時と30分ごとに引く。
+  // そのつど紙を読み直してよい程度の頻度なので、起動時に1回だけ持つ形にはしない
+  // （持つと、ランチャが裏で書き換えても画面が古いまま固まる）
+  if (pathname === '/api/update') {
+    // canApply だけは紙の中身ではなく、いまの起動のされ方の話。
+    // だから parseUpdateState には持たせず、ここで足す。
+    // これが無いと画面は押してみるまで分からず、押せない場所に更新ボタンが出る
+    sendJson(res, 200, { ...readUpdate(), canApply: Boolean(launcherPath()) });
+    return;
+  }
+
   if (pathname === '/api/health') {
     // 自動起動されたサーバーの設定を確かめる唯一の手段。
     // notify.target はマスク済みしか入っていない（notify/index.mjs の health）
-    sendJson(res, 200, { ok: true, configDir, clients: clients.size, notify: notifier.health() });
+    const update = readUpdate();
+    sendJson(res, 200, {
+      ok: true, version: VERSION, configDir, clients: clients.size, notify: notifier.health(),
+      // 短い形だけ載せる。全部入りは /api/update
+      update: { state: update.state, available: update.available },
+      // こちらは丸ごと。自動起動には専用の窓口が無いので、短くすると見る手段が消える。
+      // 設定の画面もここから1行を組む
+      startup: readStartup(),
+    });
     return;
   }
 
@@ -537,11 +727,28 @@ function listen(port, attemptsLeft = 12) {
     const url = `http://${HOST}:${port}/`;
     // 書き込みの門番が host と origin を照合するのに要る。決まってから入れる
     boundPort = server.address()?.port ?? port;
+
+    // 実ポートが決まってから置く。外から 4317 決め打ちで探されないように。
+    // 書けなくてもサーバーは動くべきなので、失敗を致命扱いにしない
+    let portFileError = null;
+    try {
+      writePortFile(portFile, {
+        port: boundPort,
+        pid: process.pid,
+        url: `http://${HOST}:${boundPort}/`,
+        version: VERSION,
+        startedAt: Date.now(),
+      });
+    } catch (err) {
+      portFileError = err?.message ?? String(err);
+    }
+
     const w = startWatching();
     console.log('ClaudeDeck');
     console.log(`  ${url}`);
     console.log(`  読み取り元: ${configDir}`);
     if (!w.okProjects) console.log('  （ファイル監視が使えないため定期確認のみで動きます）');
+    if (portFileError) console.log(`  （実ポートを書き出せませんでした: ${portFileError}）`);
     // 通知の行は有効なときと、書き間違えているときだけ出る。設定していなければ黙る
     const notifyLine = notifier.banner();
     if (notifyLine) console.log(`  ${notifyLine}`);
@@ -593,12 +800,31 @@ for (const [event, label] of [['uncaughtException', '想定外の例外'], ['unh
 const port = Number(process.env.CLAUDE_DECK_PORT) || DEFAULT_PORT;
 listen(port);
 
+/** 畳んでいる最中かどうか。Ctrl+C の連打や、quit と signal の重なりで二重に走らせない。 */
+let shuttingDown = false;
+
+/**
+ * 行儀よく畳む。
+ *
+ * 入口は3つ（Ctrl+C・SIGTERM・POST /api/quit）あるが、やることは同じなのでここに寄せる。
+ *
+ * @param {number} [code] 終了コード
+ */
+function shutdown(code = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  for (const w of watchers) {
+    try { w.close(); } catch { /* すでに閉じている */ }
+  }
+  // 助言として置いた紙なので、畳めるときは消しておく。
+  // 消し損ねても読む側は /api/health で裏を取る作りなので、そこは致命にならない
+  removePortFile(portFile);
+
+  server.close(() => process.exit(code));
+  setTimeout(() => process.exit(code), 500);
+}
+
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => {
-    for (const w of watchers) {
-      try { w.close(); } catch { /* すでに閉じている */ }
-    }
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 500);
-  });
+  process.on(sig, () => shutdown(0));
 }
