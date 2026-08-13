@@ -14,6 +14,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 外部パッケージはゼロ。Node.js 18 以降の標準モジュールだけで動く。
 
+配るときだけ C# のランチャ（`launcher/`）が付く。
+窓を出すのと、更新を当てるのがその仕事。
+**本体はそれが有っても無くても同じように動く**（`node server.mjs` で C# は1行も通らない）。
+
 ## コマンド
 
 ```
@@ -23,17 +27,45 @@ npm run list                     一覧をターミナルに1回出す
 npm test                         回帰テストを走らせる（= node --test）
 node cli.mjs --live              3秒ごとに出し直す
 node cli.mjs --all               終了したものも含めて全部出す
-ClaudeDeck.cmd                   配布先向けの起動口。ダブルクリック用
+ClaudeDeck.cmd                   フォルダごとコピーで渡した先の起動口。ダブルクリック用
 ```
 
-自動起動とアイコンの作り直しは PowerShell スクリプト。
+配布物を作るのと、アイコンの作り直しは PowerShell スクリプト。
+
+```
+powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Action all
+powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Action fetch-node|stage|pack|upload
+powershell -ExecutionPolicy Bypass -File scripts\build-icons.ps1
+```
+
+`release.ps1` は `package.json` の `version` を唯一の出どころにする。
+C# 側にも `vpk` にも版を書き写さない。**手で打つ口を作らない。**
+
+`-Action upload` は pack し直さない。既存の `build\releases\` をそのまま上げる。
+だから upload の前に、master と作業ツリーが一致していることを確かめる。
+
+前の方式（フォルダごとコピー）の自動起動も残してある。
+新しく入れた人には要らないが、既に使っている人の手元で生きている。
 
 ```
 powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1
 powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1 -Action status
 powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1 -Action start|stop|uninstall
-powershell -ExecutionPolicy Bypass -File scripts\build-icons.ps1
 ```
+
+インストールした版は exe が窓口になる。
+
+```
+ClaudeDeck.exe                   立っていなければ立てて、窓を開く
+ClaudeDeck.exe --background      窓を出さずに立てる（自動起動が使う）
+ClaudeDeck.exe --open            窓だけ開く
+ClaudeDeck.exe --stop            POST /api/quit で止める
+ClaudeDeck.exe --status          診断。コンソールへ出す
+ClaudeDeck.exe --install-startup / --uninstall-startup
+```
+
+置き場所は `%LOCALAPPDATA%\ClaudeDeckApp\ClaudeDeck.exe`。
+**これはスタブで、更新でも動かない。** 自動起動が指すのはここ。
 
 ポートは既定 4317。`CLAUDE_DECK_PORT` で変えられる。
 埋まっていたら 12 回まで +1 してずらす。
@@ -68,6 +100,8 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `plans.test.mjs` | プランのパス検証と本文の突き合わせ |
 | `subagents.test.mjs` | サブエージェントの記録と呼び出しの突き合わせ |
 | `appdata.test.mjs` | 書き込み先の解決。ログと設定が同じ場所を指すこと |
+| `appinfo.test.mjs` | 版の出どころ。読めないときに 0 でなく null を返すこと |
+| `portfile.test.mjs` | `--port-file` の受け取り方と、既定の場所 |
 | `origin.test.mjs` | 書き込み口の門番。どのヘッダの組み合わせを断るか |
 | `notify-watch.test.mjs` | いつ何を送るかの状態機械（通知の本丸） |
 | `notify-message.test.mjs` | 通知の本文。載せないものと、URL のマスク |
@@ -75,6 +109,8 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `notify-settings.test.mjs` | 画面から来た設定の検証と併合。書き込む側の本丸 |
 | `notify-slack.test.mjs` | Slack の応答をどう読むか |
 | `notify-index.test.mjs` | 通知の配線。とくに失敗したときのふるまい |
+| `update-state.test.mjs` | 更新の紙の読み方。stale の判定と、無い紙を異常にしないこと |
+| `startup-state.test.mjs` | 自動起動の紙の読み方。紙が無いことを「動いていない」と読まないこと |
 
 `digest.test.mjs` が呼ぶのは `buildDigest` だけ。
 `parse/digest/` の4枚はその中から呼ばれるので、入口経由で見ていることになる。
@@ -101,7 +137,7 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 
 ## ファイルの置き場所
 
-`src/` は役割ごとに5つに分けてある。
+`src/` は役割ごとに8つに分けてある。
 import は上から下へ一方向にだけ流れる。逆向きに import したくなったら、置き場所が間違っている。
 
 | 場所 | 役割 | 中身 |
@@ -110,7 +146,9 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） |
 | `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） |
-| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） `appdata`（書き込み先） `origin`（書き込み口の門番） |
+| `src/update/` | ランチャが書いた更新の紙を読む | `state` |
+| `src/startup/` | ランチャが書いた自動起動の紙を読む | `state` |
+| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） `appdata`（書き込み先） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） |
 | `src/os/` | OS を叩く | `focus` |
 
 流れは `read` → `parse` → `view` → `notify`。
@@ -120,11 +158,18 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 `listSessions()` が返した行（ただの JSON）を受け取るだけにしてある。
 これで向きが一方向のまま保たれ、テストも行のリテラルを渡すだけで書ける。
 
-入口は4つだけ。ここの名前と応答の形は変えない。
+`update/` と `startup/` も末端で、どの層も import しない（`shared/appdata.mjs` だけ）。
+やるのは「紙を1枚読んで、画面に出せる形に整える」だけ。
+**判断はしない。** 更新を当てるかどうかも、自動起動を登録するかどうかも決めるのは C# 側で、
+こちらは結果を読むだけにしてある。理由は「更新」の節に書いた。
+
+入口は6つだけ。ここの名前と応答の形は変えない。
 
 - `view/sessions.mjs:listSessions`
 - `view/detail.mjs:getSessionDetail`
 - `notify/index.mjs:createNotifier`
+- `update/state.mjs:loadUpdateState`
+- `startup/state.mjs:loadStartupState`
 - `os/focus.mjs:focusTerminal`
 
 `digest.mjs` に残しているのは走査の本体（`buildDigest`）と、走査の前に1回だけ作る索引だけ。
@@ -135,12 +180,34 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 | 場所 | 役割 | 中身 |
 |---|---|---|
-| `public/css/` | 見た目 | 8枚。`<link>` の並びがそのまま重ね順になる |
-| `public/js/` | 画面の組み立て | 17枚 ＋ `timeline/` 7枚 |
+| `public/css/` | 見た目 | 9枚。`<link>` の並びがそのまま重ね順になる |
+| `public/js/` | 画面の組み立て | 18枚 ＋ `timeline/` 7枚 |
 
 こちらも import は一方向。層の一覧と、循環を切っている4箇所は「画面側」に書いてある。
 
 `assets/favicon.png` はアイコンの元絵。1.3MB あるので `src/` には置かない。
+
+### `launcher/`（C#）
+
+窓を出すのと更新を当てるのだけが仕事。10枚ある。
+
+| ファイル | 役割 |
+|---|---|
+| `ClaudeDeck.csproj` | ビルドの設定。単一ファイル・トリム・自己完結 |
+| `Program.cs` | 入口。`VelopackApp` を起こしてから引数を振り分ける |
+| `Paths.cs` | 場所を決める。`current\` とデータフォルダの境目はここだけ |
+| `ServerProcess.cs` | node の起動・生存確認・停止 |
+| `EdgeWindow.cs` | Edge を探してアプリモードで開く。無ければ既定のブラウザ |
+| `Updates.cs` | 確認・落とす・当てる。`update.json` を書く |
+| `Startup.cs` | HKCU Run への登録と、前の方式の `.lnk` の無効化 |
+| `Log.cs` | `launcher.log` と、人が押したときだけ出すダイアログ |
+| `Paper.cs` | 紙を書く（一時ファイル → rename） |
+| `JsonRead.cs` | 紙を読む（`JsonDocument`） |
+
+**`src/` の下に置かない。** 上の表は Node のモジュールを前提にしていて、
+そこへ C# を混ぜると層の向きの話が通じなくなる。ルート直下なら表に1行足すだけで済む。
+
+`.sln` は作らない。`dotnet publish launcher\ClaudeDeck.csproj` で足りる。
 
 ## データの流れ
 
@@ -334,6 +401,145 @@ Webhook の作り方は `docs/slack-webhook-setup.html` にある。
 両方が立っているときは「環境変数もあるが画面の値が勝っている」と書く。
 黙って勝つと、前に踏んだ「設定したのに鳴らない」と同じ迷い方をすることになる。
 
+## 更新（新しい版へ入れ替える）
+
+`launcher/` と `src/update/`。直すたびにフォルダを配り直す形をやめるための機能。
+使う人が増えるほど古い版が残り続けるので、そこを埋める。
+
+### 器を2つに分けてある
+
+**`--packId ClaudeDeckApp` ／ `--packTitle ClaudeDeck`。**
+
+Velopack の既定のインストール先は `%LOCALAPPDATA%\{packId}`。
+ここを `ClaudeDeck` にすると `shared/appdata.mjs` の書き込み先とまるかぶりになり、
+**アンインストールで `config.json`（生の Slack Webhook 入り）が黙って消える。**
+
+| 場所 | 中身 | 消えるとき |
+|---|---|---|
+| `%LOCALAPPDATA%\ClaudeDeckApp\` | `ClaudeDeck.exe`（スタブ） `Update.exe` `current\` `packages\` | アンインストールで消える |
+| `%LOCALAPPDATA%\ClaudeDeck\` | `config.json` `port.json` `update.json` `startup.json` 各ログ | 何があっても消さない |
+
+分けた副作用として、`appdata.mjs` を1行も触らずに済んでいる。
+
+### 判断は C# 側に置く。Node には持たせない
+
+理由が2つある。どちらも「失敗が黙る」経路を塞ぐためのもの。
+
+- `server.mjs` の `uncaughtException` は**記録して続行**する作り。
+  ここに更新処理を置くと、失敗が「画面は元気なのに何も変わらない」に化ける
+- **node 自身が更新の対象**（`current\runtime\node.exe` ごと差し替わる）。
+  自分を置き換える手続きを、自分の中に持たせない
+
+加えて `releases.win.json` の形・チャネルの解き方・delta の連鎖・staging の置き場所は
+Velopack の内部の取り決めで、Node に写すと必ず片方が古くなる。
+
+向きは **C#（書く）→ `*.json` → Node（読む）→ 画面** の一方通行。
+`read` → `parse` → `view` と同じ向きで、逆流させない。
+
+### 紙が2枚
+
+どちらも `%LOCALAPPDATA%\ClaudeDeck\` に置く。書くのは `launcher/Paper.cs` だけ。
+
+| 紙 | 書く人 | 読む人 |
+|---|---|---|
+| `update.json` | `launcher/Updates.cs` | `src/update/state.mjs` |
+| `startup.json` | `launcher/Startup.cs` | `src/startup/state.mjs` |
+
+書き方は**一時ファイル → rename**（`notify/settings.mjs` と同じ作法）。
+読む側が書きかけの半端な JSON を掴まない。
+
+**`JsonSerializer` / `Deserialize<T>` を使わない。** あれは反射で型を見る作りなので、
+`PublishTrimmed` を掛けたこの実行ファイルでは必要な情報が黙って削られ、**実行時にだけ落ちる。**
+書くのは `Utf8JsonWriter`、読むのは `JsonDocument`。どちらも反射を通らない。
+
+状態の語彙は `update/state.mjs` の `UPDATE_LABELS` と
+`startup/state.mjs` の `STARTUP_LABELS` / `LEGACY_LABELS` にある。
+**ランチャが書く語と、Node 側で足す語を分けて並べてある。**
+
+Node 側で足すのは3つ（`idle` / `stale` / `unknown`）。
+
+- `idle` … 紙がまだ無い。**一度も確認していないだけで、異常ではない**
+- `stale` … 紙はあるが、書かれたときの版といまの版が食い違う
+- `unknown` … 読めない・形が違う
+
+`stale` を `available` のときだけ見るのは、ほかの状態では害が無いため。
+「最新です」の紙が1つ前の版のものでも、次の確認で上書きされるだけで誰も困らない。
+対して「0.2.1 があります」の紙が古いと、**すでに 0.2.1 で動いているのに更新を勧め続ける。**
+
+**知らない状態が来ても、状態そのものは通して言い方だけ落とす。**
+勝手に `unknown` へ潰すと、ランチャが先に新しい語を書くようになったときに
+「読めませんでした」と嘘をつくことになる。
+
+### 押してから戻るまで
+
+```
+1. 画面     「更新」を押す → POST /api/update/apply
+2. server    CLAUDE_DECK_LAUNCHER が無ければ 409「この起動の仕方では更新できません」
+             あれば ClaudeDeck.exe --apply-update --wait-pid <自分の PID> を切り離して起こす
+             spawn に失敗したら 500 をそのまま返す（ここで {ok:true} を返さない）
+             成功したら 202
+3. 画面      紙を見ながら進み方を出し、120秒で見切りを付ける
+4. ランチャ  落とす → update.json に requested と prevPort を書く
+             POST /api/quit で止める → health が沈黙するまで最大10秒
+             まだ生きていれば --wait-pid に任せる（最後の保険）
+             当てて、--restarted で起き直す
+5. ランチャ  CLAUDE_DECK_PORT=prevPort を渡して node を立てる
+             → URL が変わらないので、開いたままの窓がそのまま復帰する
+             版を照合して update.json に done か failed を書く
+```
+
+**窓は閉じない。** 他アプリの窓を勝手に殺すのは行儀が悪い。
+代わりにポートを固定して戻し、開いたままの窓が自力で戻れるようにする。
+
+### 黙って成功したように見えないための4点
+
+1. 実処理を **node の外**（C# の別プロセス）で走らせる。握り潰しの射程外に出す
+2. **再起動後に版を照合する。** `requested` と実際の版が違えば `failed`。
+   *これが「当てたと言ったのに何も起きていない」を捕まえる唯一の網*
+3. 画面側に**120秒の見切り**。無音のまま終わらせない
+4. `POST /api/update/apply` は spawn の成否をそのまま返す。**作業の前に `{ok:true}` を書かない**
+
+### 止める手段
+
+```
+CLAUDE_DECK_UPDATE_OFF=1     確認そのものをしない。紙は state:'off'
+```
+
+`CLAUDE_DECK_NOTIFY_OFF` と同じ語彙・同じ判定（`0` `false` `no` は「立っていない」）。
+**画面からは止められない。** 画面から自分を締め出せる口は作らない。
+
+### 自動起動
+
+登録先は `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`。
+指すのは**スタブの絶対パス**（`%LOCALAPPDATA%\ClaudeDeckApp\ClaudeDeck.exe --background`）。
+
+スタブは更新でも動かないので、「フォルダが動いて黙って壊れる」という
+前の方式（`.lnk` に node.exe とアプリの絶対パスを焼き込む）の弱点が構造的に消える。
+
+`.lnk` を作るには COM（`IShellLink`）が要り、**トリムを掛けた単一ファイルと相性が悪い。**
+`Microsoft.Win32.Registry` なら2行で済む。アイコンが付かないのは惜しいが、割に合わない。
+
+前の方式の `.lnk` は、通常起動のたびに見に行く。あれば**消さずに `.disabled` へ改名する。**
+放っておくと2つのサーバーがポートを取り合い、
+「画面は出るのに設定が反映されない」という追いにくい形になる。
+
+**画面に登録・解除の口は作らない。** スタブは子の終了コードを伝えない（実測）ので、
+画面から叩いても成否が分からず、いつも「できました」と言うことになる。
+入切は `ClaudeDeck.exe --install-startup` / `--uninstall-startup` の役目。
+
+### 版の出どころは1箇所
+
+```
+package.json "version"
+     ├─→ src/shared/appinfo.mjs   起動時に1回読む。/api/health と /api/update が返す
+     └─→ scripts/release.ps1      ここが唯一の読み手
+              ├─→ dotnet publish -p:Version=<v>
+              └─→ vpk pack --packVersion <v>
+```
+
+3つが同期するのではなく、**2つが1つから派生する。**
+C# 側に版を書き写さない。`vpk` に手で打たない。
+
 ## サーバー
 
 `server.mjs`。`node:http` だけで静的配信・JSON API・SSE をやる。
@@ -346,11 +552,25 @@ Webhook の作り方は `docs/slack-webhook-setup.html` にある。
 | `GET /api/sessions/:id/subagents/:agentId` | サブエージェント1件の記録。応答は詳細と同じ形（`digest` ＋ `log`）。ファイルパスは返さない |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
-| `GET /api/health` | 生存確認。二重起動の判定にも使う。通知の設定と数えもここに出る |
+| `GET /api/health` | 生存確認。二重起動の判定にも使う。版・通知の設定と数え・**自動起動の様子**もここに出る |
 | `GET /api/settings/notify` | 通知の設定。URL はマスク済み。出どころ（`sources` / `envSet`）も返す |
+| `GET /api/update` | 更新の状態。ランチャが書いた紙 ＋ `canApply`（いまの起動のされ方で当てられるか） |
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
 | `POST /api/settings/notify` | 保存して即反映。応答は GET と同じ形 |
 | `POST /api/settings/notify/test` | テスト送信を1通。3秒のクールダウン付き |
+| `POST /api/update/apply` | ランチャを起こして更新を当てさせる。202 を返して以降は関与しない |
+| `POST /api/quit` | 行儀よく止まる。ランチャが更新前に使う |
+
+**自動起動には専用の窓口を作っていない。** `/api/health` の `startup` に丸ごと載せてある。
+設定モーダルの1行もそこから組む。
+短い形にすると、裏で動いているサーバーの登録状態を見る手段が消える。
+
+`/api/update` は毎回そのつど紙を読み直す。
+起動時に1回だけ持つ形にすると、ランチャが裏で書き換えても画面が古いまま固まる。
+
+`canApply` は紙の中身ではなく「いまの起動のされ方」の話なので、
+`parseUpdateState` には持たせず `server.mjs` 側で足している。
+これが無いと、`npm start` した画面にも押せない更新ボタンが出る。
 
 ### 書き込み口の門番
 
@@ -422,7 +642,7 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 拡張子は `.js` のままにする。`.mjs` を `public/` に置くと `server.mjs` の `MIME` に無く、
 `octet-stream` で返るのでブラウザが module として読まない。
 
-`public/js/` は 17枚 ＋ `timeline/` 7枚。**import は上から下へ一方向にだけ流す。**
+`public/js/` は 18枚 ＋ `timeline/` 7枚。**import は上から下へ一方向にだけ流す。**
 逆向きに import したくなったら、置き場所が間違っている。
 
 | 層 | ファイル | 役割 |
@@ -445,6 +665,7 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 | 7 | `archive.js` | 書庫と、左のペインのタブ |
 | 7 | `stream.js` | SSE でつなぎ、届いた一覧を画面へ流す |
 | 7 | `settings.js` | 通知の設定モーダル |
+| 7 | `update.js` | 更新のお知らせの帯と、押したあとの見張り |
 | 8 | `main.js` | 入口。配線・テーマ・キー操作・起動 |
 
 `timeline/` の中も同じで、`kinds` `waits` → `search` → `blocks` → `item` → `view` → `index` の順。
@@ -480,12 +701,15 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 - URL の入力欄は常に空で開き、いまの値はマスクして `placeholder` に出す。`****` のような偽の値を `value` に置くと、それをそのまま保存して URL を壊す。空欄＝「変えない」、消すのは「消す」ボタンだけの役目
 - 数値の欄も空ならキーごと送らない。サーバー側が「キーが無い＝触らない」なので、そこに乗る
 - `.settings` に `padding` を持たせない。持たせるとその余白を押したのが背面を押したのと区別できず、`ev.target === dialog` での判定が崩れる
+- 更新の帯は、押したあとの見張りを画面側が持つ。当てる作業はサーバの外（C# の別プロセス）で走り、しかも途中でサーバ自身が落ちて起き直る。「押したのに何も起きない」を捕まえられるのは画面側しかないので、無音で終わらせず `STUCK_MS`（120秒。`server.mjs` の `APPLY_GUARD_MS` と同じ）で必ず時間切れを出す
+- 開いた直後にもう1回だけ引き直す（`RECHECK_MS` = 10秒）。ランチャは窓を開けてから更新を確認するので、最初に引いた時点の紙はまだ前回の結果か、そもそも無い
+- `/api/update` が 404 のとき（サーバーが古い）だけは、画面側で `outdated` を組む。それ以外の判断はサーバー側に置く
 
 状態ラベルの日本語は画面側に持たない。
 `/api/sessions` の `meta.stateLabels`（`STATE_LABELS` そのまま）から引く。
 状態を1つ増やすときに直すのは `parse/state.mjs` だけで済む。
 
-CSS は `public/css/` に8枚ある。`index.html` の `<link>` の並びが、そのまま重ね順になる。
+CSS は `public/css/` に9枚ある。`index.html` の `<link>` の並びが、そのまま重ね順になる。
 
 | ファイル | 中身 |
 |---|---|
@@ -496,10 +720,11 @@ CSS は `public/css/` に8枚ある。`index.html` の `<link>` の並びが、�
 | `timeline.css` | 時系列 |
 | `panels.css` | TODO・サブエージェントの記録・ファイル |
 | `settings.css` | 通知の設定モーダル |
+| `update.css` | 更新のお知らせの帯 |
 | `narrow.css` | 狭い窓向け（`@media (max-width: 860px)`） |
 
 **`<link>` の順番を入れ替えない。** CSS は宣言順で勝ち負けが付く。
-`narrow.css` は上の7枚を上書きするので、必ず最後に読む。
+`narrow.css` は上の8枚を上書きするので、必ず最後に読む。
 
 `settings.css` は狭い窓向けの指定を自分で持つ（`min()` と `max-width: 34rem` のグリッド畳み）。
 モーダルの都合を `narrow.css` に散らさないため。`<dialog>` の既定は `canvas` / `canvastext` という
@@ -551,6 +776,23 @@ CSS は `public/css/` に8枚ある。`index.html` の `<link>` の並びが、�
 - **`needs-approval` を `byStatus` の裏づけ無しで通知しない。** しきい値だけが根拠の側は、長く走る Bash と区別がつかない（実測で50秒の Bash が同じ形になった）。auto mode で Claude が自分で承認した分を誤報として送ることになる
 - **設定を変えても `watch.mjs` を作り直さない。** 値だけ差し替える（`configure()`）。作り直すと送信済みの記憶（`known`）が消えて、いま待っているぶんが保存した瞬間に全部もう一度鳴る。無効から有効へ変わったときだけ `rearm()` で種まきし直す（これが無いと、何時間も待っていたセッションが一斉に飛ぶ）
 - **通知済みの記録をファイルに残さない。** メモリだけで足りる。種まきで重複は消えるので、書き込み失敗・壊れた JSON・古い記録の掃除という失敗経路を3つ増やす価値がない
+- **packId を `ClaudeDeck` にしない。** Velopack の既定の入れ先は `%LocalAppData%\{packId}` なので、書き込み先の `%LOCALAPPDATA%\ClaudeDeck\` とまるかぶりになり、アンインストールで `config.json`（**生の Webhook URL 入り**）が黙って消える。`--packId ClaudeDeckApp` ＋ `--packTitle ClaudeDeck` で分ける
+- **更新の判断を Node に持たせない。** `server.mjs` の `uncaughtException` は記録して続行するので、ここに更新の実処理を置くと失敗が「画面は元気なのに何も変わらない」に化ける。node 自身が更新の対象（`current\runtime\node.exe` ごと差し替わる）でもある。判断は C# のランチャ側、Node は紙を読むだけ
+- **`POST /api/update/apply` は spawn の成否をそのまま返す。** 作業の前に `{ok:true}` を書かない。spawn するパスは `CLAUDE_DECK_LAUNCHER` から取り、**リクエスト本文からは絶対に取らない**（`POST /api/focus` が PowerShell を spawn している前例と同じ守り方）
+- **再起動したあとに版を照合する。** `requested` と実際の版が違えば `failed` にする。「当てましたと言ったのに何も起きていない」を捕まえる網はここだけ
+- **Edge の窓を閉じない。** 他アプリの窓を勝手に殺すのは行儀が悪い。`CLAUDE_DECK_PORT` に前のポートを渡して立て直し、開いたままの窓が自力で戻れるようにする
+- **紙が無いことを「動いていない」と読み替えない。** `update.json` も `startup.json` も、ランチャを通していないときは誰も書かない。無いのは `idle`（正常）、壊れているのが `unknown`（異常）。読み替えると `npm start` で起こすたびに「登録されていません」と出て、実際は登録されているのに解除を勧めることになる
+- **知らない状態を `unknown` へ潰さない。** 状態そのものは通したまま、言い方だけ落とす。潰すと、ランチャが先に新しい語を書くようになったとき「読めませんでした」と嘘になる
+- **画面に更新の確認を止める口を作らない。** 止めるのは `CLAUDE_DECK_UPDATE_OFF=1` だけ。画面から自分を締め出せる口を作らない
+- **画面に自動起動の登録・解除の口を作らない。** スタブ（`<install>\ClaudeDeck.exe`）は子の終了コードを伝えない（実測）ので、押した結果を返せず、いつも「できました」と言うことになる。入切は `--install-startup` / `--uninstall-startup` の役目
+- **旧方式の `.lnk` を消さない。** `ClaudeDeck.lnk.disabled` へ改名するだけにする。利用者がいつでも戻せる形を残す
+- **C# 側で `JsonSerializer` / `Deserialize<T>` を使わない。** 反射を通るので `PublishTrimmed` で黙って削られ、**実行時にだけ**落ちる。書くのは `Utf8JsonWriter`（`Paper.cs`）、読むのは `JsonDocument`（`JsonRead.cs`）
+- **Velopack のフックは `On*`。** `VelopackApp.Build().OnFirstRun(...).OnBeforeUninstallFastCallback(...).Run()`。`With*` ではない
+- **`VelopackApp.Run()` より前に自前の引数解析を置かない。** `--veloapp-*` を未知の引数として扱ってしまう。`Main` の最初、ちょうど1回
+- **`--no-open` を外さない。** 窓を開けるのはランチャだけと決めてある。外すと `openBrowser` が既定ブラウザを開き、Edge のアプリ窓と二重になる
+- **`port.json` を真実として扱わない。** 必ず `/api/health` で裏を取る。異常終了で古いファイルが残るのは正常な状態
+- **配布物は許可リストで組む。** 除外リストは黙って古くなる（`assets/` を除いていても、次に足した大きなフォルダは素通りする）。許可リストなら足し忘れたときにアプリが起動せず、その場で分かる
+- **版の出どころを増やさない。** `package.json` の `version` の1箇所から `appinfo.mjs` と `release.ps1` が派生する。3つが同期するのではなく、2つが1つから派生する形にする。C# 側に版を書き写さない・`vpk` に手で打たない
 
 ## 要約を AI に差し替えるとき
 

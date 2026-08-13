@@ -32,7 +32,7 @@ static class Program
     {
         // ログは Run() より前に開ける。
         //
-        // 下のフック（WithFirstRun / WithBeforeUninstallFastCallback）は Run() の中で走る。
+        // 下のフック（OnFirstRun / OnBeforeUninstallFastCallback）は Run() の中で走る。
         // Log.Line は開く前でも例外にならず**黙って捨てる**ので、後で開けても落ちはしない。
         // 落ちない代わりに「登録した」「解除した」の記録が1行も残らなくなる。
         // 初回起動では Run() の後に MainAsync が append:false で開き直すため、
