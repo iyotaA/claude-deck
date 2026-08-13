@@ -18,6 +18,7 @@ import { getSessionDetail } from './src/view/detail.mjs';
 import { listArchive, parseArchiveQuery } from './src/view/archive.mjs';
 import { getRawEntry } from './src/view/entry.mjs';
 import { getSubagentDetail } from './src/view/subagent.mjs';
+import { getSessionUsage } from './src/view/usage.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
 import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
@@ -618,6 +619,22 @@ const server = http.createServer((req, res) => {
     getSubagentDetail(agentMatch[1], agentMatch[2]).then(
       (payload) => {
         if (!payload) sendJson(res, 404, { error: 'その記録が見つかりません' });
+        else sendJson(res, 200, payload);
+      },
+      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+    );
+    return;
+  }
+
+  // そのセッションが何にトークンを使ったか。これも detailMatch より手前（具体的なほうから）。
+  //
+  // 詳細の応答に混ぜず別立てにしてある。/api/sessions/:id はセッションを開くたび毎回走るので、
+  // ここに集計を足すと、数値を見ない人まで詳細を開く速度が落ちる
+  const usageMatch = /^\/api\/sessions\/([\w.-]{1,80})\/usage$/.exec(pathname);
+  if (usageMatch) {
+    getSessionUsage(usageMatch[1]).then(
+      (payload) => {
+        if (!payload) sendJson(res, 404, { error: 'そのセッションが見つかりません' });
         else sendJson(res, 200, payload);
       },
       (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),

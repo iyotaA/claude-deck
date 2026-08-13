@@ -80,6 +80,85 @@ export function multiCall(uses, { ms = 0, uuid, text, ...rest } = {}) {
 }
 
 /**
+ * usage の指定を、実物のログに入っている形へ直す。
+ *
+ * 短い名前で書けるようにしつつ、組み立てるキー名は実測どおりにする。
+ * cw5m / cw1h を渡したときだけ入れ子の cache_creation を作るので、
+ * 「平坦しか無い古い形」と「入れ子と食い違う形」の両方をテストで作り分けられる。
+ *
+ * @param {object} u in / cr（キャッシュ読み）/ cw（平坦な書き）/ cw5m / cw1h / out
+ * @returns {object} message.usage に入れる形
+ */
+function usageShape({ in: input = 0, cr = 0, cw = 0, cw5m, cw1h, out = 0 } = {}) {
+  const usage = {
+    input_tokens: input,
+    cache_read_input_tokens: cr,
+    cache_creation_input_tokens: cw,
+    output_tokens: out,
+  };
+  if (cw5m !== undefined || cw1h !== undefined) {
+    usage.cache_creation = {
+      ephemeral_5m_input_tokens: cw5m ?? 0,
+      ephemeral_1h_input_tokens: cw1h ?? 0,
+    };
+  }
+  return usage;
+}
+
+/**
+ * usage を持つ assistant 行。数値の集計を試すときはこれを使う。
+ *
+ * say() は rest をエントリ直下へ展開する作りなので message.usage を作れない。
+ * requestId はエントリ直下、usage は message の下、という位置の違いをここで吸収する。
+ *
+ * @param {string} text 発言。空なら text ブロックを作らない
+ * @param {object} opts ms / uuid / requestId / usage（短縮形）/ model / uses（tool_use の並び）
+ */
+export function reply(text, { ms = 0, uuid, requestId = 'req-1', usage, model, uses, ...rest } = {}) {
+  const content = [];
+  if (text) content.push({ type: 'text', text });
+  for (const u of uses ?? []) {
+    content.push({ type: 'tool_use', id: u.id, name: u.name, input: u.input ?? {} });
+  }
+
+  const message = { role: 'assistant', content };
+  if (model) message.model = model;
+  if (usage) message.usage = usageShape(usage);
+
+  const entry = {
+    type: 'assistant',
+    uuid: uuid ?? nextUuid(),
+    timestamp: at(ms),
+    message,
+    ...rest,
+  };
+  if (requestId !== null) entry.requestId = requestId;
+  return entry;
+}
+
+/**
+ * API が落ちたときに差し込まれる行。
+ *
+ * 実測した特徴は3つで、すべて同時に成り立つ（全ログ108件で食い違い0件）。
+ * requestId を持たない / model が <synthetic> / usage が全ゼロ。
+ * 要求の回数に数えてはいけない行の代表なので、テスト用に形を固定しておく
+ */
+export function synthetic(text, { ms = 0 } = {}) {
+  return {
+    type: 'assistant',
+    uuid: nextUuid(),
+    timestamp: at(ms),
+    isApiErrorMessage: true,
+    message: {
+      role: 'assistant',
+      model: '<synthetic>',
+      content: [{ type: 'text', text }],
+      usage: usageShape({}),
+    },
+  };
+}
+
+/**
  * ツール結果の行。
  *
  * @param {string} id 対応する tool_use_id
