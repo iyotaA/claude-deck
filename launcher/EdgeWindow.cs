@@ -21,13 +21,13 @@ namespace ClaudeDeck;
 /// </summary>
 static partial class EdgeWindow
 {
-    const string AppPathsKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe";
+    const string APP_PATHS_KEY = @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe";
 
     /// <summary>アプリモードの窓のタイトル。public/index.html の title がそのまま出る。</summary>
-    const string WindowTitle = "ClaudeDeck";
+    const string WINDOW_TITLE = "ClaudeDeck";
 
     /// <summary>ShowWindow の SW_RESTORE。最小化を元の大きさに戻す。</summary>
-    const int SwRestore = 9;
+    const int SW_RESTORE = 9;
 
     /// <summary>msedge.exe を探す。見つからなければ null。</summary>
     public static string? Find()
@@ -38,7 +38,7 @@ static partial class EdgeWindow
         {
             try
             {
-                using var key = hive.OpenSubKey(AppPathsKey);
+                using var key = hive.OpenSubKey(APP_PATHS_KEY);
                 if (key?.GetValue(null) is string path && File.Exists(path)) return path;
             }
             catch
@@ -149,11 +149,11 @@ static partial class EdgeWindow
                 }
 
                 if (hwnd == IntPtr.Zero) continue;
-                if (!title.StartsWith(WindowTitle, StringComparison.Ordinal)) continue;
+                if (!title.StartsWith(WINDOW_TITLE, StringComparison.Ordinal)) continue;
                 if (title.Contains(" - ", StringComparison.Ordinal)) continue;
 
                 // 最小化されていると前面化しても見えないので、先に戻す（focus.ps1 と同じ作法）
-                if (IsIconic(hwnd)) ShowWindow(hwnd, SwRestore);
+                if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
 
                 if (SetForegroundWindow(hwnd))
                 {

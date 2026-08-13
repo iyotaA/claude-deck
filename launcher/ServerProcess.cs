@@ -24,19 +24,19 @@ namespace ClaudeDeck;
 static class ServerProcess
 {
     /// <summary>起動を待つ上限。</summary>
-    const int StartTimeoutMs = 10000;
+    const int START_TIMEOUT_MS = 10000;
 
     /// <summary>停止を待つ上限。</summary>
-    const int StopTimeoutMs = 10000;
+    const int STOP_TIMEOUT_MS = 10000;
 
     /// <summary>待つあいだの見に行く間隔。</summary>
-    const int PollMs = 200;
+    const int POLL_MS = 200;
 
     /// <summary>server.mjs の既定のポート。あちらの既定と同じ番号にする。</summary>
-    const int DefaultPort = 4317;
+    const int DEFAULT_PORT = 4317;
 
     /// <summary>server.log から人に見せるために読む上限。末尾だけあればよい。</summary>
-    const int LogTailMax = 8192;
+    const int LOG_TAIL_MAX = 8192;
 
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(2) };
 
@@ -142,7 +142,7 @@ static class ServerProcess
     static IEnumerable<int> CandidatePorts(int preferPort)
     {
         var seen = new HashSet<int>();
-        foreach (var port in new[] { preferPort, ReadPortFile()?.Port ?? 0, EnvPort(), DefaultPort })
+        foreach (var port in new[] { preferPort, ReadPortFile()?.Port ?? 0, EnvPort(), DEFAULT_PORT })
         {
             if (port > 0 && seen.Add(port)) yield return port;
         }
@@ -249,10 +249,10 @@ static class ServerProcess
 
         // 待ち方は2段。まず port.json が新しくなるのを待ち、それから health で裏を取る。
         // 紙だけを信じない（古い紙が残っていると、立ってもいないのに立ったことになる）
-        var deadline = Environment.TickCount64 + StartTimeoutMs;
+        var deadline = Environment.TickCount64 + START_TIMEOUT_MS;
         while (Environment.TickCount64 < deadline)
         {
-            await Task.Delay(PollMs);
+            await Task.Delay(POLL_MS);
 
             var info = ReadPortFile();
             if (info is not null && info.StartedAt > previousStartedAt)
@@ -276,7 +276,7 @@ static class ServerProcess
         }
 
         throw new TimeoutException(
-            $"サーバーが {StartTimeoutMs / 1000} 秒たっても応答しませんでした。{ReadServerLogTail()}");
+            $"サーバーが {START_TIMEOUT_MS / 1000} 秒たっても応答しませんでした。{ReadServerLogTail()}");
     }
 
     /// <summary>
@@ -296,7 +296,7 @@ static class ServerProcess
 
             using var stream = new FileStream(
                 Paths.ServerLog, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            if (stream.Length > LogTailMax) stream.Seek(-LogTailMax, SeekOrigin.End);
+            if (stream.Length > LOG_TAIL_MAX) stream.Seek(-LOG_TAIL_MAX, SeekOrigin.End);
             using var reader = new StreamReader(stream);
 
             var tail = reader.ReadToEnd()
@@ -349,10 +349,10 @@ static class ServerProcess
             Log.Line($"止める合図が通りませんでした: {ex.Message}");
         }
 
-        var deadline = Environment.TickCount64 + StopTimeoutMs;
+        var deadline = Environment.TickCount64 + STOP_TIMEOUT_MS;
         while (Environment.TickCount64 < deadline)
         {
-            await Task.Delay(PollMs);
+            await Task.Delay(POLL_MS);
             if (await HealthAsync(running.Port) is null)
             {
                 Log.Line($"止まりました（ポート {running.Port}）");
@@ -387,11 +387,11 @@ static class ServerProcess
     {
         if (pid <= 0) return true;
 
-        var deadline = Environment.TickCount64 + StopTimeoutMs;
+        var deadline = Environment.TickCount64 + STOP_TIMEOUT_MS;
         while (Environment.TickCount64 < deadline)
         {
             if (!IsAlive(pid)) return true;
-            await Task.Delay(PollMs);
+            await Task.Delay(POLL_MS);
         }
 
         Log.Line($"PID {pid} がまだ残っています。力ずくで止めます");

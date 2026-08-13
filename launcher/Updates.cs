@@ -33,7 +33,7 @@ namespace ClaudeDeck;
 static class Updates
 {
     /// <summary>取りに行く先。ここ以外は見ない。</summary>
-    const string RepoUrl = "https://github.com/iyotaA/claude-deck";
+    const string REPO_URL = "https://github.com/iyotaA/claude-deck";
 
     /// <summary>
     /// 確認と確認のあいだに空ける時間。
@@ -42,19 +42,19 @@ static class Updates
     /// よく使う日に上限へ当たって「確認できません」だらけになる。
     /// --check-update は force で飛び越えるので、人が確かめたいときは待たされない。
     /// </summary>
-    const long MinIntervalMs = 30 * 60 * 1000;
+    const long MIN_INTERVAL_MS = 30 * 60 * 1000;
 
     /// <summary>1回の確認を待つ上限。</summary>
-    const int TimeoutMs = 20000;
+    const int TIMEOUT_MS = 20000;
 
     /// <summary>更新の説明を載せる上限。画面の帯に出すだけなので長さは要らない。</summary>
-    const int NotesMax = 2000;
+    const int NOTES_MAX = 2000;
 
     /// <summary>失敗の理由を載せる上限。</summary>
-    const int ErrorMax = 300;
+    const int ERROR_MAX = 300;
 
     /// <summary>InnerException を辿る深さの上限。参照が輪になっていても止まるように。</summary>
-    const int CauseDepth = 5;
+    const int CAUSE_DEPTH = 5;
 
     /// <summary>
     /// 取り寄せの進み方を記録に落とす刻み（％）。
@@ -62,7 +62,7 @@ static class Updates
     /// Velopack は1％ごとに呼んでくるので、素で書くと1回の更新で100行出る。
     /// 診断に要るのは「どのあたりで止まったか」なので、10行で足りる。
     /// </summary>
-    const int ProgressStep = 10;
+    const int PROGRESS_STEP = 10;
 
     /// <summary>
     /// update.json の中身。
@@ -126,7 +126,7 @@ static class Updates
         {
             var elapsed = now - previous.CheckedAt;
             // 負になるのは時計が巻き戻ったとき。そのときは素直に確かめ直す
-            if (elapsed >= 0 && elapsed < MinIntervalMs)
+            if (elapsed >= 0 && elapsed < MIN_INTERVAL_MS)
             {
                 Log.Line($"更新の確認は省きます（前回から {elapsed / 60000} 分・{previous.State}）");
                 return previous;
@@ -135,7 +135,7 @@ static class Updates
 
         try
         {
-            var source = new GithubSource(RepoUrl, accessToken: null, prerelease: false);
+            var source = new GithubSource(REPO_URL, accessToken: null, prerelease: false);
             var manager = new UpdateManager(source, options: null, locator: null);
 
             // 配布物として入っていないと、そもそも入れ替える先が無い。
@@ -150,7 +150,7 @@ static class Updates
             var target = info.TargetFullRelease;
             var state = Make("available", now,
                 available: target?.Version?.ToString(),
-                notes: Clip(target?.NotesMarkdown, NotesMax));
+                notes: Clip(target?.NotesMarkdown, NOTES_MAX));
 
             Log.Line($"新しい版があります: {state.Available ?? "(版が読めない)"}");
             return Save(previous, state);
@@ -161,7 +161,7 @@ static class Updates
             // 分けておくと、画面で書き分けられる（片方は待てば直る、片方は直らない）
             var state = IsNetworkTrouble(ex) ? "unreachable" : "failed";
             Log.Line($"更新を確認できませんでした（{state}）: {ex.GetType().Name}: {ex.Message}");
-            return Save(previous, Make(state, now, error: Clip(ex.Message, ErrorMax)));
+            return Save(previous, Make(state, now, error: Clip(ex.Message, ERROR_MAX)));
         }
     }
 
@@ -211,7 +211,7 @@ static class Updates
         {
             Log.Line("更新は止めてあります（CLAUDE_DECK_UPDATE_OFF）。何もしません");
             Save(previous, Make("off", Now()));
-            return ExitCode.Ok;
+            return ExitCode.OK;
         }
 
         // 落としたかどうかを覚えておく。転んだときに起こし直すかの分かれ目になる
@@ -221,14 +221,14 @@ static class Updates
 
         try
         {
-            var source = new GithubSource(RepoUrl, accessToken: null, prerelease: false);
+            var source = new GithubSource(REPO_URL, accessToken: null, prerelease: false);
             var manager = new UpdateManager(source, options: null, locator: null);
 
             if (!manager.IsInstalled)
             {
                 Log.Line("インストールされた版ではありません。入れ替えられません");
                 Save(previous, Make("not-installed", Now()));
-                return ExitCode.UpdateFailed;
+                return ExitCode.UPDATE_FAILED;
             }
 
             // 画面が見ていた紙を信じず、ここで確かめ直す。
@@ -239,12 +239,12 @@ static class Updates
             {
                 Log.Line("新しい版はありませんでした");
                 Save(previous, Make("none", Now()));
-                return ExitCode.Ok;
+                return ExitCode.OK;
             }
 
             var target = info.TargetFullRelease;
             requested = target?.Version?.ToString();
-            var notes = Clip(target?.NotesMarkdown, NotesMax);
+            var notes = Clip(target?.NotesMarkdown, NOTES_MAX);
             Log.Line($"取り寄せます: {requested ?? "(版が読めない)"}");
 
             previous = Save(previous, Make("downloading", Now(),
@@ -278,10 +278,10 @@ static class Updates
             var state = IsNetworkTrouble(ex) ? "unreachable" : "failed";
             Log.Line($"入れ替えに失敗しました（{state}）: {ex.GetType().Name}: {ex.Message}");
             Save(previous, Make(state, Now(),
-                requested: requested, error: Clip(ex.Message, ErrorMax), prevPort: stoppedPort));
+                requested: requested, error: Clip(ex.Message, ERROR_MAX), prevPort: stoppedPort));
 
             if (stopped) await RecoverAsync(stoppedPort);
-            return ExitCode.UpdateFailed;
+            return ExitCode.UPDATE_FAILED;
         }
     }
 
@@ -356,7 +356,7 @@ static class Updates
         var lastStep = -1;
         return percent =>
         {
-            var step = percent / ProgressStep;
+            var step = percent / PROGRESS_STEP;
             if (step == lastStep) return;
             lastStep = step;
             Log.Line($"  取り寄せ {percent}%");
@@ -521,10 +521,10 @@ static class Updates
     /// <returns>相手の戻り値。</returns>
     static async Task<T> WithTimeoutAsync<T>(Task<T> task)
     {
-        var done = await Task.WhenAny(task, Task.Delay(TimeoutMs));
+        var done = await Task.WhenAny(task, Task.Delay(TIMEOUT_MS));
         if (done != task)
         {
-            throw new TimeoutException($"{TimeoutMs / 1000} 秒たっても返事がありませんでした。");
+            throw new TimeoutException($"{TIMEOUT_MS / 1000} 秒たっても返事がありませんでした。");
         }
         return await task;
     }
@@ -540,7 +540,7 @@ static class Updates
     static bool IsNetworkTrouble(Exception ex)
     {
         var cause = ex;
-        for (var i = 0; i < CauseDepth && cause is not null; i++, cause = cause.InnerException)
+        for (var i = 0; i < CAUSE_DEPTH && cause is not null; i++, cause = cause.InnerException)
         {
             if (cause is HttpRequestException or SocketException
                 or OperationCanceledException or TimeoutException)
