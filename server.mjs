@@ -18,7 +18,7 @@ import { getSessionDetail } from './src/view/detail.mjs';
 import { listArchive, parseArchiveQuery } from './src/view/archive.mjs';
 import { getRawEntry } from './src/view/entry.mjs';
 import { getSubagentDetail } from './src/view/subagent.mjs';
-import { getSessionUsage } from './src/view/usage.mjs';
+import { getSessionUsage, listUsage, parseUsageQuery } from './src/view/usage.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
 import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
@@ -588,6 +588,18 @@ const server = http.createServer((req, res) => {
   // 書庫。一覧と違って毎秒引かれるものではないので、その場で作って返す（push はしない）
   if (pathname === '/api/archive') {
     listArchive(parseArchiveQuery(url.searchParams)).then(
+      (payload) => sendJson(res, 200, payload),
+      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+    );
+    return;
+  }
+
+  // セッションを跨いだ数値。書庫と同じくその場で作って返す（push はしない）。
+  //
+  // ログを全文読むので、一番重い窓口。上限（USAGE_SCAN_MAX）で切って、
+  // 切ったことは meta.scanLimited で正直に返す
+  if (pathname === '/api/usage') {
+    listUsage(parseUsageQuery(url.searchParams)).then(
       (payload) => sendJson(res, 200, payload),
       (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
     );

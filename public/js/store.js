@@ -46,7 +46,7 @@ export const SUMMARY_ORDER = [
  *  ?tq=<語> … 時系列の検索語
  *  ?hide=<種類,種類> … 時系列で隠す種類。空で付けると「何も隠さない」になる
  *  ?nolive=1 … 自動更新をつながない
- *  ?tab=archive … 書庫（終了したものも含む全セッション）を開いた状態にする
+ *  ?tab=archive|usage … 書庫（終了したものも含む全セッション）や数値を開いた状態にする
  *  ?aq=<語> … 書庫の検索語
  *  ?asort=recent|oldest|size … 書庫の並び順
  */
@@ -54,6 +54,15 @@ export const query = new URLSearchParams(location.search);
 
 /** 書庫の並び順。サーバ側（view/archive.mjs の SORTS）と同じ語を使う */
 export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
+
+/**
+ * 左のペインに出せるもの。知らない値は 'live' に落とす。
+ *
+ * 集合で持つのは、増やしたときに三項演算子を書き換えなくて済むようにするため。
+ * 以前は `=== 'archive' ? 'archive' : 'live'` と書いてあり、
+ * 3つ目を足したときに黙って 'live' へ落ちる形になっていた
+ */
+export const TABS = new Set(['live', 'archive', 'usage']);
 
 export const dom = {
   app: document.getElementById('app'),
@@ -71,6 +80,7 @@ export const dom = {
   scrim: document.getElementById('scrim'),
   tabLive: document.getElementById('tab-live'),
   tabArchive: document.getElementById('tab-archive'),
+  tabUsage: document.getElementById('tab-usage'),
   liveHead: document.getElementById('live-head'),
   archiveHead: document.getElementById('archive-head'),
   archive: document.getElementById('archive'),
@@ -78,6 +88,13 @@ export const dom = {
   archiveDeep: document.getElementById('archive-deep'),
   archiveSort: document.getElementById('archive-sort'),
   archiveCount: document.getElementById('archive-count'),
+  // 横断の数値。usage-tab.js だけが使う
+  usageHead: document.getElementById('usage-head'),
+  usage: document.getElementById('usage'),
+  usageDays: document.getElementById('usage-days'),
+  usageLimit: document.getElementById('usage-limit'),
+  usageModel: document.getElementById('usage-model'),
+  usageCount: document.getElementById('usage-count'),
   // 通知の設定モーダル。settings.js だけが使う
   settings: document.getElementById('settings'),
   settingsOpen: document.getElementById('settings-open'),
@@ -169,13 +186,13 @@ export const store = {
    */
   hiddenKinds: initialHiddenKinds(query.get('hide')),
   /**
-   * 左のペインに出しているもの。'live'（稼働中）か 'archive'（書庫）。
+   * 左のペインに出しているもの。TABS のどれか。
    *
-   * localStorage には残さない。書庫を開いたまま保存すると、次に開いたときに
+   * localStorage には残さない。書庫や数値を開いたまま保存すると、次に開いたときに
    * 「誰が待っているか」が見えない状態で始まってしまう。
-   * 書庫で固定したい人は ?tab=archive をブックマークする
+   * 固定したい人は ?tab=archive のようにブックマークする
    */
-  tab: query.get('tab') === 'archive' ? 'archive' : 'live',
+  tab: TABS.has(query.get('tab')) ? query.get('tab') : 'live',
   /** 書庫の状態。rows はサーバの応答そのまま（logSize と mtimeMs を持つ） */
   archive: {
     rows: [],
@@ -191,6 +208,36 @@ export const store = {
     /** 1度でも引けたか。「まだ引いていない」と「0件だった」を区別するため */
     loaded: false,
     /** サーバ側がまだ書庫に対応していない（404）。静かに退く */
+    unavailable: false,
+  },
+  /**
+   * 数値タブ（横断集計）の状態。
+   *
+   * **1本ぶんの store.usage とは別物。** あちらは開いているセッション1本
+   * （/api/sessions/:id/usage）で、こちらは複数セッションを跨いだ集計（/api/usage）。
+   * 名前が似ているので、片方だけを直して片方を忘れないよう気をつける
+   */
+  usageTab: {
+    /** 応答そのまま。null は「まだ引けていない」 */
+    data: null,
+    /**
+     * モデルの絞り込みの選択肢。
+     *
+     * **絞り込んでいない応答からだけ拾う。** モデルを指定して引くと
+     * 応答の models は1種しか返らないので、そこから作り直すと
+     * 「すべて」に戻す以外の選択肢が消えてしまう
+     */
+    modelOptions: [],
+    limit: 30,
+    /** 期間（日）。null は「絞らない」。0 は作らない */
+    days: null,
+    /** モデルの絞り込み。null は「すべて」 */
+    model: null,
+    loading: false,
+    error: null,
+    /** 1度でも引けたか。「まだ引いていない」と「0件だった」を区別するため */
+    loaded: false,
+    /** サーバ側がまだ横断集計に対応していない（404）。静かに退く */
     unavailable: false,
   },
   /**
@@ -228,7 +275,8 @@ export function syncQuery() {
   const hide = hideQueryValue(store.hiddenKinds);
   if (hide === null) params.delete('hide');
   else params.set('hide', hide);
-  set('tab', store.tab === 'archive' ? 'archive' : null);
+  // 既定（稼働中）のときだけキーを落とす。3値になったので三項では書かない
+  set('tab', store.tab === 'live' ? null : store.tab);
   set('aq', store.tab === 'archive' ? store.archive.q : null);
   // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
   set('asort', store.tab === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
