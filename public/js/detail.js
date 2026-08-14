@@ -17,7 +17,26 @@ import {
   decisionsPanel, todoPanel, compactionPanel, timelinePanel, filesPanel, basicsPanel,
 } from './detail-panels.js';
 import { agentsPanel } from './agents.js';
+import { usagePanel } from './usage-panel.js';
 import * as Timeline from './timeline/index.js';
+
+/**
+ * いま出してよい数値。
+ *
+ * 選び直した直後は、前のセッションの数値がまだ store に残っている。
+ * id を突き合わせないと、別のセッションの数字を数秒のあいだ出し続けることになる
+ * （数値は詳細とは別の窓口から、別のタイミングで届く）
+ *
+ * @returns {object|null}
+ */
+function usageNow() {
+  return store.usage?.id === store.selected ? store.usage : null;
+}
+
+/** 数値を取れなかった理由。detailErrorNow と同じく、選んでいるセッションのものだけ返す */
+function usageErrorNow() {
+  return store.usageErrorFor === store.selected ? store.usageError : null;
+}
 
 /**
  * 詳細ペインを作り直すかどうかの材料。
@@ -42,6 +61,11 @@ function detailKeyOf() {
     row?.pid ?? '',
     row?.contextTokens ?? '',
     w ? `${w.tool ?? ''}${w.detail ?? ''}` : '',
+    // 数値は詳細より遅れて届く。入れておかないと、届いてもパネルが出ない。
+    // contextTokens が既に入っているので、稼働中は元から毎ターン作り直している。
+    // ここを足したことで作り直しが増えるわけではない
+    usageNow()?.logSize ?? '',
+    usageErrorNow() ?? '',
   ].join('');
 }
 
@@ -144,6 +168,10 @@ export function renderDetail() {
   } else {
     stack.append(el('div', 'loading', 'ログを読んでいます…'));
   }
+
+  // 数値。ここまでが「何が起きたか」で、ここからは「このセッションの性質」。
+  // 詳細（d）が読めていなくても出せる（別の窓口から来るので）
+  add(usagePanel(usageNow(), d, usageErrorNow()));
 
   add(basicsPanel(row, d));
 

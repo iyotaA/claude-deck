@@ -1,0 +1,249 @@
+/* 数値パネル。
+ *
+ * 読む順は update.css の後・narrow.css の前。
+ * narrow.css が上を全部上書きするので、あれより後ろには置けない。
+ *
+ * **新しい色を作らない。** 使うのは --accent（強調1本）と
+ * --fg-faint / --border-strong（文脈）だけ。
+ * 色を1つ足すと tokens.css の二重定義（prefers-color-scheme 側と
+ * [data-theme="dark"] 側）を両方直す義務が生まれるので、足さずに済ませる。
+ *
+ * 面も塗らない。全部を塗ると全部が同じ重さに見えて、どこを見ればいいか分からなくなる。
+ */
+
+/* ------------------------------------------------------------ 上の4枚の札 */
+
+/* auto-fit にすると、狭いときに1列・広いときに4列へ自分で畳む。
+   個数を決め打ちしないので、札を1枚増やしてもここは触らずに済む */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: .6rem;
+}
+
+.stat {
+  padding: .6rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+
+.stat-label {
+  font-size: .72rem;
+  color: var(--fg-muted);
+}
+
+/* 大きな数字に tabular-nums は付けない。
+   桁の幅が揃うぶん字間が空いて、かえって間延びして見える。
+   揃えたいのは表の行と、下の横棒の値のほうだけ */
+.stat-value {
+  margin-top: .2rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+/* 但し書き。数字より小さく、色も落とす。
+   ここに「モデルまたぎでは比べられません」のような、
+   読まないと誤読する話が入るので、隠さず常に出す */
+.stat-note {
+  margin-top: .25rem;
+  font-size: .7rem;
+  line-height: 1.45;
+  color: var(--fg-faint);
+}
+
+/* -------------------------------------------------------------- 節の区切り */
+
+/* パネルの中の小見出し。枠を足さず、破線1本で前の節と切る。
+   枠にすると入れ子の箱になって、パネルの中にパネルがあるように見える */
+.usage-block {
+  margin-top: 1rem;
+  padding-top: .9rem;
+  border-top: 1px dashed var(--border);
+}
+
+.usage-block > h4 {
+  margin: 0 0 .4rem;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.usage-block > .note { margin-bottom: .6rem; }
+
+/* 帰属できなかったぶんの注記。上の横棒に続く話なので、間を詰めて置く */
+.note-sub {
+  margin-top: .5rem;
+  font-size: .72rem;
+  color: var(--fg-faint);
+}
+
+/* ------------------------------------------------- 何が文脈を食っているか */
+
+.bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+}
+
+/* 4列。名前・棒・値・回数。
+   棒だけが 1fr で伸び、他は中身なりの幅にする。
+   棒を固定幅にすると、名前が長い行だけ右端が飛び出す */
+.bar {
+  display: grid;
+  grid-template-columns: minmax(4rem, auto) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: .5rem;
+  font-size: .78rem;
+}
+
+.bar-label {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* 溝。棒が短いときでも「ここが全体」と分かるように、薄く敷いておく */
+.bar-track {
+  height: .5rem;
+  border-radius: 999px;
+  background: var(--bg-sunk);
+  overflow: hidden;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  /* 1位以外は文脈の色。名義のカテゴリなので、値の大小で色を変えない */
+  background: var(--border-strong);
+}
+
+/* 強調は1位だけ。ここが「次に手を入れる先」になる */
+.bar.is-top .bar-fill { background: var(--accent); }
+.bar.is-top .bar-label { font-weight: 700; }
+
+.bar-value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 3.2rem;
+}
+
+.bar-sub {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 3.2rem;
+  color: var(--fg-faint);
+}
+
+/* -------------------------------------------------------- 文脈の伸び方 */
+
+/* 絵の器。高さはここで決める。
+   SVG 側は viewBox で伸び縮みするので、器の高さがそのまま絵の高さになる */
+.spark {
+  height: 3.4rem;
+  padding: .3rem .1rem;
+  border-radius: 6px;
+  background: var(--bg-sunk);
+}
+
+.spark-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 面は塗るが、薄くする。ここだけは「面を塗らない」の例外にあたるが、
+   線の下を塗らないと折れ線の上下がどちらの向きか読みにくい。
+   新しい色は作らず、--accent を薄めて使う */
+.spark-area {
+  fill: var(--accent);
+  opacity: .14;
+}
+
+/* preserveAspectRatio="none" で横に引き伸ばすので、線幅も一緒に潰れる。
+   潰さないための vector-effect は SVG 側の属性で付けてある */
+.spark-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* 絵は形しか語らない。両端と山の高さは必ず文字でも出す */
+.spark-caption {
+  margin: .35rem 0 0;
+  font-size: .72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+.spark-caption + .facts { margin-top: .5rem; }
+
+/* -------------------------------------------------------------- 表の対 */
+
+/* すべての絵に表を添える。色だけに頼った符号化が無くなり、値は必ず読める。
+   見出しは details.more と同じ見た目にする（「開くと続きがある」を1つの形に保つ） */
+.usage-table {
+  margin-top: .6rem;
+  font-size: .76rem;
+}
+
+.usage-table > summary {
+  cursor: pointer;
+  padding: .1rem 0;
+  color: var(--accent);
+}
+
+/* 横に長い表はここの中だけで滑らせる。画面ごと横に伸ばさない */
+.table-scroll {
+  margin-top: .45rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.usage-table table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+.usage-table th,
+.usage-table td {
+  padding: .3rem .5rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.usage-table th {
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+/* 数の列。ここは桁を揃える価値があるので tabular-nums を付ける */
+.usage-table th.n,
+.usage-table td.n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-table td.n { font-family: var(--font-mono); }
+
+/* 合計の行。上に1本引き直して、明細と切る。
+   :last-child では取らない。ツールの表の最終行（8位）まで合計に見えるので、
+   合計を持つ表だけが自分で印（.is-total）を付ける。
+
+   2px なのは太くしたいからではなく、**1px だと表示されない**ため。
+   border-collapse: collapse は隣り合う罫線を1本に統合し、
+   同じ幅・同じ style なら上の行の border-bottom（--border）が勝つ。
+   幅で上回らないと --border-strong が出ない（実測。1px では明細と同じ線に見えた） */
+.usage-table tr.is-total td {
+  border-bottom: 0;
+  border-top: 2px solid var(--border-strong);
+  font-weight: 700;
+}

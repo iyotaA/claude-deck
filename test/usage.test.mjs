@@ -205,6 +205,8 @@ test('要求が1件も無ければ、合計は 0 で、測れない値は null',
   assert.equal(u.context.last, null);
   assert.equal(u.context.peak, null);
   assert.equal(u.context.growth, null);
+  // 絵にする系列も、空配列ではなく null。「測って0件」と「測りようがない」を分ける
+  assert.equal(u.context.series, null);
   assert.equal(u.cache.hitRate, null);
   assert.equal(u.model, null);
   assert.deepEqual(u.tools, []);
@@ -216,6 +218,32 @@ test('要求が1件だけなら、伸び方は測れないので null', () => {
   assert.equal(u.context.last, 100);
   assert.equal(u.context.peak, 100);
   assert.equal(u.context.growth, null);
+});
+
+test('要求が少ないうちは、文脈の系列をそのまま返す', () => {
+  const u = buildUsage([
+    reply('', { ms: 0, requestId: 'r1', usage: { in: 100 } }),
+    reply('', { ms: 1, requestId: 'r2', usage: { in: 300 } }),
+    reply('', { ms: 2, requestId: 'r3', usage: { in: 250 } }),
+  ]);
+
+  assert.deepEqual(u.context.series, [100, 300, 250]);
+});
+
+test('要求が多いときは間引くが、先頭と末尾は必ず残す', () => {
+  // 画面のスパークラインを描くためだけの値。300 要求あっても 300 点は返さない
+  const entries = [];
+  for (let i = 0; i < 300; i += 1) {
+    entries.push(reply('', { ms: i, requestId: `r${i}`, usage: { in: i + 1 } }));
+  }
+  const u = buildUsage(entries);
+
+  assert.equal(u.context.series.length, 120);
+  // 間引きは形を見るためのもの。両端がずれると、絵の左右が実際の値と食い違う
+  assert.equal(u.context.series[0], 1);
+  assert.equal(u.context.series[119], 300);
+  // 最大値は間引きの結果からではなく peak から出す（山をまたぐことがあるため）
+  assert.equal(u.context.peak, 300);
 });
 
 test('未知の形が来ても落ちない', () => {

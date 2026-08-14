@@ -36,6 +36,7 @@ export const SEC = {
   timeline: 'sec-timeline',
   agents: 'sec-agents',
   files: 'sec-files',
+  usage: 'sec-usage',
   basics: 'sec-basics',
 };
 
