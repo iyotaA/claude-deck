@@ -125,6 +125,44 @@ function toolsBlock(usage) {
 }
 
 /**
+ * スキルを呼んだあとの一続き。
+ *
+ * **注記は折りたたまずに常時出す。ここを消すなら、この節ごと消すこと。**
+ * 測っているのは「Skill を呼んだ次の要求から、次にあなたの番が来るまで」で、
+ * その消費がスキルのせいなのか、たまたま重い作業だったのかは分けられない。
+ * 数字だけを並べると、読む人は必ず「このスキルは重い」と読む。
+ *
+ * @param {object} usage
+ * @returns {HTMLElement|null}
+ */
+function skillsBlock(usage) {
+  // 古いサーバー（この窓口が無い版）から来た応答にはキーごと無い
+  const skills = usage.skills ?? [];
+  if (!skills.length) return null;
+
+  const box = block('スキルを呼んだあと');
+  box.append(el('p', 'note',
+    '「スキルを呼び出した直後の一続き」を測っています。スキルが原因とは限りません。'));
+  box.append(el('p', 'note note-sub',
+    '次にあなたが発言する（または /clear・中断・圧縮が入る）までを1区間として数えています。'));
+
+  box.append(barList(skills.slice(0, BARS_MAX).map((s) => ({
+    label: s.skill,
+    value: s.ite,
+    sub: `${numStrict(s.runs)} 回`,
+  }))));
+
+  box.append(tableDetails(
+    `全 ${skills.length} 件を表で見る`,
+    ['スキル', '呼んだ回数', '要求', '実消費', '1回あたり'],
+    skills.map((s) => [
+      s.skill, numStrict(s.runs), numStrict(s.requests), numStrict(s.ite), numStrict(s.avg),
+    ]),
+  ));
+  return box;
+}
+
+/**
  * 文脈の伸び方。形だけを見る。
  *
  * 折れ線が鋸の歯のように落ちていれば、そこが圧縮。
@@ -214,6 +252,9 @@ export function usagePanel(usage, d, error) {
 
   const tools = toolsBlock(usage);
   if (tools) p.body.append(tools);
+  // 「何が食っているか」の系統なので、ツールの隣に置く
+  const skills = skillsBlock(usage);
+  if (skills) p.body.append(skills);
   const growth = growthBlock(usage);
   if (growth) p.body.append(growth);
   p.body.append(iteBlock(usage));
