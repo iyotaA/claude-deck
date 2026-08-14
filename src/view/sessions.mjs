@@ -43,6 +43,9 @@ async function buildRow({ registry, transcript, now }) {
     nameSource: registry?.nameSource ?? null,
     lastPrompt: meta.lastPrompt ?? meta.lastUserPrompt ?? null,
     lastAssistantText: meta.lastAssistantText,
+    // 呼んだスキルだけ。打ったスラッシュコマンド（meta.commands）はここに載せない。
+    // 大半が /clear で、一覧のタグとしては読み方を変えない。
+    // 毎秒返る応答なので、画面が使わない値を持たせない
     skills: meta.skills,
     // 末尾 64KB に出てきた呼び出しの記録。直近しか映らないので件数の根拠にはしない
     agents: meta.agents.slice(-3),

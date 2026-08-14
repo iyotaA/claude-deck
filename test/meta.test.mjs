@@ -138,12 +138,33 @@ test('スキルは末尾の4件までにする', () => {
   );
 });
 
-test('スラッシュコマンドもスキルとして数える', () => {
+test('スラッシュコマンドはスキルと分けて数える', () => {
   const meta = extractMeta([
-    prompt('<command-name>/pr-review</command-name>\n<command-args>1234</command-args>'),
+    call('Skill', { skill: 'pr-review' }, { id: 's1', ms: 0 }),
+    prompt('<command-name>/clear</command-name>\n<command-args></command-args>', { ms: 100 }),
+    prompt('<command-name>/pr-review</command-name>\n<command-args>1234</command-args>', { ms: 200 }),
   ]);
-  // 先頭の / は落として、スキル名と同じ並びで見せる
-  assert.deepEqual(meta.skills.map((s) => [s.skill, s.args]), [['pr-review', '1234']]);
+  // スキルは Skill ツールを呼んだものだけ。
+  // 混ぜていた頃は、全ログで Skill 82件に対しコマンドが85件（うち74件が /clear）入り込んでいた
+  assert.deepEqual(meta.skills.map((s) => s.skill), ['pr-review']);
+  // 先頭の / は落として並べる。空の引数は「無い」として null にする
+  assert.deepEqual(meta.commands.map((c) => [c.command, c.args]), [
+    ['clear', null],
+    ['pr-review', '1234'],
+  ]);
+});
+
+test('スラッシュコマンドも重複を潰して末尾の4件までにする', () => {
+  const entries = [];
+  for (let i = 0; i < 6; i += 1) {
+    entries.push(prompt(`<command-name>/cmd-${i}</command-name>`, { ms: i }));
+  }
+  // 同じものを打ち直したときは、最後の1回だけが残る
+  entries.push(prompt('<command-name>/cmd-5</command-name>', { ms: 100 }));
+
+  const meta = extractMeta(entries);
+  assert.deepEqual(meta.commands.map((c) => c.command), ['cmd-2', 'cmd-3', 'cmd-4', 'cmd-5']);
+  assert.equal(meta.commands[3].at, T0 + 100);
 });
 
 test('サブエージェントの呼び出しを記録する', () => {
@@ -198,6 +219,7 @@ test('空のログでも形の揃った結果を返す', () => {
   assert.equal(meta.cwd, null);
   assert.equal(meta.contextTokens, null);
   assert.deepEqual(meta.skills, []);
+  assert.deepEqual(meta.commands, []);
   assert.deepEqual(meta.agents, []);
 });
 

@@ -10,7 +10,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildUsage, ITE_WEIGHTS } from '../src/parse/usage.mjs';
-import { prompt, reply, result, synthetic } from './helpers.mjs';
+import { at, prompt, reply, result, synthetic } from './helpers.mjs';
+
+/** スキルを呼んだ要求を1つ作る小道具。長い uses の綴りをテストの本文から追い出す。 */
+function callSkill(name, { ms, requestId, id, usage = { in: 1 } }) {
+  return reply('', { ms, requestId, usage, uses: [{ id, name: 'Skill', input: { skill: name } }] });
+}
 
 test('同じ requestId の3行を1回として数える', () => {
   // 1回の応答が thinking / text / tool_use の複数行に分かれ、全行が同じ usage を持つ（実測）
@@ -263,6 +268,102 @@ test('未知の形が来ても落ちない', () => {
   // requestId を持たない行（{type:'assistant'} だけの行）も、数えられない側へ寄せる。
   // 実データでは <synthetic> しか該当しないが、壊れた行も同じ扱いでよい
   assert.equal(u.syntheticSkipped, 1);
+});
+
+test('スキル区間は呼んだ次の要求から、次のあなたの番まで', () => {
+  const u = buildUsage([
+    callSkill('pr-review', { ms: 0, requestId: 'r1', id: 's1', usage: { in: 1000, out: 100 } }),
+    result('s1', { ms: 1 }),
+    reply('', { ms: 2, requestId: 'r2', usage: { in: 2000, out: 200 } }),
+    reply('', { ms: 3, requestId: 'r3', usage: { in: 3000, out: 300 } }),
+    prompt('ありがと', { ms: 4 }),
+    reply('', { ms: 5, requestId: 'r4', usage: { in: 4000, out: 400 } }),
+  ]);
+
+  const s = u.skills.find((x) => x.skill === 'pr-review');
+  assert.equal(s.runs, 1);
+  // 数えるのは r2 と r3 だけ。
+  // 呼んだ要求（r1）にはスキルの本文がまだ積まれていないので入れない。
+  // あなたが発言したあと（r4）は、もうスキルの続きではない
+  assert.equal(s.requests, 2);
+  // (2000 + 200×5) + (3000 + 300×5) = 3000 + 4500
+  assert.equal(s.ite, 7500);
+  assert.equal(s.avg, 7500);
+});
+
+test('スキル区間は4つの障壁のどれでも切れる', () => {
+  const barriers = {
+    あなたの発言: prompt('つぎこれやって', { ms: 3 }),
+    スラッシュコマンド: prompt('<command-name>/clear</command-name>', { ms: 3 }),
+    中断: prompt('[Request interrupted by user]', { ms: 3 }),
+    圧縮の境目: { type: 'system', subtype: 'compact_boundary', timestamp: at(3) },
+  };
+
+  for (const [name, barrier] of Object.entries(barriers)) {
+    const u = buildUsage([
+      callSkill('test-review', { ms: 0, requestId: 'r1', id: 's1' }),
+      reply('', { ms: 2, requestId: 'r2', usage: { in: 100 } }),
+      barrier,
+      reply('', { ms: 4, requestId: 'r3', usage: { in: 1000 } }),
+    ]);
+
+    assert.equal(u.skills[0].requests, 1, `${name} で切れていない`);
+    assert.equal(u.skills[0].ite, 100, `${name} で切れていない`);
+  }
+});
+
+test('次のスキルを呼んだ要求は、前のスキルの区間の最後として数える', () => {
+  const u = buildUsage([
+    callSkill('a', { ms: 0, requestId: 'r1', id: 's1' }),
+    reply('', { ms: 1, requestId: 'r2', usage: { in: 100 } }),
+    callSkill('b', { ms: 2, requestId: 'r3', id: 's2', usage: { in: 200 } }),
+    reply('', { ms: 3, requestId: 'r4', usage: { in: 400 } }),
+  ]);
+
+  // a は r2 と r3。r3 は「a のもとで働いた最後の1回」なので含める
+  const a = u.skills.find((x) => x.skill === 'a');
+  assert.equal(a.requests, 2);
+  assert.equal(a.ite, 300);
+
+  const b = u.skills.find((x) => x.skill === 'b');
+  assert.equal(b.requests, 1);
+  assert.equal(b.ite, 400);
+});
+
+test('同じスキルを2回呼んだら、回数を足して合算する', () => {
+  const u = buildUsage([
+    callSkill('pr-review', { ms: 0, requestId: 'r1', id: 's1' }),
+    reply('', { ms: 1, requestId: 'r2', usage: { in: 100 } }),
+    prompt('つぎ', { ms: 2 }),
+    callSkill('pr-review', { ms: 3, requestId: 'r3', id: 's2' }),
+    reply('', { ms: 4, requestId: 'r4', usage: { in: 300 } }),
+  ]);
+
+  assert.deepEqual(u.skills, [{ skill: 'pr-review', runs: 2, requests: 2, ite: 400, avg: 200 }]);
+});
+
+test('1回の要求で2つ呼んだら、区間のぶんを等分する', () => {
+  const u = buildUsage([
+    reply('', {
+      ms: 0,
+      requestId: 'r1',
+      usage: { in: 1 },
+      uses: [
+        { id: 's1', name: 'Skill', input: { skill: 'a' } },
+        { id: 's2', name: 'Skill', input: { skill: 'b' } },
+      ],
+    }),
+    reply('', { ms: 1, requestId: 'r2', usage: { in: 100 } }),
+  ]);
+
+  // どちらのぶんかは分けられない。片方へ寄せずに半分ずつ持たせる
+  assert.deepEqual(u.skills.map((s) => [s.skill, s.runs, s.ite]), [['a', 1, 50], ['b', 1, 50]]);
+});
+
+test('スキルを呼んでいなければ、スキルの集計は空', () => {
+  const u = buildUsage([reply('', { requestId: 'r1', usage: { in: 100 } })]);
+
+  assert.deepEqual(u.skills, []);
 });
 
 test('ログの順が乱れていても時刻で並べ直す', () => {

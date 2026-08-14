@@ -8,6 +8,11 @@
  * ai-title は毎ターン書き直されるので、末尾だけ見ても最新のものが取れる。
  * スキルは末尾に写っているものだけ。全部は詳細ビューで出す。
  *
+ * **スキル（Skill ツール）とスラッシュコマンドは別の配列に入れる。**
+ * 以前は同じ配列へ push していて、全ログで Skill 82件に対しスラッシュコマンドが 85件、
+ * **うち 74件が `/clear`** だった（実測）。一覧の「スキル」タグが実質 `clear` を並べる状態になる。
+ * 呼んだスキルと打ったコマンドは意味がまるで違うので、混ぜると片方が読めなくなる。
+ *
  * type の種類は公開仕様ではない。実測で分かっているものだけを見て、
  * 知らない type は黙って飛ばす。
  */
@@ -21,6 +26,25 @@ import {
   slashCommandOf,
 } from './entries.mjs';
 import { oneLine } from '../shared/text.mjs';
+
+/** skills / commands に残す件数。一覧のタグとして横に並べられる上限。 */
+const KEEP = 4;
+
+/**
+ * 同じものが何度も出ていたら最後の1回だけ残し、末尾の数件に絞る。
+ *
+ * スキルもコマンドも同じ扱いにしたいので、違うのは鍵の作り方だけにしてある。
+ * 別々に書くと、片方にだけ絞り込みが入っていない状態に必ずなる。
+ *
+ * @param {object[]} list 出てきた順の並び
+ * @param {(item: object) => string} keyOf 同じものと見なすための鍵
+ * @returns {object[]}
+ */
+function lastFew(list, keyOf) {
+  const seen = new Map();
+  for (const item of list) seen.set(keyOf(item), item);
+  return [...seen.values()].slice(-KEEP);
+}
 
 /**
  * @param {Array} entries 会話ログの行
@@ -40,6 +64,7 @@ export function extractMeta(entries) {
     slug: null,
     contextTokens: null,
     skills: [],
+    commands: [],
     agents: [],
     lastUserPrompt: null,
     lastAssistantText: null,
@@ -121,16 +146,21 @@ export function extractMeta(entries) {
       continue;
     }
 
+    // 打ったスラッシュコマンド。**スキルとは別の配列へ入れる。**
+    // 大半は /clear で、呼んだスキルの記録の中に混ぜると読めなくなる
     const slash = slashCommandOf(entry);
     if (slash) {
-      meta.skills.push({ skill: slash.command.replace(/^\//, ''), args: oneLine(slash.args, 60), at: timestampOf(entry) });
+      meta.commands.push({
+        command: slash.command.replace(/^\//, ''),
+        args: oneLine(slash.args, 60),
+        at: timestampOf(entry),
+      });
     }
   }
 
-  // 同じスキルが何度も出ていたら最後の1回だけ残す
-  const seen = new Map();
-  for (const s of meta.skills) seen.set(`${s.skill}|${s.args ?? ''}`, s);
-  meta.skills = [...seen.values()].slice(-4);
+  // 同じものが何度も出ていたら最後の1回だけ残す
+  meta.skills = lastFew(meta.skills, (s) => `${s.skill}|${s.args ?? ''}`);
+  meta.commands = lastFew(meta.commands, (c) => `${c.command}|${c.args ?? ''}`);
 
   return meta;
 }

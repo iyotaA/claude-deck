@@ -22,8 +22,11 @@
  */
 
 import {
+  isInterrupt,
   isMainline,
+  isUserPrompt,
   requestIdOf,
+  slashCommandOf,
   timestampOf,
   toolResults,
   toolUses,
@@ -52,6 +55,14 @@ export const ITE_WEIGHTS = {
 
 /** ツール別の集計で、上位いくつまで返すか。残りは「その他」にまとめない（切るだけ）。 */
 const TOOLS_MAX = 24;
+
+/**
+ * スキル別の集計で、上位いくつまで返すか。
+ *
+ * 全ログを走査してもスキルは 12種・82件しか無かった（実測）。
+ * 1セッションに何種類も出るものではないので、ツールより小さくてよい。
+ */
+const SKILLS_MAX = 12;
 
 /**
  * 文脈保有量の系列を、いくつの点まで返すか。
@@ -290,6 +301,135 @@ function attributeTools(requests, sizes) {
 }
 
 /**
+ * スキル区間の切れ目になる時刻を集める。
+ *
+ * 区間は「Skill を呼んでから、次にあなたの番が来るまで」。
+ * スキルは指示を読み込ませるものなので、効き目は呼んだ**後**の作業に現れる。
+ * 打ち切るのは次の4つで、どれかが先に来た時点で終わり。
+ *
+ * - あなたの発言 … 区間の本来の終わり
+ * - スラッシュコマンド … `/clear` など。話がまるごと切り替わる
+ * - 中断 … Esc で止めた
+ * - 圧縮の境目 … それより前のやり取りは要約に置き換わっている
+ *
+ * 障壁はもう1つ「次の Skill」があるが、これはここに入れない。
+ * assistant 行なので時刻ではなく **requests の並びの位置**で切れるため
+ * （attributeSkills の側で見ている）。
+ *
+ * `digest/waits.mjs` の collectBarriers と同じ形をしている。
+ * あちらは「待ち時間を跨いでよいか」を見るためのもので、こちらは「スキルの効き目が続いているか」。
+ * 見る行の種類が違う（あちらはあなたの発言を障壁にしない）ので、まとめずに別に持つ。
+ *
+ * @param {object[]} entries 会話ログの行
+ * @param {boolean} sidechain true ならサブエージェントの行だけを見る
+ * @returns {number[]} 時刻の昇順
+ */
+function collectSkillBarriers(entries, sidechain) {
+  const out = [];
+
+  for (const entry of entries) {
+    if (isMainline(entry) === sidechain) continue;
+    const at = timestampOf(entry);
+    if (at === null) continue;
+
+    if (entry?.type === 'system' && entry.subtype === 'compact_boundary') {
+      out.push(at);
+      continue;
+    }
+    if (entry?.type !== 'user') continue;
+    if (isUserPrompt(entry) || slashCommandOf(entry) || isInterrupt(entry)) out.push(at);
+  }
+
+  return out.sort((a, b) => a - b);
+}
+
+/**
+ * スキルを呼んだ直後の一続きを、スキルごとに数える。
+ *
+ * **因果は取れない。** ここで出るのは
+ * 「そのスキルを呼んだあと、次にあなたの番が来るまでに何を使ったか」であって、
+ * その消費がスキルのせいなのか、たまたま重い作業だったのかは分けられない。
+ * だから画面側は、この但し書きを**折りたたまずに常時**出す約束にしてある。
+ * その表示を外すなら、この数字も一緒に外すこと。
+ *
+ * 区間は Skill を呼んだ要求の**次**から始める。
+ * その要求自身の usage は「Skill を呼ぶと決めるまで」の文脈で、
+ * スキルの本文はまだ積まれていない（積まれるのは結果が返る次の要求から）。
+ *
+ * @param {object[]} requests 時系列に並んだ要求
+ * @param {number[]} barriers 区間を打ち切る時刻（昇順）
+ * @returns {object[]} ite の降順
+ */
+function attributeSkills(requests, barriers) {
+  // Skill を呼んだ位置を先に拾う。区間の終わりを決めるのに「次はどこか」が要る
+  const starts = [];
+  for (let i = 0; i < requests.length; i += 1) {
+    const names = [];
+    for (const u of requests[i].uses) {
+      if (u.name === 'Skill' && typeof u.input?.skill === 'string' && u.input.skill) names.push(u.input.skill);
+    }
+    if (names.length) starts.push({ index: i, names });
+  }
+  if (!starts.length) return [];
+
+  /** @type {Map<string, {skill: string, runs: number, requests: number, ite: number}>} */
+  const byName = new Map();
+
+  for (let s = 0; s < starts.length; s += 1) {
+    const { index, names } = starts[s];
+    // 次に Skill を呼んだ要求までを見る。その要求自身は
+    // 「前のスキルのもとで働いた最後の1回」なので、区間に含める
+    const stop = starts[s + 1]?.index ?? requests.length - 1;
+
+    // 開始より後に来る最初の障壁。時刻を持たない要求からは判定できないので、
+    // そのときは次の Skill までを区間にする（実データでは時刻の無い assistant 行は見ていない）
+    const startAt = requests[index].at;
+    let endAt = Infinity;
+    if (startAt !== null) {
+      for (const b of barriers) {
+        if (b > startAt) {
+          endAt = b;
+          break;
+        }
+      }
+    }
+
+    let ite = 0;
+    let count = 0;
+    for (let i = index + 1; i <= stop; i += 1) {
+      const at = requests[i].at;
+      if (at !== null && at >= endAt) break;
+      ite += requests[i].ite;
+      count += 1;
+    }
+
+    // 1回の要求で2つのスキルを呼ぶことがある。どちらのぶんかは分けられないので等分する
+    // （ツール別の按分と同じ考え方。分けられないものを片方へ寄せない）。
+    // 呼んだ回数だけは、どちらも1回として数える
+    const share = 1 / names.length;
+    for (const name of names) {
+      const rec = byName.get(name) ?? { skill: name, runs: 0, requests: 0, ite: 0 };
+      rec.runs += 1;
+      rec.requests += count * share;
+      rec.ite += ite * share;
+      byName.set(name, rec);
+    }
+  }
+
+  return [...byName.values()]
+    .map((r) => ({
+      skill: r.skill,
+      runs: r.runs,
+      requests: Math.round(r.requests),
+      ite: Math.round(r.ite),
+      // runs は必ず1以上（呼んだから記録がある）ので、ここは 0 で割らない
+      avg: Math.round(r.ite / r.runs),
+    }))
+    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill))
+    .slice(0, SKILLS_MAX);
+}
+
+/**
  * 昇順に並んだ配列から百分位を取る。
  *
  * 空なら null。**0 を返さない**（「実際に0だった」と「取れなかった」を混ぜないため）。
@@ -395,6 +535,9 @@ export function buildUsage(entries, { sidechain = false } = {}) {
   const sizes = collectResultSizes(list, sidechain);
   const { tools, unattributed } = attributeTools(requests, sizes);
   const { model, models } = modelBreakdown(requests);
+  // 区間の切れ目は entries 側にしかない（あなたの発言も compact_boundary も assistant 行ではない）ので、
+  // requests ではなく list を渡して時刻で拾う
+  const skills = attributeSkills(requests, collectSkillBarriers(list, sidechain));
 
   return {
     model,
@@ -423,5 +566,7 @@ export function buildUsage(entries, { sidechain = false } = {}) {
     cache: { hitRate: cacheBase > 0 ? totals.cacheRead / cacheBase : null },
     tools,
     toolsUnattributed: unattributed,
+    // **因果は取れない。** 「呼んだ直後の一続き」でしかないことを、画面側が必ず併記する
+    skills,
   };
 }
