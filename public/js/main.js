@@ -9,14 +9,18 @@
  *
  * 依存は上から下へ一方向にだけ流す。逆向きに import したくなったら置き場所が間違っている。
  *   層0  util.js / perf.js / timeline/kinds.js       誰にも依存しない
- *   層1  store.js（kinds.js を直に見る）/ panel.js / detail-head.js
+ *   層1  store.js（kinds.js を直に見る）/ panel.js / detail-head.js / usage-chart.js
  *   層2  rows.js / drawer.js / timeline/（外からは index.js の1枚として見る）
- *   層3  detail-wait.js / detail-panels.js / agents.js
+ *   層3  detail-wait.js / detail-panels.js / agents.js / usage-panel.js
  *   層4  detail.js
  *   層5  session.js
  *   層6  list.js
- *   層7  archive.js / stream.js / settings.js / update.js
+ *   層7  archive.js / usage-tab.js / stream.js / settings.js / update.js
  *   層8  このファイル
+ *
+ * 数値は2つに分かれている。1本ぶんが usage-panel.js（層3・詳細ペイン）、
+ * 横断が usage-tab.js（層7・左のペイン）。絵の部品（usage-chart.js）だけを共有する。
+ * 層7 の中の向きは archive.js → usage-tab.js の片方向。逆を足すと循環になる。
  *
  * timeline/ の中も6枚で層をなしているが、外から見るときは index.js の1枚として扱う。
  * 中の向きは timeline/index.js の冒頭に書いてある。

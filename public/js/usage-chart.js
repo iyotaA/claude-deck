@@ -10,9 +10,48 @@
  * 代わりに `svgEl()` をここに置く。
  */
 
-import { el, num } from './util.js';
+import { el, num, shortModel } from './util.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * 節を1つ作る。数値の枠の中の小見出し。
+ *
+ * 詳細のパネル（層3）と横断のタブ（層7）が同じ形を使う。
+ * どちらかに置くともう片方から見えないので、層1に置いてある。
+ *
+ * @param {string} title
+ * @returns {HTMLElement}
+ */
+export function block(title) {
+  const box = el('section', 'usage-block');
+  box.append(el('h4', null, title));
+  return box;
+}
+
+/**
+ * キャッシュ命中率に添える但し書き。
+ *
+ * **モデルまたぎで比べられない。** キャッシュの最小長がモデル別で、
+ * しかも単調でない（Opus 5 は 512、Opus 4.7 は 2,048、Opus 4.6 と Haiku 4.5 は 4,096）。
+ * 最小長に満たないとエラーも出さずに黙ってキャッシュされないので、
+ * 古いモデルの命中率が低く出るのは、使い方の差だけが理由ではない。
+ *
+ * 1本ぶんと横断で同じ形（`model` と `models`）を返すので、そのまま両方で使える。
+ * 横断のほうは混ざっていると値そのものが null になるが、
+ * **なぜ出ないかを書くのはこちらの仕事。** 数字の代わりに「—」だけを出さない。
+ *
+ * @param {{model: string|null, models: {model: string}[]}} usage
+ * @returns {string}
+ */
+export function hitRateNote(usage) {
+  const models = usage.models ?? [];
+  if (models.length > 1) {
+    return `モデルが ${models.length} 種類混ざっています。モデルまたぎでは比べられません`;
+  }
+  const name = usage.model ? shortModel(usage.model) : null;
+  return name ? `${name} の中でだけ比べられます` : 'モデルが分かりません';
+}
 
 /**
  * SVG の要素を作る。
