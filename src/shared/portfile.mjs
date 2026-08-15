@@ -9,6 +9,12 @@
  * 異常終了すると消し損ねた紙がそのまま残るので、
  * 読む側は必ず GET /api/health で裏を取ること（紙だけを信じない）。
  *
+ * **書くのは `--port-file` を渡された起動だけ**（hasPortFileFlag）。
+ * 紙は1枚しかないので、同じマシンで2本立つと後から立ったほうが上書きし、
+ * 先に止めたほうが消す。実際に踏んだ（インストール版が動いているのに紙だけ消えた）。
+ * 開発側の `npm start` は紙を必要としない（ポートはコンソールに出る）ので、
+ * 書く主体を「場所を明示してきた起動」に絞れば、取り合いそのものが起きなくなる。
+ *
  * 場所の決め方は appdata.mjs のまま。あちらは「パスを決めるだけの純関数」と決めてあるので、
  * 実際に書く・消すの I/O はこちらに置く。
  */
@@ -24,18 +30,15 @@ const APP_ROOT = path.join(here, '..', '..');
 const FLAG = '--port-file';
 
 /**
- * どこへ書くかを決める。
+ * argv から `--port-file` の値を取り出す。
  *
- * ランチャは起動時に `--port-file` で場所を明示する。
- * これが無いと、パスを決める規則が Node 側と C# 側の2箇所に生きることになる。
- * 引数が無ければ従来どおり既定の場所に書くので、npm start も autostart もそのまま動く。
+ * 場所を決めるのと「明示されたか」を見るのとで、同じ走査を2回書かないための土台。
+ * 書き分けると必ず片方が古くなり、「場所は決まったのに書かれない」形で食い違う。
  *
- * @param {string[]} [argv] process.argv.slice(2) 相当
- * @param {object} [env] 環境変数。テストから差し替えられるように引数にしてある
- * @param {string} [fallbackRoot] 環境変数がどれも無いときの親
- * @returns {string} 絶対パス
+ * @param {string[]} argv process.argv.slice(2) 相当
+ * @returns {string|null} 値。書き間違い（次が別のフラグ・値が空・最後で値が無い）は null
  */
-export function resolvePortFile(argv = [], env = process.env, fallbackRoot = APP_ROOT) {
+function findPortFileArg(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (typeof arg !== 'string') continue;
@@ -49,9 +52,45 @@ export function resolvePortFile(argv = [], env = process.env, fallbackRoot = APP
       value = arg.slice(FLAG.length + 1);
     }
 
-    if (value !== null && value.trim()) return path.resolve(value.trim());
+    if (value !== null && value.trim()) return value.trim();
   }
+  return null;
+}
+
+/**
+ * どこへ書くかを決める。
+ *
+ * ランチャは起動時に `--port-file` で場所を明示する。
+ * これが無いと、パスを決める規則が Node 側と C# 側の2箇所に生きることになる。
+ * 引数が無ければ既定の場所を返すが、**そこへ書くかどうかは別の話**（hasPortFileFlag を見る）。
+ *
+ * @param {string[]} [argv] process.argv.slice(2) 相当
+ * @param {object} [env] 環境変数。テストから差し替えられるように引数にしてある
+ * @param {string} [fallbackRoot] 環境変数がどれも無いときの親
+ * @returns {string} 絶対パス
+ */
+export function resolvePortFile(argv = [], env = process.env, fallbackRoot = APP_ROOT) {
+  const explicit = findPortFileArg(argv);
+  if (explicit !== null) return path.resolve(explicit);
   return appDataFile('port.json', fallbackRoot, env);
+}
+
+/**
+ * 紙を書く役目を負った起動かどうか。
+ *
+ * 真になるのは `--port-file` で場所を明示された起動だけ（ランチャと autostart.mjs）。
+ * 偽のときは書かないし、畳むときも消さない。
+ * 開発側の `npm start` をここに落とすことで、インストール版が置いた紙を
+ * 上書きしたり巻き添えで消したりしなくなる。
+ *
+ * 書き間違い（`--port-file` の後ろに値が無い等）は偽。
+ * resolvePortFile が既定へ落ちるのと歩調が揃う。
+ *
+ * @param {string[]} [argv] process.argv.slice(2) 相当
+ * @returns {boolean}
+ */
+export function hasPortFileFlag(argv = []) {
+  return findPortFileArg(argv) !== null;
 }
 
 /**
