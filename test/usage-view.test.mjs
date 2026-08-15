@@ -12,9 +12,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseUsageQuery, aggregateUsage, USAGE_SCAN_MAX } from '../src/view/usage.mjs';
+import { parseUsageQuery, aggregateUsage, baselineFrom, USAGE_SCAN_MAX } from '../src/view/usage.mjs';
 import { buildUsage } from '../src/parse/usage.mjs';
-import { reply, prompt, call, result } from './helpers.mjs';
+import { reply, prompt, call, result, at } from './helpers.mjs';
 
 /** クエリ文字列から指定を作る。 */
 const parse = (search) => parseUsageQuery(new URLSearchParams(search));
@@ -207,6 +207,91 @@ test('行は実消費の多い順に並べ、ログのパスは載せない', ()
   assert.equal(agg.rows[0].file, undefined);
   assert.equal(agg.rows[0].logFile, undefined);
   assert.equal(agg.rows[0].cwd, undefined);
+});
+
+// --- 直近の中央値（baseline） ----------------------------------------------
+
+/**
+ * 中央値の材料を1本作る。ite が読みやすいよう、入力トークンだけを持たせる。
+ *
+ * @param {string} id
+ * @param {number} inTokens そのまま ite になる
+ * @param {string} model
+ */
+const one = (id, inTokens, model = 'claude-opus-5') =>
+  rec(id, [reply('', { requestId: `${id}-1`, model, usage: { in: inTokens } })]);
+
+test('3本そろわなければ中央値を出さない', () => {
+  const two = [one('a', 100), one('b', 200)];
+
+  // 2本の「真ん中」は2つの平均でしかない。推測で埋めずに、まるごと出さない
+  assert.equal(baselineFrom(two, 'claude-opus-5'), null);
+  assert.ok(baselineFrom([...two, one('c', 300)], 'claude-opus-5'));
+});
+
+test('違うモデルは中央値の材料にしない', () => {
+  const recs = [
+    one('a', 100),
+    one('b', 200),
+    one('c', 300),
+    one('x', 9000, 'claude-opus-4-6'),
+    one('y', 9000, 'claude-opus-4-6'),
+  ];
+
+  const base = baselineFrom(recs, 'claude-opus-5');
+  assert.equal(base.sessions, 3);
+  assert.equal(base.ite, 200);
+  assert.equal(base.model, 'claude-opus-5');
+
+  // 数が足りないほうを指定したら、そちらは出ない
+  assert.equal(baselineFrom(recs, 'claude-opus-4-6'), null);
+});
+
+test('比べたいモデルが分からなければ中央値を出さない', () => {
+  assert.equal(baselineFrom([one('a', 100), one('b', 200), one('c', 300)], null), null);
+});
+
+test('要求が1件も無いセッションは中央値の材料にしない', () => {
+  const recs = [
+    one('a', 100),
+    one('b', 200),
+    one('c', 300),
+    // /clear だけして終わったログ。0 を混ぜると中央値が下へ引きずられる
+    rec('empty', []),
+  ];
+
+  assert.equal(baselineFrom(recs, 'claude-opus-5').sessions, 3);
+});
+
+test('測れなかった値は中央値の数に入れない', () => {
+  const recs = [
+    rec('a', [reply('', { requestId: 'a1', model: 'claude-opus-5', usage: { in: 100, cr: 900 } })]),
+    rec('b', [reply('', { requestId: 'b1', model: 'claude-opus-5', usage: { in: 200, cr: 800 } })]),
+    // 入力が1トークンも記録されていないと、命中率は分母が 0 になって null（出せない、の意味）
+    rec('c', [reply('', { requestId: 'c1', model: 'claude-opus-5', usage: { out: 5 } })]),
+  ];
+
+  const base = baselineFrom(recs, 'claude-opus-5');
+  assert.equal(base.sessions, 3);
+  // ite は3本ぶん（25 / 190 / 280）。ite が読めない行は無い
+  assert.equal(base.ite, 190);
+  // 命中率を出せたのは a と b の2本だけ。null を 0 とみなして混ぜない
+  // （混ぜたら [0, 0.8, 0.9] の真ん中で 0.8 になる）
+  assert.equal(base.hitRate, 0.9);
+});
+
+test('圧縮の回数も中央値を出す', () => {
+  const withCompact = (id, n) => rec(id, [
+    reply('', { requestId: `${id}-1`, model: 'claude-opus-5', usage: { in: 100 } }),
+    ...Array.from({ length: n }, (_, i) => ({
+      type: 'system',
+      subtype: 'compact_boundary',
+      timestamp: at(i + 1),
+    })),
+  ]);
+
+  const base = baselineFrom([withCompact('a', 0), withCompact('b', 2), withCompact('c', 9)], 'claude-opus-5');
+  assert.equal(base.compactCount, 2);
 });
 
 test('スキルもツールも無いセッションが混ざっても落ちない', () => {

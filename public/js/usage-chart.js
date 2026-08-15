@@ -102,6 +102,38 @@ export function pctStrict(v) {
 }
 
 /**
+ * いつもと比べてどうか、を短く書く。
+ *
+ * **比べる相手がいなければ何も返さない。** 推測で `±0` と書かない。
+ * 0 と「不明」を分けるのと同じ理由で、「差が無い」と「比べられない」は別物。
+ *
+ * 増減で色を変えない。実消費が多いのは、単に長く働いた日かもしれない。
+ * 良し悪しを決めるのは読む人で、この画面ではない。
+ *
+ * @param {number|null|undefined} value いまの値
+ * @param {number|null|undefined} base 比べる相手（中央値）
+ * @param {{kind?: 'ratio'|'point'|'count', unit?: string}} [opts]
+ *   `ratio` は百分率の増減（既定）。`point` は割合どうしの差をポイントで。
+ *   `count` は素の差。`unit` は `count` のときだけ末尾に付く
+ * @returns {string|null} 比べられなければ null
+ */
+export function deltaText(value, base, { kind = 'ratio', unit = '' } = {}) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  if (typeof base !== 'number' || !Number.isFinite(base)) return null;
+
+  const diff = value - base;
+  // 符号は全角のマイナス。半角ハイフンは小さすぎて、数字に紛れて見落とす
+  const sign = diff > 0 ? '+' : diff < 0 ? '−' : '±';
+  const abs = Math.abs(diff);
+
+  if (kind === 'count') return `${sign}${num(abs)}${unit}`;
+  if (kind === 'point') return `${sign}${(abs * 100).toFixed(1)}pt`;
+  // 相手が 0 なら、何倍かを言えない。差だけ書いても単位が伝わらないので伏せる
+  if (base === 0) return null;
+  return `${sign}${Math.round((abs / base) * 100)}%`;
+}
+
+/**
  * 数値を1つ大きく出す札。
  *
  * 単一の現在値なので棒グラフにしない（棒は比べるためのもので、
@@ -110,12 +142,15 @@ export function pctStrict(v) {
  * @param {string} label 何の数か
  * @param {string} value 既に文字列にしたもの（`tokensStrict` などを通す）
  * @param {string} [note] 小さく添える但し書き
+ * @param {string|null} [delta] いつもとの差（`deltaText` の戻り値をそのまま渡す）
  * @returns {HTMLElement}
  */
-export function statTile(label, value, note) {
+export function statTile(label, value, note, delta) {
   const box = el('div', 'stat');
   box.append(el('div', 'stat-label', label));
   box.append(el('div', 'stat-value', value));
+  // 差は値のすぐ下。但し書きより先に置く（値と一続きに読ませたい）
+  if (delta) box.append(el('div', 'stat-delta', delta));
   if (note) box.append(el('div', 'stat-note', note));
   return box;
 }

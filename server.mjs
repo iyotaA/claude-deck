@@ -18,7 +18,7 @@ import { getSessionDetail } from './src/view/detail.mjs';
 import { listArchive, parseArchiveQuery } from './src/view/archive.mjs';
 import { getRawEntry } from './src/view/entry.mjs';
 import { getSubagentDetail } from './src/view/subagent.mjs';
-import { getSessionUsage, listUsage, parseUsageQuery } from './src/view/usage.mjs';
+import { getSessionBaseline, getSessionUsage, listUsage, parseUsageQuery } from './src/view/usage.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
 import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
@@ -631,6 +631,22 @@ const server = http.createServer((req, res) => {
     getSubagentDetail(agentMatch[1], agentMatch[2]).then(
       (payload) => {
         if (!payload) sendJson(res, 404, { error: 'その記録が見つかりません' });
+        else sendJson(res, 200, payload);
+      },
+      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+    );
+    return;
+  }
+
+  // いつもと比べてどうか。usage より手前に置く（長いほうから並べる、この並びの決まり）。
+  //
+  // 数値そのものと分けてある。こちらは直近24本を全文 parse するので実測 400〜700ms 掛かり、
+  // 混ぜると数値の表示そのものが遅くなる。画面は先に数値を出し、遅れて差を書き足す
+  const baselineMatch = /^\/api\/sessions\/([\w.-]{1,80})\/usage\/baseline$/.exec(pathname);
+  if (baselineMatch) {
+    getSessionBaseline(baselineMatch[1]).then(
+      (payload) => {
+        if (!payload) sendJson(res, 404, { error: 'そのセッションが見つかりません' });
         else sendJson(res, 200, payload);
       },
       (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),

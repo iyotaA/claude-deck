@@ -12,8 +12,9 @@
  */
 import { readRegistry } from '../read/registry.mjs';
 import { indexTranscripts, readAll, readAllOnce } from '../read/transcript.mjs';
+import { listSubagents, readSubagentLog } from '../read/subagents.mjs';
 import { extractMeta } from '../parse/meta.mjs';
-import { buildUsage } from '../parse/usage.mjs';
+import { buildUsage, percentile } from '../parse/usage.mjs';
 
 /**
  * 横断集計で開くファイルの上限。
@@ -39,6 +40,30 @@ const SKILLS_MAX = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** モデル名の文字数上限。長すぎる値は意味を持たないので頭だけ見る。 */
 const TEXT_MAX = 200;
+
+/**
+ * 「直近の中央値」を出すために開くセッションの数。
+ *
+ * **10 では足りなかった。** 実測（2026-08-15・212本）で、直近10本のうち
+ * `claude-opus-5` は2本しかなく、比べる相手が揃わずに毎回 null になっていた。
+ * 直近には短いセッションが固まって並ぶことがあり、そこが古いモデルだと丸ごと外れる。
+ *
+ * 24 まで広げると同じモデルが8本入る。しかも**時間はほとんど増えない**（412ms → 669ms）。
+ * 大きいログ（39MB・42MB）が直近に2本あって、10本の時点で既にそこを払い終えているため。
+ * つまりここの重さは本数ではなく「大きいログに当たるかどうか」で決まる。
+ *
+ * その 400〜700ms を本体（`getSessionUsage`）には載せられないので、
+ * baseline は `getSessionBaseline` として窓口ごと分けてある。
+ */
+const BASELINE_SCAN = 24;
+
+/**
+ * 中央値を出すのに最低限ほしい本数。
+ *
+ * 2本の中央値は「2つの平均」でしかなく、真ん中と呼べるものではない。
+ * 足りなければ baseline ごと null にする。**推測で 0 を書かない。**
+ */
+const BASELINE_MIN = 3;
 
 /**
  * 集計結果だけを持つ専用の memo。
@@ -122,6 +147,125 @@ async function usageForTranscript(sessionId, transcript, { shared = false } = {}
 }
 
 /**
+ * サブエージェントぶんの消費をまとめる。
+ *
+ * 親ログには子の消費が入っていない（実測: 204ファイル全走査で、親に isSidechain の
+ * assistant 行は1件も無い）。だから足しても二重計上にならない。
+ * 逆に言うと、ここを出さないと「Task を投げたぶん」がどこにも現れない。
+ *
+ * **`listSubagents` に memo を掛けない**（read/subagents.mjs の禁止事項）。
+ * 代わりに、返ってきた refs の size と mtimeMs から印を作って集計結果だけを memo する。
+ * ファイルが太れば size が変わるので、走っている最中でも表示が固まらない。
+ *
+ * @param {string} sessionId
+ * @param {string} transcriptFile 親ログの実パス
+ * @returns {Promise<object|null>} 1件も使っていなければ null（節ごと出さない）
+ */
+async function subUsageFor(sessionId, transcriptFile) {
+  const { refs, readError } = await listSubagents(transcriptFile, sessionId);
+  if (!refs.length) {
+    // 読めなかったことは伝える。0 件と「読めなかった」を同じ見た目にしない
+    return readError ? { agents: 0, requests: 0, ite: 0, truncated: 0, readError: true } : null;
+  }
+
+  const mark = refs
+    .map((r) => `${r.agentId}:${r.size}:${r.mtimeMs}`)
+    .sort()
+    .join('|');
+  const key = `sub:${sessionId}:${mark}`;
+  const hit = memoGet(key);
+  if (hit) return hit;
+
+  let requests = 0;
+  let ite = 0;
+  let truncated = 0;
+  const logs = await pooled(refs, READ_CONCURRENCY, (ref) =>
+    readSubagentLog(ref).catch(() => null));
+
+  for (const log of logs) {
+    if (!log) continue;
+    // 子ログは全行が isSidechain: true。sidechain を立てないと1件も拾えない
+    const u = buildUsage(log.entries, { sidechain: true });
+    requests += u.requests;
+    ite += u.totals.ite;
+    // 大きいログは頭だけしか読んでいない。過少集計を黙って出さない
+    if (log.truncated) truncated += 1;
+  }
+
+  const value = { agents: refs.length, requests, ite, truncated, readError: false };
+  memoSet(key, value);
+  return value;
+}
+
+/**
+ * 読み終えた束から「直近の中央値」を出す。**ディスクを触らない。**
+ *
+ * **同じモデルのものだけを見る。** キャッシュ命中率は最小長がモデル別なので、
+ * 混ぜた中央値と比べると構造の差を行動の差と読んでしまう。
+ * ite や文脈量にモデル差は無いが、比較の相手を指標ごとに変えるほうが分かりにくい。
+ *
+ * @param {object[]} recs usageForTranscript の戻りの配列（自分は含めない）
+ * @param {string|null} model 比べたいモデル
+ * @returns {object|null} 標本が足りなければ null
+ */
+export function baselineFrom(recs, model) {
+  if (!model) return null;
+
+  const same = recs.filter((r) => r?.usage?.model === model && r.usage.requests > 0);
+  if (same.length < BASELINE_MIN) return null;
+
+  /** 取れた値だけを昇順に並べて真ん中を採る。取れないものは数に入れない */
+  const med = (pick) => {
+    const vals = [];
+    for (const r of same) {
+      const v = pick(r.usage);
+      if (typeof v === 'number' && Number.isFinite(v)) vals.push(v);
+    }
+    return percentile(vals.sort((a, b) => a - b), 0.5);
+  };
+
+  return {
+    model,
+    sessions: same.length,
+    ite: med((u) => u.totals.ite),
+    contextLast: med((u) => u.context.last),
+    hitRate: med((u) => u.cache.hitRate),
+    compactCount: med((u) => u.compact.count),
+  };
+}
+
+/**
+ * 直近のセッションを開いて中央値を出す。上の baselineFrom を包む薄い殻。
+ *
+ * **自分は含めない。** 自分を入れると、極端な1本が自分自身の比較対象を引き寄せて差が縮む。
+ *
+ * @param {string} sessionId 比べる本人。除外するために要る
+ * @param {Map<string, object>} index indexTranscripts の戻り。呼び出し元が既に持っている
+ * @param {string|null} model
+ * @returns {Promise<object|null>}
+ */
+async function baselineFor(sessionId, index, model) {
+  if (!model) return null;
+
+  const all = [];
+  for (const [id, rec] of index) {
+    if (id === sessionId) continue;
+    all.push({ sessionId: id, file: rec.file, projectDir: rec.projectDir, mtimeMs: rec.mtimeMs });
+  }
+
+  all.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const scan = all.slice(0, BASELINE_SCAN);
+
+  const read = await pooled(scan, READ_CONCURRENCY, (rec) =>
+    usageForTranscript(rec.sessionId, rec).catch(() => null));
+
+  const base = baselineFrom(read.filter(Boolean), model);
+  // 何本を開いたうえでの中央値か。画面が言うのは開いた数ではなく揃った数（sessions）だが、
+  // 「24本見て3本しか同じモデルが無かった」を後から知れるように、両方持たせておく
+  return base ? { ...base, scanned: scan.length } : null;
+}
+
+/**
  * セッション1本の数値。
  *
  * ログがまだ書かれていないセッション（起こした直後など）でも null にはしない。
@@ -144,12 +288,43 @@ export async function getSessionUsage(sessionId) {
   if (!registry && !transcript) return null;
 
   if (!transcript) {
-    return { id: sessionId, logSize: 0, ...buildUsage([]) };
+    return { id: sessionId, logSize: 0, ...buildUsage([]), sub: null };
   }
 
   const rec = await usageForTranscript(sessionId, transcript, { shared: true });
+
+  // 本体を読み終えてから足す。失敗しても数値そのものは出す。
+  // 実測で 20〜65ms（5体 3.7MB で 64ms）なので、ここに残して困らない
+  const sub = await subUsageFor(sessionId, transcript.file).catch(() => null);
+
   // 応答の形は1本ぶんのまま。memo が余分に持っている見出しはここでは出さない
-  return { id: sessionId, logSize: rec.logSize, ...rec.usage };
+  return { id: sessionId, logSize: rec.logSize, ...rec.usage, sub };
+}
+
+/**
+ * 「直近の中央値」だけを返す。**窓口を分けてある。**
+ *
+ * getSessionUsage に混ぜていた時期があるが、実測で 400〜700ms 掛かった
+ * （直近24本を全文 parse する。大きいログに当たると一気に伸びる）。
+ * 本体は 1.0〜1.5秒なので、混ぜると体感が5割増しになる。
+ *
+ * 分けたので、画面は数値を先に出してから、遅れて差を書き足せる。
+ * 比べる相手がいないのは異常ではないので、そのときも 404 にはせず
+ * `baseline: null` を返す。**「まだ読めていない」と「比べる相手がいない」を分ける。**
+ *
+ * @param {string} sessionId
+ * @returns {Promise<object|null>} セッションが見つからなければ null（＝404）
+ */
+export async function getSessionBaseline(sessionId) {
+  if (!sessionId) return null;
+
+  const index = await indexTranscripts();
+  const transcript = index.get(sessionId) ?? null;
+  if (!transcript) return null;
+
+  const rec = await usageForTranscript(sessionId, transcript, { shared: true });
+  const baseline = await baselineFor(sessionId, index, rec.usage.model).catch(() => null);
+  return { id: sessionId, model: rec.usage.model, baseline };
 }
 
 /**

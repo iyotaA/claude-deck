@@ -156,6 +156,17 @@ export const store = {
   usageError: null,
   /** usageError がどのセッションのものか。detailErrorFor と同じ理由で持つ */
   usageErrorFor: null,
+  /**
+   * 「いつもと比べてどうか」（/api/sessions/:id/usage/baseline の応答）。
+   *
+   * **これも別の窓口。** 直近24本を全文読むので実測 400〜700ms 掛かり、
+   * 上の usage に混ぜると数値そのものの表示が遅くなる。
+   * 数値を先に出して、比較は遅れて書き足す。
+   *
+   * `{id, model, baseline}` をそのまま持つ。id を捨てて baseline だけにしない。
+   * 捨てると、別のセッションへ移った直後に前のセッションの差が出る
+   */
+  usageBaseline: null,
   /** サーバから来た「今」。経過時間はこれを基準に進める */
   now: Date.now(),
   onlyLive: localStorage.getItem('claude-deck.onlyLive') === '1',
