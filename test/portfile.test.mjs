@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { resolvePortFile } from '../src/shared/portfile.mjs';
+import { resolvePortFile, hasPortFileFlag } from '../src/shared/portfile.mjs';
 import { appDataFile } from '../src/shared/appdata.mjs';
 
 const ENV = { LOCALAPPDATA: 'C:\\u\\Local' };
@@ -78,4 +78,49 @@ test('既定の場所は appdata.mjs の決め方に従う', () => {
     path.dirname(resolvePortFile([], ENV, ROOT)),
     path.dirname(appDataFile('config.json', ROOT, ENV)),
   );
+});
+
+/*
+ * 紙を書く役目かどうか。
+ *
+ * 紙は1枚しかないので、同じマシンで2本立つと後から立ったほうが上書きし、
+ * 先に止めたほうが消す。実際に踏んだ（インストール版が 4317 で動いているのに紙だけ消えた）。
+ * 書く主体を「場所を明示してきた起動」に絞ることで、取り合いそのものを起こさない。
+ */
+
+test('--port-file を渡された起動だけが書く', () => {
+  assert.equal(hasPortFileFlag(['--port-file', 'C:\\d\\p.json']), true);
+  assert.equal(hasPortFileFlag(['--port-file=C:\\d\\p.json']), true);
+  assert.equal(hasPortFileFlag(['--no-open', '--port-file', 'C:\\d\\p.json']), true);
+});
+
+test('渡されていなければ書かない', () => {
+  // 開発側の `npm start` がここに落ちる。インストール版の紙を巻き添えにしない
+  assert.equal(hasPortFileFlag([]), false);
+  assert.equal(hasPortFileFlag(['--no-open']), false);
+});
+
+test('引数を省いても落ちない', () => {
+  assert.equal(hasPortFileFlag(), false);
+});
+
+test('書き間違いは書かない側に倒す', () => {
+  // resolvePortFile が既定へ落ちるのと歩調を揃える。
+  // 場所が決まらない起動が、既定の場所を勝手に掴んで上書きするのを防ぐ
+  assert.equal(hasPortFileFlag(['--port-file', '--no-open']), false);
+  assert.equal(hasPortFileFlag(['--port-file']), false);
+  assert.equal(hasPortFileFlag(['--port-file=']), false);
+  assert.equal(hasPortFileFlag(['--port-file', '   ']), false);
+});
+
+test('文字列でない要素が混ざっても、書く役目とは見なさない', () => {
+  assert.equal(hasPortFileFlag([null, undefined, 42]), false);
+});
+
+test('書くと決めた起動は、書き先も決まっている', () => {
+  // 真なのに既定へ落ちる（＝場所を決めた覚えがないのに書く）組み合わせを作らない。
+  // 2つの判断が同じ走査から出ていることを、呼ぶ側から見て確かめる
+  const argv = ['--no-open', '--port-file', 'C:\\d\\p.json'];
+  assert.equal(hasPortFileFlag(argv), true);
+  assert.notEqual(resolvePortFile(argv, ENV, ROOT), DEFAULT);
 });

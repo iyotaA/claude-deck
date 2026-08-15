@@ -27,7 +27,9 @@ import { loadUpdateState, parseUpdateState } from './src/update/state.mjs';
 import { loadStartupState, parseStartupState } from './src/startup/state.mjs';
 import { isTrustedWrite } from './src/shared/origin.mjs';
 import { VERSION } from './src/shared/appinfo.mjs';
-import { resolvePortFile, writePortFile, removePortFile } from './src/shared/portfile.mjs';
+import {
+  resolvePortFile, hasPortFileFlag, writePortFile, removePortFile,
+} from './src/shared/portfile.mjs';
 import { sessionsDir, projectsDir, configDir } from './src/read/paths.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -56,11 +58,22 @@ const noOpen = args.has('--no-open');
 /**
  * 実ポートを置いておく紙の場所。
  *
- * ランチャは `--port-file <path>` で明示してくる。
- * 無ければ既定（%LOCALAPPDATA%\ClaudeDeck\port.json）に書くので、
- * npm start も autostart.ps1 もこれまでどおり動く。
+ * ランチャと autostart.mjs は `--port-file <path>` で明示してくる。
  */
 const portFile = resolvePortFile(argv);
+/**
+ * その紙を書く役目かどうか。
+ *
+ * `--port-file` を渡された起動だけが書き、畳むときに消す。
+ * 渡されていない起動（開発側の `npm start`）は場所こそ同じだが、触らない。
+ *
+ * 紙は1枚しかないので、触る主体を絞らないと2本立ったときに取り合う。
+ * 実際に踏んだ形は「インストール版が 4317 で動いているのに紙だけ消えている」で、
+ * 開発側を Ctrl+C したときの後始末が、相手の紙を巻き添えにしていた。
+ * 起動側は /api/health で裏を取るので無事だったが、
+ * PID を紙から読む `ClaudeDeck.exe --stop` は止められなくなる。
+ */
+const writesPortFile = hasPortFileFlag(argv);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -776,16 +789,18 @@ function listen(port, attemptsLeft = 12) {
     // 実ポートが決まってから置く。外から 4317 決め打ちで探されないように。
     // 書けなくてもサーバーは動くべきなので、失敗を致命扱いにしない
     let portFileError = null;
-    try {
-      writePortFile(portFile, {
-        port: boundPort,
-        pid: process.pid,
-        url: `http://${HOST}:${boundPort}/`,
-        version: VERSION,
-        startedAt: Date.now(),
-      });
-    } catch (err) {
-      portFileError = err?.message ?? String(err);
+    if (writesPortFile) {
+      try {
+        writePortFile(portFile, {
+          port: boundPort,
+          pid: process.pid,
+          url: `http://${HOST}:${boundPort}/`,
+          version: VERSION,
+          startedAt: Date.now(),
+        });
+      } catch (err) {
+        portFileError = err?.message ?? String(err);
+      }
     }
 
     const w = startWatching();
@@ -863,8 +878,9 @@ function shutdown(code = 0) {
     try { w.close(); } catch { /* すでに閉じている */ }
   }
   // 助言として置いた紙なので、畳めるときは消しておく。
-  // 消し損ねても読む側は /api/health で裏を取る作りなので、そこは致命にならない
-  removePortFile(portFile);
+  // 消し損ねても読む側は /api/health で裏を取る作りなので、そこは致命にならない。
+  // 自分が置いたときだけ消す。置いていない紙は他のサーバーのものなので触らない
+  if (writesPortFile) removePortFile(portFile);
 
   server.close(() => process.exit(code));
   setTimeout(() => process.exit(code), 500);

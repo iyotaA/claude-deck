@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appDataDir } from '../src/shared/appdata.mjs';
+import { appDataDir, appDataFile } from '../src/shared/appdata.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(here, '..');
@@ -28,12 +28,17 @@ const logDir = appDataDir(appDir);
 fs.mkdirSync(logDir, { recursive: true });
 const logFile = path.join(logDir, 'autostart.log');
 
+// 実ポートを置く紙の場所。
+// server.mjs は --port-file を渡された起動だけが紙を書く作りなので、ここで明示する。
+// 渡さないと autostart.ps1 の -Action stop / status がポートと PID を拾えなくなる
+const portFile = appDataFile('port.json', appDir);
+
 // 毎回書き直す。追記のままだと際限なく伸びる
 const log = fs.openSync(logFile, 'w');
 fs.writeSync(log, `${new Date().toLocaleString()} 起動します\n  ${serverFile}\n`);
 
 // windowsHide で窓を作らせない。detached と unref で、この処理が終わっても残るようにする
-const child = spawn(process.execPath, [serverFile, '--no-open'], {
+const child = spawn(process.execPath, [serverFile, '--no-open', '--port-file', portFile], {
   cwd: appDir,
   detached: true,
   windowsHide: true,
