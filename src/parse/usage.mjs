@@ -430,15 +430,53 @@ function attributeSkills(requests, barriers) {
 }
 
 /**
+ * 文脈の圧縮を数える。
+ *
+ * **`cumulativeDroppedTokens` は累積なので、足してはいけない。**
+ * 実測（大きい順に40ログ・圧縮 475 件）で、そのログの最後の値が
+ * `Σ(preTokens - postTokens)` と1トークンの狂いもなく一致した。
+ * 素で合計すると、圧縮が64回あるログでは 60 倍近くに膨れる。
+ *
+ * 最後ではなく最大を採るのは、行が時刻順に並んでいなくても壊れないため。
+ * 実データは追記順なので普通は最後 ＝ 最大になる。
+ *
+ * `trigger` は 475 件すべてが `"auto"` だった（手動の /compact は1件も無い）。
+ * 分けて出す意味が無いので拾わない。
+ *
+ * @param {object[]} entries 会話ログの行
+ * @param {boolean} sidechain true ならサブエージェントの行だけを見る
+ * @returns {{count: number, dropped: number|null}} dropped は測れなければ null（0 とは分ける）
+ */
+function collectCompactions(entries, sidechain) {
+  let count = 0;
+  let dropped = null;
+
+  for (const entry of entries) {
+    if (isMainline(entry) === sidechain) continue;
+    if (entry?.type !== 'system' || entry.subtype !== 'compact_boundary') continue;
+    count += 1;
+
+    const n = entry.compactMetadata?.cumulativeDroppedTokens;
+    if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) continue;
+    if (dropped === null || n > dropped) dropped = n;
+  }
+
+  return { count, dropped };
+}
+
+/**
  * 昇順に並んだ配列から百分位を取る。
  *
  * 空なら null。**0 を返さない**（「実際に0だった」と「取れなかった」を混ぜないため）。
+ *
+ * 横断側（`view/usage.mjs`）の中央値もこれを使う。
+ * 「真ん中の取り方」が2箇所に生きると、必ず片方だけが直される。
  *
  * @param {number[]} sorted 昇順の配列
  * @param {number} p 0〜1
  * @returns {number|null}
  */
-function percentile(sorted, p) {
+export function percentile(sorted, p) {
   if (!sorted.length) return null;
   const idx = Math.round((sorted.length - 1) * p);
   return sorted[Math.min(sorted.length - 1, Math.max(0, idx))];
@@ -538,6 +576,10 @@ export function buildUsage(entries, { sidechain = false } = {}) {
   // 区間の切れ目は entries 側にしかない（あなたの発言も compact_boundary も assistant 行ではない）ので、
   // requests ではなく list を渡して時刻で拾う
   const skills = attributeSkills(requests, collectSkillBarriers(list, sidechain));
+  // entries を1周増やすが、既に3周しているので誤差。
+  // collectSkillBarriers も compact_boundary を見ているが、そこへ相乗りさせない。
+  // 「区切りを集める」関数に「圧縮を数える」を混ぜると、どちらのテストも読みにくくなる
+  const compact = collectCompactions(list, sidechain);
 
   return {
     model,
@@ -568,5 +610,6 @@ export function buildUsage(entries, { sidechain = false } = {}) {
     toolsUnattributed: unattributed,
     // **因果は取れない。** 「呼んだ直後の一続き」でしかないことを、画面側が必ず併記する
     skills,
+    compact,
   };
 }

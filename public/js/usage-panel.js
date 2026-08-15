@@ -11,11 +11,11 @@
  * 中で fetch すると、404（この版のサーバーには窓口が無い）のときに
  * 「セクションを自分で消す」羽目になり、`{section, nav}` を返す約束と噛み合わなくなる。
  */
-import { el, fact } from './util.js';
+import { el, fact, shortModel } from './util.js';
 import { panel, SEC } from './panel.js';
 import {
   block, hitRateNote, statTile, barList, sparkline, tableDetails,
-  tokensStrict, pctStrict, numStrict,
+  tokensStrict, pctStrict, numStrict, deltaText,
 } from './usage-chart.js';
 
 /** 横棒に出すツールの数。残りは下の表で読む。 */
@@ -31,23 +31,70 @@ const ITE_ROWS = [
 ];
 
 /**
+ * 圧縮の札に添える但し書き。
+ *
+ * 0 回のときは何も書かない。「圧縮されていません」は、
+ * 大きく出ている「0 回」を言い換えただけで、行数を増やす以外の働きが無い。
+ *
+ * @param {number|undefined} count
+ * @param {{dropped: number|null}|undefined} compact
+ * @returns {string|null}
+ */
+function compactNote(count, compact) {
+  if (!count) return null;
+  const dropped = compact?.dropped;
+  return typeof dropped === 'number'
+    ? `要約に置き換わったのは ${tokensStrict(dropped)}`
+    : '圧縮より前のやり取りは要約に置き換わっています';
+}
+
+/**
+ * 札に添えた差が何との比較かを、4枚まとめて1行で書く。
+ *
+ * 札ごとに繰り返さない。同じ文言が4回並ぶと、肝心の数字が沈む。
+ *
+ * @param {object|null|undefined} b 中央値（`/api/sessions/:id/usage/baseline` の `baseline`）
+ * @returns {HTMLElement|null}
+ */
+function baselineNote(b) {
+  if (!b) return null;
+  return el('p', 'note note-sub',
+    `小さく添えた差は、直近の ${numStrict(b.sessions)} 本（${shortModel(b.model)}）の中央値との比較です。`);
+}
+
+/**
  * 上に並べる4枚の札。
  *
  * @param {object} usage
- * @param {object|null} d 詳細（圧縮の回数だけ借りる）
+ * @param {object|null} d 詳細（この窓口が無い版のサーバーのときだけ圧縮の回数を借りる）
+ * @param {object|null} b 中央値。**別の窓口から遅れて着く**ので、無いことのほうが普通
  * @returns {HTMLElement}
  */
-function tiles(usage, d) {
+function tiles(usage, d, b) {
   const box = el('div', 'stats');
-  box.append(statTile('実消費', tokensStrict(usage.totals.ite), `${numStrict(usage.requests)} 回の要求`));
-  box.append(statTile('文脈保有量', tokensStrict(usage.context.last), '最後の要求の時点。足し合わせない値です'));
-  box.append(statTile('キャッシュ命中率', pctStrict(usage.cache.hitRate), hitRateNote(usage)));
-  // 詳細がまだ読めていなければ回数も分からない。0 と書かずに伏せる
-  const compactions = d?.digest?.compactions?.length;
+
+  box.append(statTile('実消費', tokensStrict(usage.totals.ite),
+    `${numStrict(usage.requests)} 回の要求`,
+    deltaText(usage.totals.ite, b?.ite)));
+
+  box.append(statTile('文脈保有量', tokensStrict(usage.context.last),
+    '最後の要求の時点。足し合わせない値です',
+    deltaText(usage.context.last, b?.contextLast)));
+
+  box.append(statTile('キャッシュ命中率', pctStrict(usage.cache.hitRate),
+    hitRateNote(usage),
+    deltaText(usage.cache.hitRate, b?.hitRate, { kind: 'point' })));
+
+  // 圧縮は自分の集計を主にする。詳細（digest）は、この窓口を持たない版のための控え。
+  // どちらも読めていなければ 0 と書かずに伏せる
+  const count = typeof usage.compact?.count === 'number'
+    ? usage.compact.count
+    : d?.digest?.compactions?.length;
   box.append(statTile(
     '文脈の圧縮',
-    typeof compactions === 'number' ? `${compactions} 回` : '—',
-    compactions ? '圧縮より前のやり取りは要約に置き換わっています' : null,
+    typeof count === 'number' ? `${count} 回` : '—',
+    compactNote(count, usage.compact),
+    deltaText(count, b?.compactCount, { kind: 'count', unit: ' 回' }),
   ));
   return box;
 }
@@ -135,6 +182,51 @@ function skillsBlock(usage) {
 }
 
 /**
+ * サブエージェントの内訳。
+ *
+ * **上の実消費に、この分は入っていない。**
+ * 実測（204ファイルの全走査）で、親のログに `isSidechain` の assistant 行は1件も無かった。
+ * 子の消費は `<セッションID>/subagents/agent-*.jsonl` に別で書かれている。
+ *
+ * つまり二重計上は起きない。裏を返すと**親だけを見ていると見落とす。**
+ * だから足し込まずに別の節として置き、合わせるといくらかを併記する。
+ * 足し込むと、`Task` を1回投げただけのセッションが機械的に上位へ来て、比較の意味が薄れる。
+ *
+ * @param {object} usage
+ * @returns {HTMLElement|null}
+ */
+function subBlock(usage) {
+  const s = usage.sub;
+  // キーごと無い（この窓口を持たない版）か、1体も走っていない
+  if (!s || (!s.readError && !s.agents)) return null;
+
+  const box = block('サブエージェント');
+  if (s.readError) {
+    // 0 体と「読めなかった」を同じ見た目にしない
+    box.append(el('p', 'note', 'サブエージェントの記録を読めませんでした。上の数値には元から入っていません。'));
+    return box;
+  }
+
+  box.append(el('p', 'note',
+    '上の実消費には、この分は入っていません。サブエージェントの消費は別のログに書かれます。'));
+
+  const total = usage.totals.ite + s.ite;
+  const dl = el('dl', 'facts');
+  fact(dl, '走ったエージェント', `${numStrict(s.agents)} 体`);
+  fact(dl, '要求', `${numStrict(s.requests)} 回`);
+  fact(dl, '実消費', tokensStrict(s.ite));
+  fact(dl, '親と合わせて', `${tokensStrict(total)}（うちサブ ${pctStrict(total > 0 ? s.ite / total : null)}）`);
+  box.append(dl);
+
+  if (s.truncated > 0) {
+    // 過少に出ていることを黙って隠さない
+    box.append(el('p', 'note note-sub',
+      `${numStrict(s.truncated)} 体は記録が大きいので頭だけを読んでいます。実際の消費はこれより多いです。`));
+  }
+  return box;
+}
+
+/**
  * 文脈の伸び方。形だけを見る。
  *
  * 折れ線が鋸の歯のように落ちていれば、そこが圧縮。
@@ -204,9 +296,11 @@ function iteBlock(usage) {
  * @param {object|null} usage `/api/sessions/:id/usage` の応答
  * @param {object|null} d 詳細の応答（圧縮の回数だけ借りる。まだ読めていなければ null）
  * @param {string|null} error 取れなかった理由
+ * @param {object|null} [baseline] `/api/sessions/:id/usage/baseline` の `baseline`。
+ *   **数値より遅れて着く。** 無ければ差を書かないだけで、パネルはそのまま出る
  * @returns {{section: HTMLElement, nav: object}|null}
  */
-export function usagePanel(usage, d, error) {
+export function usagePanel(usage, d, error, baseline = null) {
   if (!usage) {
     // まだ届いていない・この版のサーバーには窓口が無い、のどちらも静かに退く。
     // 「読んでいます」を出すと、404 のときに永久に出たままになる
@@ -220,13 +314,18 @@ export function usagePanel(usage, d, error) {
   if (!usage.requests) return null;
 
   const p = panel('数値', { id: SEC.usage, count: `${usage.requests} 回の要求` });
-  p.body.append(tiles(usage, d));
+  p.body.append(tiles(usage, d, baseline));
+  const bnote = baselineNote(baseline);
+  if (bnote) p.body.append(bnote);
 
   const tools = toolsBlock(usage);
   if (tools) p.body.append(tools);
   // 「何が食っているか」の系統なので、ツールの隣に置く
   const skills = skillsBlock(usage);
   if (skills) p.body.append(skills);
+  // 親の数値に入っていないぶんなので、内訳の話が終わる前に出す
+  const sub = subBlock(usage);
+  if (sub) p.body.append(sub);
   const growth = growthBlock(usage);
   if (growth) p.body.append(growth);
   p.body.append(iteBlock(usage));

@@ -44,6 +44,9 @@ export async function loadDetail(sessionId, { silent = false } = {}) {
   // （待つと、キャッシュが効いた詳細のときだけ数値が遅れて出ることになる）。
   // 失敗しても詳細の表示は続けるので、ここで拾って捨てる
   loadUsage(sessionId).catch(() => {});
+  // 比較（中央値との差）はさらに別。直近24本を読むので数値より遅れて着く。
+  // 待たせないために、数値と並べて撃って先に着いたほうから画面へ出す
+  loadUsageBaseline(sessionId).catch(() => {});
 
   // 名前を cacheMark にしてあるのは、perf.js の mark()（描画時間の記録）を隠さないため。
   // 時系列側からも mark() を呼ぶので、隠すと気づきにくい事故になる
@@ -185,6 +188,68 @@ export async function loadUsage(sessionId) {
     store.usageErrorFor = sessionId;
   }
   renderDetailIfNeeded();
+}
+
+/* -------------------------------------------------- いつもと比べてどうか */
+
+/**
+ * 比較の取り直し間隔。**数値そのもの（15秒）よりずっと長い。**
+ *
+ * 中央値は直近24本を全文読んで出すので、実測 400〜700ms 掛かる。
+ * しかも「直近24本の真ん中」は数分では動かない。取り直す価値がほとんど無い。
+ */
+const BASELINE_MIN_INTERVAL_MS = 300000;
+let baselineAt = { id: null, at: 0 };
+let baselineToken = 0;
+
+/** 数値と同じく、窓口ごと無いと分かったら一度で諦める */
+let baselineUnavailable = false;
+
+/**
+ * そのセッションの「直近の中央値との差」を取る。
+ *
+ * **失敗しても何も言わない。** 差は添え物で、無くても数値は読める。
+ * ここでエラーを出すと、数値パネルの主役（何が文脈を食っているか）から目が逸れる。
+ *
+ * @param {string} sessionId
+ */
+export async function loadUsageBaseline(sessionId) {
+  if (!sessionId) return;
+
+  // 別のセッションへ移ったら、前のセッションの差を残さない。
+  // 残すと、まだ引けていないあいだ**他人の中央値との差**が出ることになる
+  if (store.usageBaseline && store.usageBaseline.id !== sessionId) store.usageBaseline = null;
+  if (baselineUnavailable) return;
+
+  // 別のセッションへ移ったときは間隔を空けない（数値側と同じ考え方）
+  const now = Date.now();
+  if (baselineAt.id === sessionId && now - baselineAt.at < BASELINE_MIN_INTERVAL_MS) return;
+  baselineAt = { id: sessionId, at: now };
+
+  const token = ++baselineToken;
+  try {
+    const res = await fetch(
+      `/api/sessions/${encodeURIComponent(sessionId)}/usage/baseline`, { cache: 'no-store' });
+
+    if (res.status === 404) {
+      // 数値側と同じ切り分け。JSON で理由が返るならセッションが無いだけ、
+      // 返らないなら窓口ごと無い（サーバーが古い）
+      const body = await res.json().catch(() => null);
+      if (!body?.error) baselineUnavailable = true;
+      if (token !== baselineToken || store.selected !== sessionId) return;
+      store.usageBaseline = null;
+      renderDetailIfNeeded();
+      return;
+    }
+    if (!res.ok) return;
+
+    const data = await res.json();
+    if (token !== baselineToken || store.selected !== sessionId) return;
+    store.usageBaseline = data;
+    renderDetailIfNeeded();
+  } catch {
+    // 黙って退く。次に開いたときにまた試す
+  }
 }
 
 /**

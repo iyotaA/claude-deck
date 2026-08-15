@@ -375,3 +375,82 @@ test('ログの順が乱れていても時刻で並べ直す', () => {
   assert.equal(u.context.last, 300);
   assert.equal(u.context.growth.max, 200);
 });
+
+// --- 文脈の圧縮 ------------------------------------------------------------
+
+/**
+ * 圧縮の境目を1つ作る。
+ *
+ * @param {number} ms 時刻
+ * @param {object|null} meta compactMetadata。null なら付けない
+ * @param {object} [rest] isSidechain など
+ */
+const boundary = (ms, meta, rest = {}) => ({
+  type: 'system',
+  subtype: 'compact_boundary',
+  timestamp: at(ms),
+  ...(meta ? { compactMetadata: meta } : {}),
+  ...rest,
+});
+
+test('圧縮が無ければ 0 回。捨てた量は「不明」で 0 ではない', () => {
+  const u = buildUsage([reply('', { requestId: 'r1', usage: { in: 100 } })]);
+
+  assert.equal(u.compact.count, 0);
+  // 一度も圧縮していないのだから「捨てた量」は測れていない。0 と書くと測ったように見える
+  assert.equal(u.compact.dropped, null);
+});
+
+test('cumulativeDroppedTokens は累積なので足さずに大きいほうを採る', () => {
+  const u = buildUsage([
+    boundary(1, { trigger: 'auto', preTokens: 170000, postTokens: 8000, cumulativeDroppedTokens: 162000 }),
+    boundary(2, { trigger: 'auto', preTokens: 175000, postTokens: 9000, cumulativeDroppedTokens: 328000 }),
+    boundary(3, { trigger: 'auto', preTokens: 172000, postTokens: 8500, cumulativeDroppedTokens: 491500 }),
+  ]);
+
+  assert.equal(u.compact.count, 3);
+  // 実測（40ログ・475件）で、最後の値が Σ(pre-post) と完全に一致した。
+  // 素で足すと 981,500 になり、実際の 2 倍になる
+  assert.equal(u.compact.dropped, 491500);
+});
+
+test('順が乱れていても、圧縮の捨てた量は最大値で決まる', () => {
+  const u = buildUsage([
+    boundary(3, { cumulativeDroppedTokens: 491500 }),
+    boundary(1, { cumulativeDroppedTokens: 162000 }),
+  ]);
+
+  assert.equal(u.compact.dropped, 491500);
+});
+
+test('compactMetadata が無い圧縮は、数には入るが量には入らない', () => {
+  const noMeta = buildUsage([boundary(1, null), boundary(2, null)]);
+  assert.equal(noMeta.compact.count, 2);
+  assert.equal(noMeta.compact.dropped, null);
+
+  // 片方だけ取れているときは、取れたぶんを出す。「一部しか測れていない」を 0 で塗り潰さない
+  const half = buildUsage([boundary(1, null), boundary(2, { cumulativeDroppedTokens: 162000 })]);
+  assert.equal(half.compact.count, 2);
+  assert.equal(half.compact.dropped, 162000);
+});
+
+test('壊れた cumulativeDroppedTokens は無視する', () => {
+  const u = buildUsage([
+    boundary(1, { cumulativeDroppedTokens: '162000' }),
+    boundary(2, { cumulativeDroppedTokens: -5 }),
+    boundary(3, { cumulativeDroppedTokens: Number.NaN }),
+  ]);
+
+  assert.equal(u.compact.count, 3);
+  assert.equal(u.compact.dropped, null);
+});
+
+test('親の圧縮はサブエージェント側の集計に混ざらない', () => {
+  const entries = [
+    boundary(1, { cumulativeDroppedTokens: 162000 }),
+    boundary(2, { cumulativeDroppedTokens: 5000 }, { isSidechain: true }),
+  ];
+
+  assert.deepEqual(buildUsage(entries).compact, { count: 1, dropped: 162000 });
+  assert.deepEqual(buildUsage(entries, { sidechain: true }).compact, { count: 1, dropped: 5000 });
+});

@@ -39,6 +39,18 @@ function usageErrorNow() {
 }
 
 /**
+ * いま出してよい「直近の中央値」。
+ *
+ * 数値そのものとは別の窓口から、さらに遅れて着く（直近24本を全文読むので実測 400〜700ms）。
+ * 着くまでは null で、そのあいだは札に差を書かないだけ。**推測で 0 を書かない。**
+ *
+ * @returns {object|null}
+ */
+function baselineNow() {
+  return store.usageBaseline?.id === store.selected ? store.usageBaseline.baseline : null;
+}
+
+/**
  * 詳細ペインを作り直すかどうかの材料。
  *
  * 一覧の push は2秒ごとに来る。そのたびに作り直すと、開いた <details> と
@@ -66,7 +78,24 @@ function detailKeyOf() {
     // ここを足したことで作り直しが増えるわけではない
     usageNow()?.logSize ?? '',
     usageErrorNow() ?? '',
+    // 中央値はさらに遅れて着く（別の窓口。直近24本を読むので数値より遅い）。
+    // ここへ入れておかないと、着いても鍵が動かず、札に差が書き足されない
+    baselineStamp(),
   ].join('');
+}
+
+/**
+ * 中央値のうち、実際に画面へ出している値だけを1本にまとめる。detailKeyOf の材料。
+ *
+ * 有無だけでは足りない。5分ごとに引き直したときに中身が動いていても鍵が同じままになる。
+ * オブジェクトそのものを見比べない（毎回別の参照で届くので、必ず不一致になる）
+ *
+ * @returns {string}
+ */
+function baselineStamp() {
+  const b = baselineNow();
+  if (!b) return '';
+  return [b.model, b.sessions, b.ite, b.contextLast, b.hitRate, b.compactCount].join(',');
 }
 
 /** 前回 renderDetail() を通したときの材料。detail は参照そのままで見比べる */
@@ -171,7 +200,7 @@ export function renderDetail() {
 
   // 数値。ここまでが「何が起きたか」で、ここからは「このセッションの性質」。
   // 詳細（d）が読めていなくても出せる（別の窓口から来るので）
-  add(usagePanel(usageNow(), d, usageErrorNow()));
+  add(usagePanel(usageNow(), d, usageErrorNow(), baselineNow()));
 
   add(basicsPanel(row, d));
 
