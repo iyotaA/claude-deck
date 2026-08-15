@@ -102,6 +102,8 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `usage.test.mjs` | 数値の集計。重複の潰し方と、0 と不明の分け方（数値の本丸） |
 | `usage-view.test.mjs` | 横断集計のクエリ・走査上限・直近の中央値 |
 | `stream.test.mjs` | stream-json の行の読み書き。未知の型と壊れた行で落ちないこと |
+| `run-spec.test.mjs` | 起動指定の関所。cwd の許可・語彙・argv の完全一致（**実行に関わる本丸**） |
+| `claude-cli.test.mjs` | CLI の探し方・版の読み方・stdout の行の割り方 |
 | `appdata.test.mjs` | 書き込み先の解決。ログと設定が同じ場所を指すこと |
 | `appinfo.test.mjs` | 版の出どころ。読めないときに 0 でなく null を返すこと |
 | `portfile.test.mjs` | `--port-file` の受け取り方と、既定の場所 |
@@ -149,10 +151,11 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） `usage`（数値） `stream`（実行中の行） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） `usage`（数値） |
 | `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） |
+| `src/run/` | 画面から起こすセッション | `spec`（起動指定の検証と argv） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
 | `src/startup/` | ランチャが書いた自動起動の紙を読む | `state` |
-| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） `appdata`（書き込み先） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） |
-| `src/os/` | OS を叩く | `focus` |
+| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） `appdata`（書き込み先） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `env`（止めるスイッチの読み方） |
+| `src/os/` | OS を叩く | `focus` `claude`（CLI を探す・版を読む・行を割る） |
 
 流れは `read` → `parse` → `view` → `notify`。
 `shared` はどこからでも使えるが、逆に `shared` から他を import してはいけない。
@@ -161,12 +164,21 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 `listSessions()` が返した行（ただの JSON）を受け取るだけにしてある。
 これで向きが一方向のまま保たれ、テストも行のリテラルを渡すだけで書ける。
 
+`run/` も同じ末端で、**`view/` を import しない。`view/` から `run/` を import もしない。**
+起こしたセッションを一覧へ混ぜるのは `server.mjs` の `refresh()` の仕事で、
+そこが合成の場所と決めてある。判断そのもの（何を混ぜるか）は `run/` の純関数に置く。
+
+`os/claude.mjs` はプロジェクト内 import ゼロ。`node:child_process` などしか使わない。
+判断（どの argv を組むか・許可するか）は `run/spec.mjs` 側にあり、
+`os/` に残るのは「探して、起こして、行に割る」だけの薄い殻。
+`parseUpdateState`（判断）と `loadUpdateState`（I/O）を分けたのと同じ形。
+
 `update/` と `startup/` も末端で、どの層も import しない（`shared/appdata.mjs` だけ）。
 やるのは「紙を1枚読んで、画面に出せる形に整える」だけ。
 **判断はしない。** 更新を当てるかどうかも、自動起動を登録するかどうかも決めるのは C# 側で、
 こちらは結果を読むだけにしてある。理由は「更新」の節に書いた。
 
-入口は9つだけ。ここの名前と応答の形は変えない。
+入口は11。ここの名前と応答の形は変えない。
 
 - `view/sessions.mjs:listSessions`
 - `view/detail.mjs:getSessionDetail`
@@ -176,7 +188,9 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - `notify/index.mjs:createNotifier`
 - `update/state.mjs:loadUpdateState`
 - `startup/state.mjs:loadStartupState`
+- `run/spec.mjs:buildRunSpec`（起動指定を検証して argv まで組む）
 - `os/focus.mjs:focusTerminal`
+- `os/claude.mjs:probeClaude` / `claudeInfo`（探すのと、結果を読むのを分けてある）
 
 `digest.mjs` に残しているのは走査の本体（`buildDigest`）と、走査の前に1回だけ作る索引だけ。
 走査から呼ぶ判断は `digest/` の4枚に分けてある。`buildDigest` 本体は分けない
@@ -696,6 +710,57 @@ package.json "version"
 3つが同期するのではなく、**2つが1つから派生する。**
 C# 側に版を書き写さない。`vpk` に手で打たない。
 
+## 実行（画面からセッションを起こす）
+
+`src/run/` と `src/os/claude.mjs`。見るだけの道具から一歩出る機能で、いま作りかけ。
+**この機能が増やす被害は質が違う。これまでは表示が変わるだけだったが、ここはコードが実行される。**
+
+使うのは公開されている CLI の入口だけ（`claude -p --input-format stream-json`）。
+対話版への打鍵注入や `~/.claude` への書き込みには乗らない。理由は `os/focus.mjs` 冒頭にある。
+
+### 実測（claude 2.1.228・2026-08-12）
+
+公開仕様が無いので、叩いて分かったことをここに残す。
+
+**`--verbose` が要る。** `--print --output-format stream-json` だけだと、こう言われて exit 1 になる。
+
+```
+Error: When using --print, --output-format=stream-json requires --verbose
+```
+
+**stdout は1行も出ない。** 付け忘れると「起こしたのに無言で死ぬ」になるので、
+`buildArgs` が必ず付ける（画面から外せる口も作らない）。
+
+**headless は `sessions/<PID>.json` を書かない。** 起動の前後で `~/.claude/sessions/` も
+`~/.claude/projects/` も1件も増えなかった。つまり `deriveState` から見ると登録簿に無いので、
+**動いているのに `ended`（終了）と表示される。** 一覧へ混ぜる工程が要るのはこのため。
+
+**空の stdin で起こすと `system/init` すら出ない**（`system/hook_started` と
+`system/hook_response` の2行だけで終わる）。だから指示文を必須にしてある。
+
+**`--include-hook-events` を付けなくてもフックのイベントが流れてくる。**
+`classifyStreamLine` が知らない型を `other` に落とすので、いまのままで受かる。
+
+**`session_id` はどの行にも載る。** 自分が渡した `--session-id` と一致するか確かめられる。
+
+`--permission-mode` の語彙は実物では6つ（`acceptEdits` `auto` `bypassPermissions`
+`manual` `dontAsk` `plan`）あるが、**画面に出すのは3つだけ**にしてある。理由は `run/spec.mjs` に書いた。
+
+### CLI を掴めたか
+
+`os/claude.mjs` が起動時に1回だけ探して `--version` を読む。結果は `/api/health` の `claude`。
+
+```
+CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.exe
+```
+
+- **`CLAUDE_DECK_CLAUDE_BIN` が空振りしたら、黙って次へ落ちない。** 落とすと
+  「指定したのに違うものが動いている」になり、いちばん気づきにくい
+- **`.cmd` / `.bat` は使わない。** 実行に `shell:true` が要り、引数がシェルの構文として解釈される
+- `where` を起こさない。`PATH` を自分で割って `existsSync` で見る
+- 掴めなくても本体は落とさない。ダッシュボードとしては動くので止める理由が無い。
+  起動直後は `state:'checking'`（`ok` は `null`。0 と不明を分けるのと同じ）
+
 ## サーバー
 
 `server.mjs`。`node:http` だけで静的配信・JSON API・SSE をやる。
@@ -711,7 +776,7 @@ C# 側に版を書き写さない。`vpk` に手で打たない。
 | `GET /api/usage` | 数値の横断集計。`limit` `days` `model`。上限60件で切り詰め、切ったことを `scanLimited` で返す |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
-| `GET /api/health` | 生存確認。二重起動の判定にも使う。版・通知の設定と数え・**自動起動の様子**もここに出る |
+| `GET /api/health` | 生存確認。二重起動の判定にも使う。版・通知の設定と数え・**自動起動の様子**・**claude CLI を掴めたか**もここに出る |
 | `GET /api/settings/notify` | 通知の設定。URL はマスク済み。出どころ（`sources` / `envSet`）も返す |
 | `GET /api/update` | 更新の状態。ランチャが書いた紙 ＋ `canApply`（いまの起動のされ方で当てられるか） |
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
@@ -987,6 +1052,16 @@ CSS は `public/css/` に10枚ある。`index.html` の `<link>` の並びが、
 - **`port.json` を書く・消すのは `--port-file` を渡された起動だけ。** 紙は1枚しかないので、同じマシンで2本立つと後から立ったほうが上書きし、先に止めたほうが消す。実際に踏んだ（インストール版が 4317 で動いているのに紙だけ消えた。開発側の `npm start` を Ctrl+C した後始末が巻き添えにしていた）。判定は `hasPortFileFlag`。**`CLAUDE_DECK_PORT` で分岐してはいけない** — 更新後の再起動でランチャ自身が `CLAUDE_DECK_PORT=prevPort` を渡すので、インストール版でも立つ。書き先の分岐に使うと更新直後だけ別の場所に書くことになる
 - **配布物は許可リストで組む。** 除外リストは黙って古くなる（`assets/` を除いていても、次に足した大きなフォルダは素通りする）。許可リストなら足し忘れたときにアプリが起動せず、その場で分かる
 - **版の出どころを増やさない。** `package.json` の `version` の1箇所から `appinfo.mjs` と `release.ps1` が派生する。3つが同期するのではなく、2つが1つから派生する形にする。C# 側に版を書き写さない・`vpk` に手で打たない
+- **起こす cwd は許可リストの配下だけ。** 任意の文字列を受けない。判定は `path.resolve` で正規化してから `path.relative` が `..` で始まらないことを見る（`startsWith` は `C:\work\demo2` を `C:\work\demo` の子と誤認する）。win32 では大小を無視する。門番はブラウザ越しの攻撃を止めるが、**この機能の被害は「コードが実行される」という質の違うもの**なので、万一届いても影響がその人の作業フォルダに留まる形にしておく
+- **`-` で始まる値を空文字へ丸めない。** 弾いて理由を返す。argv は配列で渡すのでシェルの穴は無いが、commander は値の位置にあっても `-` で始まる語を**フラグとして読む**。黙って落とすと「指定したのに既定のモデルで動いた」になり、画面には何も出ない。0 と不明を分けるのと同じ扱い（`run/spec.mjs` の `flagLike`）
+- **モデル名の許可リストを持たない。** 文字種と長さだけ見て、使えるかは CLI に判断させる。一覧を持つと新しいモデルが出るたびに古くなり、「使えるはずのモデルが画面から選べない」という直しにくい形になる。副作用として `claude-opus-5[1m]` のような角括弧付きは通らない（テストに事実として書いてある）
+- **`--verbose` を外さない。** `--print --output-format stream-json` だけだと exit 1 で **stdout が1行も出ない**（実測）。「起こしたのに無言で死ぬ」といういちばん分かりにくい壊れ方になる
+- **指示文を argv に載せない。** 必ず stdin へ JSON の1行として書く
+- **`.cmd` / `.bat` を実行ファイルに使わない。** `shell:true` が要り、引数がシェルの構文として解釈される
+- **`CLAUDE_DECK_CLAUDE_BIN` が空振りしても次へ落ちない。** 理由を付けて止める。落とすと「指定したのに違うものが動いている」になる
+- **`child.stdout.setEncoding('utf8')` を必ず呼ぶ。** 素の Buffer を `toString()` するとチャンク境界で日本語が割れる。行に割るのは `createLineSplitter` の仕事で、**上限を超えた行は捨てて数える**（黙って捨てない）
+- **`bypassPermissions` を画面の語彙に入れない。** `CLAUDE_DECK_RUN_ALLOW_BYPASS` が立っているときだけ。ブラウザから押せる「許可を一切求めずに何でも実行する」ボタンは、このアプリが持ちうる最も危険なもの。`CLAUDE_DECK_NOTIFY_OFF` と同じ帯域外のスイッチにする
+- **`manual` を選ばせない。** 非対話で許可要求が来たときの返し方が確かめられていない。当てずっぽうで実装すると、要求に答えられないまま止まったプロセスが残り、画面には「実行中」と出続ける
 
 ## 要約を AI に差し替えるとき
 
