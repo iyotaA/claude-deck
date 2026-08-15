@@ -101,6 +101,7 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `subagents.test.mjs` | サブエージェントの記録と呼び出しの突き合わせ |
 | `usage.test.mjs` | 数値の集計。重複の潰し方と、0 と不明の分け方（数値の本丸） |
 | `usage-view.test.mjs` | 横断集計のクエリ・走査上限・直近の中央値 |
+| `stream.test.mjs` | stream-json の行の読み書き。未知の型と壊れた行で落ちないこと |
 | `appdata.test.mjs` | 書き込み先の解決。ログと設定が同じ場所を指すこと |
 | `appinfo.test.mjs` | 版の出どころ。読めないときに 0 でなく null を返すこと |
 | `portfile.test.mjs` | `--port-file` の受け取り方と、既定の場所 |
@@ -145,7 +146,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | 場所 | 役割 | 中身 |
 |---|---|---|
 | `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` `plans` `subagents` |
-| `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） `usage`（数値） |
+| `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） `usage`（数値） `stream`（実行中の行） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） `usage`（数値） |
 | `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
