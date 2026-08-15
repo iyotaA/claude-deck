@@ -211,6 +211,123 @@ export function tail(entries, { mtimeMs, parseErrors = 0 } = {}) {
   };
 }
 
+/*
+ * ここから下は stream-json（claude -p --output-format stream-json）の行を組む道具。
+ *
+ * 上の会話ログ用と**わざと分けてある**。似ているが別物で、
+ * とくにセッション ID のキーが session_id（snake_case）と違う。
+ * 同じ関数で両方を作れるようにすると、その違いがテストから見えなくなる。
+ *
+ * 名前は s から始める（sysInit / sAssistant / …）。どちらの道具か一目で分かるように。
+ */
+
+/** stream-json のテストで使うセッション ID。値そのものに意味は無い。 */
+export const S_ID = 'sess-1';
+
+/**
+ * 起動できたことを伝えてくる最初の行。
+ *
+ * 形は実測していない（段3 #3 で受信行を落として棚卸しする）。
+ * ここで組んでいるのは「いま読めると想定しているキー」であって、確定した仕様ではない。
+ */
+export function sysInit({ sessionId = S_ID, model = 'claude-opus-5', cwd = 'C:\\work\\demo',
+  tools = ['Read', 'Edit'], permissionMode = 'plan', ...rest } = {}) {
+  return {
+    type: 'system',
+    subtype: 'init',
+    session_id: sessionId,
+    cwd,
+    model,
+    permissionMode,
+    tools,
+    ...rest,
+  };
+}
+
+/**
+ * assistant の行。会話ログと同じ message.content を持つ。
+ *
+ * @param {string} text 発言。空なら text ブロックを作らない
+ * @param {object} opts sessionId / uses（tool_use の並び）/ model / parentToolUseId
+ */
+export function sAssistant(text, { sessionId = S_ID, uses, model, parentToolUseId, ...rest } = {}) {
+  const content = [];
+  if (text) content.push({ type: 'text', text });
+  for (const u of uses ?? []) {
+    content.push({ type: 'tool_use', id: u.id, name: u.name, input: u.input ?? {} });
+  }
+
+  const message = { role: 'assistant', content };
+  if (model) message.model = model;
+
+  const line = { type: 'assistant', message, session_id: sessionId, ...rest };
+  if (parentToolUseId) line.parent_tool_use_id = parentToolUseId;
+  return line;
+}
+
+/**
+ * user の行。ツール結果と、--replay-user-messages で返ってくる自分の指示の両方がこの形。
+ *
+ * @param {object} opts sessionId / text（自分が送った指示）/ results（[{id,text,isError}]）/ parentToolUseId
+ */
+export function sUser({ sessionId = S_ID, text, results, parentToolUseId, ...rest } = {}) {
+  const content = [];
+  if (text) content.push({ type: 'text', text });
+  for (const r of results ?? []) {
+    content.push({
+      type: 'tool_result',
+      tool_use_id: r.id,
+      content: r.text ?? 'ok',
+      is_error: r.isError ?? false,
+    });
+  }
+
+  const line = {
+    type: 'user',
+    message: { role: 'user', content },
+    session_id: sessionId,
+    ...rest,
+  };
+  if (parentToolUseId) line.parent_tool_use_id = parentToolUseId;
+  return line;
+}
+
+/**
+ * 1往復の終わりを伝えてくる行。
+ *
+ * usage が message の下ではなく行の直下に付く点が会話ログと違う。
+ * その形をテストから見えるようにしておきたいので、渡されたらそのまま直下に置く。
+ */
+export function sResult({ sessionId = S_ID, subtype = 'success', isError, durationMs = 1200,
+  numTurns = 1, costUSD = 0.01, text = '終わりました', usage, ...rest } = {}) {
+  const line = {
+    type: 'result',
+    subtype,
+    session_id: sessionId,
+    duration_ms: durationMs,
+    num_turns: numTurns,
+    total_cost_usd: costUSD,
+    result: text,
+    ...rest,
+  };
+  if (isError !== undefined) line.is_error = isError;
+  if (usage) line.usage = usageShape(usage);
+  return line;
+}
+
+/**
+ * 行の並びを NDJSON の1本のテキストにする。
+ *
+ * 末尾にも改行を付ける。実物もそうなっていて、
+ * 分割側が最後の空片をどう扱うかを試せるようにしておきたいため。
+ *
+ * @param {object[]} lines 行の並び
+ * @returns {string}
+ */
+export function sLines(lines) {
+  return `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`;
+}
+
 /** 登録簿の1件。 */
 export function reg(overrides = {}) {
   return {
