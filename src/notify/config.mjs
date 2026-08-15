@@ -27,6 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appDataFile } from '../shared/appdata.mjs';
+import { isSwitchOn } from '../shared/env.mjs';
 import { maskWebhook } from './message.mjs';
 import { normalizeStates } from './watch.mjs';
 
@@ -114,19 +115,6 @@ function clampNum(n, min, max) {
 }
 
 /**
- * 止めるスイッチが立っているかを見る。
- *
- * 0・false・no は「立っていない」とする。`set X=0` で止まると勘違いされないため。
- *
- * @param {*} raw 環境変数の値
- * @returns {boolean}
- */
-function isOff(raw) {
-  const v = str(raw).toLowerCase();
-  return v !== '' && v !== '0' && v !== 'false' && v !== 'no';
-}
-
-/**
  * 環境変数と設定ファイルから、通知の設定を組み立てる。純関数。
  *
  * @param {object} [opts]
@@ -159,8 +147,9 @@ export function parseNotifyConfig({ env = {}, file = null, configPath = null } =
   const detail = rawDetail.toLowerCase() === 'none' ? 'none' : 'full';
   const detailSource = fileDetail ? 'config' : (envDetail ? 'env' : 'none');
 
-  // 止めるスイッチ。環境変数だけに置く（画面から自分を締め出せてしまうため）
-  const off = isOff(env.CLAUDE_DECK_NOTIFY_OFF);
+  // 止めるスイッチ。環境変数だけに置く（画面から自分を締め出せてしまうため）。
+  // 値の書き方は他のスイッチと共通なので shared/env.mjs に寄せてある
+  const off = isSwitchOn(env.CLAUDE_DECK_NOTIFY_OFF);
 
   const base = {
     source: webhookSource,

@@ -20,6 +20,7 @@ import { getRawEntry } from './src/view/entry.mjs';
 import { getSubagentDetail } from './src/view/subagent.mjs';
 import { getSessionBaseline, getSessionUsage, listUsage, parseUsageQuery } from './src/view/usage.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
+import { claudeInfo, probeClaude } from './src/os/claude.mjs';
 import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
 import { validateSettings, writeSettings } from './src/notify/settings.mjs';
@@ -723,6 +724,9 @@ const server = http.createServer((req, res) => {
     const update = readUpdate();
     sendJson(res, 200, {
       ok: true, version: VERSION, configDir, clients: clients.size, notify: notifier.health(),
+      // 画面からセッションを起こすための土台。掴めていなければここで分かる。
+      // 起動直後は state:'checking'（ok は null。0 と不明を分けるのと同じ扱い）
+      claude: claudeInfo(),
       // 短い形だけ載せる。全部入りは /api/update
       update: { state: update.state, available: update.available },
       // こちらは丸ごと。自動起動には専用の窓口が無いので、短くすると見る手段が消える。
@@ -818,6 +822,11 @@ function listen(port, attemptsLeft = 12) {
     notifier.setBaseUrl(url);
     // 送信は refresh() とは別の時計で回す。flush は refresh を呼ばず、待たない
     setInterval(() => { notifier.flush(); }, FLUSH_MS).unref();
+
+    // claude CLI を1回だけ探して版を読む。結果は /api/health の claude に出る。
+    // 掴めなくてもダッシュボードとしては動くので、待たないし致命扱いにもしない。
+    // probeClaude は必ず解決するが、約束どおり受け皿は付けておく
+    probeClaude().catch(() => {});
 
     refresh(true);
     if (!noOpen) openBrowser(url);
