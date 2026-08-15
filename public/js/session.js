@@ -189,7 +189,8 @@ export async function loadUsage(sessionId) {
 
 /**
  * @param {string|null} sessionId
- * @param {'live'|'query'|'archive'} [from] 選んだ経路。store.selectedFrom の説明を参照
+ * @param {'live'|'query'|'archive'|'usage'} [from] 選んだ経路。store.selectedFrom の説明を参照。
+ *   'live' 以外は、一覧から消えても選択を外さない（stream.js が見ている）
  */
 export function select(sessionId, from = 'live') {
   if (store.selected === sessionId) return;

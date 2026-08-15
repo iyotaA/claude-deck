@@ -11,9 +11,12 @@
  * 中で fetch すると、404（この版のサーバーには窓口が無い）のときに
  * 「セクションを自分で消す」羽目になり、`{section, nav}` を返す約束と噛み合わなくなる。
  */
-import { el, fact, shortModel } from './util.js';
+import { el, fact } from './util.js';
 import { panel, SEC } from './panel.js';
-import { statTile, barList, sparkline, tableDetails, tokensStrict, pctStrict, numStrict } from './usage-chart.js';
+import {
+  block, hitRateNote, statTile, barList, sparkline, tableDetails,
+  tokensStrict, pctStrict, numStrict,
+} from './usage-chart.js';
 
 /** 横棒に出すツールの数。残りは下の表で読む。 */
 const BARS_MAX = 8;
@@ -26,37 +29,6 @@ const ITE_ROWS = [
   { key: 'cacheWrite1h', weightKey: 'cacheWrite1h', label: 'キャッシュ書き（1時間）' },
   { key: 'out', weightKey: 'out', label: '出力' },
 ];
-
-/**
- * 節を1つ作る。パネルの中の小見出し。
- *
- * @param {string} title
- * @returns {HTMLElement}
- */
-function block(title) {
-  const box = el('section', 'usage-block');
-  box.append(el('h4', null, title));
-  return box;
-}
-
-/**
- * キャッシュ命中率に添える但し書き。
- *
- * **モデルまたぎで比べられない。** キャッシュの最小長がモデル別で、
- * しかも単調でない（Opus 5 は 512、Opus 4.7 は 2,048、Opus 4.6 と Haiku 4.5 は 4,096）。
- * 最小長に満たないとエラーも出さずに黙ってキャッシュされないので、
- * 古いモデルの命中率が低く出るのは、使い方の差だけが理由ではない。
- *
- * @param {object} usage
- * @returns {string}
- */
-function hitRateNote(usage) {
-  if (usage.models.length > 1) {
-    return `モデルが ${usage.models.length} 種類混ざっています。モデルまたぎでは比べられません`;
-  }
-  const name = usage.model ? shortModel(usage.model) : null;
-  return name ? `${name} の中でだけ比べられます` : 'モデルが分かりません';
-}
 
 /**
  * 上に並べる4枚の札。

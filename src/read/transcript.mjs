@@ -208,6 +208,25 @@ export async function readHead(file, cap) {
   });
 }
 
+/**
+ * ログを全文読んで行に直す。memo は掛けない。
+ *
+ * 掛けるかどうかは呼ぶ側の判断。下の2つの入口がその判断を1つずつ持っている。
+ *
+ * @param {string} file
+ * @param {{size: number, mtimeMs: number}} stat 呼ぶ側が取り終えた stat
+ */
+async function readAllRaw(file, stat) {
+  let raw;
+  try {
+    raw = await fs.readFile(file, 'utf8');
+  } catch {
+    return { entries: [], parseErrors: 0, size: stat.size, mtimeMs: stat.mtimeMs };
+  }
+  const parsed = parseLines(raw.split('\n'));
+  return { ...parsed, size: stat.size, mtimeMs: stat.mtimeMs };
+}
+
 /** ログを全文読む。詳細ビューを開いたときだけ呼ぶ。 */
 export async function readAll(file) {
   let stat;
@@ -217,14 +236,29 @@ export async function readAll(file) {
     return { entries: [], parseErrors: 0, size: 0, mtimeMs: 0 };
   }
 
-  return memo(`all:${file}`, stampOf(stat), async () => {
-    let raw;
-    try {
-      raw = await fs.readFile(file, 'utf8');
-    } catch {
-      return { entries: [], parseErrors: 0, size: stat.size, mtimeMs: stat.mtimeMs };
-    }
-    const parsed = parseLines(raw.split('\n'));
-    return { ...parsed, size: stat.size, mtimeMs: stat.mtimeMs };
-  });
+  return memo(`all:${file}`, stampOf(stat), () => readAllRaw(file, stat));
+}
+
+/**
+ * ログを全文読むが、**共有の memo には載せない。**
+ *
+ * 横断集計（/api/usage）はこれを最大60本続けて読む。
+ * readAll を使うと 240件しかない共有 LRU が全文の entries[] で埋まり、
+ * 一覧（毎秒走る）の tail: memo が全部押し出される。
+ * しかも1本が最大 42MB あるので、抱え込むメモリが数百MB〜GBになる。
+ *
+ * 呼ぶ側（view/usage.mjs）は集計結果だけを別の memo に持つ。
+ * そちらは数百バイトの数値の塊なので、300件持っても数MBに収まる。
+ *
+ * @param {string} file
+ */
+export async function readAllOnce(file) {
+  let stat;
+  try {
+    stat = await fs.stat(file);
+  } catch {
+    return { entries: [], parseErrors: 0, size: 0, mtimeMs: 0 };
+  }
+
+  return readAllRaw(file, stat);
 }

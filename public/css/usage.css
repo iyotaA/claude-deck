@@ -247,3 +247,99 @@
   border-top: 2px solid var(--border-strong);
   font-weight: 700;
 }
+
+/* ================================================ 左のペインの3つ目のタブ */
+
+/* ここから下は横断集計（usage-tab.js）だけが使う。
+   上の部品はそのまま共有するので、足すのは器と絞り込みの帯とセッションの行だけ */
+
+/* 絞り込みが3つ並ぶので、書庫のヘッダと同じく折り返す。
+   select の見た目は .archive-head と同じにしたいが、あちらの規則を
+   .usage-head へ広げには行かない（list.css が usage の名前を知ることになる）。
+   同じ宣言をこちらに持つほうが、どちらの都合で変えたのかが後から読める */
+.usage-head { flex-wrap: wrap; }
+
+.usage-head select {
+  padding: .25rem .3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: .78rem;
+}
+
+.usage-head #usage-count {
+  flex: 1 0 100%;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+/* 器。一覧（.list）と同じ縦スクロールの作りにする。
+   .list を使い回さないのは、あれが <ul> 前提の flex + gap で、
+   節と節のあいだに一定の隙間が入ってしまうため */
+.usage-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: .7rem .75rem 1.2rem;
+  overflow-y: auto;
+}
+
+/* display を1つ書いた時点でブラウザ既定の [hidden] { display: none } に勝ってしまう。
+   list.css の .list[hidden] と同じ話で、これが無いと書庫と数値が縦に積まれて出る */
+.usage-pane[hidden] { display: none; }
+
+/* 引き直しているあいだは薄く残す。消してから描き直すと、
+   絞り込みを変えるたびに画面が空白になって、どこを見ていたか分からなくなる */
+.usage-pane.is-stale { opacity: .55; }
+
+/* 札は 2×2 に固定する。
+   既定の auto-fit（9.5rem）に任せると、左のペインの 34rem では
+   **3枚 + 1枚**に割れて、4枚目だけが 1/3 幅で細長く取り残される（実測）。
+   詳細ペイン側の .stats は今のままでちょうど4列に並ぶので、こちらだけ上書きする */
+.usage-pane > .stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* 最初の節（.stats のすぐ下）には区切り線を引かない。
+   器の上端に線が近すぎて、ヘッダの下線と二重に見える */
+.usage-pane > .stats + .usage-block {
+  border-top: 0;
+  padding-top: .2rem;
+}
+
+.usage-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+
+/* 書庫のカードと同じ扱い。状態色の帯は出さない。
+   ここに並ぶのは「消費が多い順」であって、手をつける順ではない */
+.card.is-usage { padding-left: .7rem; }
+.card.is-usage::before { content: none; }
+
+/* 実消費。この行でいちばん見たい数なので、太らせて先頭に置く */
+.usage-ite {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: .82rem;
+}
+
+/* 広いときだけ左のペインを少し広げる。
+   5列の表と横棒が 20rem では窮屈で、表がほぼ常に横スクロールになる。
+
+   **必ず @media で囲む。** narrow.css の .deck は @media の中にあるが、
+   メディアクエリは詳細度を足さないので、:has() を付けたこちらが素で勝ってしまう。
+   囲まないと、狭い画面で引き出しが壊れる */
+@media (min-width: 861px) {
+  .deck:has(.list-pane.is-usage) {
+    grid-template-columns: minmax(20rem, 34rem) minmax(0, 1fr);
+  }
+}

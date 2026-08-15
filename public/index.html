@@ -65,6 +65,7 @@
       <div class="list-tabs">
         <button class="tab" id="tab-live" type="button" aria-pressed="true">稼働中</button>
         <button class="tab" id="tab-archive" type="button" aria-pressed="false">書庫</button>
+        <button class="tab" id="tab-usage" type="button" aria-pressed="false">数値</button>
         <!-- 引き出しのときだけ出る。開いている間はハンバーガーが下に隠れるため。
              タブ行に置くのは、書庫を出しているあいだも閉じられるようにするため -->
         <button class="drawer-close" id="list-close" type="button" aria-label="一覧を閉じる">&#215;</button>
@@ -89,6 +90,26 @@
         <span id="archive-count"></span>
       </div>
       <ul class="list" id="archive" hidden></ul>
+
+      <!-- 数値（横断）。ログを全文読む一番重い窓口なので、開いたときに1回だけ引く。
+           モデルの選択肢は応答から組むので、ここには「すべて」だけを置く -->
+      <div class="list-head usage-head" id="usage-head" hidden>
+        <select id="usage-days" aria-label="集計する期間">
+          <option value="">期間を絞らない</option>
+          <option value="7">7日</option>
+          <option value="30">30日</option>
+        </select>
+        <select id="usage-limit" aria-label="集計するセッション数">
+          <option value="10">10本</option>
+          <option value="30">30本</option>
+          <option value="60">60本</option>
+        </select>
+        <select id="usage-model" aria-label="集計するモデル">
+          <option value="">すべてのモデル</option>
+        </select>
+        <span id="usage-count"></span>
+      </div>
+      <div class="usage-pane" id="usage" hidden></div>
     </section>
 
     <section class="detail-pane" id="detail" aria-label="セッションの詳細" tabindex="-1">
