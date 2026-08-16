@@ -166,6 +166,75 @@
    ここでは字を一段落として、パネル頭の facts より軽く見せるだけにする */
 .run-ev .facts { font-size: .76rem; }
 
+/* ---------------------------------------------------- 起こすフォーム */
+
+/* 器だけ自前で持つ。中身のクラス（.settings-head / .settings-body / .settings-foot /
+   .settings-label / .settings-row / .settings-hint / .settings-grid / .settings-text /
+   .settings-num / .settings-select）は設定モーダルのものをそのまま借りている。
+   あちらのセレクタは .settings を親に取っていないクラス単体なので、ここでも効く。
+   .settings 自身に紐づく4つ（本体・::backdrop・[open]・幅）だけ書き写す形になる。
+
+   幅は設定モーダル（36rem）より広く取る。本文欄が主役で、折り返しが多いと書きにくい */
+.runform {
+  /* 余白を dialog 自身に持たせない。持たせると、その余白を押したときに
+     背面を押したのと同じに見えて閉じる（settings.css と同じ理由）。
+     run-form.js の ev.target === dialog の判定はこれが前提 */
+  padding: 0;
+  width: min(44rem, calc(100vw - 2rem));
+  max-height: min(50rem, calc(100vh - 3rem));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+}
+
+.runform::backdrop { background: rgb(0 0 0 / 45%); }
+
+/* 頭と足を留めて、中身だけを縦に流す */
+.runform[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+/* 「途中で許可を求めない」がこの機能でいちばん驚かれる点。
+   折りたたまず、面も塗らず、左の線1本だけで目を留める */
+.runform-warn {
+  margin: 0 0 1rem;
+  padding: .45rem .7rem;
+  border-left: 2px solid var(--warn);
+  font-size: .78rem;
+  line-height: 1.6;
+  color: var(--fg-muted);
+}
+
+/* 危ないモードを選んだときの但し書き。.settings-hint の色を上書きする */
+.runform-danger { color: var(--hot); }
+
+/* パスもモード名も長い。行の残りいっぱいまで伸ばす */
+.runform-wide {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 本文欄。.settings-text と揃えつつ、複数行ぶんの見た目だけ変える */
+.runform-prompt {
+  display: block;
+  width: 100%;
+  padding: .45rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  line-height: 1.6;
+  /* 横は伸ばさせない（親のグリッドが崩れる）。縦だけ本人に任せる */
+  resize: vertical;
+}
+
+.runform-prompt:disabled { opacity: .5; }
+
 /* ---------------------------------------------------- 狭い窓向け */
 
 /* モーダルと同じで、この機能の都合は narrow.css へ散らさずここに置く。

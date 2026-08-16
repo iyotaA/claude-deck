@@ -116,6 +116,21 @@ export const dom = {
   startupLegacy: document.getElementById('startup-legacy'),
   startupError: document.getElementById('startup-error'),
   startupHow: document.getElementById('startup-how'),
+  // セッションを起こすフォーム。run-form.js だけが使う。
+  // URL には持たせない（syncQuery が触るのは session / only / tq / hide / tab / aq / asort だけ）
+  runformOpen: document.getElementById('runform-open'),
+  runform: document.getElementById('runform'),
+  runformClose: document.getElementById('runform-close'),
+  runformMsg: document.getElementById('runform-msg'),
+  runformStart: document.getElementById('runform-start'),
+  runformShow: document.getElementById('runform-detail'),
+  runCwd: document.getElementById('run-cwd'),
+  runPrompt: document.getElementById('run-prompt'),
+  runMode: document.getElementById('run-mode'),
+  runModel: document.getElementById('run-model'),
+  runEffort: document.getElementById('run-effort'),
+  runBudget: document.getElementById('run-budget'),
+  runNote: document.getElementById('run-note'),
   // 更新のお知らせ。update.js だけが使う
   ver: document.getElementById('ver'),
   update: document.getElementById('update'),
