@@ -720,10 +720,10 @@ C# 側に版を書き写さない。`vpk` に手で打たない。
 
 ## 実行（画面からセッションを起こす）
 
-`src/run/` と `src/os/claude.mjs`、画面側は `public/js/runs.js` と `run-view.js`。
+`src/run/` と `src/os/claude.mjs`、画面側は `public/js/runs.js` と `run-view.js` と `run-form.js`。
 見るだけの道具から一歩出る機能で、いま作りかけ。
-窓口と、詳細ペインへの出力までは通っている。
-**起こす口（新規開始のフォーム）と一覧への合流はこれから。**
+窓口と、画面から起こす口と、詳細ペインへの出力までは通っている。
+**一覧への合流はこれから。**
 **この機能が増やす被害は質が違う。これまでは表示が変わるだけだったが、ここはコードが実行される。**
 
 使うのは公開されている CLI の入口だけ（`claude -p --input-format stream-json`）。
@@ -902,6 +902,7 @@ CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.ex
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
 | `GET /api/runs` | 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている |
+| `GET /api/runs/options` | 起こすフォームの選択肢。cwd の候補・権限モード・思考量・予算の範囲・CLI の様子・いまの本数 |
 | `GET /api/runs/events?from=<seq>` | 取りこぼしの穴埋め。SSE が切れているあいだの速報を拾う |
 | `GET /api/runs/stream?from=<seq>` | **実行専用の SSE。**`/api/stream` には相乗りさせない |
 | `GET /api/runs/:id` | 1本ぶんの全部入り。粗い `rows()` と違って `counts` や `costUSD` も入る |
@@ -1035,6 +1036,7 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 | 7 | `usage-tab.js` | 数値の横断（左ペインの3つ目のタブ） |
 | 7 | `stream.js` | SSE でつなぎ、届いた一覧を画面へ流す |
 | 7 | `settings.js` | 通知の設定モーダル |
+| 7 | `run-form.js` | セッションを起こすモーダル。窓口は自分で叩く |
 | 7 | `update.js` | 更新のお知らせの帯と、押したあとの見張り |
 | 8 | `main.js` | 入口。配線・テーマ・キー操作・起動 |
 
@@ -1108,7 +1110,7 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 `/api/sessions` の `meta.stateLabels`（`STATE_LABELS` そのまま）から引く。
 状態を1つ増やすときに直すのは `parse/state.mjs` だけで済む。
 
-CSS は `public/css/` に10枚ある。`index.html` の `<link>` の並びが、そのまま重ね順になる。
+CSS は `public/css/` に11枚ある。`index.html` の `<link>` の並びが、そのまま重ね順になる。
 
 | ファイル | 中身 |
 |---|---|
@@ -1121,7 +1123,7 @@ CSS は `public/css/` に10枚ある。`index.html` の `<link>` の並びが、
 | `settings.css` | 通知の設定モーダル |
 | `update.css` | 更新のお知らせの帯 |
 | `usage.css` | 数値（札・横棒・スパークライン・表の対） |
-| `run.css` | 実行のパネル（速報の行・種類の札・入力欄） |
+| `run.css` | 実行のパネル（速報の行・種類の札・入力欄）と、起こすフォームの器 |
 | `narrow.css` | 狭い窓向け（`@media (max-width: 860px)`） |
 
 **`<link>` の順番を入れ替えない。** CSS は宣言順で勝ち負けが付く。
@@ -1233,6 +1235,10 @@ CSS は `public/css/` に10枚ある。`index.html` の `<link>` の並びが、
 - **速報が1件届くたびに詳細ペインを作り直さない。** 1ターンで数百行来るので、開いた `<details>` と入力中の caret が毎回消える。`detailKeyOf()` に混ぜるのは `runStampFor()`（出来事が増えただけでは動かない値）だけにして、中への追記は `RunView.render()` に任せる（`Timeline` と同じ「器を預かって自分で描き直す」形）
 - **`runs.js`（層2）から `run-view.js`（層3）を import しない。** 逆向きになる。`subscribeRuns(fn)` で外から登録し、配線するのは `main.js`（層8）。既存の循環4箇所と同じ切り方
 - **実行パネルを詳細（`d`）の中に入れない。** 起こした直後はまだ会話ログが1行も無く、`d` は null。中に入れるとログが出るまで何も出ず、押したのに何も起きていないように見える
+- **起こしたセッションを `select(id, 'live')` で選ばない。** `'query'` にする。起こした直後は一覧にまだ並ばないので、`'live'` で選ぶと次の push（2秒後）に `stream.js` の `apply()` が「一覧から消えた」と読んで選択を外し、先頭のセッションへ飛ぶ
+- **起こした直後に画面を勝手に動かさない。** モーダルを閉じて詳細ペインへ飛ばすと、会話ログが出るまでの数秒「このセッションは開けませんでした」を見せることになる。結果はモーダルの中に出して、移るかどうかは押した人に決めてもらう
+- **起こすフォームの見た目を新しく作らない。** 中身は設定モーダルのクラス（`.settings-head` / `.settings-body` / `.settings-sec` / `.settings-label` / `.settings-row` / `.settings-hint` / `.settings-grid` / `.settings-text` / `.settings-num` / `.settings-select` / `.settings-foot` / `.settings-msg`）をそのまま借りる。あちらのセレクタは `.settings` を親に取っていないクラス単体なので、`.runform` の中でも効く。`run.css` に書き写すのは `.settings` 自身に紐づく4つ（本体・`::backdrop`・`[open]`・幅）だけ
+- **キー操作の判定にクラス名を使わない。** 見た目を借りている以上、`.settings-text` のような借り先の名前が `run-form.js` に書かれることになる。要素名（`input, select`）で見て、本文欄だけは参照（`ev.target === dom.runPrompt`）で分ける
 
 ## 要約を AI に差し替えるとき
 

@@ -39,6 +39,7 @@
            渡された側が自分の版を確かめられる場所が、画面にはここしか無い -->
       <span class="ver" id="ver" hidden></span>
       <span class="live" id="live" data-live="wait">接続中</span>
+      <button class="btn" id="runform-open" type="button" aria-label="新しいセッションを起こす">起こす</button>
       <button class="btn" id="reload" type="button">再読み込み</button>
       <button class="btn" id="settings-open" type="button" aria-label="設定を開く">設定</button>
       <button class="btn" id="theme-toggle" type="button" aria-label="配色を切り替える">配色</button>
@@ -208,6 +209,82 @@
     <p class="settings-msg" id="settings-msg" role="status" data-tone=""></p>
     <button class="btn" id="settings-test" type="button">テスト送信</button>
     <button class="btn is-primary" id="settings-save" type="button">保存</button>
+  </div>
+
+</dialog>
+<!-- 新しいセッションを起こす。設定モーダルと同じ作法で、<form> では囲まない。
+     本文欄の Enter は改行、実行は Ctrl+Enter。配線は run-form.js が持つ。
+     中の見た目は設定モーダルのクラスをそのまま借りる（同じ CSS を二重に持たない）。
+     器（.runform）の寸法だけ run.css に書いてある -->
+<dialog class="runform" id="runform" aria-labelledby="runform-title">
+
+  <div class="settings-head">
+    <h2 id="runform-title">セッションを起こす</h2>
+    <button class="settings-x" id="runform-close" type="button" aria-label="閉じる">&#215;</button>
+  </div>
+
+  <div class="settings-body">
+
+    <!-- この機能でいちばん驚かれる点なので、折りたたまずに常に見せる -->
+    <p class="runform-warn">
+      この画面から起こすセッションは、途中であなたに許可を求めません。
+      下の権限モードで決めた範囲だけを、最後まで自分で進めます。
+    </p>
+
+    <section class="settings-sec">
+      <label class="settings-label" for="run-cwd">作業フォルダ</label>
+      <div class="settings-row">
+        <select class="settings-select runform-wide" id="run-cwd"></select>
+      </div>
+      <p class="settings-hint">Claude Code が動いたことのあるフォルダだけを出しています</p>
+    </section>
+
+    <section class="settings-sec">
+      <label class="settings-label" for="run-prompt">最初の指示</label>
+      <textarea class="runform-prompt" id="run-prompt" rows="6" spellcheck="false"
+                placeholder="やってほしいことを書く"></textarea>
+      <p class="settings-hint">Enter は改行。実行は Ctrl+Enter</p>
+    </section>
+
+    <section class="settings-sec">
+      <label class="settings-label" for="run-mode">権限モード</label>
+      <div class="settings-row">
+        <select class="settings-select runform-wide" id="run-mode"></select>
+      </div>
+      <!-- 危ないモードを選んだときだけ出す。中身は固定なので run-form.js は出し入れだけする -->
+      <p class="settings-hint runform-danger" id="run-note" hidden>
+        このモードは許可を一切求めず、何でも実行します。
+      </p>
+    </section>
+
+    <section class="settings-sec settings-grid">
+      <label class="settings-label" for="run-model">モデル</label>
+      <span class="settings-row">
+        <input class="settings-text" id="run-model" type="text"
+               spellcheck="false" autocomplete="off" placeholder="空欄なら CLI の既定">
+      </span>
+      <p class="settings-hint">名前をそのまま渡します。使えるかどうかは CLI が決めます</p>
+
+      <label class="settings-label" for="run-effort">思考量</label>
+      <span class="settings-row">
+        <select class="settings-select" id="run-effort"></select>
+      </span>
+      <p class="settings-hint">深いほど時間とトークンを使います</p>
+
+      <label class="settings-label" for="run-budget">上限</label>
+      <span class="settings-row">
+        <input class="settings-num" id="run-budget" type="number" step="0.01">
+        <span class="settings-unit">USD</span>
+      </span>
+      <p class="settings-hint">ここに達すると止まります</p>
+    </section>
+  </div>
+
+  <div class="settings-foot">
+    <p class="settings-msg" id="runform-msg" role="status" data-tone=""></p>
+    <!-- 起こした直後は一覧にまだ並ばないので、飛ぶかどうかは押した人に決めてもらう -->
+    <button class="btn" id="runform-detail" type="button" hidden>詳細を開く</button>
+    <button class="btn is-primary" id="runform-start" type="button">起こす</button>
   </div>
 
 </dialog>

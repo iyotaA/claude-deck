@@ -33,7 +33,7 @@ import { classifyStreamLine, encodeUserLine } from '../parse/stream.mjs';
 import { oneLine } from '../shared/text.mjs';
 import { LINE_MAX, claudeInfo, createLineSplitter, spawnClaude, stopClaude } from '../os/claude.mjs';
 import { PROMPT_MAX, buildRunSpec } from './spec.mjs';
-import { createRunLedger, isRunOver } from './ledger.mjs';
+import { RUN_MAX, createRunLedger, isRunOver } from './ledger.mjs';
 
 /**
  * 標準エラーから拾う理由の上限。
@@ -415,7 +415,16 @@ export function createRunner({
      * @returns {object} 速報と、押し出された件数
      */
     events: (from) => ledger.events(from),
-    /** @returns {object} 本数と通し番号 */
-    stats: () => ledger.stats(),
+    /**
+     * 本数と通し番号。上限（RUN_MAX）はここで足す。
+     *
+     * **`ledger.stats()` の側に足さない。** あちらはテストが deepEqual で
+     * 形を丸ごと固定していて、キーを1つ増やすだけで落ちる。
+     * そもそも上限は台帳が数えた値ではなく設定なので、
+     * 台帳の集計結果に混ぜず、口を組むこの層で足すほうが素直でもある。
+     *
+     * @returns {object} 本数・通し番号・上限
+     */
+    stats: () => ({ ...ledger.stats(), max: RUN_MAX }),
   };
 }

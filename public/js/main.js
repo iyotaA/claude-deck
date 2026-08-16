@@ -15,7 +15,7 @@
  *   層4  detail.js
  *   層5  session.js
  *   層6  list.js
- *   層7  archive.js / usage-tab.js / stream.js / settings.js / update.js
+ *   層7  archive.js / usage-tab.js / stream.js / settings.js / update.js / run-form.js
  *   層8  このファイル
  *
  * 数値は2つに分かれている。1本ぶんが usage-panel.js（層3・詳細ペイン）、
@@ -52,6 +52,7 @@ import { select, detailCache } from './session.js';
 import { setLive, fetchOnce, connect } from './stream.js';
 import { initSettings } from './settings.js';
 import { initUpdate } from './update.js';
+import { initRunForm } from './run-form.js';
 
 function initTheme() {
   const forced = query.get('theme');
@@ -104,6 +105,7 @@ initListDrawer();
 initTabs();
 initSettings();
 initUpdate();
+initRunForm();
 initListKeys(dom.list, 'live');
 initListKeys(dom.archive, 'archive');
 

@@ -25,7 +25,10 @@ import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
 import { validateSettings, writeSettings } from './src/notify/settings.mjs';
 import { createRunner } from './src/run/index.mjs';
-import { runDirsFromEnv } from './src/run/spec.mjs';
+import {
+  allowedModes, runDirsFromEnv, BYPASS_MODE, DEFAULT_PERMISSION_MODE, PERMISSION_MODE_LABELS,
+  EFFORTS, DEFAULT_BUDGET_USD, BUDGET_MIN_USD, BUDGET_MAX_USD, PROMPT_MAX,
+} from './src/run/spec.mjs';
 import { loadUpdateState, parseUpdateState } from './src/update/state.mjs';
 import { loadStartupState, parseStartupState } from './src/startup/state.mjs';
 import { isTrustedWrite } from './src/shared/origin.mjs';
@@ -955,6 +958,44 @@ const server = http.createServer((req, res) => {
   // 実行専用の SSE。/api/stream には相乗りさせない（理由は handleRunStream に）
   if (pathname === '/api/runs/stream') {
     handleRunStream(req, res, Number(url.searchParams.get('from')));
+    return;
+  }
+
+  // 起こすフォームが開いたときに1回だけ引く。ここを毎秒更新しない。
+  //
+  // **完全一致なので runMatch より手前に置く。** 下の正規表現は
+  // `/api/runs/options` にも当たるので、順番を入れ替えると
+  // 「そんな実行はありません」と 404 を返すようになる。
+  //
+  // **モデルの候補は返さない。** spec.mjs が許可リストを持たない方針なので、
+  // ここで一覧を作ると同じ古さを別の場所に増やすことになる。画面は自由入力にして
+  // 「空欄なら CLI の既定」と書く。
+  if (pathname === '/api/runs/options') {
+    sendJson(res, 200, {
+      // 並べ直してから返す。allowedRunDirs() は Set の挿入順なので、
+      // 一覧の並びが変わるたびに選択肢の順が動く（押す場所が毎回変わって使いにくい）
+      cwds: allowedRunDirs().sort((a, b) => a.localeCompare(b)),
+      // 語彙は spec.mjs のものをそのまま渡す。日本語も向こうに持たせてあるので、
+      // 語を1つ増やすときに直すのは spec.mjs だけで済む（STATE_LABELS と同じ方針）。
+      // bypassPermissions は CLAUDE_DECK_RUN_ALLOW_BYPASS が立っているときだけ混ざる
+      modes: allowedModes().map((value) => ({
+        value,
+        label: PERMISSION_MODE_LABELS[value] ?? value,
+        danger: value === BYPASS_MODE,
+      })),
+      defaultMode: DEFAULT_PERMISSION_MODE,
+      efforts: EFFORTS,
+      budget: { default: DEFAULT_BUDGET_USD, min: BUDGET_MIN_USD, max: BUDGET_MAX_USD },
+      promptMax: PROMPT_MAX,
+      // 掴めていなければフォームの時点で分かるようにする。押してから 503 で断るより早い。
+      // **path と source は載せない。** 画面に出す用が無いのに、あると
+      // ブラウザの履歴やスクリーンショットにローカルのパスが乗る
+      claude: (({ ok, state, label, version, reason }) => (
+        { ok, state, label, version, reason }
+      ))(claudeInfo()),
+      // 上限に達していれば、押す前に分かる
+      runs: runner.stats(),
+    });
     return;
   }
 
