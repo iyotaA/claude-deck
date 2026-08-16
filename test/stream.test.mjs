@@ -85,6 +85,88 @@ test('費用が付いてこなければ null。0 と混ぜない', () => {
 });
 
 /*
+ * 実測で分かった形（claude 2.1.228）。
+ *
+ * ここは推測ではなく、叩いて出てきた行を写している。
+ * 公開仕様が無いので、この節がその形の唯一の記録になる。
+ */
+
+test('result から止まり方の分類が取れる', () => {
+  const got = read(sResult({ terminal_reason: 'completed' }));
+  assert.equal(got.info.terminalReason, 'completed');
+});
+
+test('予算に当たった result から、人が読める理由が取れる', () => {
+  // `--max-budget-usd 0.01` で起こしたときに届いた行をそのまま写したもの。
+  // 成功時にある `result` と `api_error_status` のキーが**無い**のが要点。
+  // だからキーの有無で分岐せず、無いものは null にして進む
+  const got = read({
+    type: 'result',
+    subtype: 'error_max_budget_usd',
+    is_error: true,
+    session_id: S_ID,
+    duration_ms: 7961,
+    num_turns: 1,
+    total_cost_usd: 0.5710865,
+    terminal_reason: 'budget_exhausted',
+    errors: ['Reached maximum budget ($0.01)'],
+    permission_denials: [],
+  });
+
+  assert.equal(got.kind, 'result');
+  assert.equal(got.info.isError, true);
+  assert.equal(got.info.terminalReason, 'budget_exhausted');
+  // これが取れないと、画面に出せるのが error_max_budget_usd という機械の語だけになる
+  assert.equal(got.info.errors, 'Reached maximum budget ($0.01)');
+  assert.equal(got.info.text, null, '本文が無いことを別の文字で埋めない');
+  assert.equal(got.info.costUSD, 0.5710865);
+});
+
+test('errors が無ければ null', () => {
+  assert.equal(read(sResult()).info.errors, null);
+  assert.equal(read(sResult({ errors: [] })).info.errors, null);
+  assert.equal(read(sResult({ errors: 'こわれた' })).info.errors, null, '配列でなければ読まない');
+  assert.equal(read(sResult({ errors: [null, '   '] })).info.errors, null, '中身が空なら null');
+});
+
+test('errors が複数あれば1本に畳む', () => {
+  // 複数入る形は見ていない。配列のまま持たせると、呼ぶ側が並べ方を決めることになる
+  const got = read(sResult({ errors: ['ひとつめ', 'ふたつめ'] }));
+  assert.equal(got.info.errors, 'ひとつめ / ふたつめ');
+});
+
+test('errors が長ければ切る', () => {
+  const got = read(sResult({ errors: ['あ'.repeat(3000)] }));
+  assert.ok(got.info.errors.endsWith('…（以下省略）'));
+  assert.ok(got.info.errors.length < 3000);
+});
+
+test('許可を断った件数は、0 と不明を分ける', () => {
+  assert.equal(read(sResult({ permission_denials: [] })).info.denials, 0, '空配列は「0件だった」');
+  assert.equal(read(sResult()).info.denials, null, 'キーが無ければ不明');
+  // 中の形は空配列しか見ていないので仮定しない。件数だけ数える
+  assert.equal(read(sResult({ permission_denials: [{ tool: 'Write' }] })).info.denials, 1);
+});
+
+test('自分が送った行には isReplay が立つ', () => {
+  // --replay-user-messages の戻り。
+  // これが無いと、ツール結果の行と同じ user 型で並んで区別できない
+  const mine = read(sUser({ text: '直して', isReplay: true }));
+  assert.equal(mine.kind, 'user');
+  assert.equal(mine.isReplay, true);
+
+  const fromTool = read(sUser({ results: [{ id: 'call-1', text: 'ok' }] }));
+  assert.equal(fromTool.isReplay, false, 'ツール結果には付かない');
+});
+
+test('isReplay は印が無ければ false。null に倒さない', () => {
+  // 向こうが明示的に付ける側なので、印が無い＝自分の行ではない、と読んでよい。
+  // ここを null にすると呼ぶ側が3通りを扱うことになり、得るものが無い
+  assert.equal(read(sAssistant('やってみる')).isReplay, false);
+  assert.equal(classifyStreamLine('こわれてる').isReplay, false);
+});
+
+/*
  * 知らない形（ここが落ちると画面が丸ごと止まる）
  */
 

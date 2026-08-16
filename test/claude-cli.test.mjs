@@ -9,12 +9,12 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
-import { PassThrough } from 'node:stream';
 import {
-  LINE_MAX, CLAUDE_STATE_LABELS,
+  LINE_MAX, CLAUDE_STATE_LABELS, STOP_SOFT_MS, STOP_HARD_MS,
   resolveClaudeBin, parseClaudeVersion, createLineSplitter, probeClaude, claudeInfo,
+  spawnClaude, stopClaude,
 } from '../src/os/claude.mjs';
+import { fakeChild } from './helpers.mjs';
 
 /** 実測した置き場所。 */
 const BIN = 'C:\\Users\\me\\.local\\bin\\claude.exe';
@@ -181,15 +181,6 @@ test('読めなければ null。空文字にしない', () => {
  * 起動時のプローブ
  */
 
-/** 偽の子プロセス。close を呼ぶまで終わらない。 */
-function fakeChild() {
-  const child = new EventEmitter();
-  child.stdout = new PassThrough();
-  child.stderr = new PassThrough();
-  child.kill = () => { child.killed = true; };
-  return child;
-}
-
 test('版が読めたら ok。path と source も残る', async () => {
   const child = fakeChild();
   const p = probeClaude({
@@ -295,6 +286,229 @@ test('チャンクに割れて届いても版が読める', async () => {
   child.emit('close', 0);
 
   assert.equal((await p).version, '2.1.228');
+});
+
+/*
+ * 起こす
+ */
+
+test('決められた実行ファイルと引数を、シェルを通さずに渡す', () => {
+  let seen = null;
+  const got = spawnClaude({
+    bin: BIN,
+    args: ['--print', '--verbose'],
+    cwd: 'C:\\work\\demo',
+    env: { CLAUDE_DECK_X: '1' },
+    spawnFn: (file, args, opts) => { seen = { file, args, opts }; return fakeChild(); },
+  });
+
+  assert.equal(got.ok, true);
+  assert.equal(got.reason, null);
+  assert.equal(seen.file, BIN);
+  assert.deepEqual(seen.args, ['--print', '--verbose'], '引数は組み替えない');
+  assert.equal(seen.opts.cwd, 'C:\\work\\demo');
+  assert.deepEqual(seen.opts.env, { CLAUDE_DECK_X: '1' });
+  // 通すと引数がシェルの構文として解釈され、指示文やパスの記号が意味を持つ
+  assert.equal(seen.opts.shell, false);
+  assert.equal(seen.opts.windowsHide, true);
+  // stdin がパイプでないと、指示文を JSON の1行として書き込めない
+  assert.deepEqual(seen.opts.stdio, ['pipe', 'pipe', 'pipe']);
+});
+
+test('起こした子の出力は文字列で届く', () => {
+  // 素の Buffer を toString() すると、チャンクの境目で日本語が割れる。
+  // 割れた後では直せないので、受け取る前に決めておく
+  const child = fakeChild();
+  spawnClaude({ bin: BIN, args: [], spawnFn: () => child });
+
+  const seen = [];
+  child.stdout.on('data', (d) => seen.push(d));
+  child.stdout.write('直しました\n');
+  assert.deepEqual(seen, ['直しました\n']);
+  assert.equal(typeof seen[0], 'string', 'Buffer ではない');
+});
+
+test('出力に data を勝手に付けない', () => {
+  // 付けると流れ始めてしまい、呼ぶ側が listener を足す前の分が消える
+  const child = fakeChild();
+  spawnClaude({ bin: BIN, args: [], spawnFn: () => child });
+  assert.equal(child.stdout.listenerCount('data'), 0);
+  assert.equal(child.stderr.listenerCount('data'), 0);
+});
+
+test('stdin が先に死んでも落ちない', () => {
+  // 拾わないと uncaughtException になり、Node 18 以降は**サーバーごと落ちる**
+  const child = fakeChild();
+  spawnClaude({ bin: BIN, args: [], spawnFn: () => child });
+  child.stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+});
+
+test('.cmd / .bat は起こさない', () => {
+  // 探す側でも弾いているが、この関数だけを別の場所から呼ばれても穴が開かないように
+  for (const f of ['C:\\tools\\claude.cmd', 'C:\\tools\\claude.BAT']) {
+    let spawned = false;
+    const got = spawnClaude({
+      bin: f, args: [], spawnFn: () => { spawned = true; return fakeChild(); },
+    });
+    assert.equal(got.ok, false, `弾く: ${f}`);
+    assert.equal(spawned, false);
+    assert.match(got.reason, /\.cmd/);
+  }
+});
+
+test('実行ファイルや引数が揃っていなければ、起こさずに理由を返す', () => {
+  const cases = [
+    { bin: '', args: [] },
+    { bin: '   ', args: [] },
+    { bin: null, args: [] },
+    { bin: BIN, args: null },
+    { bin: BIN, args: '--print' },
+  ];
+  for (const c of cases) {
+    let spawned = false;
+    const got = spawnClaude({ ...c, spawnFn: () => { spawned = true; return fakeChild(); } });
+    assert.equal(got.ok, false, JSON.stringify(c));
+    assert.equal(got.child, null, '半端な子を返さない');
+    assert.ok(got.reason, '理由を必ず付ける');
+    assert.equal(spawned, false);
+  }
+});
+
+test('起こすときに spawn が同期で投げても落ちない', () => {
+  const got = spawnClaude({ bin: BIN, args: [], spawnFn: () => { throw new Error('EACCES'); } });
+  assert.equal(got.ok, false);
+  assert.equal(got.child, null);
+  assert.match(got.reason, /EACCES/);
+});
+
+/*
+ * 止める
+ */
+
+test('止める段の猶予は 3秒 → 2秒', () => {
+  assert.equal(STOP_SOFT_MS, 3000);
+  assert.equal(STOP_HARD_MS, 2000);
+});
+
+test('もう終わっている子には何もしない', async () => {
+  for (const dead of [
+    Object.assign(fakeChild(), { exitCode: 0 }),
+    Object.assign(fakeChild(), { signalCode: 'SIGKILL' }),
+    null,
+  ]) {
+    let spawned = false;
+    const got = await stopClaude(dead, {
+      platform: 'win32', softMs: 1, hardMs: 1,
+      spawnFn: () => { spawned = true; return fakeChild(); },
+    });
+    assert.equal(got.closed, true);
+    assert.equal(got.stage, 'already');
+    assert.equal(spawned, false, 'taskkill を起こさない');
+  }
+});
+
+test('まず stdin を閉じて、行儀よく終わるのを待つ', async () => {
+  const child = fakeChild();
+  let spawned = false;
+  const p = stopClaude(child, {
+    platform: 'win32', softMs: 50, hardMs: 50,
+    spawnFn: () => { spawned = true; return fakeChild(); },
+  });
+
+  assert.equal(child.stdin.writableEnded, true, 'もう入力は来ないと伝える');
+  child.close(0);
+
+  const got = await p;
+  assert.equal(got.closed, true);
+  assert.equal(got.stage, 'stdin');
+  assert.equal(got.reason, null);
+  assert.equal(spawned, false, 'いきなり落としにいかない');
+});
+
+test('終わらなければ taskkill で木ごと落としにいく', async () => {
+  // child.kill() は直接の子だけ。claude.exe は Bash ツールで孫を作るので /T が要る
+  const child = fakeChild({ pid: 999 });
+  const calls = [];
+  const p = stopClaude(child, {
+    platform: 'win32', softMs: 1, hardMs: 1,
+    spawnFn: (file, args) => {
+      calls.push([file, ...args]);
+      // 段3まで来たら落ちたことにする
+      if (args.includes('/F')) child.close(1);
+      return fakeChild();
+    },
+  });
+
+  const got = await p;
+  assert.deepEqual(calls, [
+    ['taskkill.exe', '/PID', '999', '/T'],
+    ['taskkill.exe', '/PID', '999', '/T', '/F'],
+  ], 'いきなり /F にしない。書きかけの会話ログを途中で切らないため');
+  assert.equal(got.closed, true);
+  assert.equal(got.stage, 'force');
+});
+
+test('win32 以外は SIGTERM → SIGKILL の順に強くする', async () => {
+  const child = fakeChild();
+  const got = await stopClaude(child, {
+    platform: 'linux', softMs: 1, hardMs: 1,
+    spawnFn: () => { throw new Error('taskkill は posix に無い'); },
+  });
+
+  assert.deepEqual(child.signals, ['SIGTERM', 'SIGKILL']);
+  // 「止めました」と嘘を書かない。残っているかもしれないと伝える
+  assert.equal(got.closed, false);
+  assert.equal(got.stage, 'force');
+  assert.ok(got.reason);
+});
+
+test('pid が無い子には taskkill を起こさない', async () => {
+  // spawn に失敗した子には pid が無い。渡すものが無いので何もしない
+  const child = fakeChild();
+  child.pid = undefined;
+  let spawned = false;
+  const got = await stopClaude(child, {
+    platform: 'win32', softMs: 1, hardMs: 1,
+    spawnFn: () => { spawned = true; return fakeChild(); },
+  });
+  assert.equal(spawned, false);
+  assert.equal(got.closed, false);
+});
+
+test('taskkill を起こせなくても落ちない', async () => {
+  const got = await stopClaude(fakeChild(), {
+    platform: 'win32', softMs: 1, hardMs: 1,
+    spawnFn: () => { throw new Error('taskkill.exe が無い'); },
+  });
+  assert.equal(got.closed, false);
+  assert.equal(got.stage, 'force');
+});
+
+test("taskkill が 'error' を出しても落ちない", async () => {
+  // 拾っていなければ EventEmitter が投げ、テストごと落ちる
+  const child = fakeChild({ pid: 7 });
+  const got = await stopClaude(child, {
+    platform: 'win32', softMs: 1, hardMs: 1,
+    spawnFn: () => {
+      const t = fakeChild();
+      // listener は spawnFn が返った直後に付く。マイクロタスクへ逃がして順番を合わせる
+      queueMicrotask(() => t.emit('error', new Error('見つかりません')));
+      return t;
+    },
+  });
+  assert.equal(got.closed, false);
+});
+
+test("'error' が来たら終わり扱い。close と二重に確定しない", async () => {
+  // 実行ファイルが消えた後などに来る。止めたい相手がそもそも居ない
+  const child = fakeChild();
+  const p = stopClaude(child, { platform: 'win32', softMs: 50, hardMs: 50 });
+  child.emit('error', new Error('ENOENT'));
+  child.close(0);
+
+  const got = await p;
+  assert.equal(got.closed, true);
+  assert.equal(got.stage, 'stdin');
 });
 
 /*

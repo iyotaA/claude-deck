@@ -24,6 +24,8 @@ import { claudeInfo, probeClaude } from './src/os/claude.mjs';
 import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
 import { validateSettings, writeSettings } from './src/notify/settings.mjs';
+import { createRunner } from './src/run/index.mjs';
+import { runDirsFromEnv } from './src/run/spec.mjs';
 import { loadUpdateState, parseUpdateState } from './src/update/state.mjs';
 import { loadStartupState, parseStartupState } from './src/startup/state.mjs';
 import { isTrustedWrite } from './src/shared/origin.mjs';
@@ -40,6 +42,14 @@ const HOST = '127.0.0.1';
 const DEFAULT_PORT = 4317;
 /** 書き込みの本文の上限。設定は小さい JSON しか来ない。 */
 const BODY_MAX = 8 * 1024;
+/**
+ * 実行の窓口だけの上限。
+ *
+ * **全体（BODY_MAX）を上げない。** 1本の定数を上げると、緩めた覚えのない口まで緩む。
+ * 指示文は PROMPT_MAX（64,000 文字）まで受けるので、日本語（UTF-8 で1文字3バイト）でも
+ * 最悪 192KB。他の項目を足してここに収まる。
+ */
+const RUN_BODY_MAX = 256 * 1024;
 
 /**
  * 実際に listen できたポート。
@@ -137,6 +147,13 @@ const clients = new Set();
  * 起動時に1回だけ設定を読む（毎秒の経路で fs を叩かないため）。
  */
 const notifier = createNotifier();
+/**
+ * 画面から起こしたセッションの係。
+ *
+ * 一覧（`view/`）とは別の経路。合流させるのは `refresh()` の仕事で、
+ * ここは「起こす・書く・止める」と速報の配り先だけを持つ。
+ */
+const runner = createRunner();
 let lastPayload = null;
 let lastSerialized = '';
 let refreshTimer = null;
@@ -160,6 +177,11 @@ async function refresh(force = false) {
   }
   refreshing = true;
   try {
+    // 実行の時計はここ1つ。`run/index.mjs` に setInterval を置かない。
+    // 一覧が読めなかったときも沈黙の判定だけは進むよう、compute より先に呼ぶ。
+    // try/catch は notifier と同じ理由で必須（実行側のバグで画面を空白にしない）
+    try { runner.tick(); } catch { /* 見送る */ }
+
     const payload = await computeSessions();
 
     // 通知は一覧より格下。ここで落とすと下の catch が broadcast('error') を出し、
@@ -274,10 +296,15 @@ async function handleFocus(res, pid) {
 /**
  * 本文を JSON として読む。上限を超えたら受け取らずに切る。
  *
+ * 上限を引数にしてあるのは、実行の窓口だけ大きく受けるため。
+ * **全体（BODY_MAX）を上げない。** 1本の定数を上げると、
+ * 緩めた覚えのない口（設定の保存など）まで一緒に緩む。
+ *
  * @param {object} req リクエスト
+ * @param {number} [limit] 受け取るバイト数の上限
  * @returns {Promise<object>} 本文が空なら {}
  */
-function readJsonBody(req) {
+function readJsonBody(req, limit = BODY_MAX) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
@@ -285,7 +312,7 @@ function readJsonBody(req) {
     req.on('data', (c) => {
       if (over) return;
       size += c.length;
-      if (size > BODY_MAX) {
+      if (size > limit) {
         over = true;
         // ここで req.destroy() を呼ぶと、断りの 400 を書く前に接続が切れる。
         // 溜めるのをやめて捨てるだけにして、応答は呼び側に書かせる
@@ -509,6 +536,205 @@ function handleApplyUpdate(res) {
   });
 }
 
+/* ------------------------------------------ 実行（画面から起こすセッション） */
+
+/** 実行の速報を受け取っている窓。一覧の `clients` とは別に持つ。 */
+const runClients = new Set();
+/** 前回配った台帳の姿。同じなら配らない（一覧の差分判定と同じ作法）。 */
+let lastRunRows = '';
+
+/**
+ * 実行の SSE を、つないでいる窓すべてへ配る。
+ *
+ * @param {string} event イベント名
+ * @param {object} data 中身
+ * @returns {void}
+ */
+function runBroadcast(event, data) {
+  if (runClients.size === 0) return;
+  const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of runClients) {
+    try {
+      res.write(frame);
+    } catch {
+      runClients.delete(res);
+    }
+  }
+}
+
+/**
+ * 台帳の姿が変わっていれば配る。
+ *
+ * 行は多くても3本なので毎回組んでよい。変わっていないのに配らないのは、
+ * 一覧の差分判定と同じ理由（画面側の作り直しを無駄に走らせない）。
+ *
+ * @param {boolean} [force] 変わっていなくても配る
+ * @returns {void}
+ */
+function pushRunRows(force = false) {
+  const rows = runner.rows();
+  const serialized = JSON.stringify(rows);
+  if (!force && serialized === lastRunRows) return;
+  lastRunRows = serialized;
+  runBroadcast('runs', { rows, stats: runner.stats() });
+}
+
+// 購読は**サーバーに1本**だけ。窓は runClients を出入りするだけにしてある。
+// 窓ごとに購読すると、閉じ忘れたぶんが listeners に静かに溜まる
+runner.subscribe((events) => {
+  runBroadcast('run', { events });
+  pushRunRows();
+});
+
+/**
+ * 起こしてよいフォルダ。
+ *
+ * 任意の文字列を受けない。許すのは2つだけ。
+ * - 一覧に出ている cwd（＝このマシンで Claude Code が実際に動いたことのあるフォルダ）
+ * - `CLAUDE_DECK_RUN_DIRS`（`;` 区切り）で明示的に足したフォルダ
+ *
+ * 書き込みの門番はブラウザ越しの攻撃を止めるが、**この機能の被害は
+ * 「コードが実行される」という質の違うもの**なので、万一そこを抜けて届いても
+ * 影響がその人の普段の作業フォルダに留まる形にしておく。
+ * 配下かどうかの判定そのものは run/spec.mjs の resolveCwd にある。
+ *
+ * @returns {string[]} 許可するフォルダ
+ */
+function allowedRunDirs() {
+  const dirs = new Set(runDirsFromEnv());
+  for (const row of lastPayload?.rows ?? []) {
+    if (typeof row?.cwd === 'string' && row.cwd) dirs.add(row.cwd);
+  }
+  return [...dirs];
+}
+
+/**
+ * セッションを1本起こす。
+ *
+ * 断る理由が4つある（掴めていない 503 / 指定が不正 400 / 本数と間隔 429 /
+ * 起こせなかった 500）。**どれで断ったかは run/index.mjs が status で返す。**
+ * ここで理由の文字列を見て分岐させない。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ */
+async function handleRunStart(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req, RUN_BODY_MAX);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    return;
+  }
+
+  const r = runner.start(body, { allowedDirs: allowedRunDirs() });
+  // 断られた場合も台帳が動いていることがある（spawn に失敗した run は failed で残る）
+  pushRunRows();
+  if (!r.ok) {
+    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
+    return;
+  }
+  sendJson(res, r.status, { ok: true, runId: r.runId, run: r.row });
+}
+
+/**
+ * 動いている run に続きの指示を送る。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ * @param {string} runId 実行の識別子
+ */
+async function handleRunInput(req, res, runId) {
+  let body;
+  try {
+    body = await readJsonBody(req, RUN_BODY_MAX);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    return;
+  }
+
+  const r = runner.input(runId, body?.prompt ?? body?.text);
+  pushRunRows();
+  if (!r.ok) {
+    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
+    return;
+  }
+  sendJson(res, r.status, { ok: true, run: r.row });
+}
+
+/**
+ * 止める。3段階（stdin を閉じる → taskkill /T → taskkill /T /F）は os/claude.mjs の中。
+ *
+ * @param {object} res レスポンス
+ * @param {string} runId 実行の識別子
+ */
+async function handleRunStop(res, runId) {
+  try {
+    const r = await runner.stop(runId);
+    pushRunRows();
+    if (!r.ok) {
+      sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
+      return;
+    }
+    sendJson(res, r.status, { ok: true, run: r.row, closed: r.closed ?? null });
+  } catch (err) {
+    sendJson(res, 500, { ok: false, reason: String(err?.message ?? err) });
+  }
+}
+
+/**
+ * 実行専用の SSE。
+ *
+ * **`/api/stream` に相乗りさせない。** あちらは全タブが常時つないでいる一覧の経路で、
+ * 差分判定つき・1秒 tick 付き。1ターンで数百行出る実行の速報を混ぜると、
+ * 一覧の更新が実行の量に引きずられる。性質も寿命も違う。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ * @param {number} from この `seq` より後の速報を、つないだ直後に流し直す
+ */
+function handleRunStream(req, res, from) {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no',
+  });
+  res.write(': connected\n\n');
+  runClients.add(res);
+
+  // 切れていたあいだの穴は、つないだその場で埋める。
+  // missed は落として渡せなかった件数。**黙って詰めない**
+  const back = runner.events(from);
+  try {
+    res.write(`event: runs\ndata: ${JSON.stringify({
+      rows: runner.rows(),
+      stats: runner.stats(),
+      from: back.from,
+      nextSeq: back.nextSeq,
+      missed: back.missed,
+    })}\n\n`);
+    if (back.events.length > 0) {
+      res.write(`event: run\ndata: ${JSON.stringify({ events: back.events })}\n\n`);
+    }
+  } catch { /* close 側で片付ける */ }
+
+  // 実行が無いあいだは無言になるので、生きていることだけ伝える。
+  // 一覧のような1秒 tick は要らない（経過時間をここから描かない）
+  const ping = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch { /* close 側で片付ける */ }
+  }, 25000);
+
+  const close = () => {
+    clearInterval(ping);
+    runClients.delete(res);
+  };
+  req.on('close', close);
+  req.on('error', close);
+}
+
 /**
  * GET と HEAD 以外は、すべてここを通す。
  *
@@ -550,6 +776,18 @@ function handleWrite(req, res, pathname, url) {
   }
   if (pathname === '/api/update/apply') {
     handleApplyUpdate(res);
+    return;
+  }
+  if (pathname === '/api/runs') {
+    handleRunStart(req, res);
+    return;
+  }
+  // 完全一致（/api/runs）より後ろに置く。こちらのほうが具体的だが、
+  // 上は同じ文字列との一致なので取り違えは起きない
+  const runPost = pathname.match(/^\/api\/runs\/([\w-]{1,64})\/(input|stop)$/);
+  if (runPost) {
+    if (runPost[2] === 'input') handleRunInput(req, res, runPost[1]);
+    else handleRunStop(res, runPost[1]);
     return;
   }
 
@@ -701,6 +939,33 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている
+  if (pathname === '/api/runs') {
+    sendJson(res, 200, { rows: runner.rows(), stats: runner.stats() });
+    return;
+  }
+
+  // 取りこぼしの穴埋め。SSE が切れているあいだに出た速報をここで拾う。
+  // 完全一致なので、下の runMatch（:id）とはぶつからない
+  if (pathname === '/api/runs/events') {
+    sendJson(res, 200, runner.events(Number(url.searchParams.get('from'))));
+    return;
+  }
+
+  // 実行専用の SSE。/api/stream には相乗りさせない（理由は handleRunStream に）
+  if (pathname === '/api/runs/stream') {
+    handleRunStream(req, res, Number(url.searchParams.get('from')));
+    return;
+  }
+
+  const runMatch = /^\/api\/runs\/([\w-]{1,64})$/.exec(pathname);
+  if (runMatch) {
+    const run = runner.get(runMatch[1]);
+    if (!run) sendJson(res, 404, { error: 'その実行は見つかりません' });
+    else sendJson(res, 200, run);
+    return;
+  }
+
   // 設定モーダルが開いたときに1回だけ引く。生の Webhook URL は入らない
   if (pathname === '/api/settings/notify') {
     sendJson(res, 200, notifier.settings());
@@ -727,6 +992,9 @@ const server = http.createServer((req, res) => {
       // 画面からセッションを起こすための土台。掴めていなければここで分かる。
       // 起動直後は state:'checking'（ok は null。0 と不明を分けるのと同じ扱い）
       claude: claudeInfo(),
+      // 数だけ。行そのものは /api/runs。裏で立っているサーバーが何本抱えているかを
+      // ここから確かめられるようにしておく（自動起動されたぶんは画面が無くても動く）
+      runs: runner.stats(),
       // 短い形だけ載せる。全部入りは /api/update
       update: { state: update.state, available: update.available },
       // こちらは丸ごと。自動起動には専用の窓口が無いので、短くすると見る手段が消える。
@@ -886,6 +1154,14 @@ function shutdown(code = 0) {
   for (const w of watchers) {
     try { w.close(); } catch { /* すでに閉じている */ }
   }
+
+  // 起こした子を畳みにいく。**待たない。**
+  // `stopClaude` の3段（stdin を閉じる → taskkill /T → taskkill /T /F）は最長5秒かかるが、
+  // 下の 500ms より長く待つと Ctrl+C がすぐ効かなくなる。
+  // 1段目の stdin を閉じるところまでは同期で始まり、行儀のよい相手はそれで終わる（実測 close code=0）。
+  // それでも残る木の始末（process.on('exit') の taskkill）は段3 #8 で塞ぐ。**いまは残りうる**
+  runner.shutdown().catch(() => { /* 畳む途中の失敗は見送る */ });
+
   // 助言として置いた紙なので、畳めるときは消しておく。
   // 消し損ねても読む側は /api/health で裏を取る作りなので、そこは致命にならない。
   // 自分が置いたときだけ消す。置いていない紙は他のサーバーのものなので触らない

@@ -24,6 +24,28 @@
  * **生の `type` は捨てずに残す。** `control_request`（許可を求めてくる行）のように、
  * いまは扱わないが後で扱いたくなるものがあるため。
  * JSON として読めない行は `broken` にして数えるだけ（transcript.mjs の parseLines と同じ作法）。
+ *
+ * ## 実測した行の並び（claude 2.1.228・2026-08-15 と 08-16）
+ *
+ * 観測した種類はこの9つ。`system/hook_*` はフックを入れている環境でだけ流れる。
+ *
+ * ```
+ * system/hook_started   system/hook_progress   system/hook_response   system/permission_denied
+ * system/init   user   assistant   rate_limit_event   result
+ * ```
+ *
+ * 並びで気をつけるところが4つある。どれも扱いを間違えると壊れ方が分かりにくい。
+ *
+ * - **`system/init` はターンごとに来る。** 起動時の1回だけではない（中身は同じで uuid だけ変わる）。
+ *   「もう init は来た」と決め打って2回目を捨てると、`session_id` の照合の機会を失う
+ * - **`result` は最後の行ではない。** 実測で `system/hook_response` が result の11ms 後に届いた。
+ *   result を見たら「あなたの番」に移してよいが、**そこで読むのをやめてはいけない**
+ * - **`user` 行には `isReplay: true` が付く**（`--replay-user-messages` の戻り）。
+ *   これが無いと「自分が送った行」と「ツール結果の行」が同じ顔で並ぶ
+ * - **`system/permission_denied` は止まった印ではない。** `acceptEdits` で Bash を投げると
+ *   これが流れ、そのツールの結果が `isError:true`（`This command requires approval`）になり、
+ *   **向こうは止まらずに次の手へ移る**（件数は `result` の `permission_denials` に載る）。
+ *   「許可待ちで止まっている」と読み替えると、待っていないものを待っていることにしてしまう
  */
 import { clip } from '../shared/text.mjs';
 
@@ -72,8 +94,24 @@ function num(v) {
 /**
  * `system` / `subtype:init` から、起動できたことを確かめるための値を取り出す。
  *
- * 形は実測していない（段3 #3 で受信行を丸ごと落として棚卸しする）。
- * だから**キーが無いことを異常にしない。** 取れなければ null にして進む。
+ * 実測で載っていたキー（claude 2.1.228）。ここに無いものは仮定しない。
+ *
+ * ```
+ * type subtype cwd session_id tools mcp_servers model permissionMode slash_commands
+ * apiKeySource claude_code_version output_style agents skills plugins capabilities
+ * analytics_disabled product_feedback_disabled uuid memory_paths
+ * fast_mode_state fast_mode_disabled_reason
+ * ```
+ *
+ * - `permissionMode` は**キャメル**。この行だけ他と綴りが違う（`session_id` は snake）。
+ *   `permission_mode` も見るのは、向こうが揃えてきた日に黙って null になるのを防ぐ保険
+ * - `model` は `claude-opus-5[1m]` のように**角括弧が付くことがある**。
+ *   `run/spec.mjs` の `MODEL_RE` は角括弧を通さないが、あれは**こちらから指定する側**の話。
+ *   受け取る側で弾かない（表示するだけなので害が無い）
+ * - `capabilities` に `interrupt_receipt_v1` などが載る。中断の口が公開されている手がかりだが、
+ *   いまは使っていないので拾わない
+ *
+ * それでも**キーが無いことを異常にしない。** 版が上がれば形は変わる。取れなければ null で進む。
  *
  * @param {object} line 読めた行
  * @returns {{model:string|null, cwd:string|null, permissionMode:string|null, tools:number|null}}
@@ -83,20 +121,73 @@ function initInfo(line) {
   return {
     model: str(line.model),
     cwd: str(line.cwd),
-    // 綴りが camel か snake かを確かめていないので両方見る
     permissionMode: str(line.permissionMode ?? line.permission_mode),
     tools,
   };
 }
 
 /**
+ * `errors` を1本の文字列に畳む。
+ *
+ * 実測（予算超過）で `["Reached maximum budget ($0.01)"]` の形だった。
+ * **人が読める理由はここにしか無い。** これを拾わないと、画面に出せるのが
+ * `error_max_budget_usd` という機械の語だけになる。
+ *
+ * 複数入る形は見ていないので、配列のまま持たずに畳んでおく。
+ * 台帳に積むものは短く保つ（大きな行が1つあるだけで一覧が重くなる）。
+ *
+ * @param {*} v `errors` の値（配列でないことも想定する）
+ * @returns {string|null} 空なら null
+ */
+function errorText(v) {
+  if (!Array.isArray(v)) return null;
+
+  const parts = [];
+  for (const e of v) {
+    // null を JSON.stringify に通すと文字列の "null" になる。理由として出したくないので先に落とす
+    if (e === null || e === undefined) continue;
+    // 文字列以外が入る形は見ていない。来たときに読み捨てず、形のまま見せる
+    const s = typeof e === 'string' ? e : JSON.stringify(e);
+    if (typeof s === 'string' && s.trim()) parts.push(s);
+  }
+
+  return parts.length ? clip(parts.join(' / '), RESULT_TEXT_MAX) : null;
+}
+
+/**
  * `result` から、1往復が終わったことと、その結末を取り出す。
+ *
+ * 実測（claude 2.1.228）で、成功と予算超過で**載るキーが違った**。
+ *
+ * | キー | 成功 | 予算超過 |
+ * |---|---|---|
+ * | `subtype` | `success` | `error_max_budget_usd` |
+ * | `is_error` | false | true |
+ * | `terminal_reason` | `completed` | `budget_exhausted` |
+ * | `result` | 応答の本文 | **無い** |
+ * | `errors` | 無い | `["Reached maximum budget ($0.01)"]` |
+ * | `api_error_status` | null | **無い** |
+ *
+ * だから**キーの有無で分岐しない。** 無いものは null にして、呼ぶ側が揃った形だけ見られるようにする。
+ *
+ * 数え方で間違えやすいのが2つある。どちらも実測。
+ *
+ * - **`num_turns` は累積ではない。** 2往復目も 1 に戻る。往復数は台帳側で数えること
+ * - **`total_cost_usd` は累積**（0.801395 → 0.8419855）。予算の残りを見るには最新の値を使う
  *
  * `total_cost_usd` は `--max-budget-usd` の効き目を見るために拾う。
  * 画面に金額として出すためではない（USD は既定で出さない方針のまま）。
  *
+ * `permission_denials` には断られた回数ぶん入る（`acceptEdits` で Bash を投げて 1 件を実測）。
+ * **中の形は見ていないので仮定せず、件数だけ持つ。**
+ * 0 件でも 0 を返す（キーごと無いときだけ null）。断られても向こうは止まらないので、
+ * これは「止まった理由」ではなく「思ったとおりに動かなかった回数」として読む。
+ *
  * @param {object} line 読めた行
- * @returns {{isError:boolean, durationMs:number|null, numTurns:number|null, costUSD:number|null, text:string|null}}
+ * @returns {{
+ *   isError:boolean, durationMs:number|null, numTurns:number|null, costUSD:number|null,
+ *   text:string|null, errors:string|null, terminalReason:string|null, denials:number|null,
+ * }}
  */
 function resultInfo(line) {
   return {
@@ -108,6 +199,10 @@ function resultInfo(line) {
     numTurns: num(line.num_turns),
     costUSD: num(line.total_cost_usd),
     text: clip(line.result, RESULT_TEXT_MAX),
+    errors: errorText(line.errors),
+    // 止まり方の機械可読な分類。`completed` / `budget_exhausted` を実測
+    terminalReason: str(line.terminal_reason),
+    denials: Array.isArray(line.permission_denials) ? line.permission_denials.length : null,
   };
 }
 
@@ -125,6 +220,7 @@ function resultInfo(line) {
  *   subtype: string|null,
  *   sessionId: string|null,
  *   parentToolUseId: string|null,
+ *   isReplay: boolean,
  *   entry: object|null,
  *   info: object|null,
  *   sample: string|null,
@@ -137,6 +233,7 @@ export function classifyStreamLine(text) {
     subtype: null,
     sessionId: null,
     parentToolUseId: null,
+    isReplay: false,
     entry: null,
     info: null,
     sample: null,
@@ -168,6 +265,12 @@ export function classifyStreamLine(text) {
     sessionId: sessionIdOf(line),
     // サブエージェント（Task）の出力にはこれが付く。会話ログの isSidechain にあたる印
     parentToolUseId: str(line.parent_tool_use_id ?? line.parentToolUseId),
+    // `--replay-user-messages` で返ってくる自分の行に付く（実測。camelCase）。
+    // これが無いと「自分が送った行」と「ツール結果の行」がどちらも user 型で並び、区別できない。
+    //
+    // 印が無いことは「自分の行ではない」と読んでよい（向こうが明示的に付ける側なので）。
+    // ここだけ null を使わず false に倒すのはそのため
+    isReplay: line.isReplay === true || line.is_replay === true,
   };
 
   switch (type) {
@@ -187,7 +290,8 @@ export function classifyStreamLine(text) {
       return { ...base, ...common, kind: 'result', info: resultInfo(line) };
 
     default:
-      // control_request / control_response など、いま扱わないものがここへ落ちる。
+      // 実測では `rate_limit_event`（トップレベルの type。`rate_limit_info` を持つ）がここへ落ちた。
+      // control_request / control_response のような、いま扱わないものも同じ扱い。
       // 生の type を残してあるので、扱う気になったときに読み直せる
       return { ...base, ...common, kind: 'other' };
   }

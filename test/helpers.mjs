@@ -8,6 +8,9 @@
  * 形は src/parse/entries.mjs 冒頭のコメントに書かれている実測結果に合わせている。
  */
 
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+
 /** 基準時刻。テストの中の時刻はすべてここからの相対で考える。 */
 export const T0 = Date.parse('2026-08-04T09:00:00.000Z');
 
@@ -227,8 +230,13 @@ export const S_ID = 'sess-1';
 /**
  * 起動できたことを伝えてくる最初の行。
  *
- * 形は実測していない（段3 #3 で受信行を落として棚卸しする）。
- * ここで組んでいるのは「いま読めると想定しているキー」であって、確定した仕様ではない。
+ * 実測（claude 2.1.228）で確かめたキーだけを組んでいる。
+ * 本物はもっと多くのキーを持つ（`skills` `plugins` `capabilities` など）が、
+ * 読んでいないものを並べても「読めている」の証明にはならないので足さない。
+ *
+ * **`permissionMode` だけキャメル**なのは実物がそうだから。ここを揃えて書き直さない。
+ *
+ * 最初の1回だけでなく**ターンごとに来る**（内容は同じで uuid だけ変わる）。
  */
 export function sysInit({ sessionId = S_ID, model = 'claude-opus-5', cwd = 'C:\\work\\demo',
   tools = ['Read', 'Edit'], permissionMode = 'plan', ...rest } = {}) {
@@ -326,6 +334,46 @@ export function sResult({ sessionId = S_ID, subtype = 'success', isError, durati
  */
 export function sLines(lines) {
   return `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`;
+}
+
+/**
+ * 偽の子プロセス。
+ *
+ * 実物の claude.exe は叩かない。入っているかどうかが環境で変わり、テストの前提にできないため。
+ * `close` を自分で起こすまで終わらないので、行の割れ方・止め方・死んだ子への書き込みを
+ * 好きな順番で試せる。
+ *
+ * **`exitCode` と `signalCode` は動いているあいだ `null`。**
+ * `stopClaude` がここを見て「もう終わっている」を判定するので、0 で初期化しない。
+ *
+ * @param {object} [opts] pid（既定 4242）
+ * @returns {object} EventEmitter に stdin / stdout / stderr を生やしたもの
+ */
+export function fakeChild({ pid = 4242 } = {}) {
+  const child = new EventEmitter();
+  child.pid = pid;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin = new PassThrough();
+  child.exitCode = null;
+  child.signalCode = null;
+  child.killed = false;
+
+  /** kill に渡された signal の並び。posix 側の段の進み方を確かめるのに使う。 */
+  child.signals = [];
+  child.kill = (sig = 'SIGTERM') => {
+    child.killed = true;
+    child.signals.push(sig);
+    return true;
+  };
+
+  /** 終わらせる。実物と同じく exitCode を立ててから close を出す。 */
+  child.close = (code = 0) => {
+    child.exitCode = code;
+    child.emit('close', code);
+  };
+
+  return child;
 }
 
 /** 登録簿の1件。 */

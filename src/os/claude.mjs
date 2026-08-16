@@ -5,14 +5,19 @@
  * 見ているのは node の標準モジュールだけ。
  * 判断（何を渡すか）は run/spec.mjs、解釈（返ってきた行の意味）は parse/stream.mjs にある。
  *
- * ここがやるのは3つだけ。
+ * ここがやるのは5つだけ。
  *
  * - 実行ファイルを探す（`resolveClaudeBin`）
  * - 版を1回だけ確かめて、その結果を持っておく（`probeClaude` / `claudeInfo`）
+ * - 起こす（`spawnClaude`）
+ * - 止める（`stopClaude`）
  * - 届いたバイト列を行に割る（`createLineSplitter`）
  *
- * 実際に起こす `spawnClaude` は段3 #3 で足す。
- * 配線（run/index.mjs）と同時に書かないと、テストの無い行を出荷することになるため。
+ * **どれも判断をしない。** 何を渡すか（argv・cwd）は run/spec.mjs が決め、
+ * いつ止めるかは run/ledger.mjs が決める。ここは言われたとおりに起こして止めるだけ。
+ *
+ * 届いた行を配るのもここではない。`spawnClaude` が返すのは素の子プロセスで、
+ * stdout をどう読むかは run/index.mjs（配線）の仕事。
  *
  * ## `.cmd` / `.bat` は使わない
  *
@@ -271,6 +276,179 @@ export function probeClaude({
     }, VERSION_TIMEOUT_MS);
     child.on('close', () => clearTimeout(timer));
     child.on('error', () => clearTimeout(timer));
+  });
+}
+
+/**
+ * 起こす。
+ *
+ * **判断はしない。** 何を渡すか（argv・cwd）は run/spec.mjs が決めたものをそのまま使う。
+ * ここでやるのは「シェルを通さずに起こして、事故りやすい後始末を先に済ませる」だけ。
+ *
+ * 先に済ませているのは2つ。どちらも忘れたときの壊れ方が分かりにくい。
+ *
+ * - **`setEncoding('utf8')`** … 素の Buffer を `toString()` すると、チャンクの境目で日本語が割れる。
+ *   割れた後では直せないので、受け取る前に決めておく
+ * - **`stdin.on('error')`** … 相手が先に死ぬと EPIPE が飛ぶ。拾わないと `uncaughtException` になり、
+ *   Node 18 以降は**サーバーごと落ちる**（実測で `serveStatic` の1行が同じ形で落ちていた）
+ *
+ * **stdout / stderr に `data` を付けるのは呼ぶ側の仕事。** ここでは付けない。
+ * 付けると流れ始めてしまい、呼ぶ側が listener を足す前の分が消える。
+ * 逆に**どちらも読まないとパイプが詰まって相手が終われなくなる**ので、
+ * 返ってきたその場（同じ tick のうち）で必ず両方に付けること。
+ *
+ * @param {object} opts
+ * @param {string} opts.bin 実行ファイルの絶対パス（`resolveClaudeBin` が返したもの）
+ * @param {string[]} opts.args 引数の並び（`run/spec.mjs` の `buildArgs` が組んだもの）
+ * @param {string} [opts.cwd] 起こすフォルダ
+ * @param {object} [opts.env] 環境変数
+ * @param {Function} [opts.spawnFn] spawn。テストから差し替える
+ * @returns {{ok:boolean, child:object|null, reason:string|null}}
+ */
+export function spawnClaude({ bin, args, cwd, env = process.env, spawnFn = spawn } = {}) {
+  if (typeof bin !== 'string' || !bin.trim()) {
+    return { ok: false, child: null, reason: '実行ファイルが決まっていません' };
+  }
+  // 探す側でも弾いているが、ここでも見る。この関数だけを別の場所から呼ばれても穴が開かないように
+  if (isBatch(bin)) {
+    return { ok: false, child: null, reason: '.cmd / .bat は実行しません' };
+  }
+  if (!Array.isArray(args)) {
+    return { ok: false, child: null, reason: '引数の並びがありません' };
+  }
+
+  let child;
+  try {
+    child = spawnFn(bin, args, {
+      cwd,
+      env,
+      // 黒い窓を出さない
+      windowsHide: true,
+      // **シェルを通さない。** 通すと引数がシェルの構文として解釈され、
+      // 指示文やパスの記号が意味を持つ。既定値だが、ここは明示しておく
+      shell: false,
+      // stdin は必ずパイプ。指示文をここへ JSON の1行として書く（argv には載せない）
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    // spawn が同期で投げることがある（引数の型が違うときなど）。
+    // 実行ファイルが無いときは非同期の 'error' に来るので、呼ぶ側はそちらも取ること
+    return { ok: false, child: null, reason: String(e?.message ?? e) };
+  }
+
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdin?.on('error', () => {});
+
+  return { ok: true, child, reason: null };
+}
+
+/** 止めるときの1段目の猶予。`stdin.end()` で行儀よく終わるのを待つ。 */
+export const STOP_SOFT_MS = 3000;
+
+/** 2段目・3段目の猶予。木ごと落としにかかってから、次の手に移るまで。 */
+export const STOP_HARD_MS = 2000;
+
+/**
+ * 止める。3段階で、効かなければ強くしていく。
+ *
+ * ```
+ * stdin.end()  →（3秒）→ taskkill /T  →（2秒）→ taskkill /T /F  →（2秒）→ 諦める
+ * ```
+ *
+ * **`child.kill()` では足りない。** あれは直接の子だけを終わらせるが、
+ * `claude.exe` は Bash ツールなどで**孫を作る**。親だけ殺すと孫が残り、
+ * 画面にもタスクマネージャの見えるところにも出ないまま走り続ける。
+ * `taskkill /T` は木ごと落とすのでそこを塞げる（win32 のときだけ。他では SIGTERM → SIGKILL）。
+ *
+ * いきなり `/F` にしないのは、書きかけの会話ログを途中で切らないため。
+ * まず stdin を閉じて「もう入力は来ない」と伝えれば、向こうが自分で畳んで終わる。
+ *
+ * **`closed` を「止めた」の意味で使わない。** 最後まで `close` が来なければ `false` にする。
+ * 残っているかもしれないものを「止めました」と書かない（0 と不明を分けるのと同じ）。
+ *
+ * @param {object} child spawnClaude が返した子
+ * @param {object} [opts]
+ * @param {Function} [opts.spawnFn] spawn。テストから差し替える
+ * @param {string} [opts.platform] 'win32' など
+ * @param {number} [opts.softMs] 1段目の猶予
+ * @param {number} [opts.hardMs] 2段目以降の猶予
+ * @returns {Promise<{closed:boolean, stage:'already'|'stdin'|'term'|'force', reason:string|null}>}
+ */
+export function stopClaude(child, {
+  spawnFn = spawn, platform = process.platform,
+  softMs = STOP_SOFT_MS, hardMs = STOP_HARD_MS,
+} = {}) {
+  // もう終わっている。`exitCode` と `signalCode` はどちらかに値が入る
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve({ closed: true, stage: 'already', reason: null });
+  }
+
+  return new Promise((resolve) => {
+    // どこまで強くしたか。close が来たときに、この値をそのまま結末として返す
+    let stage = 'stdin';
+    let done = false;
+    let timer = null;
+
+    const finish = (closed, reason = null) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve({ closed, stage, reason });
+    };
+
+    child.once('close', () => finish(true));
+    // 実行ファイルが消えた後などにここへ来る。止めたい相手がそもそも居ないので、終わり扱いでよい
+    child.once('error', () => finish(true));
+
+    /**
+     * 木ごと落としにかかる。
+     *
+     * @param {boolean} force `/F` を付けるか
+     */
+    const kill = (force) => {
+      const pid = child.pid;
+      // spawn に失敗した子には pid が無い。taskkill に渡すものが無いので何もしない
+      if (!pid) return;
+
+      if (platform !== 'win32') {
+        try { child.kill(force ? 'SIGKILL' : 'SIGTERM'); } catch { /* すでに終わっている */ }
+        return;
+      }
+
+      const killArgs = ['/PID', String(pid), '/T'];
+      if (force) killArgs.push('/F');
+      try {
+        const t = spawnFn('taskkill.exe', killArgs, { windowsHide: true });
+        // taskkill が無い・権限が足りない。ここで拾わないと 'error' が uncaught になる
+        t.on?.('error', () => {});
+        // 読まないとパイプが詰まる。中身は使わないので捨てる
+        t.stdout?.on('data', () => {});
+        t.stderr?.on('data', () => {});
+      } catch { /* spawn が同期で投げた。次の段に任せる */ }
+    };
+
+    // 段1。行儀よく頼む
+    try { child.stdin?.end(); } catch { /* もう閉じている */ }
+
+    timer = setTimeout(() => {
+      // 段2。木ごと閉じるよう頼む
+      stage = 'term';
+      kill(false);
+      // 落ちた瞬間に close が来ることがある。次の時計を仕掛けずに抜ける
+      if (done) return;
+
+      timer = setTimeout(() => {
+        // 段3。有無を言わせず落とす
+        stage = 'force';
+        kill(true);
+        if (done) return;
+
+        // ここまでやって close が来ないなら、こちらからできることは無い。
+        // 「止めました」と書かずに、残っているかもしれないと伝える
+        timer = setTimeout(() => finish(false, '止めきれませんでした（残っている可能性があります）'), hardMs);
+      }, hardMs);
+    }, softMs);
   });
 }
 
