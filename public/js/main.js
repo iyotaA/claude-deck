@@ -10,8 +10,8 @@
  * 依存は上から下へ一方向にだけ流す。逆向きに import したくなったら置き場所が間違っている。
  *   層0  util.js / perf.js / timeline/kinds.js       誰にも依存しない
  *   層1  store.js（kinds.js を直に見る）/ panel.js / detail-head.js / usage-chart.js
- *   層2  rows.js / drawer.js / timeline/（外からは index.js の1枚として見る）
- *   層3  detail-wait.js / detail-panels.js / agents.js / usage-panel.js
+ *   層2  rows.js / drawer.js / runs.js / timeline/（外からは index.js の1枚として見る）
+ *   層3  detail-wait.js / detail-panels.js / agents.js / usage-panel.js / run-view.js
  *   層4  detail.js
  *   層5  session.js
  *   層6  list.js
@@ -31,6 +31,10 @@
  *   - detailErrorNow は rows.js に置く（detail ⇄ session を切る）
  *   - setListOpen は drawer.js に置く（list → main → list を切る）
  *
+ * 実行の速報も同じ形で切ってある。runs.js（層2）は描画側を知らず、
+ * subscribeRuns(fn) で外から登録する。配線するのはこのファイル（層8）で、
+ * runs.js が run-view.js を import すると runs(2) ⇄ run-view(3) の循環になる。
+ *
  * 時系列は timeline/ に分けてある。呼ぶのは Timeline.* を通してだけで、
  * あちらの中のファイルを直に import しない（理由は timeline/index.js の冒頭に書いてある）。
  *
@@ -39,6 +43,9 @@
 import { query, dom, store } from './store.js';
 import { visibleRows } from './rows.js';
 import { initListDrawer } from './drawer.js';
+import { initRuns, subscribeRuns } from './runs.js';
+import * as RunView from './run-view.js';
+import { renderDetailIfNeeded } from './detail.js';
 import { renderList } from './list.js';
 import { initTabs } from './archive.js';
 import { select, detailCache } from './session.js';
@@ -118,6 +125,19 @@ dom.reload.addEventListener('click', () => {
   fetchOnce();
 });
 
+// 実行の速報。kind で受け持ちを分ける。
+//   rows   … 台帳が動いた（現れた・状態が変わった・終わった）→ 詳細ペインを作り直す
+//   events … 速報が1件届いた → パネルの中へ追記するだけ
+// 速報は1ターンで数百行来るので、そこで作り直すと開いた <details> と
+// 入力中の caret が毎回消える。だから events では作り直さない
+subscribeRuns((kind) => {
+  if (kind === 'events') {
+    RunView.render();
+    return;
+  }
+  renderDetailIfNeeded();
+});
+
 fetchOnce().then(() => {
   // つなぎっぱなしの接続があるとヘッドレスブラウザがロード完了を待ち続ける。
   // 見た目の確認を撮るときは ?nolive=1 で止める
@@ -126,4 +146,7 @@ fetchOnce().then(() => {
     return;
   }
   connect();
+  // 実行の速報は一覧とは別の SSE。あちらは全タブが常時つないでいる経路なので
+  // 相乗りさせない（1ターン数百行の速報に一覧の更新が引きずられる）
+  initRuns();
 });

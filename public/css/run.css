@@ -1,0 +1,176 @@
+/* ClaudeDeck ── この画面から起こした実行 */
+
+/* 読み込み順は usage.css の後・narrow.css の前。
+   narrow.css は上の9枚を上書きする役なので、必ず最後に読む。
+
+   色は新しく作らない。使うのは --accent（強調1本）と
+   --fg-muted / --fg-faint / --border / --border-strong / --hot / --warn だけ。
+   多色を足すと tokens.css の二重定義（prefers-color-scheme 側と
+   [data-theme="dark"] 側）を両方直す義務が生まれる。 */
+
+/* ------------------------------------------------------------ 器 */
+
+/* 流れてくるものを入れる箱。中だけがスクロールする。
+   高さを決めておかないと、1ターン数百行で詳細ペインが縦に伸び切って
+   下にある数値パネルへ辿り着けなくなる */
+.run-log {
+  margin-top: .6rem;
+  max-height: 26rem;
+  overflow-y: auto;
+  background: var(--bg-sunk);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 .6rem;
+}
+
+.run-empty {
+  padding: 1.2rem 0;
+  text-align: center;
+  font-size: .8rem;
+  color: var(--fg-faint);
+}
+
+/* 落とした件数。黙って捨てないための行なので、枠を破線にして
+   「本文ではない断り書き」だと分かる形にする（時系列の .away と同じ作法） */
+.run-drop {
+  margin: .6rem 0 0;
+  padding: .25rem .45rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  font-size: .72rem;
+  color: var(--fg-muted);
+}
+
+/* display を1つでも書いた時点でブラウザ既定の [hidden] { display: none } に勝つので、
+   隠す指定を自分で持たせる */
+.run-drop[hidden] { display: none; }
+
+/* ---------------------------------------------------------- 出来事 */
+
+.run-ev {
+  padding: .45rem 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  min-width: 0;
+}
+
+.run-log > .run-ev:first-child { border-top: 0; }
+
+/* サブエージェントの行は親の発言と混ざって並ぶ。
+   左に線を1本引いて字を落とし、どちらが本流か目で拾えるようにする */
+.run-ev.is-sub {
+  padding-left: .6rem;
+  border-left: 2px solid var(--border-strong);
+  color: var(--fg-muted);
+}
+
+.run-ev-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .45rem;
+  font-size: .72rem;
+}
+
+.run-ev-at {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.run-ev-kind {
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--fg-muted);
+}
+
+.run-ev-sub {
+  padding: .05rem .3rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  font-size: .66rem;
+  color: var(--fg-faint);
+}
+
+/* 種類の色付けは名前の1語だけ。面は塗らない。
+   一覧の状態色（点と細いバー）と喧嘩しないための決まりをここでも守る */
+.run-ev[data-kind="text"] .run-ev-kind { color: var(--accent); }
+.run-ev[data-kind="echo"] .run-ev-kind { color: var(--accent); }
+.run-ev[data-kind="note"] .run-ev-kind { color: var(--warn); }
+.run-ev[data-kind="broken"] .run-ev-kind { color: var(--hot); }
+
+/* あなたが送った1行。時系列の prompt と同じ見た目にして、
+   同じものが場所によって違って見えないようにする */
+.run-ev[data-kind="echo"] .tl-text {
+  padding: .45rem .6rem;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-elev);
+  border-radius: 0 6px 6px 0;
+}
+
+/* 1往復の終わりは区切りとして少し重くする */
+.run-ev[data-kind="result"] { border-top-color: var(--border-strong); }
+
+/* -------------------------------------------------------- 中身の形 */
+
+.run-tool {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .45rem;
+  min-width: 0;
+}
+
+.run-tool-name {
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  color: var(--accent);
+}
+
+.run-tool-detail {
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  color: var(--fg-faint);
+  overflow-wrap: anywhere;
+}
+
+/* ツールの結果と、読めなかった行。原文をそのまま出すので詰めて小さく */
+.run-out {
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.run-out.is-error { color: var(--hot); }
+
+.run-note {
+  font-size: .78rem;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.run-other {
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  color: var(--fg-faint);
+  overflow-wrap: anywhere;
+}
+
+/* 出来事の中の facts は detail.css の .facts をそのまま借りる。
+   ここでは字を一段落として、パネル頭の facts より軽く見せるだけにする */
+.run-ev .facts { font-size: .76rem; }
+
+/* ---------------------------------------------------- 狭い窓向け */
+
+/* モーダルと同じで、この機能の都合は narrow.css へ散らさずここに置く。
+   @media で必ず囲む（メディアクエリは詳細度を足さないので、
+   裸で書くと広い窓にもそのまま当たる） */
+@media (max-width: 860px) {
+  .run-log { max-height: 18rem; }
+}

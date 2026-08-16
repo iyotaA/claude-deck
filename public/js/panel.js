@@ -30,6 +30,7 @@ export function panel(title, opts = {}) {
 /** パネルの id。ジャンプ用リンクと対で使う。 */
 export const SEC = {
   wait: 'sec-wait',
+  run: 'sec-run',
   decisions: 'sec-decisions',
   todo: 'sec-todo',
   compact: 'sec-compact',

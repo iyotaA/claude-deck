@@ -3,8 +3,8 @@
  * 層4。パネル1枚ずつの中身は detail-head / detail-wait / detail-panels / agents が持ち、
  * ここは「どの順で積むか」と「作り直すかどうか」だけを決める。
  *
- * 積む順は読む順。あなたの番 → 決めたこと → TODO → 圧縮 → 時系列 →
- * サブエージェント → ファイル → セッションの状態。
+ * 積む順は読む順。あなたの番 → この画面から起こした実行 → 決めたこと → TODO → 圧縮 →
+ * 時系列 → サブエージェント → ファイル → セッションの状態。
  */
 import { el } from './util.js';
 import { mark } from './perf.js';
@@ -18,6 +18,8 @@ import {
 } from './detail-panels.js';
 import { agentsPanel } from './agents.js';
 import { usagePanel } from './usage-panel.js';
+import { runStampFor } from './runs.js';
+import * as RunView from './run-view.js';
 import * as Timeline from './timeline/index.js';
 
 /**
@@ -81,6 +83,10 @@ function detailKeyOf() {
     // 中央値はさらに遅れて着く（別の窓口。直近24本を読むので数値より遅い）。
     // ここへ入れておかないと、着いても鍵が動かず、札に差が書き足されない
     baselineStamp(),
+    // 実行の状態。**出来事が増えただけでは動かない値**を runs.js が組んでいる。
+    // 速報は1ターンで数百行来るので、それを鍵に混ぜると入力中の caret まで毎回消える。
+    // 中への追記は RunView.render() が別に受け持つ
+    runStampFor(store.selected),
   ].join('');
 }
 
@@ -117,8 +123,10 @@ export function renderDetail() {
   const row = headOf(store.selected);
   const error = detailErrorNow();
   lastDetailRender = { detail: store.detail, key: detailKeyOf() };
-  // 前の取っ手はここで捨てる。作り直したあとの画面に無い節点を掴んだままにしない
+  // 前の取っ手はここで捨てる。作り直したあとの画面に無い節点を掴んだままにしない。
+  // 実行パネルも同じ形で器を預かっているので、そちらも一緒に手放す
   Timeline.detach();
+  RunView.detach();
   dom.detail.replaceChildren();
 
   // 入口を3つに割る。ひとまとめにすると「選んでいない」「取得中」「取得に失敗した」が
@@ -181,6 +189,11 @@ export function renderDetail() {
 
   // 何を待っているか。自分の番のときはここが最初に読む場所になるので、目的の直下に置く
   add(waitingBlock(row, d));
+
+  // この画面から起こした実行。いま動いているものが最上位に来るべきなので待ちの直下に置く。
+  // if (d) の外なのは、起こした直後はまだ会話ログが1行も無いため
+  // （ログが出るまで何も出ないと、押したのに何も起きていないように見える）
+  add(RunView.runPanel(row.sessionId));
 
   if (d) {
     add(decisionsPanel(d));
