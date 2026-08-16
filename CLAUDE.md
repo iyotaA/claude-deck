@@ -208,8 +208,8 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 | 場所 | 役割 | 中身 |
 |---|---|---|
-| `public/css/` | 見た目 | 10枚。`<link>` の並びがそのまま重ね順になる |
-| `public/js/` | 画面の組み立て | 21枚 ＋ `timeline/` 7枚 |
+| `public/css/` | 見た目 | 11枚。`<link>` の並びがそのまま重ね順になる |
+| `public/js/` | 画面の組み立て | 23枚 ＋ `timeline/` 7枚 |
 
 こちらも import は一方向。層の一覧と、循環を切っている4箇所は「画面側」に書いてある。
 
@@ -720,8 +720,10 @@ C# 側に版を書き写さない。`vpk` に手で打たない。
 
 ## 実行（画面からセッションを起こす）
 
-`src/run/` と `src/os/claude.mjs`。見るだけの道具から一歩出る機能で、いま作りかけ。
-窓口までは通っていて、画面（`public/js/`）と一覧への合流はこれから。
+`src/run/` と `src/os/claude.mjs`、画面側は `public/js/runs.js` と `run-view.js`。
+見るだけの道具から一歩出る機能で、いま作りかけ。
+窓口と、詳細ペインへの出力までは通っている。
+**起こす口（新規開始のフォーム）と一覧への合流はこれから。**
 **この機能が増やす被害は質が違う。これまでは表示が変わるだけだったが、ここはコードが実行される。**
 
 使うのは公開されている CLI の入口だけ（`claude -p --input-format stream-json`）。
@@ -740,9 +742,23 @@ Error: When using --print, --output-format=stream-json requires --verbose
 **stdout は1行も出ない。** 付け忘れると「起こしたのに無言で死ぬ」になるので、
 `buildArgs` が必ず付ける（画面から外せる口も作らない）。
 
-**headless は `sessions/<PID>.json` を書かない。** 起動の前後で `~/.claude/sessions/` が
-1件も増えなかった。つまり `deriveState` から見ると登録簿に無いので、
-**動いているのに `ended`（終了）と表示される。** 一覧へ混ぜる工程が要るのはこのため。
+**headless も `sessions/<PID>.json` を書く。ただし `status` を持たない。**
+2026-08-12 に「書かない」と観測したが、08-16 に `POST /api/runs` から起こしたぶんで
+子の PID と同じ名前の紙が実際に置かれていた（同じ 2.1.228）。中身はこの形。
+
+```json
+{ "pid": 16440, "sessionId": "…", "cwd": "…", "startedAt": …, "procStart": "…",
+  "version": "2.1.228", "peerProtocol": 1,
+  "kind": "interactive", "entrypoint": "sdk-cli", "name": "claude-deck-24", "nameSource": "derived" }
+```
+
+見分けが付くのは `entrypoint` で、対話版は別の語を書く。
+**`status` のキーが無い**ので `deriveState` の2番目・3番目の段が効かず、
+末尾の行だけで決まる。実際、走っている最中の1本が `awaiting-reply`（返信待ち）に見えた。
+
+つまり `ended`（終了）にはならないが、**実行中でも「返信待ち」と出る。**
+一覧へ混ぜる工程が要る理由は変わらない。壊れ方が「終了に見える」から
+「いつでも自分の番に見える」へ変わっただけで、どちらも実態と食い違う。
 
 **会話ログのほうは普通に出る。** `projects/<スラッグ化した cwd>/<セッションID>.jsonl` に、
 **こちらが渡した `--session-id` と完全に同じ名前で**書かれる（実測3本で 26.1KB / 26.5KB / 27.7KB）。
@@ -991,7 +1007,7 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 拡張子は `.js` のままにする。`.mjs` を `public/` に置くと `server.mjs` の `MIME` に無く、
 `octet-stream` で返るのでブラウザが module として読まない。
 
-`public/js/` は 21枚 ＋ `timeline/` 7枚。**import は上から下へ一方向にだけ流す。**
+`public/js/` は 23枚 ＋ `timeline/` 7枚。**import は上から下へ一方向にだけ流す。**
 逆向きに import したくなったら、置き場所が間違っている。
 
 | 層 | ファイル | 役割 |
@@ -1005,11 +1021,13 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 | 1 | `usage-chart.js` | 数値の絵と数字（`svgEl`・横棒・スパークライン・`tokensStrict`・差の文字） |
 | 2 | `rows.js` | 一覧の行の導出 |
 | 2 | `drawer.js` | 狭い画面の一覧（引き出し） |
+| 2 | `runs.js` | 実行の台帳と速報の保持。実行専用 SSE の購読 |
 | 2 | `timeline/` | 時系列。外からは `index.js` の1枚として見る |
 | 3 | `detail-wait.js` | 「あなたの番」のパネル |
 | 3 | `detail-panels.js` | 詳細ペインに積むパネル |
 | 3 | `agents.js` | サブエージェントの記録のパネル |
 | 3 | `usage-panel.js` | 数値のパネル（詳細ペイン側） |
+| 3 | `run-view.js` | 実行のパネル（詳細ペイン側）。器を預かって自分で描き直す |
 | 4 | `detail.js` | 詳細ペインの組み立て |
 | 5 | `session.js` | 詳細の取得・保持・選択 |
 | 6 | `list.js` | 稼働中の一覧と、上のバーのまとめ |
@@ -1041,6 +1059,21 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 | `store.js` は `timeline/kinds.js` を直に見る（`index.js` を経由しない） | `index` → `view` → `store` |
 | `detailErrorNow` は `rows.js` に置く | `detail` ⇄ `session` |
 | `setListOpen` は `drawer.js` に置く | `list` → `main` → `list` |
+
+実行の速報も同じ形で切ってある。**`runs.js`（層2）は描画側を知らない。**
+`subscribeRuns(fn)` で外から登録し、配線するのは `main.js`（層8）。
+`runs.js` が `run-view.js` を import すると `runs`(2) ⇄ `run-view`(3) の循環になる。
+
+受け持ちも分けてある。届いた出来事の `kind` で行き先が変わる。
+
+- `rows` … 台帳が動いた（現れた・状態が変わった・終わった）→ `renderDetailIfNeeded()`
+- `events` … 速報が1件届いた → `RunView.render()`（パネルの中へ追記するだけ）
+
+**速報で詳細ペインを作り直さない。** 1ターンで数百行来るので、
+そこで作り直すと開いた `<details>` と入力中の caret が毎回消える。
+だから `detailKeyOf()` に混ぜるのは `runStampFor()`（**出来事が増えただけでは動かない値**）にして、
+中への追記は `Timeline` と同じ「器を預かって自分で描き直す」形にしてある
+（`RunView.attach()` / `render()` / `detach()`）。
 
 ふるまいで気をつけている所。
 
@@ -1088,10 +1121,11 @@ CSS は `public/css/` に10枚ある。`index.html` の `<link>` の並びが、
 | `settings.css` | 通知の設定モーダル |
 | `update.css` | 更新のお知らせの帯 |
 | `usage.css` | 数値（札・横棒・スパークライン・表の対） |
+| `run.css` | 実行のパネル（速報の行・種類の札・入力欄） |
 | `narrow.css` | 狭い窓向け（`@media (max-width: 860px)`） |
 
 **`<link>` の順番を入れ替えない。** CSS は宣言順で勝ち負けが付く。
-`narrow.css` は上の9枚を上書きするので、必ず最後に読む。
+`narrow.css` は上の10枚を上書きするので、必ず最後に読む。
 
 `usage.css` も**色を新しく作らない。** 使うのは `--accent`（強調1本）と
 `--fg-faint` / `--border-strong`（文脈）だけ。
@@ -1196,6 +1230,9 @@ CSS は `public/css/` に10枚ある。`index.html` の `<link>` の並びが、
 - **完全一致のルーティングを正規表現より手前に置く。** `/api/runs/events` と `/api/runs/stream` は `/^\/api\/runs\/([\w-]{1,64})$/` にも当たる。順番を入れ替えると「そんな実行はありません」と 404 を返すようになる
 - **予算切れを「終わった」として扱わない。** `--max-budget-usd` に当たっても `result` が出るだけで**プロセスは生きている**（実測）。止めるまで機械を掴んだままになる
 - **`result` の `num_turns` を累積として読まない。** そのターンぶんの数で、2往復目も 1 が入る。累積なのは `total_cost_usd` のほう。同じ行に並んでいるので混ぜやすい
+- **速報が1件届くたびに詳細ペインを作り直さない。** 1ターンで数百行来るので、開いた `<details>` と入力中の caret が毎回消える。`detailKeyOf()` に混ぜるのは `runStampFor()`（出来事が増えただけでは動かない値）だけにして、中への追記は `RunView.render()` に任せる（`Timeline` と同じ「器を預かって自分で描き直す」形）
+- **`runs.js`（層2）から `run-view.js`（層3）を import しない。** 逆向きになる。`subscribeRuns(fn)` で外から登録し、配線するのは `main.js`（層8）。既存の循環4箇所と同じ切り方
+- **実行パネルを詳細（`d`）の中に入れない。** 起こした直後はまだ会話ログが1行も無く、`d` は null。中に入れるとログが出るまで何も出ず、押したのに何も起きていないように見える
 
 ## 要約を AI に差し替えるとき
 
