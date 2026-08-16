@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { listSessions } from './src/view/sessions.mjs';
+import { listSessions, sortRows, summarizeRows } from './src/view/sessions.mjs';
 import { getSessionDetail } from './src/view/detail.mjs';
 import { listArchive, parseArchiveQuery } from './src/view/archive.mjs';
 import { getRawEntry } from './src/view/entry.mjs';
@@ -25,6 +25,7 @@ import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
 import { validateSettings, writeSettings } from './src/notify/settings.mjs';
 import { createRunner } from './src/run/index.mjs';
+import { mergeRuns } from './src/run/ledger.mjs';
 import {
   allowedModes, runDirsFromEnv, BYPASS_MODE, DEFAULT_PERMISSION_MODE, PERMISSION_MODE_LABELS,
   EFFORTS, DEFAULT_BUDGET_USD, BUDGET_MIN_USD, BUDGET_MAX_USD, PROMPT_MAX,
@@ -169,6 +170,29 @@ async function computeSessions() {
 }
 
 /**
+ * 一覧に、この画面から起こしたぶんを重ねる。**ここが合成の場所。**
+ *
+ * `view/` と `run/` はお互いを import しない決まりなので、混ぜられるのはサーバーだけ。
+ * 合流しないと、headless で起こしたセッションが走っている最中に「返信待ち」と出る
+ * （登録簿に `status` のキーが無く、`deriveState` の2段目・3段目が効かないため）。
+ *
+ * **`computeSessions()` の中でやらない。** あちらは `allowedRunDirs()` も呼んでいて、
+ * 合成行の cwd が起こせる場所の候補として跳ね返る形になる。読む口ごとにここを通す。
+ *
+ * 数え直しも要る。画面の上のバーは `meta.counts` しか見ていない。
+ *
+ * @param {{rows:Array<object>, meta:object}} payload `computeSessions()` の結果
+ * @returns {{rows:Array<object>, meta:object}} 同じオブジェクト（その場で書き換える）
+ */
+function withRuns(payload) {
+  try {
+    payload.rows = sortRows(mergeRuns(payload.rows, runner.rows(), payload.meta.now));
+    Object.assign(payload.meta, summarizeRows(payload.rows));
+  } catch { /* 見送る。合流できなくても一覧そのものは出す */ }
+  return payload;
+}
+
+/**
  * 一覧を作り直し、前回と違えば SSE で push する。
  *
  * 同時に何本も走らないよう直列化する。走っている間に来た要求は1回にまとめる。
@@ -185,7 +209,9 @@ async function refresh(force = false) {
     // try/catch は notifier と同じ理由で必須（実行側のバグで画面を空白にしない）
     try { runner.tick(); } catch { /* 見送る */ }
 
-    const payload = await computeSessions();
+    // 合流は通知（observe）より**前**に置く。あとに置くと、走っている最中のものを
+    // 「返信待ち」のまま見て、「回答待ちです」と Slack へ誤報を送ることになる
+    const payload = withRuns(await computeSessions());
 
     // 通知は一覧より格下。ここで落とすと下の catch が broadcast('error') を出し、
     // 通知側のバグで画面が空白になる。この try/catch は任意ではなく必須
@@ -833,8 +859,10 @@ const server = http.createServer((req, res) => {
   }
 
   if (pathname === '/api/sessions') {
+    // SSE と同じものを返す。ここで合流を通さないと、押し出しでは実行中に見えるのに
+    // 1回引いたときだけ「返信待ち」に見える、という食い違いが生まれる
     computeSessions().then(
-      (payload) => sendJson(res, 200, payload),
+      (payload) => sendJson(res, 200, withRuns(payload)),
       (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
     );
     return;

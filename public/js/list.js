@@ -44,6 +44,14 @@ function buildCard(row) {
   // 全行に同じ値が並ぶタグ（既定の権限モード・同じモデル）はノイズになるので出さない。
   // モデルや思考量は詳細ビュー側で見せる
   const meta = el('div', 'card-meta');
+  // この画面から起こしたセッションだけの印。
+  // ターミナルの窓がどこにも無いので、「前面に出す」を押しても何も起きない。
+  // そこを開く前に知らせるためのタグで、読み方がいちばん変わる情報だから先頭に置く
+  if (row.origin === 'deck') {
+    const deck = el('span', 'tag is-deck', 'この画面');
+    deck.title = 'この画面の実行フォームから起こしたセッションです';
+    meta.append(deck);
+  }
   if (row.project) meta.append(el('span', 'path', row.project));
   if (row.gitBranch && row.gitBranch !== 'HEAD') meta.append(el('span', 'tag', row.gitBranch));
   if (row.permissionMode && !QUIET_MODES.has(row.permissionMode)) {

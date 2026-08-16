@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 
 import { classifyStreamLine } from '../src/parse/stream.mjs';
 import {
-  createRunLedger, isRunOver, RUN_STATE_LABELS, RUN_MAX, STALL_MS,
+  createRunLedger, isRunOver, mergeRuns, RUN_STATE_LABELS, RUN_MAX, STALL_MS,
 } from '../src/run/ledger.mjs';
 import { sysInit, sAssistant, sResult, S_ID } from './helpers.mjs';
 
@@ -461,4 +461,152 @@ test('知らない runId を渡しても落ちない', () => {
   assert.deepEqual(led.onExit('r99', { code: 0 }, T), []);
   assert.equal(led.get('r99'), null);
   assert.equal(led.remove('r99'), false);
+});
+
+/* ------------------------------------------------------------ 一覧への合流 */
+
+/**
+ * 一覧の行のうち、`mergeRuns` が触るところだけ。
+ *
+ * `deriveState` が headless のセッションに付けがちな姿を初期値にしてある
+ * （登録簿に `status` のキーが無いので、走っている最中でも「返信待ち」に見える）。
+ */
+function listRow(overrides = {}) {
+  return {
+    sessionId: S_ID,
+    state: 'awaiting-reply',
+    stateLabel: '返信待ち',
+    ball: 'master',
+    alive: false,
+    pid: null,
+    idleMs: 5000,
+    lastActivityAt: T,
+    waitingFor: { tool: 'Bash', detail: null },
+    stateReason: '応答を返し終えて停止',
+    stateConfident: true,
+    statusRaw: null,
+    anchorId: 'u-9',
+    byStatus: false,
+    title: 'ログから読んだ見出し',
+    ...overrides,
+  };
+}
+
+test('動いている run を重ねると、一覧でも実行中になる', () => {
+  const { led, id } = started();
+  feed(led, id, sAssistant('やってる'), T + 1000);
+
+  const [row] = mergeRuns([listRow()], led.rows(), T + 2000);
+  assert.equal(row.state, 'running');
+  assert.equal(row.ball, 'claude');
+  assert.equal(row.alive, true);
+  assert.equal(row.pid, 4242);
+  assert.equal(row.origin, 'deck');
+  assert.equal(row.run.runId, id);
+  // 画面に出すのは run の実態のほう。写しは並び順と色のためだけのもの
+  assert.equal(row.stateLabel, '実行中');
+  // 台帳が正なので、ログの末尾から読んだ dangling は伏せる
+  assert.equal(row.waitingFor, null);
+  assert.equal(row.stateConfident, true);
+  // ログから読めているものは消さない
+  assert.equal(row.title, 'ログから読んだ見出し');
+});
+
+test('あなたの番は返信待ちへ写す。ラベルは run の言い方のまま', () => {
+  const { led, id } = started();
+  feed(led, id, sResult({}), T + 1000);
+
+  const [row] = mergeRuns([listRow({ state: 'running' })], led.rows(), T + 2000);
+  assert.equal(row.state, 'awaiting-reply');
+  assert.equal(row.ball, 'master');
+  assert.equal(row.stateLabel, 'あなたの番');
+});
+
+test('応答なしを不明の位置へ沈めない', () => {
+  const { led } = started();
+  led.tick(T + STALL_MS);
+
+  const [row] = mergeRuns([listRow()], led.rows(), T + STALL_MS);
+  // unknown（rank 4）にすると一覧の下に埋もれる。人が見に行くべきものなので上に出す
+  assert.equal(row.state, 'awaiting-reply');
+  assert.equal(row.ball, 'master');
+  assert.equal(row.stateLabel, '応答なし');
+});
+
+test('終わった run は状態を上書きしない', () => {
+  const { led, id } = started();
+  led.onExit(id, { code: 0 }, T + 100);
+
+  const [row] = mergeRuns([listRow()], led.rows(), T + 200);
+  // 終わっていれば会話ログのほうが正しい。載せるのは「この画面から起こした」事実だけ
+  assert.equal(row.state, 'awaiting-reply');
+  assert.equal(row.stateLabel, '返信待ち');
+  assert.equal(row.alive, false);
+  assert.deepEqual(row.waitingFor, { tool: 'Bash', detail: null });
+  assert.equal(row.origin, 'deck');
+  assert.equal(row.run.runId, id);
+});
+
+test('会話ログがまだ無い run は行を合成して足す', () => {
+  const { led, id } = started();
+
+  const rows = mergeRuns([listRow({ sessionId: 'ほかの人' })], led.rows(), T + 3000);
+  assert.equal(rows.length, 2);
+
+  const row = rows[1];
+  assert.equal(row.sessionId, S_ID);
+  assert.equal(row.state, 'running');
+  assert.equal(row.alive, true);
+  assert.equal(row.origin, 'deck');
+  assert.equal(row.project, 'demo');
+  assert.equal(row.idleMs, 3000);
+  assert.equal(row.lastActivityAt, T);
+  // 通知の鍵に混ざる値。null だと鍵が生涯1つになり、2回目以降が黙って落ちる
+  assert.equal(row.anchorId, id);
+  // 稼働中は中身が薄くても出す、と listSessions が決めている
+  assert.equal(row.substantive, true);
+});
+
+test('会話ログが無いまま終わった run は足さない', () => {
+  const { led, id } = started();
+  led.fail(id, 'claude.exe が見つかりません', T + 10);
+
+  // 足すと、書庫にも詳細にも出せない幽霊行が履歴の数だけ一覧に残る
+  assert.deepEqual(mergeRuns([], led.rows(), T + 20), []);
+});
+
+test('同じセッションで2本あるなら、後から起こしたほうを採る', () => {
+  const led = createRunLedger({ minIntervalMs: 0 });
+  const a = led.add(spec(), T);
+  led.onExit(a, { code: 0 }, T + 10);
+  const b = led.add(spec({ resume: true }), T + 20);
+  led.setPid(b, 7);
+
+  const [row] = mergeRuns([listRow()], led.rows(), T + 30);
+  assert.equal(row.run.runId, b);
+  assert.equal(row.alive, true);
+});
+
+test('合流した行に毎秒動く値を載せない', () => {
+  const led = createRunLedger({ minIntervalMs: 0 });
+  const a = led.add(spec(), T);                          // 一覧に行がある側（重ねる）
+  const b = led.add(spec({ sessionId: 'まだログ無し' }), T); // 行が無い側（合成する）
+  led.setPid(a, 1);
+  led.setPid(b, 2);
+  feed(led, a, sAssistant('うん'), T + 1000);
+  feed(led, a, sResult({ costUSD: 0.4 }), T + 2000);
+
+  // `refresh()` の差分判定と同じ形で比べる。ここが動くと内容が同じでも毎秒 push になる
+  const at = (now) => JSON.stringify(
+    mergeRuns([listRow()], led.rows(), now)
+      .map((r) => ({ ...r, idleMs: undefined, lastActivityAt: undefined })),
+  );
+  assert.equal(at(T + 3000), at(T + 600000));
+});
+
+test('台帳が空でも壊さない', () => {
+  const rows = [listRow()];
+  assert.equal(mergeRuns(rows, [], T), rows);
+  assert.equal(mergeRuns(rows, null, T), rows);
+  assert.deepEqual(mergeRuns(null, [], T), []);
 });

@@ -75,6 +75,46 @@ function idleForSort(row) {
 }
 
 /**
+ * 一覧の並び順を決める。
+ *
+ * **比較器をここ1箇所に置く。** `server.mjs` が実行中のセッションを重ねたあと
+ * 並べ直す必要があるので、そちらへ写すと同じ規則が2箇所に生きることになる。
+ *
+ * 受け取った配列をその場で並べ替えて返す（`Array.prototype.sort` と同じ）。
+ *
+ * @param {Array<object>} rows 並べる行
+ * @returns {Array<object>} 同じ配列
+ */
+export function sortRows(rows) {
+  return rows.sort((a, b) => {
+    const rank = (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9);
+    if (rank !== 0) return rank;
+    // 同じ状態なら動きが新しい順。放置が長いものほど下に沈む。
+    // idleMs が取れないものは「不明」なので末尾に置く（0 と混ぜない）
+    return idleForSort(a) - idleForSort(b);
+  });
+}
+
+/**
+ * 行から数を数える。
+ *
+ * `sortRows` と同じ理由でここに置いてある。合流のあとに数え直さないと、
+ * 上のバーのまとめ（画面側の `renderSummary`）だけが合流前の数のまま残る。
+ *
+ * @param {Array<object>} rows 数える行
+ * @returns {{live:number, needsYou:number, counts:object}}
+ */
+export function summarizeRows(rows) {
+  const counts = {};
+  for (const row of rows) counts[row.state] = (counts[row.state] ?? 0) + 1;
+  return {
+    live: rows.filter((r) => r.alive).length,
+    needsYou: rows.filter((r) => r.ball === 'master').length,
+    counts,
+  };
+}
+
+/**
  * 一覧を作る。
  *
  * @param {number} now
@@ -113,24 +153,13 @@ export async function listSessions(now = Date.now()) {
   // 終了済みで中身が無いものは /clear の残骸なので落とす
   const rows = built.filter((row) => row.alive || row.substantive);
 
-  rows.sort((a, b) => {
-    const rank = (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9);
-    if (rank !== 0) return rank;
-    // 同じ状態なら動きが新しい順。放置が長いものほど下に沈む。
-    // idleMs が取れないものは「不明」なので末尾に置く（0 と混ぜない）
-    return idleForSort(a) - idleForSort(b);
-  });
-
-  const counts = {};
-  for (const row of rows) counts[row.state] = (counts[row.state] ?? 0) + 1;
+  sortRows(rows);
 
   return {
     rows,
     meta: {
       now,
-      live: rows.filter((r) => r.alive).length,
-      needsYou: rows.filter((r) => r.ball === 'master').length,
-      counts,
+      ...summarizeRows(rows),
       // 画面側にラベルの日本語を持たせないために毎回そのまま渡す。
       // 6件しかないので量は問題にならない
       stateLabels: STATE_LABELS,
