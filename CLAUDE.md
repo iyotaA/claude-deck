@@ -103,6 +103,9 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `usage-view.test.mjs` | 横断集計のクエリ・走査上限・直近の中央値 |
 | `stream.test.mjs` | stream-json の行の読み書き。未知の型と壊れた行で落ちないこと |
 | `run-spec.test.mjs` | 起動指定の関所。cwd の許可・語彙・argv の完全一致（**実行に関わる本丸**） |
+| `run-event.test.mjs` | 速報1行の畳み方。切り詰めと、生の行を外へ出さないこと |
+| `run-ledger.test.mjs` | 台帳の状態機械。全分岐と、`rows()` に毎秒動く値が載らないこと |
+| `run-index.test.mjs` | 実行の配線。断る番号・停止の3段・子が死んだときの二重確定の防ぎ方 |
 | `claude-cli.test.mjs` | CLI の探し方・版の読み方・stdout の行の割り方 |
 | `appdata.test.mjs` | 書き込み先の解決。ログと設定が同じ場所を指すこと |
 | `appinfo.test.mjs` | 版の出どころ。読めないときに 0 でなく null を返すこと |
@@ -151,7 +154,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） `usage`（数値） `stream`（実行中の行） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） `usage`（数値） |
 | `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） |
-| `src/run/` | 画面から起こすセッション | `spec`（起動指定の検証と argv） |
+| `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
 | `src/startup/` | ランチャが書いた自動起動の紙を読む | `state` |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） `appdata`（書き込み先） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `env`（止めるスイッチの読み方） |
@@ -170,15 +173,19 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 `os/claude.mjs` はプロジェクト内 import ゼロ。`node:child_process` などしか使わない。
 判断（どの argv を組むか・許可するか）は `run/spec.mjs` 側にあり、
-`os/` に残るのは「探して、起こして、行に割る」だけの薄い殻。
+`os/` に残るのは「探して、起こして、止めて、行に割る」だけの薄い殻。
 `parseUpdateState`（判断）と `loadUpdateState`（I/O）を分けたのと同じ形。
+
+`run/` の中でも同じ分け方をしている。`spec` と `event` と `ledger` は I/O をまったく持たず、
+時刻さえ外から `now` で受け取る。だから状態機械の全分岐をテストで通せる。
+`index` だけが `os/claude.mjs` を呼び、どの順で手を動かすかを決める。
 
 `update/` と `startup/` も末端で、どの層も import しない（`shared/appdata.mjs` だけ）。
 やるのは「紙を1枚読んで、画面に出せる形に整える」だけ。
 **判断はしない。** 更新を当てるかどうかも、自動起動を登録するかどうかも決めるのは C# 側で、
 こちらは結果を読むだけにしてある。理由は「更新」の節に書いた。
 
-入口は11。ここの名前と応答の形は変えない。
+入口は12。ここの名前と応答の形は変えない。
 
 - `view/sessions.mjs:listSessions`
 - `view/detail.mjs:getSessionDetail`
@@ -188,6 +195,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - `notify/index.mjs:createNotifier`
 - `update/state.mjs:loadUpdateState`
 - `startup/state.mjs:loadStartupState`
+- `run/index.mjs:createRunner`（`server.mjs` が触る唯一の口。10個の関数を返す）
 - `run/spec.mjs:buildRunSpec`（起動指定を検証して argv まで組む）
 - `os/focus.mjs:focusTerminal`
 - `os/claude.mjs:probeClaude` / `claudeInfo`（探すのと、結果を読むのを分けてある）
@@ -713,12 +721,13 @@ C# 側に版を書き写さない。`vpk` に手で打たない。
 ## 実行（画面からセッションを起こす）
 
 `src/run/` と `src/os/claude.mjs`。見るだけの道具から一歩出る機能で、いま作りかけ。
+窓口までは通っていて、画面（`public/js/`）と一覧への合流はこれから。
 **この機能が増やす被害は質が違う。これまでは表示が変わるだけだったが、ここはコードが実行される。**
 
 使うのは公開されている CLI の入口だけ（`claude -p --input-format stream-json`）。
 対話版への打鍵注入や `~/.claude` への書き込みには乗らない。理由は `os/focus.mjs` 冒頭にある。
 
-### 実測（claude 2.1.228・2026-08-12）
+### 実測（claude 2.1.228・2026-08-12 と 08-16）
 
 公開仕様が無いので、叩いて分かったことをここに残す。
 
@@ -731,12 +740,18 @@ Error: When using --print, --output-format=stream-json requires --verbose
 **stdout は1行も出ない。** 付け忘れると「起こしたのに無言で死ぬ」になるので、
 `buildArgs` が必ず付ける（画面から外せる口も作らない）。
 
-**headless は `sessions/<PID>.json` を書かない。** 起動の前後で `~/.claude/sessions/` も
-`~/.claude/projects/` も1件も増えなかった。つまり `deriveState` から見ると登録簿に無いので、
+**headless は `sessions/<PID>.json` を書かない。** 起動の前後で `~/.claude/sessions/` が
+1件も増えなかった。つまり `deriveState` から見ると登録簿に無いので、
 **動いているのに `ended`（終了）と表示される。** 一覧へ混ぜる工程が要るのはこのため。
+
+**会話ログのほうは普通に出る。** `projects/<スラッグ化した cwd>/<セッションID>.jsonl` に、
+**こちらが渡した `--session-id` と完全に同じ名前で**書かれる（実測3本で 26.1KB / 26.5KB / 27.7KB）。
+だから起こした瞬間から既存の詳細・書庫・`?session=` がそのまま使えるし、
+サーバーが死んでも `--resume` で続けられる。台帳をディスクに残さないでいられるのはこのため。
 
 **空の stdin で起こすと `system/init` すら出ない**（`system/hook_started` と
 `system/hook_response` の2行だけで終わる）。だから指示文を必須にしてある。
+このとき `projects/` にもログは出ない。上の「出る」はちゃんと指示文を送ったときの話。
 
 **`--include-hook-events` を付けなくてもフックのイベントが流れてくる。**
 `classifyStreamLine` が知らない型を `other` に落とすので、いまのままで受かる。
@@ -745,6 +760,51 @@ Error: When using --print, --output-format=stream-json requires --verbose
 
 `--permission-mode` の語彙は実物では6つ（`acceptEdits` `auto` `bypassPermissions`
 `manual` `dontAsk` `plan`）あるが、**画面に出すのは3つだけ**にしてある。理由は `run/spec.mjs` に書いた。
+
+**`-p` は1ターンで終わらない。** ここが最大のリスクだったが、実測では
+`result` が来たあとも子は生きたまま stdin を待っている。次の1行を書けば同じ子・同じ
+`sessionId` のまま2ターン目が進む。stdin を閉じると `close code=0` で畳まれる。
+
+**`result` の数字は種類で意味が違う。** `num_turns` は**そのターンぶん**（2往復目も 1）、
+`total_cost_usd` は**累積**（実測 0.803025 → 0.843727）。同じ行に並んでいるので混ぜやすい。
+
+**`--max-budget-usd` に当たっても死なない。** `result` は出る（`error_max_budget_usd` /
+`terminal_reason: budget_exhausted` / `errors` 配列）が**プロセスは生き続ける**。
+stdin を閉じると `close code=1`。だから予算切れは「終わった」ではなく「止まっている」として扱う。
+
+**`acceptEdits` は許可を求めない。断って先へ進む。**
+Bash を伴う指示を投げると `system/permission_denied` が流れ、そのツールの結果が
+`isError:true` ＋ `This command requires approval` になり、**止まらずに次の手へ移る**
+（`result` の `denials` に数が載る）。「この画面から起こすセッションは、途中であなたに許可を求めません」
+という UI の文言は、この実測どおりの意味になっている。
+`system/permission_denied` は下の一覧の9種類目で、`classifyStreamLine` が `other` に落として受かっている。
+
+いま出ることを確かめた `type`（`system` は `subtype` まで）。
+
+```
+system/hook_started  system/hook_progress  system/hook_response  system/permission_denied
+system/init          user                  assistant             rate_limit_event   result
+```
+
+`system/hook_response` は `result` の**後**に来ることもある（2ターン目の冒頭で観測）。
+順序に意味を持たせない。
+
+**モデルを指定しないと `claude-opus-5[1m]` で立つ。** 角括弧付きなので
+`run/spec.mjs` の `MODEL_RE` は通らないが、こちらが渡さないときの CLI 側の既定なので問題にならない。
+（許可リストを持たない方針の裏返しで、**画面から角括弧付きは選べない**。テストにその事実を書いてある）
+
+### 止め方は3段。実測で3段とも要る
+
+`stdin.end()` → 3秒 → `taskkill /PID <pid> /T` → 2秒 → `taskkill /PID <pid> /T /F`。
+
+| 相手 | どこで終わったか | 所要 | `exitCode` |
+|---|---|---|---|
+| `result` を返して待っている子 | 1段目（`stdin.end()`）だけ | 即座 | 0 |
+| Bash を走らせている最中の子 | **3段目まで通った** | 5756ms | 1 |
+
+**Bash 中は stdin を閉じても落ちない**ので、木ごと落とす必要がある。
+`ping -n 60` を走らせて孫（`ping.exe`）ができた瞬間に止め、`tasklist` で数えたところ
+**孫も子も残骸ゼロ**。`taskkill /T /F` はネイティブ版の孫にも効く。
 
 ### CLI を掴めたか
 
@@ -761,6 +821,55 @@ CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.ex
 - 掴めなくても本体は落とさない。ダッシュボードとしては動くので止める理由が無い。
   起動直後は `state:'checking'`（`ok` は `null`。0 と不明を分けるのと同じ）
 
+### 台帳（走っているものを覚えておく）
+
+`run/` の4枚は、**判断（純関数）と I/O（薄い殻）の分け方**を層の中でもう一度やっている。
+`parseUpdateState`（判断）と `loadUpdateState`（I/O）を分けたのと同じ形。
+
+| ファイル | 何を決めるか | I/O |
+|---|---|---|
+| `spec.mjs` | 起こしてよいか。どの argv を組むか | 無し |
+| `event.mjs` | 流れてきた1行を、画面に出せる出来事へどう畳むか | 無し |
+| `ledger.mjs` | いつ状態が変わるか。何を覚えて何を捨てるか | 無し（時刻も `now` で受ける） |
+| `index.mjs` | どの順で手を動かすか。断る理由と HTTP の番号 | `os/claude.mjs` 経由だけ |
+
+**`server.mjs` が触るのは `createRunner()` が返す10個の口だけ。**
+`start` / `input` / `stop` / `tick` / `subscribe` / `shutdown` / `rows` / `get` / `events` / `stats`。
+
+**断る理由と HTTP の番号は `run/index.mjs` が決める。**
+理由は4種類ある（503 CLI を掴めていない / 400 指定が不正 / 429 本数と間隔 / 500 起こせなかった）。
+`server.mjs` 側で理由の文字列を見て振り分けると、言い回しを直しただけで番号が変わる。
+
+台帳はメモリだけに持つ。ディスクへ書かない。
+子はサーバーの子なので、サーバーが死んだ時点で台帳の意味も消える。
+**会話ログは CLI が `~/.claude/projects/` に書いているので被害は残らない**（上の実測）。
+復元を試みると失敗経路が3つ増えて、得るものが無い（「通知済みの記録を残さない」と同じ理屈）。
+
+### `rows()` と `get()` を分けてある
+
+`rows()` は一覧へ混ぜるための**粗い行**、`get()` は詳細ペイン用の**全部入り**。
+
+**`rows()` に毎秒動く値を入れない。** `refresh()` の差分判定が除外しているのは
+`idleMs` と `lastActivityAt` の2つだけなので、受信行数やトークン数を混ぜると
+**内容が同じでも毎秒 push することになる**。
+`counts` / `costUSD` / `lastLineAt` が `get()` にしか入らないのはこのため（テストで固定してある）。
+
+### 速報は専用の SSE で流す
+
+`/api/runs/stream`。**`/api/stream` に相乗りさせない。**
+あちらは全タブが常時つないでいる一覧の経路で、1秒 tick と差分判定が付いている。
+1ターンで数百行出る実行の速報を混ぜると、一覧の更新が実行の量に引きずられる。
+性質も寿命も違う（一覧は「いまの姿を丸ごと」、実行は「続き物で `seq` と再送が要る」）。
+
+出来事には単調増加の `seq` を振る。切れたら
+`GET /api/runs/events?from=<最後の seq>` で穴を埋める。
+`?from=` は `/api/runs/stream` にも渡せて、つないだ直後にまとめて送り直す。
+溢れたぶんは `missed` として数を返す（黙って捨てない）。
+
+**購読はサーバーに1本だけ持つ。** 窓ごとに `runner.subscribe()` すると、
+閉じ忘れが listeners に静かに溜まる。`server.mjs` が1回だけ購読して、
+届いた出来事を開いている SSE 全部へ配る形にしてある。
+
 ## サーバー
 
 `server.mjs`。`node:http` だけで静的配信・JSON API・SSE をやる。
@@ -776,10 +885,17 @@ CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.ex
 | `GET /api/usage` | 数値の横断集計。`limit` `days` `model`。上限60件で切り詰め、切ったことを `scanLimited` で返す |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
-| `GET /api/health` | 生存確認。二重起動の判定にも使う。版・通知の設定と数え・**自動起動の様子**・**claude CLI を掴めたか**もここに出る |
+| `GET /api/runs` | 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている |
+| `GET /api/runs/events?from=<seq>` | 取りこぼしの穴埋め。SSE が切れているあいだの速報を拾う |
+| `GET /api/runs/stream?from=<seq>` | **実行専用の SSE。**`/api/stream` には相乗りさせない |
+| `GET /api/runs/:id` | 1本ぶんの全部入り。粗い `rows()` と違って `counts` や `costUSD` も入る |
+| `GET /api/health` | 生存確認。二重起動の判定にも使う。版・通知の設定と数え・**自動起動の様子**・**claude CLI を掴めたか**・**抱えている実行の数**もここに出る |
 | `GET /api/settings/notify` | 通知の設定。URL はマスク済み。出どころ（`sources` / `envSet`）も返す |
 | `GET /api/update` | 更新の状態。ランチャが書いた紙 ＋ `canApply`（いまの起動のされ方で当てられるか） |
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
+| `POST /api/runs` | セッションを1本起こす。202 を返し、以降は速報で追う |
+| `POST /api/runs/:id/input` | 走っている（または待っている）ものへ1行送る |
+| `POST /api/runs/:id/stop` | 止める。3段階。もう終わっているものへの連打は 200 |
 | `POST /api/settings/notify` | 保存して即反映。応答は GET と同じ形 |
 | `POST /api/settings/notify/test` | テスト送信を1通。3秒のクールダウン付き |
 | `POST /api/update/apply` | ランチャを起こして更新を当てさせる。202 を返して以降は関与しない |
@@ -819,6 +935,15 @@ CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.ex
 本文は 8KB（`BODY_MAX`）を超えたら受け取らない。
 **そこで `req.destroy()` を呼ばない。** 断りの 400 を書く前に接続が切れて、
 呼び出し側には「応答が空」としか見えなくなる。溜めるのをやめて捨てるだけにする。
+
+上限は `readJsonBody(req, limit)` の**引数**にしてある。
+**全体を上げない。** 設定の窓口には小さい JSON しか来ないので、1本の定数を上げると
+緩めた覚えのない口まで緩む。長い指示文を受ける2本（`POST /api/runs` と
+`POST /api/runs/:id/input`）だけに `RUN_BODY_MAX`（256KB）を渡す。
+
+ルーティングは**完全一致を正規表現より手前に置く**。
+`/api/runs/events` と `/api/runs/stream` は `/^\/api\/runs\/([\w-]{1,64})$/` にも当たるので、
+順番を入れ替えると「そんな実行はありません」と 404 を返すようになる。
 
 ### 落ちない口の作り方
 
@@ -1062,6 +1187,15 @@ CSS は `public/css/` に10枚ある。`index.html` の `<link>` の並びが、
 - **`child.stdout.setEncoding('utf8')` を必ず呼ぶ。** 素の Buffer を `toString()` するとチャンク境界で日本語が割れる。行に割るのは `createLineSplitter` の仕事で、**上限を超えた行は捨てて数える**（黙って捨てない）
 - **`bypassPermissions` を画面の語彙に入れない。** `CLAUDE_DECK_RUN_ALLOW_BYPASS` が立っているときだけ。ブラウザから押せる「許可を一切求めずに何でも実行する」ボタンは、このアプリが持ちうる最も危険なもの。`CLAUDE_DECK_NOTIFY_OFF` と同じ帯域外のスイッチにする
 - **`manual` を選ばせない。** 非対話で許可要求が来たときの返し方が確かめられていない。当てずっぽうで実装すると、要求に答えられないまま止まったプロセスが残り、画面には「実行中」と出続ける
+- **実行の速報を `/api/stream` に相乗りさせない。** あちらは全タブが常時つないでいる一覧の経路で、1秒 tick と差分判定が付いている。1ターンで数百行出る速報を混ぜると、一覧の更新が実行の量に引きずられる。専用の `/api/runs/stream` に分ける
+- **`runner.subscribe()` を窓ごとに呼ばない。** サーバーが1回だけ購読して、開いている SSE 全部へ配る。窓ごとに購読すると閉じ忘れが listeners に静かに溜まる
+- **`readJsonBody` の上限を全体で上げない。** 長い指示文を受ける2本（`POST /api/runs` と `POST /api/runs/:id/input`）にだけ `RUN_BODY_MAX`（256KB）を引数で渡す。1本の定数を上げると、緩めた覚えのない口まで緩む
+- **`rows()` に毎秒動く値を入れない。** `refresh()` の差分判定が除外しているのは `idleMs` と `lastActivityAt` の2つだけ。受信行数やトークン数を混ぜると、内容が同じでも毎秒 push することになる。細かい値は `get()`（詳細ペイン用）の側に置く
+- **断る理由と HTTP の番号は `run/index.mjs` が決める。** 503（CLI を掴めていない）・400（指定が不正）・429（本数と間隔）・500（起こせなかった）の4種類。`server.mjs` 側で理由の文字列を見て振り分けると、言い回しを直しただけで番号が変わる
+- **`shutdown()` で `runner.shutdown()` を待たない。** 止め方の3段は最長5秒かかるが、`shutdown()` の hard exit は 500ms。待たせると Ctrl+C がすぐ効かなくなる。1段目の `stdin.end()` は同期で始まるので、行儀のよい相手はそれで畳まれる（実測 `code=0`）
+- **完全一致のルーティングを正規表現より手前に置く。** `/api/runs/events` と `/api/runs/stream` は `/^\/api\/runs\/([\w-]{1,64})$/` にも当たる。順番を入れ替えると「そんな実行はありません」と 404 を返すようになる
+- **予算切れを「終わった」として扱わない。** `--max-budget-usd` に当たっても `result` が出るだけで**プロセスは生きている**（実測）。止めるまで機械を掴んだままになる
+- **`result` の `num_turns` を累積として読まない。** そのターンぶんの数で、2往復目も 1 が入る。累積なのは `total_cost_usd` のほう。同じ行に並んでいるので混ぜやすい
 
 ## 要約を AI に差し替えるとき
 
