@@ -638,10 +638,31 @@ function allowedRunDirs() {
 }
 
 /**
+ * いま動いているセッションの ID。
+ *
+ * 続きを起こす（`--resume`）ときの門番の材料。同じセッションへ2本当てると
+ * 会話ログが壊れるので、動いていないことを確かめてからでないと通さない。
+ *
+ * **一覧をまだ一度も読めていないときは `null` を返す。**
+ * 空の Set を返すと「誰も動いていない」と読まれて、ちょうど動いている
+ * セッションへ2本目が当たる。0 と不明を分けるのと同じ扱い。
+ *
+ * @returns {Set<string>|null} 動いているセッションの ID。分からなければ null
+ */
+function liveSessionIds() {
+  if (!lastPayload) return null;
+  const ids = new Set();
+  for (const row of lastPayload.rows ?? []) {
+    if (row?.alive && typeof row.sessionId === 'string' && row.sessionId) ids.add(row.sessionId);
+  }
+  return ids;
+}
+
+/**
  * セッションを1本起こす。
  *
- * 断る理由が4つある（掴めていない 503 / 指定が不正 400 / 本数と間隔 429 /
- * 起こせなかった 500）。**どれで断ったかは run/index.mjs が status で返す。**
+ * 断る理由が5つある（掴めていない 503 / 指定が不正 400 / もう動いている 409 /
+ * 本数と間隔 429 / 起こせなかった 500）。**どれで断ったかは run/index.mjs が status で返す。**
  * ここで理由の文字列を見て分岐させない。
  *
  * @param {object} req リクエスト
@@ -656,7 +677,10 @@ async function handleRunStart(req, res) {
     return;
   }
 
-  const r = runner.start(body, { allowedDirs: allowedRunDirs() });
+  const r = runner.start(body, {
+    allowedDirs: allowedRunDirs(),
+    liveSessions: liveSessionIds(),
+  });
   // 断られた場合も台帳が動いていることがある（spawn に失敗した run は failed で残る）
   pushRunRows();
   if (!r.ok) {

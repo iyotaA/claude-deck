@@ -23,7 +23,7 @@
  *
  * ## HTTP のステータスをここで決めている理由
  *
- * 断る理由が4種類あって（見つからない・指定が悪い・多すぎる・起こせない）、
+ * 断る理由が5種類あって（見つからない・指定が悪い・もう動いている・多すぎる・起こせない）、
  * `server.mjs` 側で理由の文字列から分岐させたくないため。
  * 理由の文言を直すたびに窓口の分岐が壊れる、という形を作らない。
  */
@@ -256,6 +256,37 @@ export function createRunner({
   }
 
   /**
+   * 続きを起こしてよいか。
+   *
+   * `--resume` を同じセッションへ2本当てると会話ログが壊れる。
+   * だから「いま動いていないこと」を確かめてからでないと通さない。
+   *
+   * **`null`（分からない）を「誰も動いていない」と読み替えない。**
+   * 一覧をまだ一度も読めていない時期にそれをやると、ちょうど動いている
+   * セッションへ2本目を当てることになる。0 と不明を分けるのと同じ扱い。
+   *
+   * @param {string} sessionId 続けたいセッション
+   * @param {Set<string>|null} liveSessions いま動いているセッションの ID。分からなければ null
+   * @returns {string|null} 断る理由。通してよければ null
+   */
+  function resumeBlocked(sessionId, liveSessions) {
+    if (!(liveSessions instanceof Set)) {
+      return 'いま動いているセッションを確かめられません。少し待ってからもう一度';
+    }
+    if (liveSessions.has(sessionId)) {
+      return 'そのセッションはまだ動いています（ターミナル側を終えてからにしてください）';
+    }
+    // 画面から起こしたぶんは一覧に出るまで間があるので、台帳も見る。
+    // refresh() のタイミングに関わらず二重起動を塞げる
+    for (const row of ledger.rows()) {
+      if (row.sessionId === sessionId && !isRunOver(row.state)) {
+        return 'そのセッションはこの画面から動かしている最中です';
+      }
+    }
+    return null;
+  }
+
+  /**
    * 新しく1本起こす。
    *
    * **canStart → add → spawn → setPid までを全部同期で進める。**
@@ -264,9 +295,10 @@ export function createRunner({
    * @param {object} input 画面から来たもの
    * @param {object} [ctx]
    * @param {string[]} [ctx.allowedDirs] 許可するフォルダ
+   * @param {Set<string>|null} [ctx.liveSessions] いま動いているセッションの ID（続きを起こすときだけ見る）
    * @returns {{ok:boolean, status:number, runId?:string, row?:object, reason?:string}}
    */
-  function start(input, { allowedDirs = [] } = {}) {
+  function start(input, { allowedDirs = [], liveSessions = null } = {}) {
     const at = clock();
 
     // 掴めていないことは `/api/health` にも出ているが、押した場から理由が見えるほうがよい
@@ -277,6 +309,11 @@ export function createRunner({
 
     const built = buildRunSpec(input, { allowedDirs, env, platform });
     if (!built.ok) return { ok: false, status: 400, reason: built.reason };
+
+    if (built.spec.resume) {
+      const busy = resumeBlocked(built.spec.sessionId, liveSessions);
+      if (busy) return { ok: false, status: 409, reason: busy };
+    }
 
     const gate = ledger.canStart(at);
     if (!gate.ok) return { ok: false, status: 429, reason: gate.reason };

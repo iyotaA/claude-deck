@@ -155,6 +155,10 @@
   overflow-wrap: anywhere;
 }
 
+/* 危ないモードを選んだときの但し書き。起こすフォームの .runform-danger と同じ意味だが、
+   あちらの名前を詳細ペイン側に持ち込むと、どちらの都合の指定か読めなくなる */
+.run-danger { color: var(--hot); }
+
 .run-other {
   font-family: var(--font-mono);
   font-size: .72rem;
