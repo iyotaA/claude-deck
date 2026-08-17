@@ -294,6 +294,17 @@
 .tag.is-skill { border-color: var(--accent); color: var(--accent); }
 .tag.is-plan { border-color: var(--warn); color: var(--warn); }
 
+/* この画面から起こしたセッションの印。
+   一覧で唯一の「塗った」タグにしてある。輪郭だけのタグが並ぶ中で確実に目に留まり、
+   同時に出るのは多くて3本（RUN_MAX）なのでうるさくならない。
+   使うのは --accent で、状態色（hot / warn / calm / off）には手を出さない。
+   あちらは「どれから手をつけるか」の色なので、別の意味を混ぜると読めなくなる */
+.tag.is-deck {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+
 /* サブエージェントを使った印。状態色（hot / warn / calm / done）は使わない。
    あれは「どれから手をつけるか」を示す色なので、別の意味を混ぜると読めなくなる。
    輪郭と文字を1段濃くするだけで、並んだタグの中から目に留まる */
