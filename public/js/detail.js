@@ -20,6 +20,7 @@ import { agentsPanel } from './agents.js';
 import { usagePanel } from './usage-panel.js';
 import { runStampFor } from './runs.js';
 import * as RunView from './run-view.js';
+import * as RunResume from './run-resume.js';
 import * as Timeline from './timeline/index.js';
 
 /**
@@ -127,6 +128,7 @@ export function renderDetail() {
   // 実行パネルも同じ形で器を預かっているので、そちらも一緒に手放す
   Timeline.detach();
   RunView.detach();
+  RunResume.detach();
   dom.detail.replaceChildren();
 
   // 入口を3つに割る。ひとまとめにすると「選んでいない」「取得中」「取得に失敗した」が
@@ -194,6 +196,10 @@ export function renderDetail() {
   // if (d) の外なのは、起こした直後はまだ会話ログが1行も無いため
   // （ログが出るまで何も出ないと、押したのに何も起きていないように見える）
   add(RunView.runPanel(row.sessionId));
+
+  // 終わっているセッションの続きを起こす口。実行パネルの直下に置く。
+  // 動いているあいだは resumePanel() 自身が null を返すので、口は同時に2つ出ない
+  add(RunResume.resumePanel(row));
 
   if (d) {
     add(decisionsPanel(d));

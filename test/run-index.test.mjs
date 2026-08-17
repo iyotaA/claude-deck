@@ -18,6 +18,8 @@ const T = 1_000_000;
 const BIN = 'C:\\fake\\claude.exe';
 const CWD = 'C:\\work\\demo';
 const ALLOW = ['C:\\work'];
+/** 既に終わっているセッション（続きを起こす側のテストで使う）。 */
+const OTHER = '11111111-2222-4333-8444-555555555555';
 
 /** PassThrough の 'data' は次の tick に出るので、1回だけ待つ。 */
 const settle = () => new Promise((r) => setImmediate(r));
@@ -407,6 +409,83 @@ test('1往復で閉じた run は --resume で起こし直す', async () => {
 
   const written = await stdinText(h.children[1]);
   assert.equal(JSON.parse(written.trim()).message.content[0].text, '続けて');
+});
+
+test('終わっているセッションの続きは、同じ ID のまま起こせる', async () => {
+  const h = harness();
+  const res = h.runner.start(req({ resume: true, sessionId: OTHER }), {
+    allowedDirs: ALLOW,
+    // ターミナル側はもう死んでいる（別のセッションだけが動いている）
+    liveSessions: new Set(['99999999-2222-4333-8444-555555555555']),
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, 202);
+  assert.equal(res.row.sessionId, OTHER);
+  assert.equal(res.row.resume, true);
+  assert.deepEqual(h.calls[0].args.slice(-2), ['--resume', OTHER]);
+
+  const written = await stdinText(h.children[0]);
+  assert.equal(JSON.parse(written.trim()).message.content[0].text, '直して');
+});
+
+test('動いているセッションの続きは断る（同じログに2本書かせない）', () => {
+  const h = harness();
+  const res = h.runner.start(req({ resume: true, sessionId: OTHER }), {
+    allowedDirs: ALLOW,
+    liveSessions: new Set([OTHER]),
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.status, 409);
+  // 起こしていないので子もいない
+  assert.equal(h.calls.length, 0);
+});
+
+test('動いているセッションが分からないときも続きは断る', () => {
+  const h = harness();
+  // 一覧をまだ一度も読めていない時期。空を「誰も動いていない」と読み替えない
+  const res = h.runner.start(req({ resume: true, sessionId: OTHER }), { allowedDirs: ALLOW });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.status, 409);
+  assert.equal(h.calls.length, 0);
+});
+
+test('この画面から動かしている最中のセッションは、一覧に出る前でも断る', () => {
+  const h = harness();
+  const first = h.start();
+  const sid = first.row.sessionId;
+
+  // 起こした直後は一覧にまだ並ばない（＝ liveSessions は空）。台帳を見て塞ぐ
+  const res = h.runner.start(req({ resume: true, sessionId: sid }), {
+    allowedDirs: ALLOW,
+    liveSessions: new Set(),
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.status, 409);
+  assert.equal(h.calls.length, 1);
+});
+
+test('終わった run のセッションなら、台帳に残っていても続きを起こせる', async () => {
+  const h = harness();
+  const first = h.start();
+  const sid = first.row.sessionId;
+
+  h.children[0].close(0);
+  await settle();
+  assert.equal(h.runner.get(first.runId).state, 'done');
+
+  h.setNow(T + 10_000);
+  const res = h.runner.start(req({ resume: true, sessionId: sid }), {
+    allowedDirs: ALLOW,
+    liveSessions: new Set(),
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, 202);
+  assert.deepEqual(h.calls[1].args.slice(-2), ['--resume', sid]);
 });
 
 test('動いている run への入力はそのまま stdin へ流す', async () => {

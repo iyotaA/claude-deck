@@ -31,6 +31,7 @@ export function panel(title, opts = {}) {
 export const SEC = {
   wait: 'sec-wait',
   run: 'sec-run',
+  resume: 'sec-resume',
   decisions: 'sec-decisions',
   todo: 'sec-todo',
   compact: 'sec-compact',
