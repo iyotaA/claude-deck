@@ -20,7 +20,7 @@ import { getRawEntry } from './src/view/entry.mjs';
 import { getSubagentDetail } from './src/view/subagent.mjs';
 import { getSessionBaseline, getSessionUsage, listUsage, parseUsageQuery } from './src/view/usage.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
-import { claudeInfo, probeClaude } from './src/os/claude.mjs';
+import { claudeInfo, killTreeSync, probeClaude } from './src/os/claude.mjs';
 import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
 import { validateSettings, writeSettings } from './src/notify/settings.mjs';
@@ -712,6 +712,41 @@ async function handleRunStop(res, runId) {
 }
 
 /**
+ * モデル・思考量・権限モードを替えて続きを起こす。
+ *
+ * **画面から2手（停止 → 起動）にしない。** あいだが空くと、前の子がまだ畳まれないうちに
+ * 次が起きて、同じ会話ログに2つのプロセスが書きうる。`run/index.mjs` の中で
+ * `close` を待ってから起こすので、この窓口の1手にまとめてある。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ * @param {string} runId 実行の識別子
+ */
+async function handleRunSwitch(req, res, runId) {
+  let body;
+  try {
+    // 切り替えにも指示文が要る（空 stdin では `system/init` すら出ない。実測）ので、
+    // 入力と同じ上限を渡す
+    body = await readJsonBody(req, RUN_BODY_MAX);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    return;
+  }
+
+  try {
+    const r = await runner.switch(runId, body, body?.prompt ?? body?.text);
+    pushRunRows();
+    if (!r.ok) {
+      sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
+      return;
+    }
+    sendJson(res, r.status, { ok: true, run: r.row, changed: r.changed });
+  } catch (err) {
+    sendJson(res, 500, { ok: false, reason: String(err?.message ?? err) });
+  }
+}
+
+/**
  * 実行専用の SSE。
  *
  * **`/api/stream` に相乗りさせない。** あちらは全タブが常時つないでいる一覧の経路で、
@@ -813,9 +848,10 @@ function handleWrite(req, res, pathname, url) {
   }
   // 完全一致（/api/runs）より後ろに置く。こちらのほうが具体的だが、
   // 上は同じ文字列との一致なので取り違えは起きない
-  const runPost = pathname.match(/^\/api\/runs\/([\w-]{1,64})\/(input|stop)$/);
+  const runPost = pathname.match(/^\/api\/runs\/([\w-]{1,64})\/(input|stop|switch)$/);
   if (runPost) {
     if (runPost[2] === 'input') handleRunInput(req, res, runPost[1]);
+    else if (runPost[2] === 'switch') handleRunSwitch(req, res, runPost[1]);
     else handleRunStop(res, runPost[1]);
     return;
   }
@@ -1228,7 +1264,7 @@ function shutdown(code = 0) {
   // `stopClaude` の3段（stdin を閉じる → taskkill /T → taskkill /T /F）は最長5秒かかるが、
   // 下の 500ms より長く待つと Ctrl+C がすぐ効かなくなる。
   // 1段目の stdin を閉じるところまでは同期で始まり、行儀のよい相手はそれで終わる（実測 close code=0）。
-  // それでも残る木の始末（process.on('exit') の taskkill）は段3 #8 で塞ぐ。**いまは残りうる**
+  // 5秒に間に合わなかったぶんは、下の process.on('exit') が木ごと落とす
   runner.shutdown().catch(() => { /* 畳む途中の失敗は見送る */ });
 
   // 助言として置いた紙なので、畳めるときは消しておく。
@@ -1243,3 +1279,25 @@ function shutdown(code = 0) {
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => shutdown(0));
 }
+
+/**
+ * 最後の後始末。畳みきれなかった子を、木ごと落とす。
+ *
+ * ここは**同期しか走らない。** `runner.shutdown()` は `await` を含むので、
+ * このハンドラから呼んでも何もしないまま終わる。だから PID だけ受け取って
+ * `killTreeSync`（`taskkill /T /F` の同期版）に任せる。
+ *
+ * 行儀を捨てるのは、ここへ来る時点でサーバーの寿命が尽きているため。
+ * 上の `shutdown()` で 500ms 以内に畳めた子は `livePids()` に残らないので、
+ * ここに残るのは Bash などを掴んだまま応じなかった子だけになる（実測でその子は3段目まで要った）。
+ *
+ * **`claude.exe` は孫を作る**（Bash ツール）。`child.kill()` では親しか落ちず、
+ * 孫が画面にもタスクマネージャの見えるところにも出ないまま走り続ける。
+ */
+process.on('exit', () => {
+  let pids;
+  try { pids = runner.livePids(); } catch { return; }
+  for (const pid of pids) {
+    try { killTreeSync(pid); } catch { /* もう居ない・権限が足りない */ }
+  }
+});

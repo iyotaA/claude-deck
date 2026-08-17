@@ -17,24 +17,9 @@
  * 詳細へ移るかどうかは押した人に決めてもらう。
  */
 import { el } from './util.js';
+import { EFFORT_LABELS } from './runs.js';
 import { dom } from './store.js';
 import { select } from './session.js';
-
-/**
- * 考える深さの日本語。
- *
- * サーバーが返すのは値の一覧（EFFORTS）だけで、日本語は持っていない。
- * 状態ラベル（meta.stateLabels）と違って **CLI へそのまま渡す語**なので、
- * 訳のほうを正にしないよう、添え物としてこちらに置いてある。
- * 知らない値が来たら値をそのまま出す（PERMISSION_MODE_LABELS と同じ扱い）
- */
-const EFFORT_LABELS = {
-  low: 'low（浅く速く）',
-  medium: 'medium',
-  high: 'high',
-  xhigh: 'xhigh',
-  max: 'max（いちばん深い）',
-};
 
 /** 開いたときに引いた選択肢。閉じても捨てないが、開くたびに引き直す */
 let options = null;

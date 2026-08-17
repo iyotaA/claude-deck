@@ -91,6 +91,7 @@ export const RUN_STATE_LABELS = Object.freeze({
   waiting: 'あなたの番',
   stalled: '応答なし',
   stopping: '停止中',
+  switching: '切り替え中',
   stopped: '停止しました',
   failed: '失敗しました',
   done: '終了しました',
@@ -278,6 +279,7 @@ export function createRunLedger({
         turns: 0,
         costUSD: null,
         stopRequested: false,
+        switchRequested: false,
         counts: { lines: 0, broken: 0, events: 0 },
       });
       lastStartAt = now;
@@ -289,6 +291,7 @@ export function createRunLedger({
      * 子が起きたことを記録する。
      *
      * `waiting` からも `running` へ戻すのは、`perTurn` の run を起こし直したときのため。
+     * `switching` も同じ理由で戻す（前の子を畳んで新しい子を起こした直後がここに来る）。
      *
      * @param {string} runId 対象
      * @param {number|null} pid 子の PID
@@ -298,7 +301,9 @@ export function createRunLedger({
       const run = runs.get(runId);
       if (!run || isRunOver(run.state)) return false;
       run.pid = typeof pid === 'number' && Number.isFinite(pid) ? pid : null;
-      if (run.state === 'starting' || run.state === 'waiting') run.state = 'running';
+      if (run.state === 'starting' || run.state === 'waiting' || run.state === 'switching') {
+        run.state = 'running';
+      }
       return true;
     },
 
@@ -401,6 +406,48 @@ export function createRunLedger({
     },
 
     /**
+     * 切り替えを頼まれたことを記録する。
+     *
+     * `stopping` と分けてあるのは、この先が正反対だから。
+     * あちらは畳んで終わり、こちらは畳んでから同じ `sessionId` で起こし直す。
+     * 同じ状態にすると `onExit` がどちらか一方しか選べず、
+     * 切り替えの途中で `stopped`（終端）に落ちて起こし直せなくなる。
+     *
+     * **`spec` を丸ごと受ける。** `add()` が既に spec を受けているので形の依存は増えない。
+     * 何が変わったかは前の値と比べてここで文にする。
+     * `index.mjs` から文言を渡す形にすると、台帳の中と外に同じ判断が2つできる。
+     *
+     * @param {string} runId 対象
+     * @param {object} spec 切り替え後の spec（`buildRunSpec` の戻り）
+     * @param {number} now 時刻
+     * @returns {Array<object>} 積んだ速報。既に終わっていれば空
+     */
+    markSwitching(runId, spec, now) {
+      const run = runs.get(runId);
+      if (!run || isRunOver(run.state)) return [];
+
+      // 外したときは「指定なし」と書く。空欄にすると、外したのか元からなのか読めない
+      const parts = [];
+      if (spec.model !== run.model) parts.push(`モデルを ${spec.model ?? '指定なし'} に`);
+      if (spec.effort !== run.effort) parts.push(`思考量を ${spec.effort ?? '指定なし'} に`);
+      if (spec.permissionMode !== run.permissionMode) {
+        parts.push(`権限モードを ${spec.permissionMode} に`);
+      }
+
+      run.switchRequested = true;
+      run.state = 'switching';
+      run.model = spec.model ?? null;
+      run.effort = spec.effort ?? null;
+      run.permissionMode = spec.permissionMode;
+      run.budgetUsd = spec.budgetUsd ?? null;
+      // 切り替えた先は必ず `--resume`。画面の「続き」の印もここで合わせる
+      run.resume = true;
+
+      const text = parts.length > 0 ? `${parts.join('、')}切り替えています` : '切り替えています';
+      return [pushNote(run, text, now)];
+    },
+
+    /**
      * 起こせなかった・続けられなくなったことを記録する。
      *
      * 実行ファイルが無いときは `child.on('error')` にしか来ないので、その受け皿でもある。
@@ -445,6 +492,16 @@ export function createRunLedger({
       if (run.stopRequested) {
         run.state = 'stopped';
         return [pushNote(run, '止めました', now)];
+      }
+
+      // **`stopRequested` より後に見ること。** 切り替えの最中に停止を頼まれると
+      // 両方立つので、先に見ると「止めろと言われたのに切り替え中へ戻る」ことになる。
+      if (run.switchRequested) {
+        // 切り替えのために自分で畳んだぶん。ここで終端にすると起こし直せない。
+        // `switching` のまま残し、新しい子の `setPid` で `running` へ戻す。
+        // 旗を下ろすのは、次に来る close（新しい子のもの）をまた切り替えと読まないため
+        run.switchRequested = false;
+        return [pushNote(run, '切り替えのため、いったん止めました', now)];
       }
 
       if (run.state === 'waiting' && code === 0) {
@@ -581,6 +638,7 @@ const RUN_TO_LIST_STATE = Object.freeze({
   starting: 'running',
   running: 'running',
   stopping: 'running',
+  switching: 'running',
   waiting: 'awaiting-reply',
   stalled: 'awaiting-reply',
   stopped: 'ended',

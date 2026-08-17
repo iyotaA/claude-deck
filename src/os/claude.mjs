@@ -26,7 +26,7 @@
  * このアプリでいちばん危ないのは「ブラウザ越しにコードが実行されること」なので、
  * シェルを通す経路を最初から作らない。
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 
@@ -450,6 +450,45 @@ export function stopClaude(child, {
       }, hardMs);
     }, softMs);
   });
+}
+
+/** 最後の後始末に使う待ち時間。ここで長く待つと Ctrl+C の効きが悪くなる。 */
+const KILL_SYNC_TIMEOUT_MS = 3000;
+
+/**
+ * 木ごと落とす。**同期版。**
+ *
+ * `stopClaude` の3段は非同期で、行儀のよい終わり方（stdin を閉じて向こうが畳む）を待てる。
+ * こちらは待てない場面のためのもの。`process.on('exit')` のハンドラでは
+ * **同期しか走らない**ので、`await` を含む `stopClaude` はそこから呼んでも何もしないまま終わる。
+ *
+ * だから段は無く、いきなり `/F` を付ける。行儀を捨てるのは、
+ * ここへ来る時点でサーバーの寿命が尽きているため（`shutdown()` が先に走って畳めた子は
+ * `livePids()` に残らない。ここに残っているのは、その5秒で畳めなかった子だけ）。
+ *
+ * **落ちたかどうかは返さない。** 同期で確かめる手段が無いので、
+ * 分からないものを「止めました」と書かない（0 と不明を分けるのと同じ）。
+ *
+ * @param {number} pid 落とす木の根
+ * @param {object} [opts]
+ * @param {string} [opts.platform] 'win32' など
+ * @param {Function} [opts.spawnSyncFn] spawnSync。テストから差し替える
+ * @returns {boolean} 手を出したか（pid が無ければ false）
+ */
+export function killTreeSync(pid, { platform = process.platform, spawnSyncFn = spawnSync } = {}) {
+  if (typeof pid !== 'number' || !Number.isFinite(pid) || pid <= 0) return false;
+
+  if (platform !== 'win32') {
+    try { process.kill(pid, 'SIGKILL'); } catch { /* もう居ない */ }
+    return true;
+  }
+
+  try {
+    spawnSyncFn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+      windowsHide: true, timeout: KILL_SYNC_TIMEOUT_MS,
+    });
+  } catch { /* taskkill が無い・権限が足りない。ここから先は打つ手が無い */ }
+  return true;
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   PERMISSION_MODES, BYPASS_MODE, DEFAULT_PERMISSION_MODE, PERMISSION_MODE_LABELS,
   EFFORTS, DEFAULT_BUDGET_USD, BUDGET_MIN_USD, BUDGET_MAX_USD, PROMPT_MAX,
   allowedModes, isSessionId, newSessionId, runDirsFromEnv, resolveCwd, buildRunSpec,
+  mergeSwitch,
 } from '../src/run/spec.mjs';
 
 /** テストで使う固定の ID。実物と同じ形にしておく（isSessionId を通ること自体が確認になる）。 */
@@ -424,4 +425,138 @@ test('入力が丸ごと壊れていても落ちない', () => {
     assert.equal(got.ok, false);
     assert.ok(got.reason);
   }
+});
+
+/*
+ * ---------------------------------------------------------------- 切り替え
+ *
+ * `mergeSwitch` が決めるのは「どのキーを、どう重ねるか」だけ。
+ * 値そのものが使えるかは `buildRunSpec` の仕事なので、ここでは見ない。
+ *
+ * 3通り（キーが無い / 外す / 差し替える）を取り違えると、
+ * **画面には「替えました」と出るのに実際は替わっていない**という形で壊れる。
+ */
+
+/** 動いている run の spec に見立てたもの。 */
+const PREV = Object.freeze({
+  sessionId: ID, cwd: 'C:\\work\\demo', prompt: '前の指示',
+  permissionMode: 'plan', model: 'claude-opus-5', effort: 'high',
+  budgetUsd: 5, resume: true, args: [],
+});
+
+/** 通ることを前提に中身を取り出す。 */
+function merged(patch, prev = PREV) {
+  const got = mergeSwitch(prev, patch);
+  assert.equal(got.ok, true, `通るはず: ${got.reason ?? ''}`);
+  return got;
+}
+
+test('キーが無いものは変えない', () => {
+  const got = merged({ model: 'claude-sonnet-5' });
+  assert.equal(got.next.model, 'claude-sonnet-5');
+  // 触っていないキーは前のまま
+  assert.equal(got.next.effort, 'high');
+  assert.equal(got.next.permissionMode, 'plan');
+  assert.equal(got.next.cwd, PREV.cwd);
+  assert.equal(got.next.sessionId, ID);
+  assert.deepEqual(got.changed, ['model']);
+});
+
+test('changed はキー名の配列。日本語のラベルではない', () => {
+  // 画面側が SWITCH_LABELS で日本語にする。ここで訳すと、訳し方が2箇所に増える
+  const got = merged({ model: 'claude-sonnet-5', effort: 'max' });
+  assert.deepEqual(got.changed, ['model', 'effort']);
+});
+
+test('null と空文字で model と effort を外せる', () => {
+  for (const raw of [null, '', '   ']) {
+    const got = merged({ model: raw, effort: raw });
+    assert.equal(got.next.model, null);
+    assert.equal(got.next.effort, null);
+    assert.deepEqual(got.changed, ['model', 'effort']);
+  }
+});
+
+test('権限モードは外せない', () => {
+  // 外した先が「既定」なので、plan のつもりが acceptEdits で走る（逆も）事故になる
+  for (const raw of [null, '', '  ']) {
+    const got = mergeSwitch(PREV, { permissionMode: raw });
+    assert.equal(got.ok, false);
+    assert.equal(got.reason, '権限モードは外せません');
+  }
+});
+
+test('同じ値なら changed に入らない', () => {
+  const got = mergeSwitch(PREV, { model: 'claude-opus-5', permissionMode: 'plan' });
+  assert.equal(got.ok, false);
+  assert.equal(got.reason, '切り替える内容がありません');
+});
+
+test('元から無いものを外そうとしても、替えたことにしない', () => {
+  const prev = { ...PREV, model: null, effort: null };
+  const got = mergeSwitch(prev, { model: '', effort: null });
+  assert.equal(got.ok, false);
+  assert.equal(got.reason, '切り替える内容がありません');
+});
+
+test('前後の空白は落として比べる', () => {
+  const got = mergeSwitch(PREV, { model: '  claude-opus-5  ' });
+  assert.equal(got.ok, false, '同じ値なので替えるところが無い');
+
+  const changed = merged({ model: '  claude-sonnet-5  ' });
+  assert.equal(changed.next.model, 'claude-sonnet-5');
+});
+
+test('文字列でも null でもない値は、空へ丸めずに断る', () => {
+  // 丸めると「指定したのに外れた」が画面のどこにも出ない
+  for (const raw of [42, true, [], {}, undefined]) {
+    const got = mergeSwitch(PREV, { model: raw });
+    assert.equal(got.ok, false, `値: ${JSON.stringify(raw)}`);
+    assert.equal(got.reason, 'モデルの指定が不正です');
+  }
+});
+
+test('断る理由はキー名ではなく日本語で返す', () => {
+  assert.equal(mergeSwitch(PREV, { effort: 1 }).reason, '思考量の指定が不正です');
+  assert.equal(mergeSwitch(PREV, { permissionMode: 1 }).reason, '権限モードの指定が不正です');
+});
+
+test('切り替えで cwd と sessionId は動かせない', () => {
+  // ここが動くと、他人のログへ追記させられる・許可していないフォルダで走る
+  const got = merged({ model: 'claude-sonnet-5', cwd: 'C:\\Windows', sessionId: 'x' });
+  assert.equal(got.next.cwd, PREV.cwd);
+  assert.equal(got.next.sessionId, ID);
+  assert.deepEqual(got.changed, ['model']);
+});
+
+test('差分が丸ごと壊れていても落ちない', () => {
+  for (const v of [null, undefined, 'あ', 42, [], true]) {
+    const got = mergeSwitch(PREV, v);
+    assert.equal(got.ok, false, `値: ${JSON.stringify(v)}`);
+    assert.equal(got.reason, '切り替える内容がありません');
+  }
+});
+
+test('元の spec を書き換えない', () => {
+  const prev = { ...PREV };
+  merged({ model: 'claude-sonnet-5', effort: null }, prev);
+  assert.equal(prev.model, 'claude-opus-5');
+  assert.equal(prev.effort, 'high');
+});
+
+test('切り替えた spec をそのまま buildRunSpec へ通せる', () => {
+  // 実際の経路がこの形。ここが通らないと切り替えは1回も成功しない
+  const got = merged({ model: 'claude-sonnet-5', effort: null });
+  const built = buildRunSpec(
+    { ...got.next, prompt: '続けて', resume: true, sessionId: PREV.sessionId },
+    { ...CTX, allowedDirs: [PREV.cwd] },
+  );
+  assert.equal(built.ok, true, built.reason ?? '');
+  assert.equal(built.spec.sessionId, ID);
+  assert.equal(built.spec.model, 'claude-sonnet-5');
+  assert.equal(built.spec.effort, null);
+  assert.equal(built.spec.args.includes('--resume'), true);
+  assert.equal(built.spec.args.includes('--verbose'), true);
+  // 外したものはフラグごと消える（空文字で渡すと commander がフラグとして読む）
+  assert.equal(built.spec.args.includes('--effort'), false);
 });

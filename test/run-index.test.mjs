@@ -484,6 +484,174 @@ test('知らない run を止めたら 404', async () => {
   assert.equal(out.status, 404);
 });
 
+/*
+ * ------------------------------------------------------------ 替えて続ける
+ *
+ * 畳んでから起こし直す。順が逆になると、同じ会話ログへ2つのプロセスが書きうる。
+ * だから**断る判断はすべて畳む前**に済ませる。
+ * 下のテストが `h.stops.length` と `h.calls.length` を見張っているのはそのため。
+ */
+
+test('替えて続けると、畳んでから --resume で起こし直す', async () => {
+  const h = harness();
+  const res = h.start();
+  const sid = res.row.sessionId;
+  await stdinText(h.children[0]);
+
+  const out = await h.runner.switch(res.runId, { model: 'claude-sonnet-5' }, 'つづき');
+
+  assert.equal(out.ok, true);
+  assert.equal(out.status, 202);
+  assert.deepEqual(out.changed, ['model']);
+  // 前の子を畳んでから、新しい子を1つだけ起こす
+  assert.equal(h.stops.length, 1);
+  assert.equal(h.calls.length, 2);
+  // ID は変えない（--fork-session を使わない）
+  const at = h.calls[1].args.indexOf('--resume');
+  assert.ok(at >= 0, '--resume が付いていない');
+  assert.equal(h.calls[1].args[at + 1], sid);
+  assert.ok(h.calls[1].args.includes('claude-sonnet-5'));
+
+  const row = h.runner.get(res.runId);
+  assert.equal(row.state, 'running');
+  assert.equal(row.model, 'claude-sonnet-5');
+  assert.equal(row.sessionId, sid);
+  assert.equal(row.resume, true);
+
+  // 指示文は argv ではなく、新しい子の stdin へ
+  const written = await stdinText(h.children[1]);
+  assert.equal(JSON.parse(written.trim()).message.content[0].text, 'つづき');
+});
+
+test('1往復で閉じている run は、畳む工程を飛ばして起こし直す', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+
+  feed(child, sResult({ sessionId: res.row.sessionId }));
+  await settle();
+  child.close(0);
+  await settle();
+  assert.equal(h.runner.get(res.runId).state, 'waiting');
+
+  const out = await h.runner.switch(res.runId, { effort: 'high' }, 'つづき');
+
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.changed, ['effort']);
+  // もう閉じている相手を止めにいかない
+  assert.equal(h.stops.length, 0);
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.runner.get(res.runId).state, 'running');
+  assert.equal(h.runner.get(res.runId).effort, 'high');
+});
+
+test('断るだけのときは子を畳まない', async () => {
+  const h = harness();
+  const res = h.start();
+  const patch = { model: 'claude-sonnet-5' };
+
+  const cases = [
+    ['知らない run', h.runner.switch('r99', patch, 'つづき'), 404],
+    ['替える中身が無い', h.runner.switch(res.runId, {}, 'つづき'), 400],
+    ['patch が object ではない', h.runner.switch(res.runId, 'claude-sonnet-5', 'つづき'), 400],
+    ['同じ指定', h.runner.switch(res.runId, { permissionMode: 'plan' }, 'つづき'), 400],
+    ['権限モードを外そうとした', h.runner.switch(res.runId, { permissionMode: '' }, 'つづき'), 400],
+    ['文字列でない指定', h.runner.switch(res.runId, { model: 5 }, 'つづき'), 400],
+    ['CLI が読めない名前', h.runner.switch(res.runId, { model: '-rf' }, 'つづき'), 400],
+    ['指示が空', h.runner.switch(res.runId, patch, '   '), 400],
+    ['指示が長すぎる', h.runner.switch(res.runId, patch, 'あ'.repeat(64001)), 400],
+  ];
+
+  for (const [label, promise, status] of cases) {
+    const out = await promise;
+    assert.equal(out.ok, false, label);
+    assert.equal(out.status, status, label);
+    assert.ok(out.reason, `${label}: 理由を付けずに断らない`);
+  }
+
+  assert.equal(h.stops.length, 0, '断るだけのときに子を殺してはいけない');
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.runner.get(res.runId).state, 'running');
+});
+
+test('終わった run は替えられない', async () => {
+  const h = harness();
+  const res = h.start();
+  h.children[0].close(1);
+  await settle();
+
+  const out = await h.runner.switch(res.runId, { model: 'claude-sonnet-5' }, 'つづき');
+  assert.equal(out.ok, false);
+  assert.equal(out.status, 409);
+  assert.equal(h.calls.length, 1);
+});
+
+test('claude を掴めていなければ 503。前の子はそのまま', async () => {
+  let found = { ok: true, state: 'ok', path: BIN, version: '2.1.228', reason: null };
+  const h = harness({ claude: () => found });
+  const res = h.start();
+
+  // 起こした後に消えた形（更新で入れ替わった・PATH が変わった）
+  found = { ok: false, state: 'missing', path: null, version: null, reason: '見つかりません' };
+  const out = await h.runner.switch(res.runId, { model: 'claude-sonnet-5' }, 'つづき');
+
+  assert.equal(out.ok, false);
+  assert.equal(out.status, 503);
+  assert.equal(out.reason, '見つかりません');
+  assert.equal(h.stops.length, 0);
+  assert.equal(h.runner.get(res.runId).state, 'running');
+});
+
+test('畳んでいるあいだに止められたら、起こし直さない', async () => {
+  const ledger = createRunLedger({ minIntervalMs: 0 });
+  let target = null;
+  const h = harness({
+    ledger,
+    stopFn: async (child) => {
+      // 畳んでいる最中に「止めて」が届いた形。`switching` から外れる
+      if (target) ledger.markStopping(target, T);
+      child.close(0);
+      return { closed: true, stage: 'stdin', reason: null };
+    },
+  });
+  const res = h.start();
+  target = res.runId;
+
+  const out = await h.runner.switch(res.runId, { model: 'claude-sonnet-5' }, 'つづき');
+
+  assert.equal(out.ok, false);
+  assert.equal(out.status, 409);
+  // isRunOver だけを見ていると stopping を素通りして、ここで新しい子が立つ
+  assert.equal(h.calls.length, 1);
+});
+
+test('前の子を止めきれなければ 500。起こし直さない', async () => {
+  const h = harness({
+    stopFn: async () => ({ closed: false, stage: 'force', reason: '止めきれませんでした（残っている可能性があります）' }),
+  });
+  const res = h.start();
+
+  const out = await h.runner.switch(res.runId, { model: 'claude-sonnet-5' }, 'つづき');
+
+  assert.equal(out.ok, false);
+  assert.equal(out.status, 500);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.runner.get(res.runId).state, 'failed');
+});
+
+test('livePids は生きている子の PID だけ返す', async () => {
+  const h = harness({ ledger: createRunLedger({ minIntervalMs: 0 }) });
+  const a = h.start();
+  h.start();
+
+  assert.deepEqual([...h.runner.livePids()].sort(), [1000, 1001]);
+
+  await h.runner.stop(a.runId);
+  await settle();
+  // 畳んだぶんは配らない（process.on('exit') から二重に殺しにいかない）
+  assert.deepEqual(h.runner.livePids(), [1001]);
+});
+
 test('shutdown で動いているものを全部止める', async () => {
   const h = harness({ ledger: createRunLedger({ minIntervalMs: 0 }) });
   const a = h.start();
