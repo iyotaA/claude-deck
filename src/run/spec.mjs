@@ -372,3 +372,72 @@ export function buildRunSpec(input = {}, {
 
   return { ok: true, spec };
 }
+
+/** 切り替えで差し替えてよいキー。ここに `cwd` と `sessionId` を足さない */
+const SWITCHABLE = Object.freeze(['model', 'effort', 'permissionMode']);
+
+/** 断るときの言い方。キー名をそのまま出すと、画面を見ている人には読めない */
+const SWITCH_LABELS = Object.freeze({
+  model: 'モデル',
+  effort: '思考量',
+  permissionMode: '権限モード',
+});
+
+/**
+ * 動いている run の起動指定に、画面から来た差分を重ねる。
+ *
+ * 値そのものが使えるかは見ない。**そこは `buildRunSpec` の仕事で、二重に書かない。**
+ * ここで決めるのは「どのキーを、どう重ねるか」だけ。
+ *
+ * 3通りを分けて扱う。
+ *
+ * - キーが無い … 変えない
+ * - `null` か空文字 … 外す（`model` と `effort` だけ。既定に戻る）
+ * - 文字列 … 差し替える
+ *
+ * `permissionMode` だけ外せないのは、外した先が「既定」だから。
+ * `plan` のつもりが `acceptEdits` で走る（その逆も）という、いちばん高くつく事故になる。
+ *
+ * 文字列でも `null` でもない値（数値・配列・真偽値）は空へ丸めずに断る。
+ * 丸めると「指定したのに外れた」が画面のどこにも出ない。
+ *
+ * @param {object} prev いまの spec
+ * @param {object} patch 画面から来た差分
+ * @returns {{ok:true, next:object, changed:string[]}|{ok:false, reason:string}}
+ */
+export function mergeSwitch(prev, patch) {
+  const src = (patch && typeof patch === 'object' && !Array.isArray(patch)) ? patch : null;
+  if (!src) return { ok: false, reason: '切り替える内容がありません' };
+
+  const next = { ...prev };
+  const changed = [];
+
+  for (const key of SWITCHABLE) {
+    if (!(key in src)) continue;
+    const raw = src[key];
+    if (raw !== null && typeof raw !== 'string') {
+      return { ok: false, reason: `${SWITCH_LABELS[key]}の指定が不正です` };
+    }
+
+    const value = typeof raw === 'string' ? raw.trim() : '';
+    if (!value) {
+      if (key === 'permissionMode') {
+        return { ok: false, reason: '権限モードは外せません' };
+      }
+      if ((next[key] ?? null) === null) continue;
+      next[key] = null;
+      changed.push(key);
+      continue;
+    }
+
+    if (next[key] === value) continue;
+    next[key] = value;
+    changed.push(key);
+  }
+
+  // 同じ指定で起こし直すのは、ただ会話を1回中断するだけで得るものが無い。
+  // 続きを書きたいだけなら `POST /api/runs/:id/input` のほうが速い
+  if (changed.length === 0) return { ok: false, reason: '切り替える内容がありません' };
+
+  return { ok: true, next, changed };
+}

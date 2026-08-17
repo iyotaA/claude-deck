@@ -235,6 +235,67 @@
 
 .runform-prompt:disabled { opacity: .5; }
 
+/* ------------------------------- 操作（送る・止める・替える） */
+
+/* 速報の下に置く。線1本で区切るだけにして、面は塗らない */
+.run-ops {
+  margin-top: .6rem;
+  padding-top: .6rem;
+  border-top: 1px solid var(--border);
+}
+
+/* 起こすフォームの本文欄と同じ見た目。あちらのクラスをそのまま借りると
+   .runform- という名前が実行パネルの中に出てきて、どちらの都合か読めなくなる */
+.run-prompt {
+  display: block;
+  width: 100%;
+  padding: .45rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  line-height: 1.6;
+  /* 横は伸ばさせない。縦だけ本人に任せる */
+  resize: vertical;
+}
+
+/* ボタンと一言を1行に並べる。狭ければ折り返す */
+.run-ops-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  margin-top: .5rem;
+}
+
+/* 「もう一度押すと止めます」の見た目。面は塗らず、枠と字だけ */
+.btn.is-armed {
+  border-color: var(--hot);
+  color: var(--hot);
+}
+
+/* 替えて続ける。普段は畳んでおく。
+   display を書かないので、hidden はブラウザ既定のまま効く
+   （.run-drop のように display を持たせると [hidden] に勝ってしまう） */
+.run-switch { margin-top: .6rem; }
+
+.run-switch > summary {
+  cursor: pointer;
+  font-size: .78rem;
+  color: var(--fg-muted);
+}
+
+.run-switch > summary:hover { color: var(--fg); }
+
+/* 開いた中身。左の線1本で、上の操作と地続きでないことを示す */
+.run-switch-body {
+  margin-top: .5rem;
+  padding-left: .6rem;
+  border-left: 2px solid var(--border);
+}
+
 /* ---------------------------------------------------- 狭い窓向け */
 
 /* モーダルと同じで、この機能の都合は narrow.css へ散らさずここに置く。

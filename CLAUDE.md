@@ -102,11 +102,11 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `usage.test.mjs` | 数値の集計。重複の潰し方と、0 と不明の分け方（数値の本丸） |
 | `usage-view.test.mjs` | 横断集計のクエリ・走査上限・直近の中央値 |
 | `stream.test.mjs` | stream-json の行の読み書き。未知の型と壊れた行で落ちないこと |
-| `run-spec.test.mjs` | 起動指定の関所。cwd の許可・語彙・argv の完全一致（**実行に関わる本丸**） |
+| `run-spec.test.mjs` | 起動指定の関所。cwd の許可・語彙・argv の完全一致・切り替えの併合（**実行に関わる本丸**） |
 | `run-event.test.mjs` | 速報1行の畳み方。切り詰めと、生の行を外へ出さないこと |
-| `run-ledger.test.mjs` | 台帳の状態機械。全分岐と、`rows()` に毎秒動く値が載らないこと |
-| `run-index.test.mjs` | 実行の配線。断る番号・停止の3段・子が死んだときの二重確定の防ぎ方 |
-| `claude-cli.test.mjs` | CLI の探し方・版の読み方・stdout の行の割り方 |
+| `run-ledger.test.mjs` | 台帳の状態機械。全分岐と、`rows()` に毎秒動く値が載らないこと。一覧への合流 |
+| `run-index.test.mjs` | 実行の配線。断る番号・停止の3段・二重確定の防ぎ方・切り替えは畳む前に断ること |
+| `claude-cli.test.mjs` | CLI の探し方・版の読み方・stdout の行の割り方・最後の後始末（同期版） |
 | `appdata.test.mjs` | 書き込み先の解決。ログと設定が同じ場所を指すこと |
 | `appinfo.test.mjs` | 版の出どころ。読めないときに 0 でなく null を返すこと |
 | `portfile.test.mjs` | `--port-file` の受け取り方と、既定の場所 |
@@ -195,7 +195,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - `notify/index.mjs:createNotifier`
 - `update/state.mjs:loadUpdateState`
 - `startup/state.mjs:loadStartupState`
-- `run/index.mjs:createRunner`（`server.mjs` が触る唯一の口。10個の関数を返す）
+- `run/index.mjs:createRunner`（`server.mjs` が触る唯一の口。12個の関数を返す）
 - `run/spec.mjs:buildRunSpec`（起動指定を検証して argv まで組む）
 - `os/focus.mjs:focusTerminal`
 - `os/claude.mjs:probeClaude` / `claudeInfo`（探すのと、結果を読むのを分けてある）
@@ -209,7 +209,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | 場所 | 役割 | 中身 |
 |---|---|---|
 | `public/css/` | 見た目 | 11枚。`<link>` の並びがそのまま重ね順になる |
-| `public/js/` | 画面の組み立て | 23枚 ＋ `timeline/` 7枚 |
+| `public/js/` | 画面の組み立て | 24枚 ＋ `timeline/` 7枚 |
 
 こちらも import は一方向。層の一覧と、循環を切っている4箇所は「画面側」に書いてある。
 
@@ -721,9 +721,8 @@ C# 側に版を書き写さない。`vpk` に手で打たない。
 ## 実行（画面からセッションを起こす）
 
 `src/run/` と `src/os/claude.mjs`、画面側は `public/js/runs.js` と `run-view.js` と `run-form.js`。
-見るだけの道具から一歩出る機能で、いま作りかけ。
-窓口と、画面から起こす口と、詳細ペインへの出力までは通っている。
-**一覧への合流はこれから。**
+見るだけの道具から一歩出る機能。
+起こす・続ける・止める・替える と、一覧への合流までひととおり通っている。
 **この機能が増やす被害は質が違う。これまでは表示が変わるだけだったが、ここはコードが実行される。**
 
 使うのは公開されている CLI の入口だけ（`claude -p --input-format stream-json`）。
@@ -783,6 +782,11 @@ Error: When using --print, --output-format=stream-json requires --verbose
 
 **`result` の数字は種類で意味が違う。** `num_turns` は**そのターンぶん**（2往復目も 1）、
 `total_cost_usd` は**累積**（実測 0.803025 → 0.843727）。同じ行に並んでいるので混ぜやすい。
+
+ただし `total_cost_usd` が累積するのは**同じ子のあいだだけ**。
+`/switch` は子を起こし直すので、そこで起点に戻る（実測 0.401036 → 切り替え後の最初の `result` で 0.130617）。
+だから画面のラベルは「この起動ぶんの費用」にしてある。「ここまで」と書くと、
+切り替え後の小さい値を run 全体の合計として読ませてしまう。
 
 **`--max-budget-usd` に当たっても死なない。** `result` は出る（`error_max_budget_usd` /
 `terminal_reason: budget_exhausted` / `errors` 配列）が**プロセスは生き続ける**。
@@ -849,8 +853,9 @@ CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.ex
 | `ledger.mjs` | いつ状態が変わるか。何を覚えて何を捨てるか | 無し（時刻も `now` で受ける） |
 | `index.mjs` | どの順で手を動かすか。断る理由と HTTP の番号 | `os/claude.mjs` 経由だけ |
 
-**`server.mjs` が触るのは `createRunner()` が返す10個の口だけ。**
-`start` / `input` / `stop` / `tick` / `subscribe` / `shutdown` / `rows` / `get` / `events` / `stats`。
+**`server.mjs` が触るのは `createRunner()` が返す12個の口だけ。**
+`start` / `input` / `stop` / `switch` / `tick` / `subscribe` / `shutdown` / `livePids` /
+`rows` / `get` / `events` / `stats`。
 
 **断る理由と HTTP の番号は `run/index.mjs` が決める。**
 理由は4種類ある（503 CLI を掴めていない / 400 指定が不正 / 429 本数と間隔 / 500 起こせなかった）。
@@ -869,6 +874,71 @@ CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.ex
 `idleMs` と `lastActivityAt` の2つだけなので、受信行数やトークン数を混ぜると
 **内容が同じでも毎秒 push することになる**。
 `counts` / `costUSD` / `lastLineAt` が `get()` にしか入らないのはこのため（テストで固定してある）。
+
+### 一覧への合流
+
+`ledger.mjs` の `mergeRuns()`。**`parse/state.mjs` の規則は1行も変えない。**
+headless でも紙は書かれるが `status` のキーが無いので、`deriveState` は末尾の行だけで決める。
+走っている最中でも「返信待ち」に見えるのはそのため（上の実測）。
+台帳が知っている本当の状態を、あとから重ねて直す。
+
+合流させる場所は `server.mjs` の `refresh()` だけ。
+**`view/` の中でやらない。** `view/` と `run/` はお互いを import しない決まりなので、
+合成の場所はサーバーと決めてある。並べ直しは `view/sessions.mjs` の `sortRows` を使う
+（比較器を2箇所に書かない）。
+
+- `sessionId` が一致する行があれば、その上に重ねる（`state` は台帳の値が勝つ）
+- 一致する行が無ければ同じ形の行を合成して足す。**ただし生きているぶんだけ。**
+  終わっていてログも無い run を足すと、書庫にも詳細にも出せない幽霊行が
+  `HISTORY_MAX` 件ぶん一覧に残る
+- 同じ `sessionId` の run が2本あるなら、後から起こしたほうを採る
+  （`--resume` で起こし直すと、前の run が終端のまま履歴に残っている）
+
+### 替えて続ける（`POST /api/runs/:id/switch`）
+
+モデル・思考量・権限モードを替えて、**同じセッションの続き**を起こす。
+
+**画面から2手（停止 → 起動）にしない。** あいだが空くと、前の子がまだ畳まれないうちに
+次が起きて、同じ会話ログに2つのプロセスが書きうる。
+サーバー側で `close` を待ってから起こせば、その競合は構造的に起きない。
+
+**`--fork-session` は使わない。** ID が変わると一覧・詳細・`?session=`・ブックマークが全部切れる。
+切り替えの跡は会話ログに書かない。跡が残るのは台帳と実行パネルだけ。
+
+**断る判断はすべて子を畳む前に済ませる。** 通らないと分かっているのに殺すと、
+断るだけで済んだはずのものが「止まっただけ」で終わる。順番はこう。
+
+```
+404 その run が無い → 409 もう終わっている → 409 起動指定が残っていない
+→ 400 替える中身が無い・指定が不正（mergeSwitch）→ 400 指示が空・長すぎる
+→ 503 claude を掴めていない → 400 argv を組めない（buildRunSpec）
+→ ここで初めて畳む
+```
+
+畳んだ**後にもう一度**台帳を見て、`switching` から外れていたら起こし直さない（409）。
+見るのは「まだ切り替え中か」の1点で、**`isRunOver` だけでは `stopping` を素通りする**。
+素通りすると、止めろと言われた run の子だけが生き残る。
+
+`perTurn`（`result` を返して閉じた `waiting`）なら畳む工程そのものが要らない。
+`detach()` が `live` から entry を消すのは終端のときだけなので、`entry.spec` はそこに残っている。
+
+### 最後の後始末
+
+止め方は3段（上の実測）で最長5秒かかる。`shutdown()` の hard exit は 500ms なので、
+**`shutdown()` で `runner.shutdown()` を待たない**（待たせると Ctrl+C がすぐ効かなくなる）。
+1段目の `stdin.end()` は同期で始まるので、行儀のよい相手はそれで畳まれる。
+
+畳めなかったぶんは `process.on('exit')` が拾う。
+**ここは同期しか走らない。** `runner.shutdown()` は `await` を含むので、
+ここから呼んでも何もしないまま終わる。だから `livePids()` で PID だけ受け取り、
+`os/claude.mjs` の `killTreeSync`（`taskkill /T /F` の同期版）に任せる。
+
+段を踏まないのは、ここへ来る時点でサーバーの寿命が尽きているため。
+`shutdown()` で畳めた子は `livePids()` に残らないので、ここに残るのは
+Bash などを掴んだまま応じなかった子だけになる（実測でその子は3段目まで要った）。
+
+`killTreeSync` が返すのは**「手を出したか」であって「落ちたか」ではない。**
+同期で確かめる手段が無いので、確かめられないことを返り値の意味に混ぜない。
 
 ### 速報は専用の SSE で流す
 
@@ -913,6 +983,7 @@ CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.ex
 | `POST /api/runs` | セッションを1本起こす。202 を返し、以降は速報で追う |
 | `POST /api/runs/:id/input` | 走っている（または待っている）ものへ1行送る |
 | `POST /api/runs/:id/stop` | 止める。3段階。もう終わっているものへの連打は 200 |
+| `POST /api/runs/:id/switch` | モデル・思考量・権限モードを替えて `--resume` で続ける。202 |
 | `POST /api/settings/notify` | 保存して即反映。応答は GET と同じ形 |
 | `POST /api/settings/notify/test` | テスト送信を1通。3秒のクールダウン付き |
 | `POST /api/update/apply` | ランチャを起こして更新を当てさせる。202 を返して以降は関与しない |
@@ -955,8 +1026,9 @@ CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.ex
 
 上限は `readJsonBody(req, limit)` の**引数**にしてある。
 **全体を上げない。** 設定の窓口には小さい JSON しか来ないので、1本の定数を上げると
-緩めた覚えのない口まで緩む。長い指示文を受ける2本（`POST /api/runs` と
-`POST /api/runs/:id/input`）だけに `RUN_BODY_MAX`（256KB）を渡す。
+緩めた覚えのない口まで緩む。長い指示文を受ける3本（`POST /api/runs` と
+`POST /api/runs/:id/input` と `POST /api/runs/:id/switch`）だけに `RUN_BODY_MAX`（256KB）を渡す。
+切り替えにも指示文が要る（空 stdin では `system/init` すら出ない。実測）ので、同じ上限に乗せてある。
 
 ルーティングは**完全一致を正規表現より手前に置く**。
 `/api/runs/events` と `/api/runs/stream` は `/^\/api\/runs\/([\w-]{1,64})$/` にも当たるので、
@@ -1008,7 +1080,7 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 拡張子は `.js` のままにする。`.mjs` を `public/` に置くと `server.mjs` の `MIME` に無く、
 `octet-stream` で返るのでブラウザが module として読まない。
 
-`public/js/` は 23枚 ＋ `timeline/` 7枚。**import は上から下へ一方向にだけ流す。**
+`public/js/` は 24枚 ＋ `timeline/` 7枚。**import は上から下へ一方向にだけ流す。**
 逆向きに import したくなったら、置き場所が間違っている。
 
 | 層 | ファイル | 役割 |
@@ -1225,19 +1297,28 @@ CSS は `public/css/` に11枚ある。`index.html` の `<link>` の並びが、
 - **`manual` を選ばせない。** 非対話で許可要求が来たときの返し方が確かめられていない。当てずっぽうで実装すると、要求に答えられないまま止まったプロセスが残り、画面には「実行中」と出続ける
 - **実行の速報を `/api/stream` に相乗りさせない。** あちらは全タブが常時つないでいる一覧の経路で、1秒 tick と差分判定が付いている。1ターンで数百行出る速報を混ぜると、一覧の更新が実行の量に引きずられる。専用の `/api/runs/stream` に分ける
 - **`runner.subscribe()` を窓ごとに呼ばない。** サーバーが1回だけ購読して、開いている SSE 全部へ配る。窓ごとに購読すると閉じ忘れが listeners に静かに溜まる
-- **`readJsonBody` の上限を全体で上げない。** 長い指示文を受ける2本（`POST /api/runs` と `POST /api/runs/:id/input`）にだけ `RUN_BODY_MAX`（256KB）を引数で渡す。1本の定数を上げると、緩めた覚えのない口まで緩む
+- **`readJsonBody` の上限を全体で上げない。** 長い指示文を受ける3本（`POST /api/runs` と `POST /api/runs/:id/input` と `POST /api/runs/:id/switch`）にだけ `RUN_BODY_MAX`（256KB）を引数で渡す。1本の定数を上げると、緩めた覚えのない口まで緩む
 - **`rows()` に毎秒動く値を入れない。** `refresh()` の差分判定が除外しているのは `idleMs` と `lastActivityAt` の2つだけ。受信行数やトークン数を混ぜると、内容が同じでも毎秒 push することになる。細かい値は `get()`（詳細ペイン用）の側に置く
 - **断る理由と HTTP の番号は `run/index.mjs` が決める。** 503（CLI を掴めていない）・400（指定が不正）・429（本数と間隔）・500（起こせなかった）の4種類。`server.mjs` 側で理由の文字列を見て振り分けると、言い回しを直しただけで番号が変わる
 - **`shutdown()` で `runner.shutdown()` を待たない。** 止め方の3段は最長5秒かかるが、`shutdown()` の hard exit は 500ms。待たせると Ctrl+C がすぐ効かなくなる。1段目の `stdin.end()` は同期で始まるので、行儀のよい相手はそれで畳まれる（実測 `code=0`）
 - **完全一致のルーティングを正規表現より手前に置く。** `/api/runs/events` と `/api/runs/stream` は `/^\/api\/runs\/([\w-]{1,64})$/` にも当たる。順番を入れ替えると「そんな実行はありません」と 404 を返すようになる
 - **予算切れを「終わった」として扱わない。** `--max-budget-usd` に当たっても `result` が出るだけで**プロセスは生きている**（実測）。止めるまで機械を掴んだままになる
 - **`result` の `num_turns` を累積として読まない。** そのターンぶんの数で、2往復目も 1 が入る。累積なのは `total_cost_usd` のほう。同じ行に並んでいるので混ぜやすい
+- **`total_cost_usd` を run 全体の合計として画面に出さない。** 累積するのは同じ子のあいだだけで、`/switch` は子を起こし直すので起点に戻る（実測 0.401036 → 0.130617）。ラベルは「この起動ぶんの費用」にしてある。「ここまで」と書くと、切り替え後の小さい値を全体の合計として読ませることになる
 - **速報が1件届くたびに詳細ペインを作り直さない。** 1ターンで数百行来るので、開いた `<details>` と入力中の caret が毎回消える。`detailKeyOf()` に混ぜるのは `runStampFor()`（出来事が増えただけでは動かない値）だけにして、中への追記は `RunView.render()` に任せる（`Timeline` と同じ「器を預かって自分で描き直す」形）
 - **`runs.js`（層2）から `run-view.js`（層3）を import しない。** 逆向きになる。`subscribeRuns(fn)` で外から登録し、配線するのは `main.js`（層8）。既存の循環4箇所と同じ切り方
 - **実行パネルを詳細（`d`）の中に入れない。** 起こした直後はまだ会話ログが1行も無く、`d` は null。中に入れるとログが出るまで何も出ず、押したのに何も起きていないように見える
 - **起こしたセッションを `select(id, 'live')` で選ばない。** `'query'` にする。起こした直後は一覧にまだ並ばないので、`'live'` で選ぶと次の push（2秒後）に `stream.js` の `apply()` が「一覧から消えた」と読んで選択を外し、先頭のセッションへ飛ぶ
 - **起こした直後に画面を勝手に動かさない。** モーダルを閉じて詳細ペインへ飛ばすと、会話ログが出るまでの数秒「このセッションは開けませんでした」を見せることになる。結果はモーダルの中に出して、移るかどうかは押した人に決めてもらう
 - **起こすフォームの見た目を新しく作らない。** 中身は設定モーダルのクラス（`.settings-head` / `.settings-body` / `.settings-sec` / `.settings-label` / `.settings-row` / `.settings-hint` / `.settings-grid` / `.settings-text` / `.settings-num` / `.settings-select` / `.settings-foot` / `.settings-msg`）をそのまま借りる。あちらのセレクタは `.settings` を親に取っていないクラス単体なので、`.runform` の中でも効く。`run.css` に書き写すのは `.settings` 自身に紐づく4つ（本体・`::backdrop`・`[open]`・幅）だけ
+- **終わっていてログも無い run を一覧へ合成しない。** 足すと、書庫にも詳細にも出せない幽霊行が `HISTORY_MAX` 件ぶん残る。起こしてすぐ失敗したものは実行パネルとフォームの帯に出るので、そちらで足りる
+- **合流を `view/` の中でやらない。** `view/` と `run/` はお互いを import しない決まりなので、合成の場所は `server.mjs` の `refresh()` だけ。並べ直しは `view/sessions.mjs` の `sortRows` を使う（比較器を2箇所に書かない）
+- **切り替えを画面から2手（停止 → 起動）にしない。** あいだが空くと、前の子がまだ畳まれないうちに次が起きて、同じ会話ログに2つのプロセスが書きうる。`POST /api/runs/:id/switch` の1本にまとめ、サーバー側で `close` を待ってから起こす
+- **切り替えで断る判断を、子を畳んだ後に置かない。** 通らないと分かっているのに殺すと、断るだけで済んだはずのものが「止まっただけ」で終わる。順は 404 → 409（終端）→ 409（起動指定が無い）→ 400（`mergeSwitch`）→ 400（指示）→ 503（CLI）→ 400（`buildRunSpec`）→ そこで初めて畳む
+- **畳んだ後の再確認を `isRunOver` で済ませない。** 見るのは「まだ `switching` か」の1点。`stopping` は終端ではないので `isRunOver` では素通りし、止めろと言われた run の子だけが生き残る
+- **`detach()` で `live` から entry を消すのは終端のときだけ。** `perTurn`（`waiting`）で消すと `entry.spec` が失われ、切り替えが「起動指定が残っていません」で断られる
+- **`process.on('exit')` から `runner.shutdown()` を呼ばない。** ここは**同期しか走らない**ので、`await` を含むあれは何もしないまま終わる。`livePids()` で PID を受け取って `killTreeSync` に任せる
+- **`killTreeSync` の返り値を「落ちた」と読まない。** 返しているのは「手を出したか」。同期で確かめる手段が無いので、確かめられないことを返り値の意味に混ぜない
 - **キー操作の判定にクラス名を使わない。** 見た目を借りている以上、`.settings-text` のような借り先の名前が `run-form.js` に書かれることになる。要素名（`input, select`）で見て、本文欄だけは参照（`ev.target === dom.runPrompt`）で分ける
 
 ## 要約を AI に差し替えるとき

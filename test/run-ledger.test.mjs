@@ -46,13 +46,14 @@ function started(opts = {}) {
 
 test('isRunOver は終わった3つだけを真にする', () => {
   for (const s of ['stopped', 'failed', 'done']) assert.equal(isRunOver(s), true);
-  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping']) {
+  // stopping と switching は終端ではない。**ここを真にすると切り替えが起こし直せなくなる**
+  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping', 'switching']) {
     assert.equal(isRunOver(s), false);
   }
 });
 
 test('状態の言い方は全部そろっている', () => {
-  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping', 'stopped', 'failed', 'done']) {
+  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping', 'switching', 'stopped', 'failed', 'done']) {
     assert.equal(typeof RUN_STATE_LABELS[s], 'string');
   }
 });
@@ -240,6 +241,99 @@ test('止めるあいだは stopping。嘘の状態を出さない', () => {
   led.onExit(id, { code: 1 }, T + 3000);
   // 自分で止めたので、終了コードが 0 でなくても失敗ではない
   assert.equal(led.rows()[0].state, 'stopped');
+});
+
+/*
+ * ------------------------------------------------------------ 切り替え
+ *
+ * 畳んでから同じ `sessionId` で起こし直すので、途中の状態が終端に落ちると
+ * **二度と起こし直せない。** stopping と分けてあるのはそのため。
+ */
+
+test('切り替えのあいだは switching。終端にしない', () => {
+  const { led, id } = started();
+  const evs = led.markSwitching(id, spec({ model: 'claude-sonnet-5' }), T + 100);
+
+  const [row] = led.rows();
+  assert.equal(row.state, 'switching');
+  assert.equal(isRunOver(row.state), false);
+  assert.equal(row.model, 'claude-sonnet-5');
+  assert.equal(evs.length, 1);
+  assert.equal(evs[0].kind, 'note');
+});
+
+test('何を替えたかを1行に書く。外したものは「指定なし」', () => {
+  const { led, id } = started();
+  // 起こしたときは model: 'claude-opus-5' / effort: null（spec() の既定）
+  const [ev] = led.markSwitching(id, spec({ model: null, effort: 'high' }), T + 100);
+  assert.equal(ev.text, 'モデルを 指定なし に、思考量を high に切り替えています');
+});
+
+test('切り替えた先は必ず続き（resume）になる', () => {
+  const { led, id } = started();
+  assert.equal(led.rows()[0].resume, false);
+
+  led.markSwitching(id, spec({ model: 'claude-sonnet-5', resume: true }), T + 100);
+  // 画面の「続き」の印もここで合わせる。spec の resume を写すのではなく必ず真
+  assert.equal(led.rows()[0].resume, true);
+});
+
+test('切り替えのために畳んだ close は終端にしない', () => {
+  const { led, id } = started();
+  led.markSwitching(id, spec({ model: 'claude-sonnet-5' }), T + 100);
+  led.onExit(id, { code: 1 }, T + 200);
+
+  const [row] = led.rows();
+  // ここで stopped や failed に落ちると、新しい子を起こしても setPid が効かない
+  assert.equal(row.state, 'switching');
+  assert.equal(row.pid, null);
+});
+
+test('切り替えのあと setPid で running へ戻る', () => {
+  const { led, id } = started();
+  led.markSwitching(id, spec({ model: 'claude-sonnet-5' }), T + 100);
+  led.onExit(id, { code: 0 }, T + 200);
+
+  assert.equal(led.setPid(id, 7777), true);
+  const [row] = led.rows();
+  assert.equal(row.state, 'running');
+  assert.equal(row.pid, 7777);
+});
+
+test('切り替えの旗は1回で下ろす。次の close は普通に読む', () => {
+  const { led, id } = started();
+  led.markSwitching(id, spec({ model: 'claude-sonnet-5' }), T + 100);
+  led.onExit(id, { code: 0 }, T + 200);
+  led.setPid(id, 7777);
+
+  // 起こし直した子が閉じたぶん。ここをまた切り替えと読むと永久に終われない
+  led.onExit(id, { code: 0 }, T + 9000);
+  assert.equal(led.rows()[0].state, 'done');
+});
+
+test('切り替えの最中に止めろと言われたら、止めるほうが勝つ', () => {
+  const { led, id } = started();
+  led.markSwitching(id, spec({ model: 'claude-sonnet-5' }), T + 100);
+  led.markStopping(id, T + 150);
+  led.onExit(id, { code: 1 }, T + 200);
+
+  // onExit が switchRequested を先に見ると、止めろと言われたのに切り替え中へ戻る
+  assert.equal(led.rows()[0].state, 'stopped');
+});
+
+test('終わった run は切り替えられない', () => {
+  const { led, id } = started();
+  led.onExit(id, { code: 0 }, T + 1000);
+
+  assert.deepEqual(led.markSwitching(id, spec({ model: 'claude-sonnet-5' }), T + 2000), []);
+  const [row] = led.rows();
+  assert.equal(row.state, 'done');
+  assert.equal(row.model, 'claude-opus-5', '終わった run の中身は書き換えない');
+});
+
+test('知らない runId の切り替えでも落ちない', () => {
+  const led = createRunLedger();
+  assert.deepEqual(led.markSwitching('r99', spec(), T), []);
 });
 
 test('waiting のまま 0 で閉じたら終わりにせず perTurn を覚える', () => {
@@ -510,6 +604,21 @@ test('動いている run を重ねると、一覧でも実行中になる', () 
   assert.equal(row.stateConfident, true);
   // ログから読めているものは消さない
   assert.equal(row.title, 'ログから読んだ見出し');
+});
+
+test('切り替え中も一覧では実行中の位置に置く', () => {
+  const { led, id } = started();
+  led.markSwitching(id, spec({ model: 'claude-sonnet-5' }), T + 100);
+  // 古い子を畳んだ直後。新しい子はまだ起きていないので pid が無い
+  led.onExit(id, { code: 0 }, T + 200);
+
+  const [row] = mergeRuns([listRow()], led.rows(), T + 300);
+  // switching を写さずに素で入れると STATE_RANK に無く、一覧の末尾へ沈む
+  assert.equal(row.state, 'running');
+  assert.equal(row.ball, 'claude');
+  assert.equal(row.alive, true);
+  // 画面に出す言い方は run の実態のまま
+  assert.equal(row.stateLabel, '切り替え中');
 });
 
 test('あなたの番は返信待ちへ写す。ラベルは run の言い方のまま', () => {

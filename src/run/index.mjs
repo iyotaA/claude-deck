@@ -32,7 +32,7 @@ import { spawn } from 'node:child_process';
 import { classifyStreamLine, encodeUserLine } from '../parse/stream.mjs';
 import { oneLine } from '../shared/text.mjs';
 import { LINE_MAX, claudeInfo, createLineSplitter, spawnClaude, stopClaude } from '../os/claude.mjs';
-import { PROMPT_MAX, buildRunSpec } from './spec.mjs';
+import { PROMPT_MAX, buildRunSpec, mergeSwitch } from './spec.mjs';
 import { RUN_MAX, createRunLedger, isRunOver } from './ledger.mjs';
 
 /**
@@ -363,6 +363,114 @@ export function createRunner({
   }
 
   /**
+   * モデル・思考量・権限モードを替えて、同じセッションの続きを起こす。
+   *
+   * **画面から2手（停止 → 起動）にしない。** あいだが空くと、前の子がまだ畳まれないうちに
+   * 次が起きて、同じ会話ログに2つのプロセスが書きうる。
+   * こちらで `close` を待ってから起こせば、その競合は構造的に起きない。
+   *
+   * `--fork-session` は使わない。ID が変わると一覧・詳細・`?session=` が全部切れる。
+   *
+   * 手を動かす順にも理由がある。
+   *
+   * 1. **検証は畳む前。** 通らないと分かっているのに子を殺すと、
+   *    断るだけで済んだはずのものが「止まっただけ」で終わる
+   * 2. 畳んだ後にもう一度台帳を見る。あいだに停止を頼まれていたら起こし直さない
+   *
+   * @param {string} runId 実行の識別子
+   * @param {object} patch 画面から来た差分（model / effort / permissionMode）
+   * @param {string} text 切り替えた先へ送る指示文。空では起こせない（実測）
+   * @returns {Promise<{ok:boolean, status:number, runId?:string, row?:object,
+   *                    changed?:string[], reason?:string}>}
+   */
+  async function switchRun(runId, patch, text) {
+    const at = clock();
+    const row = ledger.get(runId);
+    if (!row) return { ok: false, status: 404, reason: 'その実行は見つかりません' };
+    if (isRunOver(row.state)) return { ok: false, status: 409, reason: 'その実行はもう終わっています' };
+
+    const entry = live.get(runId);
+    const prev = entry?.spec;
+    if (!prev) {
+      return { ok: false, status: 409, reason: '切り替えられません（起動指定が残っていません）' };
+    }
+
+    const merged = mergeSwitch(prev, patch);
+    if (!merged.ok) return { ok: false, status: 400, reason: merged.reason };
+
+    const body = typeof text === 'string' ? text.trim() : '';
+    if (!body) return { ok: false, status: 400, reason: '指示が空です' };
+    if (body.length > PROMPT_MAX) {
+      return { ok: false, status: 400, reason: `指示が長すぎます（${PROMPT_MAX} 文字まで）` };
+    }
+
+    const found = claude();
+    if (!found?.path) {
+      return { ok: false, status: 503, reason: found?.reason ?? 'claude が見つかりません' };
+    }
+
+    const built = buildRunSpec(
+      { ...merged.next, prompt: body, resume: true, sessionId: prev.sessionId },
+      { allowedDirs: [prev.cwd], env, platform },
+    );
+    if (!built.ok) return { ok: false, status: 400, reason: built.reason };
+
+    emit(ledger.markSwitching(runId, built.spec, at));
+
+    // 子が生きていれば畳む。`perTurn` で既に閉じているなら、この工程は要らない
+    if (entry.child) {
+      entry.stopping = true;
+      const res = await stopFn(entry.child, { spawnFn, platform });
+      if (!res.closed) {
+        emit(ledger.fail(runId, res.reason ?? '前の子を止めきれませんでした', clock()));
+        live.delete(runId);
+        return { ok: false, status: 500, reason: '前の子を止めきれませんでした' };
+      }
+    }
+
+    // 畳んでいるあいだに停止を頼まれていたら、起こし直さない。
+    // 見るのは「まだ切り替え中か」の1点。`isRunOver` だけでは `stopping` を素通りして、
+    // 止めろと言われた run の子だけが生き残る
+    if (ledger.get(runId)?.state !== 'switching') {
+      return { ok: false, status: 409, reason: '切り替えの途中で止まりました' };
+    }
+
+    const started = spawnClaude({
+      bin: found.path, args: built.spec.args, cwd: built.spec.cwd, env, spawnFn,
+    });
+    if (!started.ok) {
+      emit(ledger.fail(runId, started.reason, clock()));
+      return { ok: false, status: 500, reason: started.reason, runId, row: ledger.get(runId) };
+    }
+
+    attach(runId, started.child, built.spec);
+    ledger.setPid(runId, started.child.pid ?? null);
+
+    const wrote = write(runId, body, clock());
+    if (!wrote.ok) return { ...wrote, runId, row: ledger.get(runId) };
+
+    return { ok: true, status: 202, runId, row: ledger.get(runId), changed: merged.changed };
+  }
+
+  /**
+   * いま抱えている子の PID。
+   *
+   * サーバーが畳まれるときの最後の後始末に使う。`shutdown()` は3段の停止を待てる（最長5秒）が、
+   * `process.on('exit')` は**同期しか走れない**ので、そこからは PID を配って
+   * `killTreeSync` に任せるしかない。
+   *
+   * @returns {number[]} 生きている子の PID
+   */
+  function livePids() {
+    const pids = [];
+    for (const entry of live.values()) {
+      const pid = entry.child?.pid;
+      if (typeof pid === 'number' && Number.isFinite(pid)) pids.push(pid);
+    }
+    return pids;
+  }
+
+  /**
    * 沈黙を見る。`server.mjs` の `refresh()` から呼ぶ。
    *
    * @returns {string[]} 状態が変わった runId
@@ -400,9 +508,13 @@ export function createRunner({
     start,
     input,
     stop,
+    // `switch` は予約語だが、プロパティ名としては使える。
+    // 窓口の名前（`POST /api/runs/:id/switch`）と揃えるほうが読みやすい
+    switch: switchRun,
     tick,
     subscribe,
     shutdown,
+    livePids,
     /** @returns {Array<object>} 一覧に混ぜる行 */
     rows: () => ledger.rows(),
     /**

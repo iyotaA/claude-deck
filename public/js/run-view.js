@@ -12,6 +12,13 @@
  * 全部作り直さないのは、出来事が増えるだけで前の行は動かないから。
  * 全消し＋再構築にすると、行数が増えるほど描き直しが重くなる。
  *
+ * ## 操作の器も使い回す
+ *
+ * 送る・止める・替えるの節点も module-level に1つだけ持ち、作り直すたびに append し直す。
+ * document から外れても <textarea> の value と <details> の開閉は消えないので、
+ * 詳細ペインが丸ごと作り直されても書きかけの文が残る。
+ * 焦点だけは外れるので、detach() で控えて runPanel() の最後に戻す。
+ *
  * ## 速報であって正本ではない
  *
  * ここに出るのは「いま何が起きているか」。読み返す正本は ~/.claude/projects/ の会話ログで、
@@ -19,7 +26,7 @@
  */
 import { el, dur, stamp, shortModel, fact } from './util.js';
 import { panel, SEC } from './panel.js';
-import { runFor, eventsOf, droppedOf, runsMissed, EVENTS_PER_RUN } from './runs.js';
+import { runFor, eventsOf, droppedOf, runsMissed, EVENTS_PER_RUN, EFFORT_LABELS } from './runs.js';
 import { bodyText } from './timeline/index.js';
 
 /** 地の文の頭出し。これを超えたら <details> に畳む（時系列と同じ作法）。 */
@@ -110,8 +117,12 @@ function resultBody(ev) {
   fact(dl, 'かかった時間', typeof ev.durationMs === 'number' ? dur(ev.durationMs) : null);
   // num_turns は**そのターンぶん**の数（実測で2往復目も 1）。累積ではない
   fact(dl, 'このターンの往復', ev.numTurns);
-  // total_cost_usd のほうは累積（実測 0.803025 → 0.843727）。同じ行に並んでいるので混ぜやすい
-  fact(dl, 'ここまでの費用', typeof ev.costUSD === 'number' ? `$${ev.costUSD.toFixed(4)}` : null);
+  // total_cost_usd のほうは累積（実測 0.803025 → 0.843727）。同じ行に並んでいるので混ぜやすい。
+  //
+  // ただし**累積するのは同じ子のあいだだけ。**「モデルなどを替えて続ける」は子を起こし直すので、
+  // そこで起点に戻る（実測 0.401036 → 切り替え後の最初の result で 0.130617）。
+  // だから「ここまで」とは書かない。切り替えを挟んだぶんは、並んだ result を足したものが合計になる
+  fact(dl, 'この起動ぶんの費用', typeof ev.costUSD === 'number' ? `$${ev.costUSD.toFixed(4)}` : null);
   fact(dl, '止まった理由', ev.terminalReason);
   // 断ったものが無いときは行ごと出さない。0 を隠すのは「取れなかった」ではなく
   // 「起きなかった」ので、0 と不明を分ける原則には触れない
@@ -181,6 +192,9 @@ export function attach(opts) {
  * 呼ばないと、画面から外れた節点を掴んだまま追記し続けることになる。
  */
 export function detach() {
+  // 焦点はここで控える。detail.js はこの直後に replaceChildren() するので、
+  // 掴んでいた節点が document から外れ、焦点が body へ飛ぶ
+  saveFocus();
   cur = null;
 }
 
@@ -248,6 +262,483 @@ export function render() {
   cur.log.scrollTop = cur.log.scrollHeight;
 }
 
+/* ── 操作（送る・止める・替える）───────────────────────────── */
+
+/**
+ * もう手を出せない状態。
+ *
+ * サーバー側（run/index.mjs の isRunOver）と同じ3つにしてある。
+ * **stopping と switching を入れない。** どちらも途中の姿で、そこから running へ戻る。
+ */
+const RUN_OVER = new Set(['stopped', 'failed', 'done']);
+
+/** 替えたものの言い方。サーバーは changed を**キー名の配列**で返す。 */
+const SWITCH_LABELS = { model: 'モデル', effort: '思考量', permissionMode: '権限モード' };
+
+/** 「止める」の2段押し。1回目からこの時間で元へ戻る。 */
+const STOP_CONFIRM_MS = 5000;
+
+/**
+ * 控えた焦点を戻してよい猶予。
+ *
+ * detach() と作り直しは同じタスクの中で続けて起きるので、これで足りる。
+ * 短く切ってあるのは、detach() だけ呼ばれて runPanel() が呼ばれなかったとき
+ * （実行パネルごと消えたとき）に、後から関係のない場所へ焦点を飛ばさないため。
+ */
+const FOCUS_MEMO_MS = 400;
+
+/**
+ * 切り替えの選択肢。**1回だけ引く。**
+ *
+ * 取れなければ切り替えの節を出さないだけで、送る・止めるはそのまま動く。
+ * 引き直さないのは「窓口ごと無いと分かったら一度で諦める」の作法
+ * （更新の前後で、画面だけ新しくサーバーが古いことがある）。
+ */
+let runOptions = null;
+let optionsAsked = false;
+
+/**
+ * 操作の器。**module-level に1つだけ持って使い回す。**
+ *
+ * 詳細ペインは detailKeyOf() が動くと丸ごと作り直されるが、
+ * document から外れても <textarea> の value と <details> の開閉は消えない。
+ * だから作り直しのたびに同じ節点を append し直すだけにしてある。
+ *
+ * @type {null | {
+ *   wrap: HTMLElement, prompt: HTMLTextAreaElement, send: HTMLButtonElement,
+ *   stop: HTMLButtonElement, msg: HTMLElement, det: HTMLElement,
+ *   swModel: HTMLInputElement, swEffort: HTMLSelectElement, swMode: HTMLSelectElement,
+ *   apply: HTMLButtonElement, runId: string|null, busy: boolean, over: boolean,
+ *   stopArmed: boolean, stopTimer: number|null, lastRow: object|null
+ * }}
+ */
+let ops = null;
+
+/** 控えた焦点。detach() で控え、runPanel() の最後に戻す。 */
+let focusMemo = null;
+
+/**
+ * <select> の中身を組み直す。
+ *
+ * 起こすフォーム（層7）にも同じ形の小道具があるが、あちらを import すると
+ * 層3 → 層7 の逆向きになる。10行に満たないのでこちらに持つ
+ * （共有するなら層0の util.js へ出すことになり、そちらのほうが影響が広い）。
+ *
+ * @param {HTMLSelectElement} sel
+ * @param {Array<{value: string, label: string}>} items
+ */
+function fillSelect(sel, items) {
+  sel.replaceChildren();
+  for (const it of items) {
+    const opt = el('option', null, it.label);
+    opt.value = it.value;
+    sel.append(opt);
+  }
+}
+
+/**
+ * 3列のグリッドに1行足す。設定モーダルの .settings-grid をそのまま借りている。
+ *
+ * @param {HTMLElement} grid 入れ先
+ * @param {string} id 入力の id。ラベルと結ぶ
+ * @param {string} text ラベル
+ * @param {HTMLElement} control 入力
+ * @param {string} hint 右に置く説明
+ */
+function gridRow(grid, id, text, control, hint) {
+  const lb = el('label', 'settings-label', text);
+  lb.htmlFor = id;
+  control.id = id;
+  grid.append(lb, control, el('p', 'settings-hint', hint));
+}
+
+/** 下に一言出す。空文字で消える。 */
+function say(text, tone = '') {
+  ops.msg.textContent = text;
+  ops.msg.dataset.tone = text ? tone : '';
+}
+
+/** ボタンの入切をまとめて当てる。 */
+function applyEnabled() {
+  const off = ops.busy || ops.over;
+  ops.send.disabled = off;
+  ops.stop.disabled = off;
+  ops.apply.disabled = off;
+}
+
+/**
+ * 送信中の入切。
+ *
+ * **入力欄は disabled にしない。** 押している最中に caret が飛び、
+ * 待っているあいだに続きを書き足せなくなる。落とすのはボタンだけでよい。
+ */
+function setBusy(on) {
+  ops.busy = on;
+  applyEnabled();
+}
+
+/**
+ * 替える中身を組む。**いまと同じ値はキーごと送らない。**
+ *
+ * サーバー側（mergeSwitch）は「キーが無い＝変えない」「空文字＝外す」で読む。
+ * 何も変わらないときは断られるので、押す前にこちらで気づけるようにしておく。
+ *
+ * @returns {object|null} 替えるものが無ければ null
+ */
+function collectSwitch() {
+  const row = ops.lastRow ?? {};
+  const out = {};
+
+  // 空欄は「外す（CLI の既定へ戻す）」の指定。だから空でもキーを送る
+  const model = ops.swModel.value.trim();
+  if (model !== (row.model ?? '')) out.model = model;
+
+  const effort = ops.swEffort.value;
+  if (effort !== (row.effort ?? '')) out.effort = effort;
+
+  // **権限モードだけは外せない。** 空を送るとサーバーが断る
+  // （外した先が「既定」で、plan のつもりが acceptEdits で走る事故になるため）
+  const mode = ops.swMode.value;
+  if (mode && mode !== row.permissionMode) out.permissionMode = mode;
+
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** 替えたあとの言い方。changed はキー名で返るので、ここで日本語に直す。 */
+function switchedText(data) {
+  const names = (data.changed ?? []).map((k) => SWITCH_LABELS[k] ?? k);
+  return names.length > 0 ? `${names.join('・')}を替えて続けます` : '替えて続けます';
+}
+
+/**
+ * 送る／替える。どちらも指示文が要るので、窓口と本文だけ変える。
+ *
+ * @param {'input'|'switch'} kind
+ */
+async function post(kind) {
+  if (ops.busy || ops.over) return;
+
+  const runId = ops.runId;
+  if (!runId) return;
+
+  const text = ops.prompt.value.trim();
+  if (!text) {
+    say('指示を書いてください', 'bad');
+    ops.prompt.focus();
+    return;
+  }
+
+  const body = { prompt: text };
+  if (kind === 'switch') {
+    const patch = collectSwitch();
+    if (!patch) {
+      say('替えるところがありません', 'bad');
+      return;
+    }
+    Object.assign(body, patch);
+  }
+
+  setBusy(true);
+  say(kind === 'switch' ? '替えています…' : '送っています…');
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/${kind}`, {
+      method: 'POST',
+      // 付け忘れると書き込み口の門番に断られる
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => null);
+
+    // 返ってくるまでに別の実行へ移っていることがある。
+    // そのまま書くと、**他人の実行の**メッセージ欄と入力欄を書き換えることになる
+    if (ops.runId !== runId) return;
+
+    if (!res.ok || !data?.ok) {
+      say(data?.reason ?? `送れませんでした（HTTP ${res.status}）`, 'bad');
+      return;
+    }
+
+    // 送っているあいだに書き足していたら消さない。消すのは送ったぶんが残っているときだけ
+    if (ops.prompt.value.trim() === text) ops.prompt.value = '';
+    say(kind === 'switch' ? switchedText(data) : '送りました', 'good');
+  } catch (err) {
+    if (ops.runId === runId) say(`送れませんでした（${err.message}）`, 'bad');
+  } finally {
+    if (ops.runId === runId) setBusy(false);
+  }
+}
+
+/** 2段押しを元へ戻す。 */
+function disarmStop() {
+  if (ops.stopTimer !== null) {
+    clearTimeout(ops.stopTimer);
+    ops.stopTimer = null;
+  }
+  ops.stopArmed = false;
+  ops.stop.textContent = '止める';
+  ops.stop.classList.remove('is-armed');
+}
+
+/** 実際に止めにいく。 */
+async function doStop() {
+  const runId = ops.runId;
+  if (!runId) return;
+
+  setBusy(true);
+  say('止めています…');
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    const data = await res.json().catch(() => null);
+    if (ops.runId !== runId) return;
+
+    if (!res.ok || !data?.ok) {
+      say(data?.reason ?? `止められませんでした（HTTP ${res.status}）`, 'bad');
+      return;
+    }
+    // closed が false は「木ごと落としにいったが、消えたことを確かめられていない」。
+    // 「止めました」と言い切ると、残った孫に気づけなくなる
+    const done = data.closed === false ? '止めにいきました（残っているかもしれません）' : '止めました';
+    say(done, 'good');
+  } catch (err) {
+    if (ops.runId === runId) say(`止められませんでした（${err.message}）`, 'bad');
+  } finally {
+    if (ops.runId === runId) setBusy(false);
+  }
+}
+
+/**
+ * 止めるを押した。**2段押しにしてある。**
+ *
+ * kill は取り消せない。confirm() だと窓の外へ出てしまうので、
+ * 1回目はボタンの字を変えるだけにして、5秒で元へ戻す。
+ */
+function onStop() {
+  if (ops.busy || ops.over) return;
+
+  if (!ops.stopArmed) {
+    ops.stopArmed = true;
+    ops.stop.textContent = 'もう一度押すと止めます';
+    ops.stop.classList.add('is-armed');
+    say('止めると、走っている途中でも終わります');
+    ops.stopTimer = setTimeout(disarmStop, STOP_CONFIRM_MS);
+    return;
+  }
+  disarmStop();
+  doStop();
+}
+
+/** 器を1回だけ組む。以降はこの節点を append し直して使う。 */
+function buildOps() {
+  const wrap = el('div', 'run-ops');
+
+  const label = el('label', 'settings-label', '続きの指示');
+  label.htmlFor = 'run-ops-prompt';
+
+  const prompt = el('textarea', 'run-prompt');
+  prompt.id = 'run-ops-prompt';
+  prompt.rows = 3;
+
+  // 本文欄の Enter は改行。送るのは Ctrl+Enter。
+  // 長い指示を書いている途中に Enter で走り出すのがいちばん困る（起こすフォームと同じ）
+  prompt.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' || !(ev.ctrlKey || ev.metaKey)) return;
+    ev.preventDefault();
+    post('input');
+  });
+
+  const send = el('button', 'btn is-primary', '送る');
+  send.type = 'button';
+  send.addEventListener('click', () => post('input'));
+
+  const stop = el('button', 'btn', '止める');
+  stop.type = 'button';
+  stop.addEventListener('click', onStop);
+
+  const msg = el('p', 'settings-msg');
+
+  const foot = el('div', 'run-ops-foot');
+  foot.append(send, stop, msg);
+
+  // ── 替えて続ける。畳んでおく（普段は使わないので、送る・止めるの邪魔をしない）
+  const det = el('details', 'run-switch');
+  // 選択肢を引けるまで出さない。中身の無い <select> を見せない
+  det.hidden = true;
+  det.append(el('summary', null, 'モデルなどを替えて続ける'));
+
+  const grid = el('div', 'settings-grid');
+
+  const swModel = el('input', 'settings-text');
+  swModel.type = 'text';
+  swModel.spellcheck = false;
+  gridRow(grid, 'run-sw-model', 'モデル', swModel, '空にすると CLI の既定へ戻る');
+
+  const swEffort = el('select', 'settings-select');
+  gridRow(grid, 'run-sw-effort', '思考量', swEffort, '深いほど時間と費用が増える');
+
+  const swMode = el('select', 'settings-select');
+  gridRow(grid, 'run-sw-mode', '権限モード', swMode, 'ここで選んだ内容で走る。途中で許可は求めない');
+
+  const apply = el('button', 'btn', 'この内容で続ける');
+  apply.type = 'button';
+  apply.addEventListener('click', () => post('switch'));
+
+  const swFoot = el('div', 'run-ops-foot');
+  swFoot.append(apply, el('p', 'settings-hint', 'いまの子をいったん止めて、同じ会話を続きから起こし直す'));
+
+  const swBody = el('div', 'run-switch-body');
+  swBody.append(grid, swFoot);
+  det.append(swBody);
+
+  wrap.append(label, prompt, foot, det);
+
+  ops = {
+    wrap, prompt, send, stop, msg, det, swModel, swEffort, swMode, apply,
+    runId: null, busy: false, over: false, stopArmed: false, stopTimer: null, lastRow: null,
+  };
+  return ops;
+}
+
+/** いまの指定を切り替えの欄へ写す。 */
+function prefillSwitch(row) {
+  ops.swModel.value = row.model ?? '';
+  ops.swEffort.value = row.effort ?? '';
+  // 知らない値だと <select> が空になる。そのときは選び直してもらう
+  if (row.permissionMode) ops.swMode.value = row.permissionMode;
+}
+
+/**
+ * 引いた選択肢を切り替えの欄へ流し込む。
+ *
+ * **埋め直したら、開いていても prefill し直す。** <option> を入れ替えると
+ * value が先頭へ飛ぶので、そのままだと acceptEdits で走っている実行に
+ * plan が選ばれた状態で残る。押すと権限が変わるので、事故として重い。
+ * 人が選び直したぶんはどのみち消えるが、空欄で残すよりは厳密に安全。
+ */
+function fillSwitch() {
+  if (!ops || !runOptions) return;
+
+  // 危ないモード（bypassPermissions）はサーバー側のラベルに「（危険）」が入っている。
+  // 語彙そのものも環境変数が立っているときしか返らないので、ここでは素通しでよい
+  const modes = (runOptions.modes ?? []).map((m) => ({ value: m.value, label: m.label }));
+  fillSelect(ops.swMode, modes);
+
+  fillSelect(ops.swEffort, [
+    { value: '', label: '指定しない（CLI の既定）' },
+    ...(runOptions.efforts ?? []).map((v) => ({ value: v, label: EFFORT_LABELS[v] ?? v })),
+  ]);
+
+  ops.det.hidden = modes.length === 0;
+  if (ops.lastRow) prefillSwitch(ops.lastRow);
+}
+
+/**
+ * 切り替えの選択肢を引く。1回だけ。
+ *
+ * 中で受け止めているので、呼ぶ側は await も .catch() も要らない。
+ */
+async function loadOptions() {
+  if (optionsAsked) return;
+  optionsAsked = true;
+  try {
+    const res = await fetch('/api/runs/options', { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    runOptions = await res.json();
+    fillSwitch();
+  } catch {
+    // 取れなくても送る・止めるは動く。切り替えの節を出さないだけにして、引き直さない
+    runOptions = null;
+  }
+}
+
+/**
+ * 器をいまの実行に合わせて、詳細ペインへ入れる節点を返す。
+ *
+ * @param {object} row 台帳の行
+ * @returns {HTMLElement}
+ */
+function syncOps(row) {
+  if (!ops) buildOps();
+
+  if (ops.runId !== row.runId) {
+    // 別の実行へ移った。**前の実行あてに書いていた文を、次の実行へ送らせない**
+    ops.runId = row.runId;
+    ops.prompt.value = '';
+    ops.busy = false;
+    focusMemo = null;
+    disarmStop();
+    say('');
+  }
+
+  ops.lastRow = row;
+  ops.over = RUN_OVER.has(row.state);
+  applyEnabled();
+
+  if (ops.over) {
+    ops.prompt.placeholder = 'この実行はもう終わっています';
+    disarmStop();
+  } else {
+    ops.prompt.placeholder = '続きを書いて送る（Ctrl+Enter でも送れる）';
+  }
+
+  // 人が開いて書き換えているあいだは上書きしない。
+  // 状態が変わるたびに選び直されると、押す直前に値が入れ替わる
+  if (!ops.det.open) prefillSwitch(row);
+
+  // 中身は1回だけ引く。取れなければ切り替えの節は畳んだまま出さない
+  loadOptions();
+
+  return ops.wrap;
+}
+
+/**
+ * いま掴んでいる焦点を控える。
+ *
+ * 詳細ペインは丸ごと作り直されるので、何もしないと打っている途中で焦点が飛ぶ。
+ * 節点そのものは使い回すから、参照と caret の位置さえ覚えておけば戻せる。
+ */
+function saveFocus() {
+  focusMemo = null;
+  const node = document.activeElement;
+  if (!ops || !node || !ops.wrap.contains(node)) return;
+
+  focusMemo = {
+    runId: ops.runId,
+    node,
+    start: typeof node.selectionStart === 'number' ? node.selectionStart : null,
+    end: typeof node.selectionEnd === 'number' ? node.selectionEnd : null,
+    at: performance.now(),
+  };
+}
+
+/**
+ * 控えた焦点を戻す。
+ *
+ * **実際に focus するのは requestAnimationFrame の中。**
+ * runPanel() が返る時点では detail.js がまだ節点を document へ付けていないので、
+ * この場で focus しても効かない（render() の初回スクロールが待つのと同じ理由）。
+ */
+function restoreFocus() {
+  const memo = focusMemo;
+  focusMemo = null;
+  if (!memo || memo.runId !== ops.runId) return;
+  if (performance.now() - memo.at > FOCUS_MEMO_MS) return;
+
+  requestAnimationFrame(() => {
+    // 人が先にどこかを触っていたら奪わない
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const node = memo.node;
+    if (!node.isConnected || node.disabled) return;
+    node.focus();
+    if (memo.start !== null && typeof node.setSelectionRange === 'function') {
+      node.setSelectionRange(memo.start, memo.end ?? memo.start);
+    }
+  });
+}
+
 /**
  * 実行パネル。この画面から起こしたセッションのときだけ出す。
  *
@@ -271,8 +762,12 @@ export function runPanel(sessionId) {
   const log = el('div', 'run-log');
   p.body.append(log);
 
+  // 操作（送る・止める・替える）。器は使い回すので、ここでは付け直すだけ
+  p.body.append(syncOps(row));
+
   attach({ log, drop, runId: row.runId });
   render();
+  restoreFocus();
 
   return { section: p.section, nav: { id: SEC.run, label: '実行', count: label, tone } };
 }

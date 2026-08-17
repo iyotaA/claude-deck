@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import {
   LINE_MAX, CLAUDE_STATE_LABELS, STOP_SOFT_MS, STOP_HARD_MS,
   resolveClaudeBin, parseClaudeVersion, createLineSplitter, probeClaude, claudeInfo,
-  spawnClaude, stopClaude,
+  spawnClaude, stopClaude, killTreeSync,
 } from '../src/os/claude.mjs';
 import { fakeChild } from './helpers.mjs';
 
@@ -509,6 +509,57 @@ test("'error' が来たら終わり扱い。close と二重に確定しない", 
   const got = await p;
   assert.equal(got.closed, true);
   assert.equal(got.stage, 'stdin');
+});
+
+/*
+ * 最後の後始末（同期版）
+ *
+ * `process.on('exit')` からは**同期しか走らない**ので、3段の `stopClaude` はそこで何もしない。
+ * ここに残っているのは `shutdown()` の5秒で畳めなかった子だけなので、段を踏まずに落とす。
+ */
+
+test('同期版は段を踏まずに /F まで一気に付ける', () => {
+  const calls = [];
+  const got = killTreeSync(999, {
+    platform: 'win32',
+    spawnSyncFn: (file, args, opts) => { calls.push({ file, args, opts }); return {}; },
+  });
+
+  assert.equal(got, true);
+  assert.deepEqual(calls, [{
+    file: 'taskkill.exe',
+    args: ['/PID', '999', '/T', '/F'],
+    opts: { windowsHide: true, timeout: 3000 },
+  }]);
+});
+
+test('渡せる pid が無ければ手を出さない', () => {
+  for (const pid of [0, -1, NaN, Infinity, null, undefined, '999', {}]) {
+    let spawned = false;
+    const got = killTreeSync(pid, {
+      platform: 'win32', spawnSyncFn: () => { spawned = true; return {}; },
+    });
+    assert.equal(got, false, `値: ${String(pid)}`);
+    assert.equal(spawned, false);
+  }
+});
+
+test('taskkill を起こせなくても落ちない', () => {
+  // ここで投げると process.on('exit') の中なので、記録すら残らないまま終わる
+  const got = killTreeSync(999, {
+    platform: 'win32', spawnSyncFn: () => { throw new Error('taskkill.exe が無い'); },
+  });
+  assert.equal(got, true);
+});
+
+test('win32 以外は taskkill を起こさない', () => {
+  let spawned = false;
+  // 実在しない pid。process.kill は ESRCH を投げるが、飲み込んで進む
+  const got = killTreeSync(2_147_483_647, {
+    platform: 'linux', spawnSyncFn: () => { spawned = true; return {}; },
+  });
+  assert.equal(got, true);
+  assert.equal(spawned, false);
 });
 
 /*

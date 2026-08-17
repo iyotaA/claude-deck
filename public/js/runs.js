@@ -24,6 +24,22 @@
  */
 export const EVENTS_PER_RUN = 400;
 
+/**
+ * 思考量の言い方。
+ *
+ * **ここに置いてあるのは、起こすフォーム（層7）と実行パネル（層3）の両方が使うから。**
+ * どちらかに書くともう片方が同じものを持つことになり、必ず片方が古くなる。
+ * 語彙そのもの（どの値が使えるか）はサーバーの `/api/runs/options` が返すので、
+ * ここにあるのは名前だけ。知らない値が来たらその値をそのまま出す。
+ */
+export const EFFORT_LABELS = {
+  low: 'low（浅く速く）',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max（いちばん深い）',
+};
+
 /** 切れたあと、つなぎ直すまでの待ち。 */
 const RECONNECT_MS = 3000;
 
