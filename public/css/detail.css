@@ -1,9 +1,10 @@
-/* ClaudeDeck ── 詳細ペイン（右）
+/* ClaudeDeck ── 詳細ペイン（中央）と右のインスペクタ
  *
- * 目次・パネルの器・待ちの中身・判断の記録・facts・本文の見た目。
+ * 中央のタブ・パネルの器・待ちの中身・判断の記録・facts・本文の見た目、
+ * それと右のインスペクタと、それを開閉するレール。
  */
 
-/* -------------------------------------------------------------- 詳細（右） */
+/* ------------------------------------------------------------ 詳細（中央） */
 
 /* 上の余白はここに置かない。中身（.detail）側に持たせる。
    スクロールする箱に padding-top があると、上に貼り付けた目次がその分だけ下で止まり、
@@ -405,3 +406,110 @@ details.rejected > summary:hover { color: var(--fg-muted); }
 details.rejected ul { margin: .35rem 0 0; padding-left: 1.1rem; color: var(--fg-muted); }
 details.rejected li { margin-bottom: .2rem; }
 details.rejected .label { color: var(--fg); }
+
+/* ------------------------------------------------- 右のインスペクタ */
+
+/* 数値・成果・状態はここへ寄せた。中央のタブに混ぜると、
+   数字を見るために作業の手元（いま・経過）を隠すことになる。
+
+   閉じているあいだは JS が hidden を立てて grid の列ごと消す。
+   **[hidden] は UA 側の指定なので、こちらの display: flex に負ける。**
+   下の .insp[hidden] を消すと、閉じたつもりで開いたままになる */
+.insp {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+}
+
+.insp[hidden] { display: none; }
+
+.insp-head {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .55rem .75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.insp-head h2 {
+  margin: 0 auto 0 0;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--fg-muted);
+}
+
+/* 閉じるボタン。見た目は引き出しの .drawer-close と揃えてある
+   （閉じる口が画面に2種類あると、その都度どちらか確かめることになる） */
+.iclose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  margin: -.3rem -.25rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  font-size: 1.05rem;
+  line-height: 1;
+  color: var(--fg-muted);
+}
+
+.iclose:hover { border-color: var(--border-strong); color: var(--fg); }
+
+.insp-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: .9rem .75rem 2rem;
+}
+
+/* ------------------------------------------------------- 右端のレール */
+
+/* 閉じていても幅は取ったままにする。消すと押すたびに中央の幅が跳ねる。
+   縦線1本で中央と切り分けるだけにして、面は塗らない */
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  padding: .5rem .2rem;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+}
+
+.rail-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 2.3rem;
+  padding: .4rem .1rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg-muted);
+}
+
+.rail-btn:hover:not(:disabled) { color: var(--fg); }
+
+/* 開いているものだけ枠と色を付ける。開閉の正は aria-pressed 1つにする。
+   専用のクラスを足すと、JS が2つの真偽を同期する義理を負う */
+.rail-btn[aria-pressed="true"] {
+  border-color: var(--border);
+  background: var(--bg-elev);
+  color: var(--accent);
+}
+
+/* まだ出す中身が無いとき。薄くするだけで隠さない（隠すと列の幅が変わる） */
+.rail-btn:disabled {
+  cursor: default;
+  color: var(--fg-faint);
+  opacity: .55;
+}
+
+.rail-label {
+  font-size: .62rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+}

@@ -4,14 +4,23 @@
  * ここは「どのタブに入れるか」と「作り直すかどうか」だけを決める。
  *
  * 以前は11枚のパネルを1本の縦棒に積んでいた。同時に置きうる情報の塊が多すぎて、
- * いま何を見ればいいのかが分からなくなっていたので、役目で6つのタブに割ってある。
+ * いま何を見ればいいのかが分からなくなっていたので、役目で割って2箇所に分けてある。
+ *
+ * 中央（TAB_DEFS）は「その作業をするのに要るもの」。どれか1つが必ず出ている。
  *
  *   いま … あなたの番 / この画面から起こした実行 / 続きを起こす
  *   経過 … 文脈の圧縮 / 時系列
  *   調査 … サブエージェントの記録
+ *
+ * 右のインスペクタ（INSP_DEFS）は「作業しながら横目で見るもの」。既定では閉じている。
+ *
  *   数値 … 何にトークンを使ったか
  *   成果 … 決めたこと / TODO / 書き換えたファイル
  *   状態 … セッションの状態
+ *
+ * 分けたのは、この3つを中央に混ぜると、数字を見るために作業の手元を隠すことになるため。
+ * 右なら中央と同時に見られる。**同時に開くのは1つだけ**にしてあるのは、
+ * 3つ並べると元の縦棒に戻るから。
  *
  * **選んだタブのぶんだけ組む。** 全部組んで CSS で隠す形にはしない。
  * timelinePanel() は必ず Timeline.attach() を呼ぶので、隠した節点を掴んだままになり、
@@ -64,9 +73,21 @@ const TAB_DEFS = [
   { id: 'now', label: 'いま' },
   { id: 'log', label: '経過', needsDetail: true, count: (c) => c.d?.digest.items.length ?? null },
   { id: 'agents', label: '調査', needsDetail: true, count: (c) => c.d?.subagents?.items?.length ?? null },
-  { id: 'usage', label: '数値' },
-  { id: 'out', label: '成果', needsDetail: true },
-  { id: 'basics', label: '状態' },
+];
+
+/**
+ * 右のインスペクタの定義。並びがそのままレールの並び。id は store.inspector の値。
+ *
+ * 形は TAB_DEFS と同じにしてある。中央と右で組み方を変えると、
+ * どちらかに足したときにもう片方の作法を思い出せなくなる。
+ *
+ * title はインスペクタの見出し。レールのボタンは幅 2.3rem しか無いので短い語を出し、
+ * 開いた先で何を見ているのかを言い直す
+ */
+const INSP_DEFS = [
+  { id: 'usage', label: '数値', title: '何にトークンを使ったか' },
+  { id: 'out', label: '成果', title: 'このセッションの成果', needsDetail: true },
+  { id: 'basics', label: '状態', title: 'セッションの状態' },
 ];
 
 /**
@@ -116,6 +137,10 @@ function detailKeyOf() {
     detailErrorNow() ?? '',
     // 開いているタブ。混ぜないと、押しても renderDetailIfNeeded() が素通りする
     store.detailTab,
+    // 右のインスペクタ（閉じているときは空文字）。いまは setInspector() が
+    // 自分で renderDetail() を呼ぶので無くても動くが、混ぜておかないと
+    // 別の経路（Ctrl+K など）から store.inspector を動かしたときに黙って素通りする
+    store.inspector ?? '',
     row?.state ?? '',
     row?.stateLabel ?? '',
     row?.stateReason ?? '',
@@ -229,28 +254,6 @@ function fillTab(stack, ctx) {
       break;
     }
 
-    case 'usage': {
-      // 詳細（d）が読めていなくても出せる。別の窓口から来るので、詳細の失敗に巻き込む理由が無い
-      const p = usagePanel(usageNow(), d, usageErrorNow(), baselineNow());
-      if (p) add(p);
-      else if (usageNow()) none('このセッションには数えられる要求がありません');
-      else none('数値を読んでいます…');
-      break;
-    }
-
-    case 'out': {
-      const before = stack.childElementCount;
-      add(decisionsPanel(d));
-      add(todoPanel(d));
-      add(filesPanel(d));
-      if (stack.childElementCount === before) none('まだ決めたこと・TODO・書き換えたファイルはありません');
-      break;
-    }
-
-    case 'basics':
-      add(basicsPanel(row, d));
-      break;
-
     default: {
       // 'now'。何を待っているか → この画面から起こした実行 → 続きを起こす。
       // if (d) の外なのは、起こした直後はまだ会話ログが1行も無いため
@@ -265,6 +268,147 @@ function fillTab(stack, ctx) {
   }
 }
 
+/**
+ * 全文（store.detail）が無いと何も組めないタブの倒し方。
+ *
+ * 中央と右で同じ形にする。片方だけ言い方を変えると、同じ「読めていない」が
+ * 場所によって違う顔で出ることになる
+ *
+ * @param {HTMLElement} stack 積む先
+ * @param {string|null} error 取れなかった理由
+ */
+function fillPending(stack, error) {
+  if (!error) {
+    stack.append(el('div', 'loading', 'ログを読んでいます…'));
+    return;
+  }
+  const p = panel('詳細を読み込めませんでした');
+  p.body.append(el('p', 'note', error));
+  stack.append(p.section);
+}
+
+/**
+ * 右のインスペクタの中身を組んで stack へ積む。
+ *
+ * 中央の fillTab() と同じ作法（空なら1行だけ書く）。
+ * 中央から移した3つなので、中身は移す前と同じものを出す
+ *
+ * @param {HTMLElement} stack 積む先
+ * @param {{row: object, d: object|null}} ctx
+ */
+function fillInsp(stack, ctx) {
+  const { row, d } = ctx;
+  const add = (node) => { if (node) stack.append(node); };
+  const none = (text) => stack.append(el('p', 'tab-none', text));
+
+  switch (store.inspector) {
+    case 'out': {
+      const before = stack.childElementCount;
+      add(decisionsPanel(d));
+      add(todoPanel(d));
+      add(filesPanel(d));
+      if (stack.childElementCount === before) none('まだ決めたこと・TODO・書き換えたファイルはありません');
+      break;
+    }
+
+    case 'basics':
+      add(basicsPanel(row, d));
+      break;
+
+    default: {
+      // 'usage'。詳細（d）が読めていなくても出せる。
+      // 別の窓口から来るので、詳細の失敗に巻き込む理由が無い
+      const p = usagePanel(usageNow(), d, usageErrorNow(), baselineNow());
+      if (p) add(p);
+      else if (usageNow()) none('このセッションには数えられる要求がありません');
+      else none('数値を読んでいます…');
+      break;
+    }
+  }
+}
+
+/**
+ * インスペクタの開閉を器へ当てる。
+ *
+ * hidden で丸ごと外すと grid の列も消える（.deck の列は開閉で2種類ある）。
+ * 目印を付けるのは .app 側で、これは .is-list-open と同じ流儀
+ *
+ * @param {boolean} open 開くなら true
+ */
+function applyInspOpen(open) {
+  dom.insp.hidden = !open;
+  dom.app.classList.toggle('is-insp-open', open);
+}
+
+/**
+ * レールのボタンの状態を合わせる。
+ *
+ * ボタン自体は initInspector() で1回だけ組む。**毎回作り直さない。**
+ * 詳細ペインは他の理由でもよく組み直されるので、そのたびに節点を捨てると
+ * キーボードで辿っている途中の focus が飛ぶ
+ *
+ * @param {object|null} row 選んでいるセッション（無ければ null）
+ */
+function syncRail(row) {
+  for (const b of dom.rail.querySelectorAll('.rail-btn')) {
+    b.setAttribute('aria-pressed', store.inspector === b.dataset.insp ? 'true' : 'false');
+    // 出す中身がまだ無いので押させない。**隠さない**（列の幅が変わって中央が跳ねる）
+    b.disabled = !row;
+  }
+}
+
+/**
+ * 右のインスペクタを組み直す。開いていなければ何もしない。
+ *
+ * 中央と同じ材料（ctx）で組む。中央だけ差し替えると、セッションを選び直したあとも
+ * 右に前のセッションの数字が残る
+ *
+ * @param {{row: object, d: object|null, error: string|null}} ctx
+ */
+function renderInspector(ctx) {
+  const def = INSP_DEFS.find((t) => t.id === store.inspector);
+  if (!def) return;
+  dom.inspTitle.textContent = def.title;
+
+  const stack = el('div', 'stack');
+  if (def.needsDetail && !ctx.d) fillPending(stack, ctx.error);
+  else fillInsp(stack, ctx);
+  dom.inspBody.append(stack);
+}
+
+/**
+ * 右のインスペクタを開く／閉じる。
+ *
+ * 同じものを押したら閉じる。レールは開く口と閉じる口を兼ねている
+ *
+ * @param {string|null} id INSP_DEFS の id。null で閉じる
+ */
+export function setInspector(id) {
+  store.inspector = store.inspector === id ? null : id;
+  syncQuery();
+  renderDetail();
+}
+
+/**
+ * レールを組んで、閉じるボタンを配線する。起動時に1回だけ呼ぶ。
+ *
+ * レールは詳細の中身ではなく画面の枠なので、セッションを選んでいなくても出したままにする。
+ * 選ぶまでは押せない（syncRail が disabled を当てる）
+ */
+export function initInspector() {
+  for (const t of INSP_DEFS) {
+    const b = el('button', 'rail-btn');
+    b.type = 'button';
+    b.dataset.insp = t.id;
+    b.disabled = true;
+    b.setAttribute('aria-pressed', 'false');
+    b.append(el('span', 'rail-label', t.label));
+    b.addEventListener('click', () => setInspector(t.id));
+    dom.rail.append(b);
+  }
+  dom.inspClose.addEventListener('click', () => setInspector(null));
+}
+
 export function renderDetail() {
   const t0 = performance.now();
   // row と呼んでいるのは一覧の行と同じ形のもの。一覧に居なければ詳細から組む
@@ -277,6 +421,13 @@ export function renderDetail() {
   RunView.detach();
   RunResume.detach();
   dom.detail.replaceChildren();
+  // 右も同じ材料で組み直す。中央だけ差し替えると、選び直したあとも
+  // 右に前のセッションの数字が残ったままになる
+  dom.inspBody.replaceChildren();
+  syncRail(row);
+  // 選ぶ前は出すものが無いので閉じる。store.inspector は残しておいて、
+  // 選んだら開いた状態で戻る（URL に ?insp= で渡した指定も保たれる）
+  applyInspOpen(Boolean(store.inspector) && Boolean(row));
 
   // 入口を3つに割る。ひとまとめにすると「選んでいない」「取得中」「取得に失敗した」が
   // すべて同じ空表示になり、存在しない id を開いても何も起きていないように見える
@@ -324,20 +475,13 @@ export function renderDetail() {
 
   const stack = el('div', 'stack');
   const def = TAB_DEFS.find((t) => t.id === store.detailTab) ?? TAB_DEFS[0];
-  if (def.needsDetail && !d) {
-    // 全文が無いと何も組めないタブ。既存の取得中・失敗の表示へ倒す
-    if (error) {
-      const p = panel('詳細を読み込めませんでした');
-      p.body.append(el('p', 'note', error));
-      stack.append(p.section);
-    } else {
-      stack.append(el('div', 'loading', 'ログを読んでいます…'));
-    }
-  } else {
-    fillTab(stack, ctx);
-  }
+  // 全文が無いと何も組めないタブ。既存の取得中・失敗の表示へ倒す
+  if (def.needsDetail && !d) fillPending(stack, error);
+  else fillTab(stack, ctx);
 
   wrap.append(stack);
+  // 右のインスペクタ。開いていなければ何もしない
+  renderInspector(ctx);
   // 時系列の中身はここで入れる。まだ document に付いていないので、
   // 120件を組んでもレイアウトの計算は1回で済む。
   // 「経過」以外のタブでは Timeline.attach() を通っていないので、何もしないで帰る

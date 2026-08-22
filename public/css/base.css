@@ -44,11 +44,19 @@ body {
   height: 100vh;
 }
 
+/* 3列目は右端のレール。幅は auto にしてボタン側で決める（数字を2箇所に焼き込まない）。
+   閉じているあいだ .insp は hidden なので、grid の子は3つ・列も3つで釣り合う */
 .deck {
   display: grid;
-  grid-template-columns: minmax(20rem, 27rem) minmax(0, 1fr);
+  grid-template-columns: minmax(20rem, 27rem) minmax(0, 1fr) auto;
   gap: 0;
   min-height: 0;
+}
+
+/* インスペクタが開いたら、中央を削って右に場所を作る。
+   目印を .app に付けているのは .is-list-open と同じ流儀 */
+.is-insp-open .deck {
+  grid-template-columns: minmax(20rem, 27rem) minmax(0, 1fr) minmax(17rem, 23rem) auto;
 }
 
 /* ------------------------------------------------------------------ 見出し */

@@ -13,10 +13,21 @@
    上半分を一覧に取られると詳細が読めないので、左上のボタンで手前に引き出す形にする。
    閉じているあいだは詳細が全面を使う */
 @media (max-width: 860px) {
-  .deck {
-    grid-template-columns: minmax(0, 1fr);
+  /* レールの分だけ右に残して、残りを中央に全部渡す。
+     .is-insp-open の方を並べて書くのは詳細度のため。
+     （0,2,0）なので、ここで .deck だけを書いても base.css の方が勝つ */
+  .deck,
+  .is-insp-open .deck {
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: minmax(0, 1fr);
   }
+
+  /* 並べる幅が無いので、開いているあいだはインスペクタが中央と入れ替わる。
+     これを消してから並べないと、grid の子が3つになって
+     レールが2行目へ落ち、画面の下に横倒しの帯が出る。
+     ボトムシートに落とすのは段5。レールは消さない
+     （消すと数値・成果・状態へ行く口が狭い画面から丸ごと無くなる） */
+  .is-insp-open .detail-pane { display: none; }
 
   .hamburger,
   .drawer-close { display: inline-flex; }

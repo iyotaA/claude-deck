@@ -117,6 +117,21 @@
     <section class="detail-pane" id="detail" aria-label="セッションの詳細" tabindex="-1">
       <div class="detail-empty">左の一覧からセッションを選ぶと、ここに中身が出ます</div>
     </section>
+
+    <!-- 右のインスペクタ。作業しながら横目で見るもの（数値・成果・状態）をここへ寄せる。
+         閉じているあいだは hidden で丸ごと外し、grid の列も消える。
+         器は作り直さず、中身（#insp-body）だけを差し替える -->
+    <aside class="insp" id="insp" aria-label="このセッションの詳しいところ" hidden>
+      <div class="insp-head">
+        <h2 id="insp-title"></h2>
+        <button class="iclose" id="insp-close" type="button" aria-label="閉じる">&times;</button>
+      </div>
+      <div class="insp-body" id="insp-body"></div>
+    </aside>
+
+    <!-- 右端のレール。中身は detail.js が組む（並びと語彙を1箇所に持つため）。
+         閉じていても幅は取ったままにする。消すと押すたびに中央の幅が跳ねる -->
+    <nav class="rail" id="rail" aria-label="詳しいところを開く"></nav>
   </div>
 
   <!-- 引き出しの背後を覆う膜。押すと閉じる -->

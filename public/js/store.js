@@ -49,7 +49,8 @@ export const SUMMARY_ORDER = [
  *  ?tab=archive|usage … 書庫（終了したものも含む全セッション）や数値を開いた状態にする
  *  ?aq=<語> … 書庫の検索語
  *  ?asort=recent|oldest|size … 書庫の並び順
- *  ?dtab=log|agents|usage|out|basics … 詳細ペインのどのタブを開くか
+ *  ?dtab=log|agents … 詳細ペインの中央のどのタブを開くか
+ *  ?insp=usage|out|basics … 右のインスペクタをどのタブで開くか（付けなければ閉じた状態）
  */
 export const query = new URLSearchParams(location.search);
 
@@ -66,15 +67,28 @@ export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
 export const TABS = new Set(['live', 'archive', 'usage']);
 
 /**
- * 詳細ペインに出せるもの。知らない値は 'now' に落とす。
+ * 詳細ペインの中央に出せるもの。知らない値は 'now' に落とす。
  *
  * 以前は11枚のパネルを縦に積んでいた。同時に置きうる情報の塊が多すぎて、
- * いま何を見ればいいのかが分からなくなっていたので、役目で6つに割ってある。
+ * いま何を見ればいいのかが分からなくなっていたので、役目で割ってある。
+ * 中央は「その作業をするのに要るもの」の3つだけ。残りは右のインスペクタへ寄せた。
  *
  * TABS と同じく集合で持つ。三項演算子で二値に畳むと、増やすたびに
  * 判定と syncQuery の2箇所を直すことになる
  */
-export const DETAIL_TABS = new Set(['now', 'log', 'agents', 'usage', 'out', 'basics']);
+export const DETAIL_TABS = new Set(['now', 'log', 'agents']);
+
+/**
+ * 右のインスペクタに出せるもの。知らない値は null（閉じた状態）に落とす。
+ *
+ * 中央と分けてあるのは、この3つが「作業しながら横目で見るもの」だから。
+ * 中央のタブに混ぜると、数字を見るために作業の手元（いま・経過）を隠すことになる。
+ *
+ * 中央から移したので `?dtab=usage` のような古い指定は DETAIL_TABS に無く、
+ * 既定（いま）へ落ちる。**読み替えは入れない。** 段1 はまだ誰にも配っていないので、
+ * 拾うべき古いブックマークが存在しない
+ */
+export const INSPECTOR_TABS = new Set(['usage', 'out', 'basics']);
 
 export const dom = {
   app: document.getElementById('app'),
@@ -90,6 +104,13 @@ export const dom = {
   listToggle: document.getElementById('list-toggle'),
   listClose: document.getElementById('list-close'),
   scrim: document.getElementById('scrim'),
+  // 右のインスペクタと、その開閉をするレール。detail.js だけが使う。
+  // 器は index.html に置いたまま作り直さず、中身（inspBody）だけを差し替える
+  insp: document.getElementById('insp'),
+  inspTitle: document.getElementById('insp-title'),
+  inspClose: document.getElementById('insp-close'),
+  inspBody: document.getElementById('insp-body'),
+  rail: document.getElementById('rail'),
   tabLive: document.getElementById('tab-live'),
   tabArchive: document.getElementById('tab-archive'),
   tabUsage: document.getElementById('tab-usage'),
@@ -232,13 +253,22 @@ export const store = {
    */
   tab: TABS.has(query.get('tab')) ? query.get('tab') : 'live',
   /**
-   * 詳細ペインに出しているタブ。DETAIL_TABS のどれか。
+   * 詳細ペインの中央に出しているタブ。DETAIL_TABS のどれか。
    *
    * localStorage には残さない（tab と同じ理由）。
    * セッションを選び直しても戻さない。見たいものは人ごとに決まっていて、
    * セッションごとに変わるものではないため
    */
   detailTab: DETAIL_TABS.has(query.get('dtab')) ? query.get('dtab') : 'now',
+  /**
+   * 右のインスペクタ。INSPECTOR_TABS のどれか、または null で閉じている。
+   *
+   * **開閉と「どれを見ているか」を1つの値で持つ。** 2つに分けると
+   * 「開いているのにどのタブも選んでいない」という組み合わせが作れてしまい、
+   * そこへ落ちたときに空の枠だけが右に残る。
+   * レールは同じボタンをもう一度押すと閉じるので、その形が素直に書ける
+   */
+  inspector: INSPECTOR_TABS.has(query.get('insp')) ? query.get('insp') : null,
   /** 書庫の状態。rows はサーバの応答そのまま（logSize と mtimeMs を持つ） */
   archive: {
     rows: [],
@@ -302,7 +332,7 @@ export const store = {
  * pushState は使わない。検索欄は1文字ごとにここを通るので、履歴が入力の回数だけ積まれ、
  * 戻るボタンが使えなくなる。replaceState なら今のアドレスだけが差し替わる。
  *
- * 触るキーは session / only / tq / hide / tab / aq / asort / dtab だけ。
+ * 触るキーは session / only / tq / hide / tab / aq / asort / dtab / insp だけ。
  * theme と nolive は「開くときの指定」なので、こちらから書き換えない
  */
 export function syncQuery() {
@@ -328,6 +358,8 @@ export function syncQuery() {
   set('asort', store.tab === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
   // 既定（いま）のときだけキーを落とす。tab と同じ扱い
   set('dtab', store.detailTab === 'now' ? null : store.detailTab);
+  // 閉じているときはキーを付けない。null は set() が消してくれる
+  set('insp', store.inspector);
 
   const qs = params.toString();
   const next = qs ? `${location.pathname}?${qs}` : location.pathname;

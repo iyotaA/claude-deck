@@ -45,7 +45,7 @@ import { visibleRows } from './rows.js';
 import { initListDrawer } from './drawer.js';
 import { initRuns, subscribeRuns } from './runs.js';
 import * as RunView from './run-view.js';
-import { renderDetailIfNeeded } from './detail.js';
+import { renderDetailIfNeeded, initInspector } from './detail.js';
 import { renderList } from './list.js';
 import { initTabs } from './archive.js';
 import { select, detailCache } from './session.js';
@@ -102,6 +102,7 @@ function initListKeys(listEl, from) {
 
 initTheme();
 initListDrawer();
+initInspector();
 initTabs();
 initSettings();
 initUpdate();

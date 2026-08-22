@@ -248,6 +248,24 @@
   border-top: 1px solid var(--border);
 }
 
+/* 選び直しの3列は設定モーダルの .settings-grid を借りているが、
+   あちらの「狭いときは縦に積む」は @media（窓の幅）で判定している。
+   モーダルの幅は窓に付いて動くのでそれで合っていたが、
+   ここの幅は窓でなく deck の列で決まる。実測で、窓は広いまま
+   右のインスペクタを開いただけで説明の列が潰れ、文字が縦１列になった。
+
+   幅を当てにするのをやめて、ここでは常にラベル＋入力の2列にして
+   説明を次の行へ回す。詳細ペインはもともと狭いので、
+   3列が入る幅があるという前提そのものがここでは成り立たない */
+.run-ops .settings-grid {
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+}
+
+.run-ops .settings-grid .settings-hint {
+  grid-column: 1 / -1;
+  margin-bottom: .35rem;
+}
+
 /* 起こすフォームの本文欄と同じ見た目。あちらのクラスをそのまま借りると
    .runform- という名前が実行パネルの中に出てきて、どちらの都合か読めなくなる */
 .run-prompt {
