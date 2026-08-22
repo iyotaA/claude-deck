@@ -328,7 +328,7 @@ export function detach() {
  * 「続きを起こす」のパネル。出す条件を満たさなければ null。
  *
  * @param {object|null} row 詳細ペインが持っている行（`headOf()` の結果）
- * @returns {{section: HTMLElement, nav: object}|null}
+ * @returns {HTMLElement|null}
  */
 export function resumePanel(row) {
   if (!canOffer(row)) return null;
@@ -340,5 +340,5 @@ export function resumePanel(row) {
   applyOptions();
   loadOptions();
   restoreFocus();
-  return { section: p.section, nav: { id: SEC.resume, label: '続きを起こす' } };
+  return p.section;
 }

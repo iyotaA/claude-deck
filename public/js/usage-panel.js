@@ -1,6 +1,6 @@
 /* 詳細ペインの「数値」パネル。
  *
- * 層3。`detail-panels.js` と同格で、返す形も同じ（`{section, nav}` か `null`）。
+ * 層3。`detail-panels.js` と同格で、返す形も同じ（節点か `null`）。
  *
  * **主役は「何が文脈を食っているか」の1つだけ。**
  * 実消費も命中率も、見て納得して終わりになりやすい。
@@ -9,7 +9,7 @@
  *
  * ここは描くだけで、取りに行かない。数値は `session.js` が引いて store に置く。
  * 中で fetch すると、404（この版のサーバーには窓口が無い）のときに
- * 「セクションを自分で消す」羽目になり、`{section, nav}` を返す約束と噛み合わなくなる。
+ * 「セクションを自分で消す」羽目になり、「節点か null を返す」約束と噛み合わなくなる。
  */
 import { el, fact, shortModel } from './util.js';
 import { panel, SEC } from './panel.js';
@@ -298,7 +298,7 @@ function iteBlock(usage) {
  * @param {string|null} error 取れなかった理由
  * @param {object|null} [baseline] `/api/sessions/:id/usage/baseline` の `baseline`。
  *   **数値より遅れて着く。** 無ければ差を書かないだけで、パネルはそのまま出る
- * @returns {{section: HTMLElement, nav: object}|null}
+ * @returns {HTMLElement|null}
  */
 export function usagePanel(usage, d, error, baseline = null) {
   if (!usage) {
@@ -307,7 +307,7 @@ export function usagePanel(usage, d, error, baseline = null) {
     if (!error) return null;
     const p = panel('数値', { id: SEC.usage });
     p.body.append(el('p', 'note', `数値を取れません: ${error}`));
-    return { section: p.section, nav: { id: SEC.usage, label: '数値' } };
+    return p.section;
   }
 
   // 要求が1件も無ければ節ごと出さない。0 が並ぶだけの枠は、読む人の時間を取るだけ
@@ -330,8 +330,5 @@ export function usagePanel(usage, d, error, baseline = null) {
   if (growth) p.body.append(growth);
   p.body.append(iteBlock(usage));
 
-  return {
-    section: p.section,
-    nav: { id: SEC.usage, label: '数値', count: usage.requests },
-  };
+  return p.section;
 }

@@ -69,7 +69,7 @@ function pendingQuestion(a) {
  *
  * @param {object} row 一覧の1行
  * @param {object|null} d 詳細（まだ読めていなければ null）
- * @returns {{section: HTMLElement, nav: object}|null} 待っていなければ null
+ * @returns {HTMLElement|null} 待っていなければ null
  */
 export function waitingBlock(row, d) {
   const guide = WAIT_GUIDE[row.state];
@@ -114,5 +114,5 @@ export function waitingBlock(row, d) {
     }
   }
 
-  return { section: p.section, nav: { id: SEC.wait, label: 'あなたの番', tone: guide.tone } };
+  return p.section;
 }

@@ -1,6 +1,6 @@
 /* この画面から起こした実行のパネル。
  *
- * 層3。detail-panels.js・agents.js・usage-panel.js と同格で、返す形も同じ（{section, nav} か null）。
+ * 層3。detail-panels.js・agents.js・usage-panel.js と同格で、返す形も同じ（節点か null）。
  *
  * ## 中だけ差し替える
  *
@@ -743,7 +743,7 @@ function restoreFocus() {
  * 実行パネル。この画面から起こしたセッションのときだけ出す。
  *
  * @param {string|null} sessionId 開いているセッション
- * @returns {{section: HTMLElement, nav: object}|null}
+ * @returns {HTMLElement|null}
  */
 export function runPanel(sessionId) {
   const row = runFor(sessionId);
@@ -769,5 +769,5 @@ export function runPanel(sessionId) {
   render();
   restoreFocus();
 
-  return { section: p.section, nav: { id: SEC.run, label: '実行', count: label, tone } };
+  return p.section;
 }

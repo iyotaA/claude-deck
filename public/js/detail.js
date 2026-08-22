@@ -1,16 +1,27 @@
 /* 詳細ペインの組み立て。
  *
  * 層4。パネル1枚ずつの中身は detail-head / detail-wait / detail-panels / agents が持ち、
- * ここは「どの順で積むか」と「作り直すかどうか」だけを決める。
+ * ここは「どのタブに入れるか」と「作り直すかどうか」だけを決める。
  *
- * 積む順は読む順。あなたの番 → この画面から起こした実行 → 決めたこと → TODO → 圧縮 →
- * 時系列 → サブエージェント → ファイル → セッションの状態。
+ * 以前は11枚のパネルを1本の縦棒に積んでいた。同時に置きうる情報の塊が多すぎて、
+ * いま何を見ればいいのかが分からなくなっていたので、役目で6つのタブに割ってある。
+ *
+ *   いま … あなたの番 / この画面から起こした実行 / 続きを起こす
+ *   経過 … 文脈の圧縮 / 時系列
+ *   調査 … サブエージェントの記録
+ *   数値 … 何にトークンを使ったか
+ *   成果 … 決めたこと / TODO / 書き換えたファイル
+ *   状態 … セッションの状態
+ *
+ * **選んだタブのぶんだけ組む。** 全部組んで CSS で隠す形にはしない。
+ * timelinePanel() は必ず Timeline.attach() を呼ぶので、隠した節点を掴んだままになり、
+ * 画面に出ていない時系列へ描き続けることになる。
  */
-import { el } from './util.js';
+import { el, num } from './util.js';
 import { mark } from './perf.js';
-import { dom, store, STATE_COLOR } from './store.js';
+import { dom, store, syncQuery, STATE_COLOR } from './store.js';
 import { headOf, detailErrorNow } from './rows.js';
-import { panel, navBlock, SEC } from './panel.js';
+import { panel } from './panel.js';
 import { detailActions, summaryBlock } from './detail-head.js';
 import { waitingBlock } from './detail-wait.js';
 import {
@@ -22,6 +33,41 @@ import { runStampFor } from './runs.js';
 import * as RunView from './run-view.js';
 import * as RunResume from './run-resume.js';
 import * as Timeline from './timeline/index.js';
+
+/**
+ * 「いま」のタブに色を付ける状態。あなたの手が要るものだけ。
+ *
+ * running（Claude が動いている）には付けない。選んでいるタブの下線が --accent で、
+ * 実行中の色（--calm）と同じ青なので、押されているのか色が付いているのか分からなくなる
+ */
+const NOW_TONE = {
+  'needs-answer': 'is-hot',
+  'needs-plan-approval': 'is-hot',
+  'needs-approval': 'is-hot',
+  'awaiting-reply': 'is-warn',
+};
+
+/**
+ * 中央タブの定義。並びがそのまま画面の並び。id は store.detailTab の値。
+ *
+ * count はタブの右肩に出す数。**データを直に読む。**
+ * パネルの戻り値からは取れない（選んでいないタブのパネルは組まないため）。
+ *
+ * 0 のときは数を出さない。ほとんどのセッションはサブエージェントを持たないので、
+ * すべてのタブに 0 が並ぶだけになる。空かどうかは押したときの1行で言う。
+ * そこでなら「まだ読めていない」と「無い」を書き分けられる
+ *
+ * needsDetail は「会話ログの全文（store.detail）が無いと何も組めない」印。
+ * 立っているタブは、読めていなければ既存の取得中・失敗の表示へ倒す
+ */
+const TAB_DEFS = [
+  { id: 'now', label: 'いま' },
+  { id: 'log', label: '経過', needsDetail: true, count: (c) => c.d?.digest.items.length ?? null },
+  { id: 'agents', label: '調査', needsDetail: true, count: (c) => c.d?.subagents?.items?.length ?? null },
+  { id: 'usage', label: '数値' },
+  { id: 'out', label: '成果', needsDetail: true },
+  { id: 'basics', label: '状態' },
+];
 
 /**
  * いま出してよい数値。
@@ -68,6 +114,8 @@ function detailKeyOf() {
   return [
     store.selected ?? '',
     detailErrorNow() ?? '',
+    // 開いているタブ。混ぜないと、押しても renderDetailIfNeeded() が素通りする
+    store.detailTab,
     row?.state ?? '',
     row?.stateLabel ?? '',
     row?.stateReason ?? '',
@@ -118,6 +166,105 @@ export function renderDetailIfNeeded() {
   renderDetail();
 }
 
+/**
+ * 中央タブの帯。
+ *
+ * 上に残す（sticky）。詳細は縦に長いので、下まで読んでから別のタブへ移るときに
+ * 一番上まで戻らせない
+ *
+ * @param {{row: object, d: object|null}} ctx タブの数を出すための材料
+ */
+function tabBar(ctx) {
+  const bar = el('nav', 'detail-tabs');
+  bar.setAttribute('aria-label', 'このセッションの何を見るか');
+
+  for (const t of TAB_DEFS) {
+    const b = el('button', 'detail-tab', t.label);
+    b.type = 'button';
+    const on = store.detailTab === t.id;
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    // 「いま」だけは、別のタブを見ているあいだも手が要ることが分かるように色を付ける
+    if (t.id === 'now' && NOW_TONE[ctx.row.state]) b.classList.add(NOW_TONE[ctx.row.state]);
+    const n = t.count ? t.count(ctx) : null;
+    if (n) b.append(el('span', 'n', num(n)));
+    b.addEventListener('click', () => {
+      if (store.detailTab === t.id) return;
+      store.detailTab = t.id;
+      syncQuery();
+      renderDetail();
+      // 前のタブで下まで読んでいた位置が残ると、移った先の途中から始まってしまう
+      dom.detail.scrollTop = 0;
+    });
+    bar.append(b);
+  }
+  return bar;
+}
+
+/**
+ * 選んでいるタブの中身を組んで stack へ積む。
+ *
+ * 空のときに黙って空白にしない。1行だけでも書いておかないと、
+ * 押したのに何も起きていないように見える
+ *
+ * @param {HTMLElement} stack 積む先
+ * @param {{row: object, d: object|null}} ctx
+ */
+function fillTab(stack, ctx) {
+  const { row, d } = ctx;
+  const add = (node) => { if (node) stack.append(node); };
+  const none = (text) => stack.append(el('p', 'tab-none', text));
+
+  switch (store.detailTab) {
+    case 'log':
+      // 圧縮を時系列の上に置く。どこで文脈が切れたかは、時系列の読み方そのものを変える
+      add(compactionPanel(d));
+      // timelinePanel は必ず節点を返す（Timeline.attach() を呼ぶのはここだけ）
+      add(timelinePanel(d));
+      break;
+
+    case 'agents': {
+      const p = agentsPanel(d.subagents, row.sessionId);
+      if (p) add(p);
+      else none('このセッションはサブエージェントを呼んでいません');
+      break;
+    }
+
+    case 'usage': {
+      // 詳細（d）が読めていなくても出せる。別の窓口から来るので、詳細の失敗に巻き込む理由が無い
+      const p = usagePanel(usageNow(), d, usageErrorNow(), baselineNow());
+      if (p) add(p);
+      else if (usageNow()) none('このセッションには数えられる要求がありません');
+      else none('数値を読んでいます…');
+      break;
+    }
+
+    case 'out': {
+      const before = stack.childElementCount;
+      add(decisionsPanel(d));
+      add(todoPanel(d));
+      add(filesPanel(d));
+      if (stack.childElementCount === before) none('まだ決めたこと・TODO・書き換えたファイルはありません');
+      break;
+    }
+
+    case 'basics':
+      add(basicsPanel(row, d));
+      break;
+
+    default: {
+      // 'now'。何を待っているか → この画面から起こした実行 → 続きを起こす。
+      // if (d) の外なのは、起こした直後はまだ会話ログが1行も無いため
+      // （ログが出るまで何も出ないと、押したのに何も起きていないように見える）
+      const before = stack.childElementCount;
+      add(waitingBlock(row, d));
+      add(RunView.runPanel(row.sessionId));
+      add(RunResume.resumePanel(row));
+      if (stack.childElementCount === before) none('いまあなたの手が要るものはありません');
+      break;
+    }
+  }
+}
+
 export function renderDetail() {
   const t0 = performance.now();
   // row と呼んでいるのは一覧の行と同じ形のもの。一覧に居なければ詳細から組む
@@ -166,75 +313,34 @@ export function renderDetail() {
 
   const d = store.detail?.sessionId === store.selected ? store.detail : null;
 
-  // なぜこの作業をしているか。読む順として、待ちの内容より先に来る必要がある
+  // なぜこの作業をしているか。どのタブを見ていても要るので、帯より上に置く
   if (d) {
     const summary = summaryBlock(d.summary);
     if (summary) wrap.append(summary);
   }
 
+  const ctx = { row, d, error };
+  wrap.append(tabBar(ctx));
+
   const stack = el('div', 'stack');
-  /** 上のジャンプ用リンクに出す並び。パネルを積むのと同じ順に足していく */
-  const sections = [];
-  /**
-   * パネル1枚を積む。null（出すものが無い）はそのまま素通りする。
-   *
-   * 積む順と目次の並びを1箇所で揃えるための小道具。別々に書くと、
-   * パネルを1枚足したときに目次だけ順番がずれる
-   *
-   * @param {{section: HTMLElement, nav?: object}|null} p
-   */
-  const add = (p) => {
-    if (!p) return;
-    stack.append(p.section);
-    if (p.nav) sections.push(p.nav);
-  };
-
-  // 何を待っているか。自分の番のときはここが最初に読む場所になるので、目的の直下に置く
-  add(waitingBlock(row, d));
-
-  // この画面から起こした実行。いま動いているものが最上位に来るべきなので待ちの直下に置く。
-  // if (d) の外なのは、起こした直後はまだ会話ログが1行も無いため
-  // （ログが出るまで何も出ないと、押したのに何も起きていないように見える）
-  add(RunView.runPanel(row.sessionId));
-
-  // 終わっているセッションの続きを起こす口。実行パネルの直下に置く。
-  // 動いているあいだは resumePanel() 自身が null を返すので、口は同時に2つ出ない
-  add(RunResume.resumePanel(row));
-
-  if (d) {
-    add(decisionsPanel(d));
-    add(todoPanel(d));
-    add(compactionPanel(d));
-    add(timelinePanel(d));
-    // 時系列の下、書き換えたファイルの前。調査の記録は時系列の続きとして読まれる
-    add(agentsPanel(d.subagents, row.sessionId));
-    add(filesPanel(d));
-  } else if (error) {
-    const p = panel('詳細を読み込めませんでした');
-    p.body.append(el('p', 'note', error));
-    stack.append(p.section);
+  const def = TAB_DEFS.find((t) => t.id === store.detailTab) ?? TAB_DEFS[0];
+  if (def.needsDetail && !d) {
+    // 全文が無いと何も組めないタブ。既存の取得中・失敗の表示へ倒す
+    if (error) {
+      const p = panel('詳細を読み込めませんでした');
+      p.body.append(el('p', 'note', error));
+      stack.append(p.section);
+    } else {
+      stack.append(el('div', 'loading', 'ログを読んでいます…'));
+    }
   } else {
-    stack.append(el('div', 'loading', 'ログを読んでいます…'));
-  }
-
-  // 数値。ここまでが「何が起きたか」で、ここからは「このセッションの性質」。
-  // 詳細（d）が読めていなくても出せる（別の窓口から来るので）
-  add(usagePanel(usageNow(), d, usageErrorNow(), baselineNow()));
-
-  add(basicsPanel(row, d));
-
-  // ジャンプ用リンクはパネルを積み終わってから作る（あるものだけを並べたいので）
-  const nav = navBlock(sections);
-  if (nav) {
-    wrap.append(nav);
-    // 目次の件数の差し替え先を教えておく。パネルが3枚に届かないと目次自体が出ないので、
-    // 取れないこともある（Timeline 側が null を見て素通りする）
-    Timeline.setNav(nav.querySelector(`[data-sec="${SEC.timeline}"] .n`));
+    fillTab(stack, ctx);
   }
 
   wrap.append(stack);
   // 時系列の中身はここで入れる。まだ document に付いていないので、
-  // 120件を組んでもレイアウトの計算は1回で済む
+  // 120件を組んでもレイアウトの計算は1回で済む。
+  // 「経過」以外のタブでは Timeline.attach() を通っていないので、何もしないで帰る
   Timeline.render();
   dom.detail.append(wrap);
   mark('detail', t0);

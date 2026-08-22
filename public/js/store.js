@@ -49,6 +49,7 @@ export const SUMMARY_ORDER = [
  *  ?tab=archive|usage … 書庫（終了したものも含む全セッション）や数値を開いた状態にする
  *  ?aq=<語> … 書庫の検索語
  *  ?asort=recent|oldest|size … 書庫の並び順
+ *  ?dtab=log|agents|usage|out|basics … 詳細ペインのどのタブを開くか
  */
 export const query = new URLSearchParams(location.search);
 
@@ -63,6 +64,17 @@ export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
  * 3つ目を足したときに黙って 'live' へ落ちる形になっていた
  */
 export const TABS = new Set(['live', 'archive', 'usage']);
+
+/**
+ * 詳細ペインに出せるもの。知らない値は 'now' に落とす。
+ *
+ * 以前は11枚のパネルを縦に積んでいた。同時に置きうる情報の塊が多すぎて、
+ * いま何を見ればいいのかが分からなくなっていたので、役目で6つに割ってある。
+ *
+ * TABS と同じく集合で持つ。三項演算子で二値に畳むと、増やすたびに
+ * 判定と syncQuery の2箇所を直すことになる
+ */
+export const DETAIL_TABS = new Set(['now', 'log', 'agents', 'usage', 'out', 'basics']);
 
 export const dom = {
   app: document.getElementById('app'),
@@ -219,6 +231,14 @@ export const store = {
    * 固定したい人は ?tab=archive のようにブックマークする
    */
   tab: TABS.has(query.get('tab')) ? query.get('tab') : 'live',
+  /**
+   * 詳細ペインに出しているタブ。DETAIL_TABS のどれか。
+   *
+   * localStorage には残さない（tab と同じ理由）。
+   * セッションを選び直しても戻さない。見たいものは人ごとに決まっていて、
+   * セッションごとに変わるものではないため
+   */
+  detailTab: DETAIL_TABS.has(query.get('dtab')) ? query.get('dtab') : 'now',
   /** 書庫の状態。rows はサーバの応答そのまま（logSize と mtimeMs を持つ） */
   archive: {
     rows: [],
@@ -282,7 +302,7 @@ export const store = {
  * pushState は使わない。検索欄は1文字ごとにここを通るので、履歴が入力の回数だけ積まれ、
  * 戻るボタンが使えなくなる。replaceState なら今のアドレスだけが差し替わる。
  *
- * 触るキーは session / only / tq / hide / tab / aq / asort だけ。
+ * 触るキーは session / only / tq / hide / tab / aq / asort / dtab だけ。
  * theme と nolive は「開くときの指定」なので、こちらから書き換えない
  */
 export function syncQuery() {
@@ -306,6 +326,8 @@ export function syncQuery() {
   set('aq', store.tab === 'archive' ? store.archive.q : null);
   // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
   set('asort', store.tab === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
+  // 既定（いま）のときだけキーを落とす。tab と同じ扱い
+  set('dtab', store.detailTab === 'now' ? null : store.detailTab);
 
   const qs = params.toString();
   const next = qs ? `${location.pathname}?${qs}` : location.pathname;

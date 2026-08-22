@@ -2,11 +2,12 @@
  *
  * 層3。1枚が1つの関数で、どれも同じ形を返す。
  *
- *   { section, nav } … section は積む節点、nav は上のジャンプ用リンクに出す1件
- *   null            … 出すものが無い（呼ぶ側は何もしない）
+ *   HTMLElement … 積む節点
+ *   null        … 出すものが無い（呼ぶ側は何もしない）
  *
- * 目次の1件を各パネル自身に持たせているのが要点。detail.js 側で並べると、
- * パネルを1枚足すたびに離れた2箇所を揃える必要が出て、件数の数え方がずれる。
+ * 以前は目次（上のジャンプ用リンク）に出す1件も一緒に返していたが、
+ * 中央タブに割ったときに目次ごと外した。タブと役目が重なるうえ、
+ * タブの数は選んでいないタブのぶんも要るので、パネルの戻り値からは取れない。
  */
 import { el, since, stamp, shortModel, fact } from './util.js';
 import { store, syncQuery } from './store.js';
@@ -41,12 +42,7 @@ export function decisionsPanel(d) {
     }
   }
 
-  return {
-    section: p.section,
-    // 見出しと同じ数え方にする（回答＋プラン）。
-    // ログの行数を出すと、見出しの「回答 3 / プラン 1」と食い違って読めなくなる
-    nav: { id: SEC.decisions, label: 'あなたが決めたこと', count: answers + d.digest.stats.plans },
-  };
+  return p.section;
 }
 
 /** @param {object} d 詳細の応答 */
@@ -66,10 +62,7 @@ export function todoPanel(d) {
   }
   p.body.append(ul);
 
-  return {
-    section: p.section,
-    nav: { id: SEC.todo, label: 'TODO', count: `${done}/${d.tasks.items.length}` },
-  };
+  return p.section;
 }
 
 /** @param {object} d 詳細の応答 */
@@ -80,10 +73,7 @@ export function compactionPanel(d) {
   p.body.append(el('p', 'note',
     'このセッションは途中で文脈が圧縮されています。圧縮より前のやり取りは要約に置き換わっているため、下の時系列で確認してください。'));
 
-  return {
-    section: p.section,
-    nav: { id: SEC.compact, label: '文脈の圧縮', count: d.digest.compactions.length },
-  };
+  return p.section;
 }
 
 /**
@@ -130,10 +120,7 @@ export function timelinePanel(d) {
     dropped: d.digest.stats.droppedItems ?? 0,
   });
 
-  return {
-    section: p.section,
-    nav: { id: SEC.timeline, label: '時系列', count: '' },
-  };
+  return p.section;
 }
 
 /** @param {object} d 詳細の応答 */
@@ -155,10 +142,7 @@ export function filesPanel(d) {
   }
   p.body.append(ul);
 
-  return {
-    section: p.section,
-    nav: { id: SEC.files, label: '書き換えたファイル', count: d.digest.files.length },
-  };
+  return p.section;
 }
 
 /**
@@ -212,8 +196,5 @@ export function basicsPanel(row, d) {
     }
   }
 
-  return {
-    section: basics.section,
-    nav: { id: SEC.basics, label: 'セッションの状態' },
-  };
+  return basics.section;
 }

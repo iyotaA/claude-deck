@@ -15,6 +15,6 @@
  * store.js が kinds.js から直に取る。層0 の語彙なので経由する必要がなく、
  * ここを通させると index -> view -> store -> index の循環になる。
  */
-export { attach, detach, setNav, filterBar, render, renderPlain } from './view.js';
+export { attach, detach, filterBar, render, renderPlain } from './view.js';
 export { answerBlock, planBlock, bodyText } from './blocks.js';
 export { waitFact, WAIT_LABELS, WAIT_NOTE } from './waits.js';

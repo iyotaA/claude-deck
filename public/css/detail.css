@@ -116,50 +116,76 @@
   overflow-wrap: anywhere;
 }
 
-/* ------------------------------------------------------ ジャンプ用リンク */
+/* ------------------------------------------------------ 中央のタブ */
 
-/* 詳細は縦に長い。スクロールしても上に残して、いつでも飛べる状態にしておく。
+/* 以前はここに目次（パネルへ飛ぶリンクの帯）があった。
+   パネルを11枚積んでいたので、上から探すより飛んだほうが速かった。
+
+   中央タブに割ってからは、同時に置くパネルが1〜3枚になり飛ぶ必要が無くなった。
+   帯そのものは残す。上に張り付いていれば、下まで読んでから別のタブへ移れる。
+
    左右の負の margin はペインの余白を打ち消すためのもの。帯を端まで伸ばして、
    下のパネルが背後を通り抜けても読めなくならないようにする */
-.deck-nav {
+.detail-tabs {
   position: sticky;
   top: 0;
   z-index: 2;
   display: flex;
   flex-wrap: wrap;
-  gap: .35rem;
+  gap: .15rem;
   margin: 0 -1.3rem 1.1rem;
-  padding: .5rem 1.3rem;
+  padding: .35rem 1.3rem 0;
   background: var(--bg-sunk);
   border-bottom: 1px solid var(--border);
 }
 
-.nav-chip {
+/* 下線で選択を示す。左ペインのタブ（.tab）と別の名前にしてあるのは、
+   あちらが「一覧／書庫／数値」で既に使っていて、見た目も密度も違うため */
+.detail-tab {
   display: inline-flex;
   align-items: center;
   gap: .3rem;
-  padding: .12rem .55rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg);
-  font-size: .78rem;
-  color: var(--fg-muted);
+  padding: .35rem .7rem .3rem;
+  border: 0;
+  /* 選んでいないときも同じ太さを取る。付け外しで文字の位置が動かないようにする */
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: .82rem;
+  color: var(--fg-faint);
   white-space: nowrap;
+  cursor: pointer;
 }
 
-.nav-chip:hover { border-color: var(--border-strong); color: var(--fg); }
+.detail-tab:hover { color: var(--fg-muted); }
 
-.nav-chip .n {
+.detail-tab[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--fg);
+  font-weight: 700;
+}
+
+.detail-tab .n {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: .74rem;
   color: var(--fg-faint);
 }
 
-/* 自分の番のものだけ色を変える。全部に色を付けると差が読めない */
-.nav-chip.is-hot { border-color: var(--hot); color: var(--hot); font-weight: 700; }
-.nav-chip.is-hot .n { color: var(--hot); }
-.nav-chip.is-warn { border-color: var(--warn); color: var(--warn); font-weight: 700; }
+/* 「いま」だけ色を変える。別のタブを見ているあいだも手が要ることが分かるように。
+   全部に色を付けると差が読めなくなるので、ここ1つに絞る */
+.detail-tab.is-hot { color: var(--hot); }
+.detail-tab.is-warn { color: var(--warn); }
+.detail-tab.is-hot[aria-pressed="true"] { border-bottom-color: var(--hot); }
+.detail-tab.is-warn[aria-pressed="true"] { border-bottom-color: var(--warn); }
+
+/* 出すものが無いタブ。黙って空白にすると、押しても何も起きていないように見える */
+.tab-none {
+  margin: 0;
+  padding: 1.4rem .2rem;
+  color: var(--fg-faint);
+  font-size: .84rem;
+}
 
 .stack { display: flex; flex-direction: column; gap: 1.1rem; }
 
@@ -168,7 +194,8 @@
   border-radius: var(--radius);
   background: var(--bg);
   overflow: hidden;
-  /* 上に張り付いている目次の下に隠れないよう、飛んだ先に余白を残す */
+  /* 上に張り付いているタブの帯の下に隠れないよう、余白を残す。
+     飛ぶ先の目次は無くなったが、id はそのまま振ってあるので #sec-… を直に開ける */
   scroll-margin-top: 3.4rem;
 }
 
