@@ -2,17 +2,15 @@
  *
  * 層7。タブを稼働中に戻すときに renderList（list.js）を呼ぶので、あちらより下に置く。
  *
- * 数値タブ（usage-tab.js）も同じ層だが、**呼ぶのはこちらから片方向だけ。**
- * タブの出し分けを持っているのが setTab なので、向きは自然にこうなる。
- * 逆（あちらから setTab を呼ぶ）を足すと循環になる。
+ * 数値はここのタブだったが、モード（board.js の setMode）へ移した。
+ * 出す中身がセッション1本のものではないので、選ぶ場所である左のペインに
+ * 置く理由が無かった。この import が1本減っている。
  */
 import { el, kb, shortStamp, stamp, agentTag } from './util.js';
 import { dom, store, syncQuery, ARCHIVE_SORTS, TABS } from './store.js';
 import { setListOpen } from './drawer.js';
-import { select, loadDetail } from './session.js';
-import { renderDetailIfNeeded } from './detail.js';
+import { select } from './session.js';
 import { renderList } from './list.js';
-import { showUsage, initUsageTab } from './usage-tab.js';
 
 /** 1ページの件数。サーバ側の上限は 50 */
 const ARCHIVE_PER = 30;
@@ -205,49 +203,30 @@ async function loadArchive({ append = false } = {}) {
  * あれが「誰かが待っている」の唯一の合図なので、ここで止めると質問を取りこぼす。
  *
  * 出し分けは hidden の付け外しだけでやる。作り直さないので、
- * 書庫の途中まで読んだ位置や、数値の開いた <details> がタブを行き来しても残る。
+ * 書庫の途中まで読んだ位置がタブを行き来しても残る。
  *
- * @param {'live'|'archive'|'usage'} tab TABS のどれか。知らない値は 'live' に落とす
+ * @param {'live'|'archive'} tab TABS のどれか。知らない値は 'live' に落とす
  * @param {object} [opts]
  * @param {boolean} [opts.sync] URL を書き戻すか。起動時だけ false にする
  *   （まだ ?session= を store に取り込んでいないので、書き戻すと指定が消える）
  */
 export function setTab(tab, { sync = true } = {}) {
-  const prev = store.tab;
   store.tab = TABS.has(tab) ? tab : 'live';
   const now = store.tab;
 
-  // 3つに増えたので「書庫かどうか」の二値では書けない。
-  // 出す側を1つ選んで、残りは全部隠す形にする
+  // 出す側を1つ選んで、残りは全部隠す形にする。二値の三項に畳まないのは TABS と
+  // 同じ理由で、3つ目を足した日にこの行を書き換え忘れると黙って両方出る
   dom.tabLive.setAttribute('aria-pressed', String(now === 'live'));
   dom.tabArchive.setAttribute('aria-pressed', String(now === 'archive'));
-  dom.tabUsage.setAttribute('aria-pressed', String(now === 'usage'));
   dom.liveHead.hidden = now !== 'live';
   dom.list.hidden = now !== 'live';
   dom.archiveHead.hidden = now !== 'archive';
   dom.archive.hidden = now !== 'archive';
-  dom.usageHead.hidden = now !== 'usage';
-  dom.usage.hidden = now !== 'usage';
-  // 数値のときだけ左のペインを全幅にする（幅と、中央・右を消すのは usage.css）。
-  // 目印をここに付けているのは、幅の話が CSS 側だけで閉じるため
-  dom.listPane.classList.toggle('is-usage', now === 'usage');
   if (sync) syncQuery();
-
-  // 数値のあいだ apply() は中央を飛ばしている（stream.js）。出るときに追いつかせる。
-  // **数値から出たときだけ。** live ⇄ 書庫では詳細ペインが消えていないので、
-  // 止めていたものが無く、払う理由が無い。setMode('work') と同じ形
-  if (prev === 'usage' && now !== 'usage') {
-    renderDetailIfNeeded();
-    loadDetail(store.selected, { silent: true });
-  }
 
   if (now === 'live') {
     // まだ一覧を受け取っていない起動直後は描かない。空表示が一瞬出るのを避ける
     if (store.meta) renderList();
-    return;
-  }
-  if (now === 'usage') {
-    showUsage();
     return;
   }
   if (!store.archive.loaded && !store.archive.loading) loadArchive();
@@ -258,12 +237,6 @@ export function setTab(tab, { sync = true } = {}) {
 export function initTabs() {
   dom.tabLive.addEventListener('click', () => setTab('live'));
   dom.tabArchive.addEventListener('click', () => setTab('archive'));
-  dom.tabUsage.addEventListener('click', () => setTab('usage'));
-  // 数値タブは全幅で、詳細ペインが消えている（usage.css）。押した1本を見せるには
-  // 作業台へ戻すしかないので、その口だけを渡す。**向きはこちらから片方向のまま。**
-  // あちらから setTab を呼ぶと循環になる（監視盤のカードが buildCard(row, onPick) で
-  // 後始末だけ差し替えられているのと同じ形）
-  initUsageTab({ onPick: () => setTab('live') });
 
   dom.archiveQ.value = store.archive.q ?? '';
   dom.archiveSort.value = store.archive.sort;

@@ -31,6 +31,18 @@ import { select } from './session.js';
 import { openRunForm } from './run-form.js';
 import { setMode } from './board.js';
 
+// モードの札。**二値に畳まない。** 三項で「監視盤か作業台か」と書くと、
+// モードが1つ増えた日に文言と行き先の2箇所を直すことになる
+// （store.js の MODES / TABS を集合のままにしてあるのと同じ理由）
+const MODE_DEFS = [
+  { id: 'work', label: '作業台', name: '作業台へ戻る', desc: 'いまの作業に集中する',
+    hay: '作業台 モード work 作業' },
+  { id: 'board', label: '監視盤', name: '監視盤へ移る', desc: '待っているものを列で見る',
+    hay: '監視盤 モード board 列 盤' },
+  { id: 'usage', label: '数値', name: '数値へ移る', desc: '何にトークンを使ったかを横断で見る',
+    hay: '数値 モード usage トークン 集計 横断 スキル' },
+];
+
 // 開いたときに組んだ全部と、絞り込んで残ったぶんと、選んでいる位置。
 // **開いているあいだは組み直さない。** 裏で一覧は毎秒動いているので、
 // 組み直すと打っている最中に並びが変わり、狙っていたものがずれる
@@ -71,9 +83,10 @@ function buildAll() {
       hay: hay(row.project, row.title, row.name, row.stateLabel, row.gitBranch),
       run: () => {
         select(row.sessionId, 'live');
-        // 監視盤から選んだときは作業台へ移す。あちらは中央を消しているので、
-        // 移さないと「選んだのに何も起きない」に見える
-        if (store.mode === 'board') setMode('work');
+        // 作業台の外から選んだときは作業台へ移す。監視盤も数値も中央を消しているので、
+        // 移さないと「選んだのに何も起きない」に見える。
+        // **'board' と名指しで比べない。** モードが増えるたびにここを直すことになる
+        if (store.mode !== 'work') setMode('work');
       },
     });
   }
@@ -103,16 +116,19 @@ function buildAll() {
 
   // モードの切り替えは出してよい。替わるのは画面だけで、
   // 止める・替える・続けるのように子プロセスを畳んだり起こしたりしない。
-  // 選んでいるものと無関係なので、下の if の外に置く
-  const onBoard = store.mode === 'board';
-  out.push({
-    group: '出す・畳む',
-    verb: onBoard ? '作業台' : '監視盤',
-    name: onBoard ? '作業台へ戻る' : '監視盤へ移る',
-    desc: onBoard ? 'いまの作業に集中する' : '待っているものを列で見る',
-    hay: hay('監視盤 作業台 モード board work 列 盤'),
-    run: () => setMode(onBoard ? 'work' : 'board'),
-  });
+  // 選んでいるものと無関係なので、下の if の外に置く。
+  // **いま出ているモードは出さない。** 押しても何も起きないものを並べない
+  for (const m of MODE_DEFS) {
+    if (store.mode === m.id) continue;
+    out.push({
+      group: '出す・畳む',
+      verb: m.label,
+      name: m.name,
+      desc: m.desc,
+      hay: hay(m.hay),
+      run: () => setMode(m.id),
+    });
+  }
 
   // 選んでいないときは出さない。押しても出す中身が無い
   if (store.selected) {

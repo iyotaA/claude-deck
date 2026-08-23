@@ -302,7 +302,7 @@
   font-weight: 700;
 }
 
-/* ================================================ 左のペインの3つ目のタブ */
+/* ==================================================== 3つ目のモード「数値」 */
 
 /* ここから下は横断集計（usage-tab.js）だけが使う。
    上の部品はそのまま共有するので、足すのは器と絞り込みの帯とセッションの行だけ */
@@ -349,14 +349,6 @@
    絞り込みを変えるたびに画面が空白になって、どこを見ていたか分からなくなる */
 .usage-pane.is-stale { opacity: .55; }
 
-/* 札は 2×2 に固定する。
-   既定の auto-fit（9.5rem）に任せると、左のペインの 34rem では
-   **3枚 + 1枚**に割れて、4枚目だけが 1/3 幅で細長く取り残される（実測）。
-   詳細ペイン側の .stats は今のままでちょうど4列に並ぶので、こちらだけ上書きする */
-.usage-pane > .stats {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 /* 最初の節（.stats のすぐ下）には区切り線を引かない。
    器の上端に線が近すぎて、ヘッダの下線と二重に見える */
 .usage-pane > .stats + .usage-block {
@@ -386,45 +378,46 @@
   font-size: .82rem;
 }
 
-/* 数値タブは全幅で見せる。中央の詳細ペインも、右のインスペクタとレールも消す。
+/* 数値モードは全幅で見せる。左の一覧も、中央の詳細ペインも、右のインスペクタとレールも消す。
 
-   ダッシュボードを 34rem の中に閉じ込める理由が無い（5列の表と横棒がほぼ常に
-   横スクロールになっていた）うえ、数値を読んでいるあいだ隣に出ている
-   セッションの詳細は**選んだ覚えのないもの**で、読まないのに場所を取る。
+   **タブではなくモードにしてある。** 出す中身がセッション1本のものではないから。
+   左のペインは「どのセッションを選ぶか」の場所なので、そこに横断の集計を置くと、
+   選ぶための場所に、選んでいるものと関係のない数字が出ることになる。
 
-   前例は board.css の .is-board（監視盤モード）。あちらはモードとして分けたが、
-   こちらはタブなので目印は .list-pane 側に付いている（archive.js の is-usage）。
+   作りは board.css の .is-board（監視盤）と同じで、目印は <div id="app"> に付く。
+   中身を .deck の中に置いているのも同じ理由（.app の grid-template-rows が2行しか
+   宣言していないので、3つ目の in-flow な子を置くと高さの配り方が崩れる）。
+   だから行は auto（ヘッダ）＋ minmax(0,1fr)（器）の2つを自分で宣言する。
 
-   詳細度は .deck:has(.list-pane.is-usage) が (0,3,0) で、
-   base.css の .is-insp-open .deck (0,2,0) と board.css の .is-board .deck (0,2,0) に
-   素で勝つ。**読む順ではなく詳細度で決まる。**
-   board.css の .is-board.is-insp-open .deck だけは同じ (0,3,0) だが、
-   あちらも 1 列なので取り合いにならない。
+   **.is-usage.is-insp-open .deck を必ず並べて書く。** narrow.css は
+   `.deck, .is-insp-open .deck` というセレクタリストで、リストの各項は
+   それぞれ独立に詳細度を持つ。あとから読まれる .is-insp-open .deck（0,2,0）は
+   ここの .is-usage .deck（0,2,0）に**読む順で勝つ**ので、(0,3,0) の側を書かないと、
+   右の枠を開いたまま数値へ移った人だけ列が戻る。board.css が同じ組み方をしている。
 
-   **必ず @media で囲む。** narrow.css の .deck は @media の中にあるが、
-   メディアクエリは詳細度を足さないので、:has() を付けたこちらが素で勝ってしまう。
-   囲まないと、狭い画面で引き出しが壊れる */
-@media (min-width: 861px) {
-  .deck:has(.list-pane.is-usage) {
-    grid-template-columns: minmax(0, 1fr);
-  }
+   **@media で囲まない。** タブだった頃は、狭い画面の引き出し（.list-pane を
+   position: fixed で外へ出す作り）を壊さないよう 861px 以上に閉じ込めていた。
+   モードになった今は .list-pane を display: none で丸ごと消すので、
+   狭い画面でも同じ形で通る（監視盤も同じ理由で狭い画面向けの上書きを持たない）*/
+.is-usage .deck,
+.is-usage.is-insp-open .deck {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
 
-  /* 子セレクタにするのは、この3つが .deck の直下にしか無いことを示すため。
-     .is-board が使っている display での消し方に合わせる（hidden ではない） */
-  .deck:has(.list-pane.is-usage) > .detail-pane,
-  .deck:has(.list-pane.is-usage) > .insp,
-  .deck:has(.list-pane.is-usage) > .rail { display: none; }
+/* .is-board が使っている display での消し方に合わせる（hidden ではない）*/
+.is-usage .list-pane,
+.is-usage .detail-pane,
+.is-usage .insp,
+.is-usage .rail { display: none; }
 
-  /* 隣が無くなったので仕切りの線も要らない。
-     残すと画面のいちばん右端に、何も分けていない縦線が1本立つ */
-  .list-pane.is-usage { border-right: 0; }
+/* カードは全幅だと横に伸びきって、中身（1行のタイトルと札2つ）に対して間延びする。
+   余った幅は列に使う。**並び順は変えない。** 既定の行方向のまま、実消費の多い順が
+   左上から右へ流れる（監視盤が store.rows を順に振り分けたのと同じで、
+   比較器をこちらに持たない）。
 
-  /* カードは全幅だと横に伸びきって、中身（1行のタイトルと札2つ）に対して間延びする。
-     余った幅は列に使う。**並び順は変えない。** 既定の行方向のまま、実消費の多い順が
-     左上から右へ流れる（監視盤が store.rows を順に振り分けたのと同じで、
-     比較器をこちらに持たない） */
-  .is-usage .usage-rows {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
-  }
+   min() で挟むのは、22rem（352px）より細い窓で列が器から溢れないため */
+.is-usage .usage-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(22rem, 100%), 1fr));
 }

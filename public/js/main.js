@@ -21,9 +21,11 @@
  *   層8  このファイル
  *
  * 数値は2つに分かれている。1本ぶんが usage-panel.js（層3・詳細ペイン）、
- * 横断が usage-tab.js（層7・左のペイン）。絵の部品（usage-chart.js）だけを共有する。
- * 層7 の中の向きは4本。archive.js → usage-tab.js / palette.js → run-form.js /
- * stream.js → board.js / palette.js → board.js。どれも片方向で、逆を足すと循環になる。
+ * 横断が usage-tab.js（層7・モードの1つ）。絵の部品（usage-chart.js）だけを共有する。
+ * 層7 の中の向きは3本。palette.js → run-form.js / stream.js → board.js /
+ * palette.js → board.js。どれも片方向で、逆を足すと循環になる。
+ * usage-tab.js は誰からも import されない（呼ぶのはこのファイルだけ）。
+ * board.js の setMode が数値モードを出す口は initBoard({ onUsage }) で差してある。
  * palette.js は層7 のいちばん下流で、誰からも import されない（呼ぶのはこのファイルだけ）。
  *
  * board.js（監視盤）が層7 なのは list.js（層6）から buildCard を借りているため。
@@ -55,7 +57,8 @@ import * as RunView from './run-view.js';
 import { renderDetailIfNeeded, initInspector } from './detail.js';
 import { renderList } from './list.js';
 import { initTabs } from './archive.js';
-import { initBoard } from './board.js';
+import { showUsage, initUsageTab } from './usage-tab.js';
+import { initBoard, setMode } from './board.js';
 import { select, detailCache } from './session.js';
 import { setLive, fetchOnce, connect } from './stream.js';
 import { initSettings } from './settings.js';
@@ -113,9 +116,15 @@ initTheme();
 initListDrawer();
 initInspector();
 initTabs();
+// 数値モードの絞り込みを配線してから initBoard に渡す。あちらの setMode は
+// ?mode=usage で開いたときに onUsage（= showUsage）をその場で呼ぶので、
+// 先に配線しておかないと <select> の初期値が当たる前に引き始める
+initUsageTab({ onPick: () => setMode('work') });
 // パレットより前に置く。あちらは board.js の setMode を呼ぶので、
-// 押される前にモードが当たっていないと最初の1回が空振りする
-initBoard();
+// 押される前にモードが当たっていないと最初の1回が空振りする。
+// 数値モードの中身は usage-tab.js にあるので、出す口だけを差す
+// （board.js があちらを import すると、同じ層7 に向きが1本増える）
+initBoard({ onUsage: showUsage });
 initSettings();
 initUpdate();
 initRunForm();

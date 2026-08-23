@@ -1,4 +1,13 @@
-/* 監視盤モード。一覧を主役にした列表示。
+/* 監視盤モード（一覧を主役にした列表示）と、モードの切り替え。
+ *
+ * setMode がこのファイルにあるのは歴史の産物で、モードが2つ（作業台・監視盤）
+ * だったときにここへ置いた。3つ目（数値）が増えたが、**ファイルは割らない。**
+ * 割ると palette.js と stream.js の import 先も動かすことになり、
+ * 得るものが「名前の一致」だけになる。
+ *
+ * 数値モードの中身は usage-tab.js（同じ層7）が持つ。こちらは import しない。
+ * 出すときに呼ぶものを initBoard({ onUsage }) で外から受け取る形にしてある
+ * （runs.js の subscribeRuns(fn) と同じ切り方。配線するのは main.js）。
  *
  * 層7。「どれから手をつけるか」だけを見る画面で、作業台とは**モードとして分ける**。
  * 同居させると同じ画面で場所を取り合う。それがこの組み替えの発端そのものなので、
@@ -17,6 +26,9 @@ import { setListOpen } from './drawer.js';
 import { renderDetailIfNeeded } from './detail.js';
 import { loadDetail } from './session.js';
 import { buildCard, renderList } from './list.js';
+
+/** 数値モードに入ったときに呼ぶもの。main.js が showUsage を差す */
+let onUsage = null;
 
 /**
  * 列の並び。左から手をつける順（src/parse/state.mjs の STATE_RANK と同じ考え）。
@@ -112,7 +124,10 @@ export function renderBoard() {
  * モードを切り替える。
  *
  * 押した状態の正は aria-pressed 1つ（.list-tabs と同じ流儀）。
- * 開き方の指定を URL に残すので、監視盤のままブックマークできる。
+ * 開き方の指定を URL に残すので、監視盤や数値のままブックマークできる。
+ *
+ * 3つになったので「監視盤かどうか」の二値では書けない。
+ * 出す側を1つ選んで残りは全部隠す形にする（setTab がタブ3枚でやったのと同じ）。
  *
  * @param {string} mode MODES のどれか。知らない値は 'work' に落とす
  * @param {object} [opts]
@@ -123,25 +138,35 @@ export function setMode(mode, { sync = true } = {}) {
   // 実際に替わったかを先に測る。起動時と押し直しで作業台を描き直さないため
   const changed = store.mode !== next;
   store.mode = next;
-  const board = store.mode === 'board';
+  const board = next === 'board';
+  const usage = next === 'usage';
 
+  // 目印は .app に付ける（.is-list-open と同じ流儀）。骨格の組み替えは
+  // board.css の .is-board と usage.css の .is-usage が受け持つ
   dom.app.classList.toggle('is-board', board);
-  dom.modeWork.setAttribute('aria-pressed', String(!board));
+  dom.app.classList.toggle('is-usage', usage);
+  dom.modeWork.setAttribute('aria-pressed', String(next === 'work'));
   dom.modeBoard.setAttribute('aria-pressed', String(board));
+  dom.modeUsage.setAttribute('aria-pressed', String(usage));
   dom.boardHead.hidden = !board;
   dom.board.hidden = !board;
+  dom.usageHead.hidden = !usage;
+  dom.usage.hidden = !usage;
   if (sync) syncQuery();
 
-  if (board) {
+  if (board || usage) {
     // 引き出しを開けっぱなしにしない。一覧そのものが消えるので、
     // 開いたままだと中身の無い紙と膜だけが画面に残る
     setListOpen(false);
-    renderBoard();
+    // 監視盤は毎秒の push でも描き直す（apply() が呼ぶ）が、数値は開いたときだけ。
+    // 引くのは /api/usage（ログを全文読む）なので、見ているあいだ撃ち続けない
+    if (board) renderBoard();
+    else onUsage?.();
     return;
   }
 
-  // 監視盤のあいだ中央と左は描いていない（apply() が飛ばしている）ので、戻るときに
-  // 追いつかせる。**替わったときだけ。** 起動時や押し直しでも払うと、
+  // 監視盤と数値のあいだ、中央と左は描いていない（apply() が飛ばしている）ので、
+  // 戻るときに追いつかせる。**替わったときだけ。** 起動時や押し直しでも払うと、
   // 作業台で「作業台」を押すたびに開いた <details> と打ちかけの文が消える
   if (!changed) return;
   if (store.meta) renderList();
@@ -153,12 +178,21 @@ export function setMode(mode, { sync = true } = {}) {
   loadDetail(store.selected, { silent: true });
 }
 
-/** 配線。main.js から1回だけ呼ぶ */
-export function initBoard() {
+/**
+ * 配線。main.js から1回だけ呼ぶ。
+ *
+ * @param {object} [opts]
+ * @param {() => void} [opts.onUsage] 数値モードに入ったときに呼ぶもの。
+ *   usage-tab.js の showUsage を差す（**こちらから import しない。**
+ *   同じ層7 なので、向きを持たせずに済む形を選ぶ）
+ */
+export function initBoard({ onUsage: fn = null } = {}) {
+  onUsage = fn;
   dom.modeWork.addEventListener('click', () => setMode('work'));
   dom.modeBoard.addEventListener('click', () => setMode('board'));
+  dom.modeUsage.addEventListener('click', () => setMode('usage'));
   // 列に入らなかったぶんの逃げ道。作業台の一覧へ移すだけ
   dom.boardRest.addEventListener('click', () => setMode('work'));
-  // ?mode=board で開いたときのために1回当てる。起動時に URL は書き換えない
+  // ?mode=board や ?mode=usage で開いたときのために1回当てる。起動時に URL は書き換えない
   setMode(store.mode, { sync: false });
 }

@@ -46,8 +46,8 @@ export const SUMMARY_ORDER = [
  *  ?tq=<語> … 時系列の検索語
  *  ?hide=<種類,種類> … 時系列で隠す種類。空で付けると「何も隠さない」になる
  *  ?nolive=1 … 自動更新をつながない
- *  ?mode=board … 監視盤（列で見るモード）で開く
- *  ?tab=archive|usage … 書庫（終了したものも含む全セッション）や数値を開いた状態にする
+ *  ?mode=board|usage … 監視盤（列で見る）や数値（横断の集計）で開く
+ *  ?tab=archive … 書庫（終了したものも含む全セッション）を開いた状態にする
  *  ?aq=<語> … 書庫の検索語
  *  ?asort=recent|oldest|size … 書庫の並び順
  *  ?dtab=log|agents … 詳細ペインの中央のどのタブを開くか
@@ -61,22 +61,44 @@ export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
 /**
  * 画面のモード。知らない値は 'work' に落とす。
  *
- * 見る目的が2つある。「どれから手をつけるか」（監視盤）と「いまの作業」（作業台）。
- * 同居させると同じ画面で場所を取り合うので、モードとして分けている。
+ * 見る目的が3つある。「いまの作業」（作業台）・「どれから手をつけるか」（監視盤）・
+ * 「何にトークンを使ったか」（数値）。同居させると同じ画面で場所を取り合うので、
+ * モードとして分けている。
  *
- * TABS と同じく集合で持つ。三項演算子で二値に畳むと、3つ目を足した日に
- * 黙って 'work' へ落ちる形になる
+ * 数値がタブではなくモードなのは、**出す中身がセッション1本のものではない**から。
+ * 左のペインは「どのセッションを選ぶか」の場所なので、そこに横断の集計を置くと、
+ * 選ぶための場所に、選んでいるものと関係のない数字が出ることになる。
+ *
+ * 集合で持つ。三項演算子で二値に畳むと、3つ目を足した日に
+ * 黙って 'work' へ落ちる形になる（実際に3つ目を足した）
  */
-export const MODES = new Set(['work', 'board']);
+export const MODES = new Set(['work', 'board', 'usage']);
+
+/**
+ * 開くモードを決める。
+ *
+ * `?tab=usage` を拾うのは、数値が左のペインのタブだった版（0.3.0 で配った）の
+ * URL が実在するため。**ここは読み替えを入れる。** INSPECTOR_TABS の側で
+ * 入れなかったのは、あれがまだ誰にも配っていなかったからで、方針の違いではない。
+ */
+function initialMode() {
+  const m = query.get('mode');
+  if (MODES.has(m)) return m;
+  return query.get('tab') === 'usage' ? 'usage' : 'work';
+}
 
 /**
  * 左のペインに出せるもの。知らない値は 'live' に落とす。
  *
  * 集合で持つのは、増やしたときに三項演算子を書き換えなくて済むようにするため。
  * 以前は `=== 'archive' ? 'archive' : 'live'` と書いてあり、
- * 3つ目を足したときに黙って 'live' へ落ちる形になっていた
+ * 3つ目を足したときに黙って 'live' へ落ちる形になっていた。
+ *
+ * 数値は 3つ目のタブだったが、モード（MODES）へ移した。
+ * **2つに戻っても集合のままにする。** 三項に畳み直すと、次に足したときに
+ * 同じ地雷（黙って 'live' へ落ちる）を踏み直すことになる
  */
-export const TABS = new Set(['live', 'archive', 'usage']);
+export const TABS = new Set(['live', 'archive']);
 
 /**
  * 詳細ペインの中央に出せるもの。知らない値は 'now' に落とす。
@@ -117,6 +139,7 @@ export const dom = {
   // 監視盤（board.js）。作業台とは別のモードなので、器も別に持つ
   modeWork: document.getElementById('mode-work'),
   modeBoard: document.getElementById('mode-board'),
+  modeUsage: document.getElementById('mode-usage'),
   boardHead: document.getElementById('board-head'),
   boardCount: document.getElementById('board-count'),
   boardRest: document.getElementById('board-rest'),
@@ -134,7 +157,6 @@ export const dom = {
   rail: document.getElementById('rail'),
   tabLive: document.getElementById('tab-live'),
   tabArchive: document.getElementById('tab-archive'),
-  tabUsage: document.getElementById('tab-usage'),
   liveHead: document.getElementById('live-head'),
   archiveHead: document.getElementById('archive-head'),
   archive: document.getElementById('archive'),
@@ -274,15 +296,15 @@ export const store = {
   /**
    * いまのモード。MODES のどれか。
    *
-   * tab と同じく localStorage には残さない。監視盤を開いたまま保存すると、
+   * tab と同じく localStorage には残さない。監視盤や数値を開いたまま保存すると、
    * 次に開いたときに作業台へ戻る道が「押す」しか無い状態で始まってしまう。
-   * 固定したい人は ?mode=board でブックマークする
+   * 固定したい人は ?mode=board のようにブックマークする
    */
-  mode: MODES.has(query.get('mode')) ? query.get('mode') : 'work',
+  mode: initialMode(),
   /**
    * 左のペインに出しているもの。TABS のどれか。
    *
-   * localStorage には残さない。書庫や数値を開いたまま保存すると、次に開いたときに
+   * localStorage には残さない。書庫を開いたまま保存すると、次に開いたときに
    * 「誰が待っているか」が見えない状態で始まってしまう。
    * 固定したい人は ?tab=archive のようにブックマークする
    */
