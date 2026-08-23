@@ -214,7 +214,7 @@ function buildUi() {
   const budget = el('input', 'settings-num');
   budget.type = 'number';
   budget.step = '0.01';
-  gridRow(grid, 'run-resume-budget', '上限（USD）', budget, 'ここに達すると止まります');
+  gridRow(grid, 'run-resume-budget', '上限（USD）', budget, '空欄なら上限なし。入れた額に達すると止まります');
   grid.hidden = true;
 
   const danger = el('p', 'settings-hint run-danger',
