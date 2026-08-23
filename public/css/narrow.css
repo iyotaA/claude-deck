@@ -84,6 +84,11 @@
   .hamburger,
   .drawer-close { display: inline-flex; }
 
+  /* 幅を変えるつまみは出さない。狭い画面の一覧は列ではなく引き出し
+     （position: fixed ＋ z-index: 40）で、幅は width: min(88vw, 24rem) が決める。
+     つまり掴む境目そのものが無い。インスペクタも中央に重ねる紙なので同じ */
+  .splitter { display: none; }
+
   /* 折り返しで高さが変わる上のバーごと覆う。中途半端に避けると位置が合わなくなる。
      閉じている間は画面の外へ逃がすだけにして、visibility では隠さない。
      visibility は変化が1フレームで確定せず、開いた直後は「隠れている」ままなので、

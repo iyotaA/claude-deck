@@ -132,6 +132,12 @@
         <span id="archive-count"></span>
       </div>
       <ul class="list" id="archive" hidden></ul>
+
+      <!-- 幅を変えるつまみ。列の境目にまたがるが、絶対配置なので上の並びには入らない。
+           狭い画面（引き出し）と監視盤・数値モードでは出ない（前者は narrow.css、
+           後者は .list-pane ごと消えるので自動的に消える） -->
+      <button class="splitter" id="split-list" type="button"
+              aria-label="一覧の幅を変える。矢印キーでも動かせる（Home で既定に戻る）"></button>
     </section>
 
     <!-- 詳細ペイン。中身が流れる箱と、下に留まる入力欄の2段に割ってある。
@@ -155,6 +161,10 @@
         <button class="iclose" id="insp-close" type="button" aria-label="閉じる">&times;</button>
       </div>
       <div class="insp-body" id="insp-body"></div>
+
+      <!-- こちらは閉じているあいだ .insp ごと hidden になるので、消す手当ては要らない -->
+      <button class="splitter" id="split-insp" type="button"
+              aria-label="詳しいところの幅を変える。矢印キーでも動かせる（Home で既定に戻る）"></button>
     </aside>
 
     <!-- 右端のレール。中身は detail.js が組む（並びと語彙を1箇所に持つため）。

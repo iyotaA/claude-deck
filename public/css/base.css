@@ -44,11 +44,29 @@ body {
   height: 100vh;
 }
 
+/* 左右の幅。つまみ（.splitter）をドラッグすると resize.js が --list-w / --insp-w を書く。
+
+   **上下限をここに持たせるのが要点。** JS が書くのは生の px 1つだけで、
+   丸めるのは clamp の仕事。窓が狭いときの蓋（min(…, 40vw)）も CSS 側なので、
+   窓をリサイズすればその場で効き直す。JS で窓幅を測って自分で丸めると追いつかない。
+
+   既定値もここだけに置く。resize.js が既定へ戻すときは値を書かず、
+   インラインの変数を削るだけにしてある（両方に書くと片方が古くなる）。
+
+   下限を 20rem → 16rem へ、上限を 27rem → 40rem へ広げた。
+   「ある程度」動かせることが要件なので、幅の範囲そのものは残す */
+:root {
+  --list-w: 27rem;
+  --insp-w: 23rem;
+  --list-col: clamp(16rem, var(--list-w), min(40rem, 40vw));
+  --insp-col: clamp(15rem, var(--insp-w), min(34rem, 34vw));
+}
+
 /* 3列目は右端のレール。幅は auto にしてボタン側で決める（数字を2箇所に焼き込まない）。
    閉じているあいだ .insp は hidden なので、grid の子は3つ・列も3つで釣り合う */
 .deck {
   display: grid;
-  grid-template-columns: minmax(20rem, 27rem) minmax(0, 1fr) auto;
+  grid-template-columns: var(--list-col) minmax(0, 1fr) auto;
   gap: 0;
   min-height: 0;
 }
@@ -56,8 +74,59 @@ body {
 /* インスペクタが開いたら、中央を削って右に場所を作る。
    目印を .app に付けているのは .is-list-open と同じ流儀 */
 .is-insp-open .deck {
-  grid-template-columns: minmax(20rem, 27rem) minmax(0, 1fr) minmax(17rem, 23rem) auto;
+  grid-template-columns: var(--list-col) minmax(0, 1fr) var(--insp-col) auto;
 }
+
+/* 幅を変えるつまみ。列の境目にまたがらせる。
+
+   **grid の子として列を足さない。** 上のコメントどおり「子の数と列の数が釣り合う」
+   前提で組んであるので、そこへ4つ目を挿すと閉じているときの釣り合いが崩れる。
+   ペインの中に置いて絶対配置すれば、列にも子の数にも触らずに済む。
+
+   z-index が要るのは、中央の .detail-tabs が sticky ＋ z-index: 2 だから。
+   印を付けないと帯の下に潜って、上のほうだけ掴めなくなる。
+
+   role="separator" ではなく button なのは、焦点を持つ separator には
+   aria-valuenow が要ることになっていて、px の数を読ませても意味が薄いため。
+   道具として押せるものは button で表す */
+.splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 3;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  /* タッチで掴んだときに画面が動かないようにする */
+  touch-action: none;
+}
+
+/* つまみを収める側。**セレクタを .deck > で絞らない。**
+   絞ると（0,2,0）になり、narrow.css の .list-pane { position: fixed }（0,1,0）に
+   詳細度で勝ってしまう。狭い画面の一覧は引き出し（fixed）なので、
+   そこを奪うと引き出しが列に戻って重なる。裸のまま（0,1,0）にしておけば、
+   最後に読まれる narrow.css が同じ詳細度で勝てる */
+.list-pane,
+.insp { position: relative; }
+
+.list-pane > .splitter { right: -3px; }
+.insp > .splitter { left: -3px; }
+
+.splitter:hover { background: var(--border-strong); }
+
+/* 焦点は必ず見えるようにする。矢印キーで動かせることが分からないと使われない */
+.splitter:focus-visible {
+  outline: none;
+  background: var(--accent);
+}
+
+/* 掴んでいるあいだは、通った先の文字が選ばれないようにする */
+.is-resizing,
+.is-resizing .splitter { cursor: col-resize; }
+
+.is-resizing { user-select: none; }
 
 /* ------------------------------------------------------------------ 見出し */
 

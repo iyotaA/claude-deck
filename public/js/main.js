@@ -10,7 +10,7 @@
  * 依存は上から下へ一方向にだけ流す。逆向きに import したくなったら置き場所が間違っている。
  *   層0  util.js / perf.js / timeline/kinds.js       誰にも依存しない
  *   層1  store.js（kinds.js を直に見る）/ panel.js / detail-head.js / usage-chart.js
- *   層2  rows.js / drawer.js / runs.js / timeline/（外からは index.js の1枚として見る）
+ *   層2  rows.js / drawer.js / resize.js / runs.js / timeline/（外からは index.js の1枚として見る）
  *   層3  detail-wait.js / detail-panels.js / agents.js / usage-panel.js /
  *        run-view.js / run-resume.js
  *   層4  detail.js
@@ -52,6 +52,7 @@
 import { query, dom, store } from './store.js';
 import { visibleRows } from './rows.js';
 import { initListDrawer } from './drawer.js';
+import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
 import * as RunView from './run-view.js';
 import { renderDetailIfNeeded, initInspector } from './detail.js';
@@ -115,6 +116,7 @@ function initListKeys(listEl, from) {
 initTheme();
 initListDrawer();
 initInspector();
+initResize();
 initTabs();
 // 数値モードの絞り込みを配線してから initBoard に渡す。あちらの setMode は
 // ?mode=usage で開いたときに onUsage（= showUsage）をその場で呼ぶので、
