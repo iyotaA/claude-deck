@@ -1,0 +1,160 @@
+/* Markdown の見た目。md-view.js が組んだ `.md` の中だけを塗る。
+ *
+ * 色は新しく作らない。使うのは既にある意味トークン（--border / --code-bg /
+ * --bg-elev / --fg-faint）だけ。足すと tokens.css の二重定義
+ * （prefers-color-scheme 側と [data-theme="dark"] 側）を両方直す義務が生まれる。
+ *
+ * detail.css より後に読む。`pre` と `code` はあちらが裸のセレクタで持っているので、
+ * クラス（0,1,0）で上書きできる。順番も詳細度も、どちらでも勝つ位置にある。
+ */
+
+/* 器。どのパネルへ入れても同じに見えるよう、字の大きさと行間はここで決める */
+.md {
+  font-size: .84rem;
+  line-height: 1.75;
+}
+
+/* ブロックの間。日本語の本文なので詰めすぎない */
+.md > * + * { margin-top: .7rem; }
+
+/* 見出しの前だけ広く取る。ここが空くと段落の切れ目が読める */
+.md > * + .md-h { margin-top: 1.1rem; }
+
+/* ------------------------------------------------------- 段落 */
+
+/* 段落の中の改行はそのまま出す。md.js が \n を1つの span に残しているのは、
+   Claude の出力が「1行1文」で書かれていることが多く、畳むと意味が変わるため */
+.md-p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------- 見出し */
+
+/* 大きさは元の段（md-h1〜md-h6）で決める。h タグのほうは2段下げてあるので、
+   6 で頭打ちにしても見た目は潰れない */
+.md-h {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.md-h1 { font-size: 1.02rem; }
+.md-h2 { font-size: .95rem; }
+.md-h3 { font-size: .89rem; }
+.md-h4,
+.md-h5,
+.md-h6 { font-size: .85rem; }
+
+/* 上2段だけ線を引く。全部に引くと本文より罫線のほうが目立つ */
+.md-h1,
+.md-h2 {
+  padding-bottom: .2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ------------------------------------------------------- コード */
+
+.md-code { overflow-wrap: anywhere; }
+
+/* フェンス。detail.css の `pre` に乗るので、変えるのは寸法だけ。
+   高さの上限は持たせない（畳んだ中に入れるときは、その器の側が持つ） */
+.md-pre {
+  font-size: .78rem;
+  line-height: 1.6;
+}
+
+/* 言語の札。実測で 885 件のうち 852 件が指定なしなので、出る場面は少ない。
+   本文の行に混ぜないよう浮かせる */
+.md-pre[data-lang] {
+  position: relative;
+  padding-top: 1.3rem;
+}
+
+.md-pre[data-lang]::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: .15rem;
+  right: .5rem;
+  font-size: .68rem;
+  color: var(--fg-faint);
+}
+
+/* 閉じていないフェンス。clip() が本文に「…（以下省略）」を書いているので、
+   ここで言葉を足すと二重に報告することになる。線を破線にするだけにする */
+.md-pre.is-open { border-bottom-style: dashed; }
+
+/* ------------------------------------------------------- 箇条書き */
+
+.md-list { margin: 0; }
+
+.md-ul {
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+/* 入れ子。項目（li）の中に入るので、上に少し空ける */
+.md-ul .md-ul { margin-top: .25rem; }
+
+.md-list li {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.md-list li + li { margin-top: .25rem; }
+
+/* ------------------------------------------------------- 表 */
+
+/* 横に溢れるのはここだけに閉じ込める。ページ全体が横スクロールしないように */
+.md-tablewrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.md-table {
+  border-collapse: collapse;
+  font-size: .8rem;
+  line-height: 1.55;
+}
+
+.md-table th,
+.md-table td {
+  padding: .3rem .55rem;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.md-table th {
+  background: var(--bg-elev);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------- 水平線 */
+
+/* `.md > * + *`（0,1,0）と同じ詳細度なので、子の指定（0,2,0）で確実に勝たせる */
+.md > .md-hr {
+  margin: 1rem 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* ------------------------------------------------------- 太字 */
+
+/* 700 だと日本語が潰れて読みにくい。600 にする */
+.md-strong { font-weight: 600; }
+
+/* ------------------------------------------------------- 「全文」の畳んだ中 */
+
+/* timeline.css の `details.more > pre` と同じ寸法を引き継ぐ。
+   背景は敷かない。中のフェンスが --code-bg で塗られているので、
+   同じ系統の色を下にも敷くと枠だけが浮いて、どこからがコードか読めなくなる */
+details.more > .md {
+  margin-top: .4rem;
+  max-height: 30rem;
+  overflow: auto;
+}
