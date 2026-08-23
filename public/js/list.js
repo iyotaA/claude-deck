@@ -9,7 +9,17 @@ import { idleOf, headOf, visibleRows } from './rows.js';
 import { setListOpen } from './drawer.js';
 import { select } from './session.js';
 
-function buildCard(row) {
+/**
+ * 一覧の1枚。
+ *
+ * **監視盤（board.js）も同じものを借りる。** 見た目を新しく作らないための export で、
+ * 違うのは押されたあとの後始末だけなので、そこだけ差し替えられる形にしてある。
+ *
+ * @param {object} row 一覧の行
+ * @param {?function} onPick 押されたあとの後始末。既定（null）は引き出しを畳む
+ * @returns {HTMLElement} <li> に入れたカード
+ */
+export function buildCard(row, onPick = null) {
   const li = el('li');
   const card = el('button', 'card');
   card.type = 'button';
@@ -71,6 +81,11 @@ function buildCard(row) {
 
   card.addEventListener('click', () => {
     select(row.sessionId);
+    // 後始末を借り手が持っているならそちらへ渡す（監視盤は作業台へ移る）
+    if (onPick) {
+      onPick(row);
+      return;
+    }
     // 引き出しは選ぶために開くもの。選び終わったら用済みなので閉じて詳細に場所を渡す。
     // 同じものを選び直したときも閉じたいので、select の中ではなくここに置く
     setListOpen(false, dom.detail);
@@ -119,10 +134,16 @@ export function renderSummary() {
   }
 }
 
-/** 経過時間の表示だけを進める。作り直さないのでスクロール位置が動かない */
+/**
+ * 経過時間の表示だけを進める。作り直さないのでスクロール位置が動かない。
+ *
+ * 引く先に監視盤（dom.board）も入れる。あちらのカードも同じ buildCard なので、
+ * 見る場所を広げれば1秒ごとの更新がそのまま効く
+ */
 export function refreshTimes() {
   const byId = new Map(store.rows.map((r) => [r.sessionId, r]));
-  for (const node of dom.list.querySelectorAll('.card')) {
+  const cards = [...dom.list.querySelectorAll('.card'), ...dom.board.querySelectorAll('.card')];
+  for (const node of cards) {
     const row = byId.get(node.dataset.sessionId);
     if (!row) continue;
     const idle = node.querySelector('.idle');

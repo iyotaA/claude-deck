@@ -22,6 +22,7 @@
 <link rel="stylesheet" href="css/usage.css">
 <link rel="stylesheet" href="css/run.css">
 <link rel="stylesheet" href="css/palette.css">
+<link rel="stylesheet" href="css/board.css">
 <link rel="stylesheet" href="css/narrow.css">
 </head>
 <body>
@@ -34,6 +35,13 @@
       <span class="bars" aria-hidden="true"></span>
     </button>
     <h1>ClaudeDeck<span class="sub">セッションの状態</span></h1>
+    <!-- 見る目的が2つあるので、モードで分ける。同居させると「どれから手をつけるか」と
+         「いまの作業」が同じ画面で場所を取り合う（それが組み替えの発端そのもの）。
+         押した状態は aria-pressed で表す（.list-tabs と同じ理由。role="tab" は使わない） -->
+    <div class="modes" role="group" aria-label="画面のモード">
+      <button class="tab" id="mode-work" type="button" aria-pressed="true">作業台</button>
+      <button class="tab" id="mode-board" type="button" aria-pressed="false">監視盤</button>
+    </div>
     <div class="summary" id="summary"></div>
     <div class="topbar-actions">
       <!-- いまの版。触ると更新の確認の結果が出る。
@@ -61,6 +69,16 @@
   </header>
 
   <div class="deck">
+    <!-- 監視盤。.deck の中に置く。.app 直下には置けない（grid-template-rows が
+         2行しか宣言していないので、3つ目の子を足すと高さの配分が崩れる）。
+         説明の帯は .list-head を借りる（クラス単体のセレクタなので、ここでも効く） -->
+    <div class="list-head board-head" id="board-head" hidden>
+      ボールの所在。左から順に手をつける
+      <span class="note-small">押すと、そのセッションの作業台に入ります</span>
+      <button class="btn board-rest" id="board-rest" type="button" hidden></button>
+      <span class="n" id="board-count">0</span>
+    </div>
+    <div class="board" id="board" hidden></div>
     <section class="list-pane" id="list-pane" aria-label="セッション一覧">
       <!-- role="tab" は使わない。正式なタブは矢印キーでタブ間を移動する約束が付くが、
            この下の一覧が上下キーをカードの移動に使っている。同じペインに矢印キーの

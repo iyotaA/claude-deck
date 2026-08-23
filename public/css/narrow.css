@@ -30,6 +30,17 @@
     grid-template-rows: minmax(0, 1fr);
   }
 
+  /* 監視盤のときは上の2列を取り消す。**board.css だけでは足りない。**
+     あちらは narrow.css より前に読まれるので、同じ詳細度（0,2,0）の
+     上の .deck に負けて、狭い画面だと列がレールの分だけ残ってしまう。
+     レールごと display: none で消しているので、その列は幅ゼロのまま居座る。
+     .is-board.is-insp-open は 0,3,0 なので、こちらは読む順に関わらず勝つ */
+  .is-board .deck,
+  .is-board.is-insp-open .deck {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
   /* インスペクタは中央と同じセルに重ねて、下から出す紙（ボトムシート）にする。
 
      **セルを分けずに重ねるのが要点。** 単一列の grid に in-flow の子が3つ

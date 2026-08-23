@@ -16,15 +16,18 @@
  *   層4  detail.js
  *   層5  session.js
  *   層6  list.js
- *   層7  archive.js / usage-tab.js / stream.js / settings.js / update.js /
- *        run-form.js / palette.js
+ *   層7  archive.js / usage-tab.js / board.js / stream.js / settings.js /
+ *        update.js / run-form.js / palette.js
  *   層8  このファイル
  *
  * 数値は2つに分かれている。1本ぶんが usage-panel.js（層3・詳細ペイン）、
  * 横断が usage-tab.js（層7・左のペイン）。絵の部品（usage-chart.js）だけを共有する。
- * 層7 の中の向きは archive.js → usage-tab.js と palette.js → run-form.js の2本。
- * どちらも片方向で、逆を足すと循環になる。palette.js は層7 のいちばん下流で、
- * 誰からも import されない（呼ぶのはこのファイルだけ）。
+ * 層7 の中の向きは4本。archive.js → usage-tab.js / palette.js → run-form.js /
+ * stream.js → board.js / palette.js → board.js。どれも片方向で、逆を足すと循環になる。
+ * palette.js は層7 のいちばん下流で、誰からも import されない（呼ぶのはこのファイルだけ）。
+ *
+ * board.js（監視盤）が層7 なのは list.js（層6）から buildCard を借りているため。
+ * 見た目を新しく作らないための借用で、向きはこちらが正しい。
  *
  * timeline/ の中も6枚で層をなしているが、外から見るときは index.js の1枚として扱う。
  * 中の向きは timeline/index.js の冒頭に書いてある。
@@ -52,6 +55,7 @@ import * as RunView from './run-view.js';
 import { renderDetailIfNeeded, initInspector } from './detail.js';
 import { renderList } from './list.js';
 import { initTabs } from './archive.js';
+import { initBoard } from './board.js';
 import { select, detailCache } from './session.js';
 import { setLive, fetchOnce, connect } from './stream.js';
 import { initSettings } from './settings.js';
@@ -109,6 +113,9 @@ initTheme();
 initListDrawer();
 initInspector();
 initTabs();
+// パレットより前に置く。あちらは board.js の setMode を呼ぶので、
+// 押される前にモードが当たっていないと最初の1回が空振りする
+initBoard();
 initSettings();
 initUpdate();
 initRunForm();

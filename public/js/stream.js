@@ -8,6 +8,7 @@ import { visibleRows } from './rows.js';
 import { renderList, renderSummary, refreshTimes } from './list.js';
 import { loadDetail } from './session.js';
 import { renderDetailIfNeeded } from './detail.js';
+import { renderBoard } from './board.js';
 
 const initialSession = query.get('session');
 let firstApply = true;
@@ -43,6 +44,13 @@ function apply(payload) {
   syncQuery();
   // まとめは書庫を出しているあいだも動かす。「誰かが待っている」の唯一の合図なので
   renderSummary();
+  // 監視盤のあいだは中央も左も消えている。描いても誰も見ないうえ、詳細を引くのは
+  // サーバー側の全文読みなので、見えないもののために毎2秒撃たない。
+  // 作業台へ戻るときに setMode('work') が3つとも追いつかせる
+  if (store.mode === 'board') {
+    renderBoard();
+    return;
+  }
   // 書庫を出しているあいだ #list には触らない。replaceChildren すると
   // 見えていない一覧のスクロール位置が毎秒先頭へ飛ぶ
   if (store.tab !== 'archive') renderList();

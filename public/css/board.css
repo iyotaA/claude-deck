@@ -1,0 +1,165 @@
+/* ClaudeDeck ── 監視盤モード。
+ *
+ * palette.css の後、narrow.css の前に読む。
+ * narrow.css より前なのは、狭い窓の指定を必ずあちらが上書きできるようにするため
+ * （.deck の組み替えは両方が触るので、後に読むほうが勝つ）。
+ *
+ * **作業台と同居させない。** 見る目的が2つ（どれから手をつけるか / いまの作業）あって、
+ * 同居させると同じ画面で場所を取り合う。それがこの組み替えの発端そのものなので、
+ * ここではモードとして分けている。
+ */
+
+/* ------------------------------------------------------------ モードの切り替え */
+
+/* 上のバーの中。.list-tabs と同じ形（.tab を借りる）だが、
+   帯の高さに合わせて上下の余白だけ詰める */
+.modes {
+  display: flex;
+  gap: .1rem;
+}
+
+.modes .tab {
+  padding: .2rem .6rem .15rem;
+}
+
+/* ------------------------------------------------------------ 骨格の組み替え */
+
+/* 監視盤のときは deck を1列 ＋ 2行にする。
+   .is-insp-open の方を並べて書くのは詳細度のため（あちらも 0,2,0）。
+   .is-board.is-insp-open は 0,3,0 なので、読む順に関わらず勝つ */
+.is-board .deck,
+.is-board.is-insp-open .deck {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* 作業台の道具は丸ごと消す。**hidden ではなく display で消す。**
+   .list-pane は狭い画面で position: fixed の引き出しになっているので、
+   hidden を立てるだけでは JS 側の開閉と噛み合わなくなる */
+.is-board .list-pane,
+.is-board .detail-pane,
+.is-board .insp,
+.is-board .rail { display: none; }
+
+/* ------------------------------------------------------------ 説明の帯 */
+
+/* 器は .list-head を借りる（クラス単体のセレクタなので .deck 直下でも効く）。
+   .list-head[hidden] { display: none } も list.css にあるので、
+   hidden で消す形が素で効く */
+.board-head .note-small {
+  font-size: .74rem;
+  color: var(--fg-faint);
+}
+
+.board-head .n {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 列に入れられなかったぶんへの逃げ道。押すと作業台の一覧へ移る。
+   **数だけでも必ず出す。** 出さないと、状態が1つ増えた日に
+   一覧の件数と列の合計が食い違うだけで、どこへ消えたのか分からなくなる */
+.board-rest {
+  padding: .1rem .5rem;
+  font-size: .74rem;
+}
+
+.board-rest[hidden] { display: none; }
+
+/* ------------------------------------------------------------ 列 */
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* [hidden] はブラウザ既定のスタイルなので、作者が書いた display に必ず負ける。
+   消す指定を自分で添える */
+.board[hidden] { display: none; }
+
+.col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+
+.col:last-child { border-right: 0; }
+
+.col-head {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .55rem .7rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: .8rem;
+  font-weight: 700;
+}
+
+/* 件数。0 と「不明」を分ける原則があるので、0 のときも 0 と書く（消さない） */
+.col-head .n {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+
+/* カードは list.css のものをそのまま借りる（見た目を新しく作らない）。
+   .list と同じ形にしておけば、間隔も余白も一緒に付いてくる */
+.col-body {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  min-height: 0;
+  padding: .5rem;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.col-empty {
+  padding: .4rem .2rem;
+  font-size: .78rem;
+  color: var(--fg-faint);
+}
+
+/* 列そのものの読み方。列の中がどれだけ動いても位置が変わらないよう、下端に置く */
+.col-note {
+  margin: 0;
+  padding: .5rem .7rem;
+  border-top: 1px solid var(--border);
+  font-size: .72rem;
+  line-height: 1.5;
+  color: var(--fg-faint);
+}
+
+/* ------------------------------------------------------------ 狭い窓向け */
+
+/* 4列は入らないので縦に積む。列ごとに別々にスクロールすると読みにくいので、
+   スクロールは .board にまとめて持たせる。
+   narrow.css は .board を触らないので、ここで書いておけば競合しない */
+@media (max-width: 860px) {
+  .board {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: min-content;
+    overflow-y: auto;
+  }
+
+  .col {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* 縦に積むと列の見出しが流れていくので、上端で止める */
+  .col-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .col-body { overflow-y: visible; }
+}

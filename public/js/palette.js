@@ -29,6 +29,7 @@ import { focusTerminal } from './detail-head.js';
 import { TAB_DEFS, INSP_DEFS, setDetailTab, setInspector } from './detail.js';
 import { select } from './session.js';
 import { openRunForm } from './run-form.js';
+import { setMode } from './board.js';
 
 // 開いたときに組んだ全部と、絞り込んで残ったぶんと、選んでいる位置。
 // **開いているあいだは組み直さない。** 裏で一覧は毎秒動いているので、
@@ -68,7 +69,12 @@ function buildAll() {
       name: row.title || row.name || '（まだ指示なし）',
       desc: `${row.stateLabel ?? ''} ${since(idleOf(row))}`.trim(),
       hay: hay(row.project, row.title, row.name, row.stateLabel, row.gitBranch),
-      run: () => select(row.sessionId, 'live'),
+      run: () => {
+        select(row.sessionId, 'live');
+        // 監視盤から選んだときは作業台へ移す。あちらは中央を消しているので、
+        // 移さないと「選んだのに何も起きない」に見える
+        if (store.mode === 'board') setMode('work');
+      },
     });
   }
 
@@ -94,6 +100,19 @@ function buildAll() {
       run: () => focusTerminal(cur.pid),
     });
   }
+
+  // モードの切り替えは出してよい。替わるのは画面だけで、
+  // 止める・替える・続けるのように子プロセスを畳んだり起こしたりしない。
+  // 選んでいるものと無関係なので、下の if の外に置く
+  const onBoard = store.mode === 'board';
+  out.push({
+    group: '出す・畳む',
+    verb: onBoard ? '作業台' : '監視盤',
+    name: onBoard ? '作業台へ戻る' : '監視盤へ移る',
+    desc: onBoard ? 'いまの作業に集中する' : '待っているものを列で見る',
+    hay: hay('監視盤 作業台 モード board work 列 盤'),
+    run: () => setMode(onBoard ? 'work' : 'board'),
+  });
 
   // 選んでいないときは出さない。押しても出す中身が無い
   if (store.selected) {

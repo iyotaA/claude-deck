@@ -46,6 +46,7 @@ export const SUMMARY_ORDER = [
  *  ?tq=<語> … 時系列の検索語
  *  ?hide=<種類,種類> … 時系列で隠す種類。空で付けると「何も隠さない」になる
  *  ?nolive=1 … 自動更新をつながない
+ *  ?mode=board … 監視盤（列で見るモード）で開く
  *  ?tab=archive|usage … 書庫（終了したものも含む全セッション）や数値を開いた状態にする
  *  ?aq=<語> … 書庫の検索語
  *  ?asort=recent|oldest|size … 書庫の並び順
@@ -56,6 +57,17 @@ export const query = new URLSearchParams(location.search);
 
 /** 書庫の並び順。サーバ側（view/archive.mjs の SORTS）と同じ語を使う */
 export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
+
+/**
+ * 画面のモード。知らない値は 'work' に落とす。
+ *
+ * 見る目的が2つある。「どれから手をつけるか」（監視盤）と「いまの作業」（作業台）。
+ * 同居させると同じ画面で場所を取り合うので、モードとして分けている。
+ *
+ * TABS と同じく集合で持つ。三項演算子で二値に畳むと、3つ目を足した日に
+ * 黙って 'work' へ落ちる形になる
+ */
+export const MODES = new Set(['work', 'board']);
 
 /**
  * 左のペインに出せるもの。知らない値は 'live' に落とす。
@@ -102,6 +114,13 @@ export const dom = {
   reload: document.getElementById('reload'),
   themeToggle: document.getElementById('theme-toggle'),
   onlyLive: document.getElementById('only-live'),
+  // 監視盤（board.js）。作業台とは別のモードなので、器も別に持つ
+  modeWork: document.getElementById('mode-work'),
+  modeBoard: document.getElementById('mode-board'),
+  boardHead: document.getElementById('board-head'),
+  boardCount: document.getElementById('board-count'),
+  boardRest: document.getElementById('board-rest'),
+  board: document.getElementById('board'),
   listPane: document.getElementById('list-pane'),
   listToggle: document.getElementById('list-toggle'),
   listClose: document.getElementById('list-close'),
@@ -253,6 +272,14 @@ export const store = {
    */
   hiddenKinds: initialHiddenKinds(query.get('hide')),
   /**
+   * いまのモード。MODES のどれか。
+   *
+   * tab と同じく localStorage には残さない。監視盤を開いたまま保存すると、
+   * 次に開いたときに作業台へ戻る道が「押す」しか無い状態で始まってしまう。
+   * 固定したい人は ?mode=board でブックマークする
+   */
+  mode: MODES.has(query.get('mode')) ? query.get('mode') : 'work',
+  /**
    * 左のペインに出しているもの。TABS のどれか。
    *
    * localStorage には残さない。書庫や数値を開いたまま保存すると、次に開いたときに
@@ -340,7 +367,7 @@ export const store = {
  * pushState は使わない。検索欄は1文字ごとにここを通るので、履歴が入力の回数だけ積まれ、
  * 戻るボタンが使えなくなる。replaceState なら今のアドレスだけが差し替わる。
  *
- * 触るキーは session / only / tq / hide / tab / aq / asort / dtab / insp だけ。
+ * 触るキーは session / only / tq / hide / mode / tab / aq / asort / dtab / insp だけ。
  * theme と nolive は「開くときの指定」なので、こちらから書き換えない
  */
 export function syncQuery() {
@@ -359,6 +386,8 @@ export function syncQuery() {
   const hide = hideQueryValue(store.hiddenKinds);
   if (hide === null) params.delete('hide');
   else params.set('hide', hide);
+  // 既定（作業台）のときだけキーを落とす。tab と同じ扱い
+  set('mode', store.mode === 'work' ? null : store.mode);
   // 既定（稼働中）のときだけキーを落とす。3値になったので三項では書かない
   set('tab', store.tab === 'live' ? null : store.tab);
   set('aq', store.tab === 'archive' ? store.archive.q : null);
