@@ -65,6 +65,19 @@ const TOOLS_MAX = 24;
 const SKILLS_MAX = 12;
 
 /**
+ * スキルの区間を、畳まずに1件ずつ何件まで返すか。
+ *
+ * 上の SKILLS_MAX が「何種類まで」なら、こちらは「何回ぶんまで」。
+ * 同じスキルを前回とどう比べるかを見るには、平均へ畳む前の1回ごとが要る。
+ *
+ * 実測では全ログ273本を走ってもスキルの呼び出しは82件しか無く、
+ * 1本あたりでは十数件が上限だった。60 なら実質切れないが、
+ * 上限そのものは要る（1本のログに何十回も呼ぶ使い方を禁じてはいない）。
+ * 切るときは**新しいほうを残す**。推移で見たいのは直近だから。
+ */
+const SKILL_RUNS_MAX = 60;
+
+/**
  * 文脈保有量の系列を、いくつの点まで返すか。
  *
  * 画面のスパークラインを描くためだけの値。700要求のセッションで 700 個返しても
@@ -356,9 +369,14 @@ function collectSkillBarriers(entries, sidechain) {
  * その要求自身の usage は「Skill を呼ぶと決めるまで」の文脈で、
  * スキルの本文はまだ積まれていない（積まれるのは結果が返る次の要求から）。
  *
+ * 返すのは2つ。**畳んだもの（skills）と、畳む前の1回ごと（runs）。**
+ * 平均だけを返していたころ、同じスキルを5回呼んだ記録が1つの数へ溶けていて、
+ * 1回目より速くなったのか遅くなったのかが読めなかった。
+ * 畳む前の値はここで既に計算しているので、配列で持つだけで済む。
+ *
  * @param {object[]} requests 時系列に並んだ要求
  * @param {number[]} barriers 区間を打ち切る時刻（昇順）
- * @returns {object[]} ite の降順
+ * @returns {{skills: object[], runs: object[]}} skills は ite の降順、runs は時刻の昇順
  */
 function attributeSkills(requests, barriers) {
   // Skill を呼んだ位置を先に拾う。区間の終わりを決めるのに「次はどこか」が要る
@@ -370,10 +388,12 @@ function attributeSkills(requests, barriers) {
     }
     if (names.length) starts.push({ index: i, names });
   }
-  if (!starts.length) return [];
+  if (!starts.length) return { skills: [], runs: [] };
 
   /** @type {Map<string, {skill: string, runs: number, requests: number, ite: number}>} */
   const byName = new Map();
+  /** @type {{skill: string, at: number|null, ite: number, requests: number}[]} 畳む前の1回ごと。時刻の昇順 */
+  const runsList = [];
 
   for (let s = 0; s < starts.length; s += 1) {
     const { index, names } = starts[s];
@@ -408,6 +428,15 @@ function attributeSkills(requests, barriers) {
     // 呼んだ回数だけは、どちらも1回として数える
     const share = 1 / names.length;
     for (const name of names) {
+      // 畳む前の1件。**ここでだけ丸める。** 足してから丸めると、
+      // 等分した端数が積もって skills 側の合計と食い違う
+      runsList.push({
+        skill: name,
+        at: startAt,
+        ite: Math.round(ite * share),
+        requests: Math.round(count * share),
+      });
+
       const rec = byName.get(name) ?? { skill: name, runs: 0, requests: 0, ite: 0 };
       rec.runs += 1;
       rec.requests += count * share;
@@ -416,7 +445,7 @@ function attributeSkills(requests, barriers) {
     }
   }
 
-  return [...byName.values()]
+  const skills = [...byName.values()]
     .map((r) => ({
       skill: r.skill,
       runs: r.runs,
@@ -427,6 +456,9 @@ function attributeSkills(requests, barriers) {
     }))
     .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill))
     .slice(0, SKILLS_MAX);
+
+  // starts は index の昇順なので runsList も時刻の昇順。切るのは古いほうから
+  return { skills, runs: runsList.slice(-SKILL_RUNS_MAX) };
 }
 
 /**
@@ -575,7 +607,10 @@ export function buildUsage(entries, { sidechain = false } = {}) {
   const { model, models } = modelBreakdown(requests);
   // 区間の切れ目は entries 側にしかない（あなたの発言も compact_boundary も assistant 行ではない）ので、
   // requests ではなく list を渡して時刻で拾う
-  const skills = attributeSkills(requests, collectSkillBarriers(list, sidechain));
+  const { skills, runs: skillRuns } = attributeSkills(
+    requests,
+    collectSkillBarriers(list, sidechain)
+  );
   // entries を1周増やすが、既に3周しているので誤差。
   // collectSkillBarriers も compact_boundary を見ているが、そこへ相乗りさせない。
   // 「区切りを集める」関数に「圧縮を数える」を混ぜると、どちらのテストも読みにくくなる
@@ -610,6 +645,9 @@ export function buildUsage(entries, { sidechain = false } = {}) {
     toolsUnattributed: unattributed,
     // **因果は取れない。** 「呼んだ直後の一続き」でしかないことを、画面側が必ず併記する
     skills,
+    // 畳む前の1回ごと。横断側が同じスキルの推移を並べるのに使う。
+    // 但し書きは skills と同じものが効く（推移が下がっても、楽な仕事だっただけかもしれない）
+    skillRuns,
     compact,
   };
 }

@@ -340,6 +340,16 @@ test('同じスキルを2回呼んだら、回数を足して合算する', () =
   ]);
 
   assert.deepEqual(u.skills, [{ skill: 'pr-review', runs: 2, requests: 2, ite: 400, avg: 200 }]);
+
+  // **畳む前も返す。** 実データで document-writing-style は5回・平均 213k だったが、
+  // 中身は 214k → 101k → 619k → 118k → 13k と桁が動いていた。
+  // 平均だけでは「前回より軽くなったか」が読めない
+  assert.deepEqual(u.skillRuns.map((r) => [r.skill, r.ite, r.requests]), [
+    ['pr-review', 100, 1],
+    ['pr-review', 300, 1],
+  ]);
+  // 並べるための時刻。呼んだ順（昇順）で、絵も左から右へこの順に描く
+  assert.ok(u.skillRuns[0].at < u.skillRuns[1].at, '時刻の昇順で並ぶ');
 });
 
 test('1回の要求で2つ呼んだら、区間のぶんを等分する', () => {
@@ -358,12 +368,20 @@ test('1回の要求で2つ呼んだら、区間のぶんを等分する', () => 
 
   // どちらのぶんかは分けられない。片方へ寄せずに半分ずつ持たせる
   assert.deepEqual(u.skills.map((s) => [s.skill, s.runs, s.ite]), [['a', 1, 50], ['b', 1, 50]]);
+
+  // 畳む前も同じ等分にする。**丸めるのは1件ごと。** 足してから丸めると
+  // 端数が積もって skills 側の合計と食い違う
+  assert.deepEqual(u.skillRuns.map((r) => [r.skill, r.ite]), [['a', 50], ['b', 50]]);
+  // 同じ要求から出た2件なので時刻も同じ。どちらが先ということは無い
+  assert.equal(u.skillRuns[0].at, u.skillRuns[1].at);
 });
 
 test('スキルを呼んでいなければ、スキルの集計は空', () => {
   const u = buildUsage([reply('', { requestId: 'r1', usage: { in: 100 } })]);
 
   assert.deepEqual(u.skills, []);
+  // 畳む前も空。[] を返す（「呼んでいない」は測れているので null ではない）
+  assert.deepEqual(u.skillRuns, []);
 });
 
 test('ログの順が乱れていても時刻で並べ直す', () => {

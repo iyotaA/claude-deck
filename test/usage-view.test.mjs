@@ -197,6 +197,88 @@ test('スキルは呼んだ回数と、使ったセッション数を両方持�
   assert.equal(skill.sessions, 2);
 });
 
+/**
+ * スキルを1回呼んで1往復するだけのセッション。
+ *
+ * 区間に入るのは Skill を呼んだ**次**の要求だけなので、ite は 5×out になる。
+ *
+ * @param {string} id
+ * @param {{ms: number, out: number, skill?: string}} opt
+ */
+const skillOnce = (id, { ms, out, skill = 'review' }) =>
+  rec(id, [
+    reply('やる', {
+      ms,
+      requestId: id,
+      model: 'claude-opus-5',
+      usage: { in: 10, out: 1 },
+      uses: [{ id: `${id}-s`, name: 'Skill', input: { skill } }],
+    }),
+    result(`${id}-s`, 'ok', { ms: ms + 1 }),
+    reply('できた', { ms: ms + 2, requestId: `${id}-2`, model: 'claude-opus-5', usage: { in: 0, out } }),
+  ]);
+
+test('同じスキルの1回ごとが、時刻の昇順で推移として並ぶ', () => {
+  // 横断は新しい順に読むので、渡ってくる順は時刻の逆になる。並べ直す責任はこちら側
+  const agg = aggregateUsage([
+    skillOnce('c', { ms: 300, out: 30 }),
+    skillOnce('a', { ms: 100, out: 10 }),
+    skillOnce('b', { ms: 200, out: 20 }),
+  ]);
+  const s = agg.skills.find((x) => x.skill === 'review');
+
+  assert.deepEqual(s.series.map((p) => p.ite), [50, 100, 150]);
+  // **どの回かを追える。** 重かった回を見つけたら、その会話を開きたくなる
+  assert.deepEqual(s.series.map((p) => p.sessionId), ['a', 'b', 'c']);
+  assert.equal(s.seriesOmitted, 0);
+  // 畳んだ側は今までどおり（合計と平均は壊れていない）
+  assert.equal(s.runs, 3);
+  assert.equal(s.ite, 300);
+});
+
+test('推移から差を書くのは、比べる相手が3件そろってから', () => {
+  const three = [
+    skillOnce('a', { ms: 100, out: 20 }),
+    skillOnce('b', { ms: 200, out: 20 }),
+    skillOnce('c', { ms: 300, out: 20 }),
+  ];
+
+  // 3件だと相手が2件しかない。中央値が薄く、たまたま重かった1回で向きが反転する。
+  // **推測で「変わっていません」と書かない**（「差が無い」と「比べられない」は別物）
+  assert.equal(aggregateUsage(three).skills.find((x) => x.skill === 'review').trend, null);
+
+  const t = aggregateUsage([...three, skillOnce('d', { ms: 400, out: 100 })]).skills.find(
+    (x) => x.skill === 'review'
+  ).trend;
+  // 4件目でようやく BASELINE_MIN と同じ「相手が3件」に届く
+  assert.equal(t.n, 3);
+  assert.equal(t.prevMedian, 100, '最新を除いた3件の中央値');
+  assert.equal(t.last, 500, '最新の1件');
+});
+
+test('時刻の無い区間は推移に混ぜず、落とした数を返す', () => {
+  const agg = aggregateUsage([
+    skillOnce('a', { ms: 100, out: 20 }),
+    rec('b', [
+      reply('やる', {
+        timestamp: null,
+        requestId: 'b1',
+        model: 'claude-opus-5',
+        usage: { in: 10, out: 1 },
+        uses: [{ id: 'b-s', name: 'Skill', input: { skill: 'review' } }],
+      }),
+      reply('できた', { ms: 5, requestId: 'b2', model: 'claude-opus-5', usage: { in: 0, out: 20 } }),
+    ]),
+  ]);
+  const s = agg.skills.find((x) => x.skill === 'review');
+
+  // 並べようがないものを 0 として左端に置くと、いちばん軽い回に見える
+  assert.equal(s.series.length, 1);
+  // 畳んだ側には残る（合計は測れている）。**黙って捨てたことにしない**
+  assert.equal(s.runs, 2);
+  assert.equal(agg.skillsUndated, 1);
+});
+
 test('行は実消費の多い順に並べ、ログのパスは載せない', () => {
   const small = rec('small', [reply('x', { requestId: 's1', model: 'claude-opus-5', usage: { in: 10, out: 1 } })]);
   const big = rec('big', [reply('y', { requestId: 'b1', model: 'claude-opus-5', usage: { in: 9000, out: 900 } })]);

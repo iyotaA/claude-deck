@@ -37,6 +37,26 @@ const LIMIT_DEFAULT = 30;
 const TOOLS_MAX = 30;
 const SKILLS_MAX = 20;
 
+/**
+ * 同じスキルの推移として、1つのスキルに何件まで並べるか。
+ *
+ * スパークラインを読むためだけの値。走査上限（60本）ぶん全部並べても
+ * 幅 320px の絵には乗らないので、新しいほうから切る。
+ */
+const SKILL_SERIES_MAX = 24;
+
+/**
+ * 「前回までと比べてどうか」を書くのに、最低いくつの記録が要るか。
+ *
+ * **4 は「比べる相手が3件」という意味。** 最新の1件を残り3件の中央値と比べるので、
+ * BASELINE_MIN（3）と同じ線になる。3件（相手が2件）だと中央値が薄く、
+ * たまたま重かった1回で判定が反転する。
+ *
+ * 足りなければ trend は null。**推測で「変わっていません」と書かない**
+ * （「差が無い」と「比べられない」は別物）。
+ */
+const SKILL_TREND_MIN = 4;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** モデル名の文字数上限。長すぎる値は意味を持たないので頭だけ見る。 */
 const TEXT_MAX = 200;
@@ -438,23 +458,83 @@ function mergeTools(list) {
  * @param {object[]} list 各セッションの usage
  * @returns {object[]}
  */
-function mergeSkills(list) {
+function mergeSkills(recs) {
   const byName = new Map();
-  for (const usage of list) {
+  /** @type {Map<string, object[]>} スキル名 → 畳む前の1回ごと */
+  const seriesOf = new Map();
+  // 時刻を持たない区間は並べようがないので落とす。落とした数は返す（黙って捨てない）
+  let undated = 0;
+
+  for (const rec of recs) {
+    const usage = rec.usage;
+
     for (const s of usage.skills ?? []) {
-      const rec = byName.get(s.skill) ?? { skill: s.skill, runs: 0, requests: 0, ite: 0, sessions: 0 };
-      rec.runs += s.runs;
-      rec.requests += s.requests;
-      rec.ite += s.ite;
-      rec.sessions += 1;
-      byName.set(s.skill, rec);
+      const acc = byName.get(s.skill) ?? { skill: s.skill, runs: 0, requests: 0, ite: 0, sessions: 0 };
+      acc.runs += s.runs;
+      acc.requests += s.requests;
+      acc.ite += s.ite;
+      acc.sessions += 1;
+      byName.set(s.skill, acc);
+    }
+
+    for (const r of usage.skillRuns ?? []) {
+      if (!r || typeof r.skill !== 'string' || !r.skill) continue;
+      if (!Number.isFinite(r.at)) {
+        undated += 1;
+        continue;
+      }
+      const bucket = seriesOf.get(r.skill) ?? [];
+      // **sessionId を添える。** どの回が重かったかを見たら、その会話を開きたくなる
+      bucket.push({ at: r.at, ite: r.ite, requests: r.requests, sessionId: rec.id });
+      seriesOf.set(r.skill, bucket);
     }
   }
 
-  return [...byName.values()]
-    .map((r) => ({ ...r, avg: r.runs > 0 ? Math.round(r.ite / r.runs) : null }))
+  const skills = [...byName.values()]
+    .map((r) => {
+      // 時刻の昇順へ。**そのうえで新しいほうを残す。** 絵は左から右へ古い順に描くので、
+      // 並べ替えてから切る順を逆にすると、古いほうだけが残った絵になる
+      const all = (seriesOf.get(r.skill) ?? []).sort((a, b) => a.at - b.at);
+      const series = all.slice(-SKILL_SERIES_MAX);
+      return {
+        ...r,
+        avg: r.runs > 0 ? Math.round(r.ite / r.runs) : null,
+        series,
+        // 絵から落ちたぶん。runs と絵の点の数が合わないときの理由になる
+        seriesOmitted: all.length - series.length,
+        trend: skillTrend(series),
+      };
+    })
     .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill))
     .slice(0, SKILLS_MAX);
+
+  return { skills, undated };
+}
+
+/**
+ * 同じスキルの「前回までと比べてどうか」。
+ *
+ * 比べるのは**最新の1件と、それ以前の中央値**。直近1件と1件を比べると、
+ * たまたま重かった回で向きが反転する。baseline（直近24本の中央値と比べる）と同じ形。
+ *
+ * **足りなければ null を返す。** ここが null のとき画面は差を書かない。
+ * 増減で色も変えない — 実消費が多いのは、単に重い仕事だっただけかもしれない。
+ * 因果が取れないという但し書きは、畳む前の値でも同じように効く。
+ *
+ * @param {object[]} series 時刻の昇順に並んだ1回ごとの記録
+ * @returns {{last: number, prevMedian: number, n: number}|null}
+ */
+function skillTrend(series) {
+  if (series.length < SKILL_TREND_MIN) return null;
+
+  const last = series[series.length - 1].ite;
+  const prev = series
+    .slice(0, -1)
+    .map((r) => r.ite)
+    .sort((a, b) => a - b);
+
+  // percentile は parse 側から借りている。同じ p50 が画面の場所によって違う値にならないように
+  return { last, prevMedian: percentile(prev, 0.5), n: prev.length };
 }
 
 /**
@@ -531,6 +611,7 @@ export function aggregateUsage(recs) {
   }
 
   const { model, models } = mergeModels(list);
+  const { skills, undated: skillsUndated } = mergeSkills(recs);
   // **モデルが混ざっていたら命中率は出さない。** 最小長がモデル別（Opus5=512 /
   // Opus4.7=2048 / Opus4.6・Haiku4.5=4096）で、未満だとエラーも出さずに黙って
   // キャッシュされない。混ぜて平均すると、行動の差と構造の差が見分けられなくなる。
@@ -546,7 +627,10 @@ export function aggregateUsage(recs) {
     models,
     cache: { hitRate },
     tools: mergeTools(list),
-    skills: mergeSkills(list),
+    // 畳んだものと、畳む前の推移。**recs を渡す**（list には sessionId が無い）
+    skills,
+    // 時刻が無くて推移に並べられなかった区間の数。0 と不明を分けるのと同じ扱い
+    skillsUndated,
     // 実消費の多い順。いま見て効くのは「どれが重かったか」なので、新しい順にはしない
     rows: recs.map(publicRow).sort((a, b) => b.ite - a.ite),
   };

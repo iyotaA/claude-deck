@@ -84,6 +84,17 @@
 
 .usage-block > .note { margin-bottom: .6rem; }
 
+/* 節の中の区切り。
+   スキルの節は「どれが重いか（量）」と「増えているか減っているか（向き）」の
+   2つの話を持つ。並べただけだと下の絵が上の棒の続きに見えるので、
+   節を分けるのと同じ破線で区切る。**節そのものは分けない** —
+   分けると因果の但し書き（節の頭に1つ）が片方にしか付かなくなる */
+.usage-block .note-part {
+  margin-top: .9rem;
+  padding-top: .8rem;
+  border-top: 1px dashed var(--border);
+}
+
 /* 帰属できなかったぶんの注記。上の横棒に続く話なので、間を詰めて置く */
 .note-sub {
   margin-top: .5rem;
@@ -195,6 +206,21 @@
 }
 
 .spark-caption + .facts { margin-top: .5rem; }
+
+/* 折れ線を棒の位置（.bar の2列目）に置く器。
+   棒の高さ（.5rem）のままだと折れ線が潰れて向きが読めないので、ここだけ高くする。
+   高さを持つのは器の側で、中の SVG は viewBox で伸び縮みする（.spark と同じ作り） */
+.bar.is-trend .trend-spark {
+  display: block;
+  height: 1.5rem;
+  border-radius: 4px;
+  background: var(--bg-sunk);
+  overflow: hidden;
+}
+
+/* 行の高さが絵のぶん増えるので、行間も少し広げる。
+   詰めると隣の行の折れ線と地続きに見えて、1本の長い線に読める */
+.bar.is-trend { padding: .1rem 0; }
 
 /* -------------------------------------------------------------- 表の対 */
 
