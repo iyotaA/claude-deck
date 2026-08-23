@@ -23,22 +23,17 @@
 @media (max-width: 860px) {
   /* レールの分だけ右に残して、残りを中央に全部渡す。
      .is-insp-open の方を並べて書くのは詳細度のため。
-     （0,2,0）なので、ここで .deck だけを書いても base.css の方が勝つ */
+     （0,2,0）なので、ここで .deck だけを書いても base.css の方が勝つ。
+
+     **監視盤（.is-board）には手を出さない。** あちらは board.css の
+     .is-board .deck（0,2,0）が、ここの .deck 単体（0,1,0）に詳細度で勝つ。
+     セレクタリストは1つずつ独立に詳細度を持つので、隣に並んでいる
+     .is-insp-open .deck（0,2,0）はこの勝負に関わらない。
+     読む順ではなく詳細度で決まるので、board.css 側だけで足りる（実測） */
   .deck,
   .is-insp-open .deck {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: minmax(0, 1fr);
-  }
-
-  /* 監視盤のときは上の2列を取り消す。**board.css だけでは足りない。**
-     あちらは narrow.css より前に読まれるので、同じ詳細度（0,2,0）の
-     上の .deck に負けて、狭い画面だと列がレールの分だけ残ってしまう。
-     レールごと display: none で消しているので、その列は幅ゼロのまま居座る。
-     .is-board.is-insp-open は 0,3,0 なので、こちらは読む順に関わらず勝つ */
-  .is-board .deck,
-  .is-board.is-insp-open .deck {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
   }
 
   /* インスペクタは中央と同じセルに重ねて、下から出す紙（ボトムシート）にする。
