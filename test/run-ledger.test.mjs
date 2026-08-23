@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 
 import { classifyStreamLine } from '../src/parse/stream.mjs';
 import {
-  createRunLedger, isRunOver, mergeRuns, RUN_STATE_LABELS, RUN_MAX, STALL_MS,
+  createRunLedger, isRunOver, mergeRuns, quietFor, RUN_STATE_LABELS, RUN_MAX, STALL_MS,
 } from '../src/run/ledger.mjs';
 import { sysInit, sAssistant, sResult, S_ID } from './helpers.mjs';
 
@@ -447,6 +447,90 @@ test('指示を送ると沈黙の時計を仕切り直す', () => {
   assert.deepEqual(led.tick(T + 100000 + STALL_MS - 1).changed, []);
 });
 
+test('無音の速報は測ったことだけを言う', () => {
+  const { led, id } = started();
+  feed(led, id, sAssistant('うん'), T + 1000);
+
+  const out = led.tick(T + 1000 + STALL_MS);
+  assert.equal(out.events[0].text, '出力が2分止まっています。圧縮や長いコマンドの最中かもしれません');
+  // 「応答なし」は診断。実測（2026-08-23）で5回とも圧縮の最中の、正常な無音だった
+  assert.ok(!out.events[0].text.includes('応答'));
+  // 一覧の理由にも同じ文が乗る（既定の「この画面から起こしたセッション」では何も分からない）
+  assert.equal(led.rows()[0].reason, '出力が2分止まっています。圧縮や長いコマンドの最中かもしれません');
+});
+
+test('短い stallMs でも「0分」と書かない', () => {
+  const { led } = started({ stallMs: 5000 });
+  const out = led.tick(T + 5000);
+  assert.equal(out.events[0].text, '出力が5秒止まっています。圧縮や長いコマンドの最中かもしれません');
+});
+
+test('行が届けば無音の理由も落ちる', () => {
+  const { led, id } = started();
+  led.tick(T + STALL_MS);
+  assert.equal(led.rows()[0].reason, '出力が2分止まっています。圧縮や長いコマンドの最中かもしれません');
+
+  feed(led, id, sAssistant('戻ってきた'), T + STALL_MS + 10);
+  // 動いているのに理由が「止まっています」のままだと、直したことにならない
+  assert.equal(led.rows()[0].reason, null);
+});
+
+test('指示を送れば無音の理由も落ちる', () => {
+  const { led, id } = started();
+  led.tick(T + STALL_MS);
+  led.markInput(id, T + STALL_MS + 10);
+
+  assert.equal(led.rows()[0].state, 'running');
+  assert.equal(led.rows()[0].reason, null);
+});
+
+test('無音のまま止めた理由を、止まった理由として残さない', () => {
+  const { led, id } = started();
+  led.tick(T + STALL_MS);
+  led.markStopping(id, T + STALL_MS + 10);
+
+  // 実行パネルは `理由` の行をそのまま出すので、残すと「止めた結果」に見える
+  assert.equal(led.rows()[0].reason, null);
+});
+
+test('無音のまま切り替えても理由を持ち越さない', () => {
+  const { led, id } = started();
+  led.tick(T + STALL_MS);
+  led.markSwitching(id, spec({ model: 'claude-sonnet-5' }), T + STALL_MS + 10);
+
+  assert.equal(led.rows()[0].reason, null);
+});
+
+test('「あなたの番」の理由は無音の後始末で消さない', () => {
+  const { led, id } = started();
+  feed(led, id, sResult({
+    subtype: 'error_during_execution',
+    isError: true,
+    text: null,
+    errors: ['うまくいかなかった'],
+  }), T + 1000);
+  assert.equal(led.rows()[0].reason, 'うまくいかなかった');
+
+  // 遅れて届いた行では消さない。落とすのは `stalled` のときだけ
+  feed(led, id, sAssistant('あとがき'), T + 2000);
+  assert.equal(led.rows()[0].reason, 'うまくいかなかった');
+});
+
+test('無音の長さは分で言い、1分未満だけ秒で言う', () => {
+  assert.equal(quietFor(STALL_MS), '2分');
+  assert.equal(quietFor(121000), '2分');
+  assert.equal(quietFor(60000), '1分');
+  // 切り上げると 59.9秒が「60秒」になり、すぐ上の「1分」と2つの言い方が並ぶ
+  assert.equal(quietFor(59999), '59秒');
+  assert.equal(quietFor(3000), '3秒');
+  // 0 でも「0秒」とは書かない（測れた以上、何かは経っている）
+  assert.equal(quietFor(0), '1秒');
+  // 数でないものが来たら数を書かない（0 と不明を分けるのと同じ扱い）
+  for (const bad of [NaN, Infinity, -1, null, undefined, '2分']) {
+    assert.equal(quietFor(bad), 'しばらく');
+  }
+});
+
 test('一覧の行に毎秒動く値を載せない', () => {
   const { led, id } = started();
   feed(led, id, sAssistant('うん'), T + 1000);
@@ -631,7 +715,7 @@ test('あなたの番は返信待ちへ写す。ラベルは run の言い方の
   assert.equal(row.stateLabel, 'あなたの番');
 });
 
-test('応答なしを不明の位置へ沈めない', () => {
+test('無音を不明の位置へ沈めない', () => {
   const { led } = started();
   led.tick(T + STALL_MS);
 
@@ -639,7 +723,7 @@ test('応答なしを不明の位置へ沈めない', () => {
   // unknown（rank 4）にすると一覧の下に埋もれる。人が見に行くべきものなので上に出す
   assert.equal(row.state, 'awaiting-reply');
   assert.equal(row.ball, 'master');
-  assert.equal(row.stateLabel, '応答なし');
+  assert.equal(row.stateLabel, '無音');
 });
 
 test('終わった run は状態を上書きしない', () => {
