@@ -5,9 +5,8 @@
  *
  * bodyText は長い本文を切る。切った跡に元の長さを添えるのはここの仕事。
  */
-import { el, num, ymd, hms } from '../util.js';
+import { el, num, ymd, hms, markUp, marked, countHits } from '../util.js';
 import { store } from '../store.js';
-import { markUp, marked, countHits } from './search.js';
 
 /**
  * 長い本文は頭だけ出して、続きは折りたたむ。

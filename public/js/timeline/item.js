@@ -6,10 +6,9 @@
  *
  * 行の中で使う部品は blocks.js と waits.js にある。ここは組み立ての順番だけを持つ。
  */
-import { el, dur, num, hms } from '../util.js';
+import { el, dur, num, hms, markUp, marked, countHits } from '../util.js';
 import { labelOf } from './kinds.js';
 import { waitBadge } from './waits.js';
-import { markUp, marked, countHits } from './search.js';
 import { bodyText, answerBlock, planBlock, rawBlock, whenNode } from './blocks.js';
 
 /**
