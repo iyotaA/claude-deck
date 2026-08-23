@@ -31,6 +31,10 @@ export function buildCard(row, onPick = null) {
   const state = el('span', 'state', row.stateLabel);
   // 判定に自信が無いものは印を付ける。断定して外すより、迷っていると伝えたほうが役に立つ
   if (row.stateConfident === false) state.dataset.guess = 'true';
+  // 予算切れは点ではなく「$」の印にする。一覧では `awaiting-reply`（あなたの番）の
+  // 位置に置いていて色も同じなので、印が無いと札の文字を読むまで見分けが付かない。
+  // 台帳の状態は overlay / synthRow が row.run に丸ごと写している
+  if (row.run?.state === 'budget') state.dataset.mark = 'budget';
   top.append(state);
   if (row.name && row.name !== row.title) top.append(el('span', 'tag', row.name));
   const idle = el('span', 'idle', since(idleOf(row)));

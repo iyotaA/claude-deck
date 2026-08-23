@@ -498,6 +498,8 @@ export function renderDetail() {
   if (row.stateLabel) {
     const state = el('span', 'state', row.stateLabel);
     state.style.color = STATE_COLOR[row.state] ?? 'var(--off)';
+    // 予算切れだけは点ではなく印にする（理由は list.js の buildCard 側に書いた）
+    if (row.run?.state === 'budget') state.dataset.mark = 'budget';
     sub.append(state);
   }
   if (row.cwd) sub.append(el('span', 'path', row.cwd));

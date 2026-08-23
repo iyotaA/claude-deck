@@ -45,6 +45,37 @@
    隠す指定を自分で持たせる */
 .run-drop[hidden] { display: none; }
 
+/* ------------------------------------------------------- 状態の札 */
+
+/* 見出しの札は一覧のカードと同じ `.state`（点 ＋ 太字 ＋ 状態色）を借りている。
+   本体は list.css にあるので、ここに書くのはその語彙に足りない印だけ。 */
+
+/* 予算切れは点をやめて「$」の輪にする。
+   一覧では `awaiting-reply`（あなたの番）の位置に置いていて色も同じ --warn なので、
+   点のままだと札の文字を読むまで見分けが付かない。
+
+   絵文字にしないのは、あちらが自分の色を持っていて --warn が乗らないため
+   （状態色は点と細いバーだけに使い、面は塗らない。だから輪は縁だけで、中は塗らない）。
+   文字を印に使うのは、既にある `?`（自信が無い印）と同じ形。
+
+   list.css より後に読まれるうえ属性が1つ増えているので、読む順に頼らずに勝つ */
+.state[data-mark="budget"]::before {
+  content: "$";
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: .95rem;
+  height: .95rem;
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 /* ---------------------------------------------------------- 出来事 */
 
 .run-ev {

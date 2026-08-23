@@ -276,6 +276,31 @@ export function render() {
  */
 const RUN_OVER = new Set(['stopped', 'failed', 'done']);
 
+/**
+ * 見出しに出す状態の札。
+ *
+ * 一覧のカードと同じ `.state`（点 ＋ 太字 ＋ 状態色）を借りる。**見た目を新しく作らない。**
+ * 素の `.count` に乗せていたときは `--fg-faint` の細字だったので、
+ * このパネルでいちばん知りたいもの（いまどうなっているか）がいちばん薄く出ていた。
+ *
+ * 予算切れだけは点ではなく「$」の印にする（`run.css` の `[data-mark]`）。
+ * 一覧では `awaiting-reply`（あなたの番）の位置に置いていて色も同じ `--warn` なので、
+ * 点のままだと札の文字を読むまで見分けが付かない。
+ *
+ * @param {object} row 台帳の行
+ * @returns {HTMLElement}
+ */
+function stateBadge(row) {
+  const badge = el('span', 'state', row.stateLabel ?? row.state);
+  // 色は必ず変数経由で取る（一覧の STATE_COLOR と同じ渡し方）。
+  // 色が付かない状態は、動いているか・もう動かないかの2つに分ける
+  const tone = toneOf(row.state);
+  const color = tone ? `var(--${tone})` : (RUN_OVER.has(row.state) ? 'var(--off)' : 'var(--calm)');
+  badge.style.setProperty('--state-color', color);
+  if (row.state === 'budget') badge.dataset.mark = 'budget';
+  return badge;
+}
+
 /** 替えたものの言い方。サーバーは changed を**キー名の配列**で返す。 */
 const SWITCH_LABELS = {
   model: 'モデル', effort: '思考量', permissionMode: '権限モード', budgetUsd: '予算',
@@ -819,9 +844,11 @@ export function runPanel(sessionId) {
   const row = runFor(sessionId);
   if (!row) return null;
 
-  const label = row.stateLabel ?? row.state;
-  const tone = toneOf(row.state);
-  const p = panel('この画面から起こした実行', { id: SEC.run, count: label, tone });
+  const p = panel('この画面から起こした実行', {
+    id: SEC.run,
+    count: stateBadge(row),
+    tone: toneOf(row.state),
+  });
 
   p.body.append(factsOf(row));
 

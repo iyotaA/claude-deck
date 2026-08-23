@@ -14,13 +14,17 @@ import { el } from './util.js';
  * id はパネルの身元。中央タブに割ってからは飛ぶ先ではなくなったが、
  * 目で追うときと、あとから外から掴むときの手がかりとして振っておく。
  * tone は枠と見出しの色。急ぐものだけ色を変え、他は素のままにする。
+ * count は文字でも節点でもよい。節点なら素の `.count` に包まない。
  */
 export function panel(title, opts = {}) {
   const section = el('section', 'panel');
   if (opts.id) section.id = opts.id;
   if (opts.tone) section.classList.add(`is-${opts.tone}`);
   const head = el('h3', null, title);
-  if (opts.count !== undefined && opts.count !== null) head.append(el('span', 'count', opts.count));
+  // 状態の札のように点や印を持つものを素の `.count`（`--fg-faint` の細字）に包むと、
+  // このパネルでいちばん知りたいものがいちばん薄く出ることになる
+  if (opts.count instanceof Node) head.append(opts.count);
+  else if (opts.count !== undefined && opts.count !== null) head.append(el('span', 'count', opts.count));
   if (opts.action) head.append(opts.action);
   section.append(head);
   const body = el('div', 'panel-body');

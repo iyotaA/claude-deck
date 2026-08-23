@@ -40,11 +40,15 @@ export function rowOf(sessionId) {
  * 逆に身元（title / model / cwd）は詳細のほうが当たる。
  * 一覧は末尾64KB、詳細は全文を読んで解析しているため。
  *
+ * `run`（台帳の行）だけは「新しいほう」ではなく**一覧の行しか持っていない**。
+ * 合流させているのが `server.mjs` の `refresh()` で、詳細の窓口は台帳を知らないため。
+ * 持っていない行では `key in row` が偽になるので、書庫から開いたぶんも壊れない。
+ *
  * 上書きする項目を配列で名前付けするのは、プロパティの並び順に判断を埋めないため。
  */
 export const LIVE_FIELDS = [
   'state', 'stateLabel', 'ball', 'idleMs', 'lastActivityAt',
-  'waitingFor', 'stateReason', 'stateConfident', 'statusRaw', 'alive', 'pid',
+  'waitingFor', 'stateReason', 'stateConfident', 'statusRaw', 'alive', 'pid', 'run',
 ];
 
 /**
