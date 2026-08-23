@@ -9,6 +9,14 @@
 /* 背後を覆う膜。広い画面には引き出しが無いので、ここでは無効にしておく */
 .scrim { display: none; }
 
+/* 紙が出てくるときだけ動かす。閉じる側は JS が hidden を立てて即座に消える。
+   transition ではなく animation にしてあるのはそのためで、display: none から
+   現れる要素には遷移の1フレーム目が無いので transition は効かない。
+   動きを控える設定のときは base.css が duration を潰すのでただ乗りできる */
+@keyframes insp-up {
+  from { transform: translateY(100%); }
+}
+
 /* 狭い画面では、一覧を常に出しておく場所が無い。
    上半分を一覧に取られると詳細が読めないので、左上のボタンで手前に引き出す形にする。
    閉じているあいだは詳細が全面を使う */
@@ -22,14 +30,50 @@
     grid-template-rows: minmax(0, 1fr);
   }
 
-  /* 並べる幅が無いので、開いているあいだはインスペクタが中央と入れ替わる。
-     これを消してから並べないと、grid の子が3つになって
-     レールが2行目へ落ち、画面の下に横倒しの帯が出る。
-     ボトムシートに落とすのは段5。レールは消さない
-     （消すと数値・成果・状態へ行く口が狭い画面から丸ごと無くなる）。
-     **入力欄（.composer）も一緒に隠れる。** 中央下に置いてあるので巻き添えになる。
-     段5 でインスペクタを重ねる形にすれば、中央を消さずに済んで直る */
-  .is-insp-open .detail-pane { display: none; }
+  /* インスペクタは中央と同じセルに重ねて、下から出す紙（ボトムシート）にする。
+
+     **セルを分けずに重ねるのが要点。** 単一列の grid に in-flow の子が3つ
+     （.detail-pane / .insp / .rail）あると2列から溢れて暗黙の2行目ができ、
+     レールが画面の下で横倒しの帯になる（段2 で実測）。grid-area を明示して
+     1行2列へ押し込めば、重ねる紙が何枚あっても行は増えない。
+
+     position: fixed で浮かせる手もあるが、そちらはレールの幅を right: <幅> として
+     二重に書くことになる（レールを覆うと開閉の口が塞がる）。grid に任せれば
+     幅は列が決めるし、引き出し（.list-pane の 40）と膜（.scrim の 30）の
+     z-index にも手を出さずに済む */
+  .detail-pane,
+  .insp { grid-area: 1 / 1; }
+
+  .rail { grid-area: 1 / 2; }
+
+  /* **膜を出さない。** 引き出しは一覧を選ぶための一時的な寄り道なので背面を止めるが、
+     こちらは中央の時系列と見比べながら読むもの。膜を敷くとレール（z-index を持たない）が
+     その下に潜り、開く口と閉じる口を兼ねているレールの設計が狭い画面だけ崩れる。
+     閉じる口は紙の頭の × と、押したのと同じレールのボタン（setInspector はトグル）の2つ。
+
+     上端を丸めて影を付けると、下から出てきたものに見える。border-left は広い画面で
+     中央と切り分けるための線なので、狭い画面では上端へ移す。
+
+     入力欄（.composer）は中央の下端にあるので、開いているあいだは紙の下に隠れる。
+     段2 の入れ替え（中央ごと消す）と違って、閉じればそのまま戻ってくる。
+
+     **z-index が要る。** 重なりの順は DOM の並びでは決まらない。中央の中にある
+     タブの帯（.detail-tabs）が sticky ＋ z-index: 2 なので、印を付けない紙は
+     その下へ潜り、閉じるボタンの上にタブが透けて出る。grid item は
+     position: static でも z-index が効くので、1つ足すだけで済む */
+  .insp {
+    z-index: 3;
+    align-self: end;
+    max-height: 72%;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    box-shadow: var(--shadow);
+    animation: insp-up .18s ease;
+  }
+
+  /* 下まで読み切ったあと、そのまま背面が流れ出すのを止める */
+  .insp-body { overscroll-behavior: contain; }
 
   .hamburger,
   .drawer-close { display: inline-flex; }
