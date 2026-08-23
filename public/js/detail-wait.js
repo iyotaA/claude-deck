@@ -2,10 +2,16 @@
  *
  * 層3。このアプリの目的そのもの（ボールの所在）を出す場所なので、
  * 他のパネルとは別のファイルにして、待ちの種類ごとの見せ方をここだけで完結させる。
+ *
+ * プランと最後の応答は Markdown として、切らずに全部描く（mdView）。
+ * 以前は bodyText で 1,400 字・18 行の頭出しにして残りを畳んでいたが、ここは
+ * 承認するかどうかを決める場所なので、読むのに1手増えるのが惜しい。
+ * 記法の途中で切った断片を Markdown として描くと崩れる、という事情もある。
+ * 画面が埋まらないよう、高さの上限は markdown.css の `.is-wait .md` が持つ。
  */
 import { el } from './util.js';
+import { mdView } from './md-view.js';
 import { panel, SEC } from './panel.js';
-import * as Timeline from './timeline/index.js';
 
 /**
  * 待ちの種類ごとの、見出しと「何をすれば進むのか」。
@@ -99,7 +105,7 @@ export function waitingBlock(row, d) {
       line.append(el('span', 'mono', plan.planFile));
       p.body.append(line);
     }
-    if (plan?.plan) p.body.append(...Timeline.bodyText(plan.plan, 1400, 18));
+    if (plan?.plan) p.body.append(mdView(plan.plan));
     else if (d) p.body.append(el('p', 'note', 'プランの本文はログから取れませんでした'));
   } else if (row.state === 'needs-approval') {
     if (row.waitingFor) {
@@ -110,7 +116,7 @@ export function waitingBlock(row, d) {
     const say = lastOf((i) => i.kind === 'say' && i.text);
     if (say) {
       p.body.append(el('div', 'wait-lead', 'Claude の最後の応答'));
-      p.body.append(...Timeline.bodyText(say.text, 700, 8));
+      p.body.append(mdView(say.text));
     }
   }
 
