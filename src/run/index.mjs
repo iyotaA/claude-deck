@@ -33,7 +33,7 @@ import { classifyStreamLine, encodeUserLine } from '../parse/stream.mjs';
 import { oneLine } from '../shared/text.mjs';
 import { LINE_MAX, claudeInfo, createLineSplitter, spawnClaude, stopClaude } from '../os/claude.mjs';
 import { PROMPT_MAX, buildRunSpec, mergeSwitch } from './spec.mjs';
-import { RUN_MAX, createRunLedger, isRunOver } from './ledger.mjs';
+import { RUN_MAX, createRunLedger, isChildDone, isRunOver } from './ledger.mjs';
 
 /**
  * 標準エラーから拾う理由の上限。
@@ -97,21 +97,29 @@ export function createRunner({
   }
 
   /**
-   * 台帳が「もう終わり」と決めた run の子を落とす。
+   * 台帳が「もう子は要らない」と決めた run の子を落とす。
    *
    * 予算超過とセッションIDの食い違いがこれに当たる。**どちらもプロセスは死なない**
    * （予算超過は実測）ので、殻の側から止めないと動き続ける。
+   *
+   * **見るのは `isChildDone` で、`isRunOver` ではない。** 予算切れは終端にしないので、
+   * 終端で判定すると畳む手が出ず、上限に当たった子が機械と `RUN_MAX` の枠を
+   * 掴んだまま残る（実測でプロセスは生きている）。
    *
    * 判断は台帳、手を動かすのはこちら。この向きを混ぜない。
    *
    * @param {string} runId 実行の識別子
    * @returns {void}
    */
-  function reapIfOver(runId) {
+  function reapIfDone(runId) {
     const entry = live.get(runId);
     if (!entry?.child) return;
+    // 誰かが既に畳んでいるなら重ねない。stdout の `data` ごとに来るので、
+    // 予算切れの `result` の後ろにもう1行届くだけで2回目が走る
+    // （実測で `system/hook_response` が `result` の後に来ることがある）
+    if (entry.stopping) return;
     const row = ledger.get(runId);
-    if (!row || !isRunOver(row.state)) return;
+    if (!row || !isChildDone(row.state)) return;
     entry.stopping = true;
     Promise.resolve(stopFn(entry.child, { spawnFn, platform })).catch(() => {});
   }
@@ -128,7 +136,8 @@ export function createRunner({
     entry.child = null;
     entry.splitter = null;
     const row = ledger.get(runId);
-    // 終わった run の起動指定は捨てる。`perTurn` は終端ではないので残る
+    // 終わった run の起動指定は捨てる。終端でないものは残す
+    // （`perTurn` と予算切れ。どちらも子はいないが、同じ指定で続きを打てる）
     if (!row || isRunOver(row.state)) live.delete(runId);
   }
 
@@ -154,7 +163,7 @@ export function createRunner({
       for (const line of splitter.push(chunk)) {
         emit(ledger.apply(runId, classifyStreamLine(line), at));
       }
-      reapIfOver(runId);
+      reapIfDone(runId);
     });
 
     // 標準エラーは速報に混ぜない。CLI の警告が本文の間に並ぶと読めなくなる。

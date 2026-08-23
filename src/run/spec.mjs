@@ -404,7 +404,12 @@ export function buildRunSpec(input = {}, {
   return { ok: true, spec };
 }
 
-/** 切り替えで差し替えてよいキー。ここに `cwd` と `sessionId` を足さない */
+/**
+ * 切り替えで差し替えてよい文字列のキー。ここに `cwd` と `sessionId` を足さない。
+ *
+ * **`budgetUsd` はここに入れない。** 数値なので、この輪の中では
+ * 「文字列でも null でもない値は断る」に引っかかる。下で別に扱う。
+ */
 const SWITCHABLE = Object.freeze(['model', 'effort', 'permissionMode']);
 
 /** 断るときの言い方。キー名をそのまま出すと、画面を見ている人には読めない */
@@ -412,6 +417,7 @@ const SWITCH_LABELS = Object.freeze({
   model: 'モデル',
   effort: '思考量',
   permissionMode: '権限モード',
+  budgetUsd: '予算',
 });
 
 /**
@@ -428,6 +434,10 @@ const SWITCH_LABELS = Object.freeze({
  *
  * `permissionMode` だけ外せないのは、外した先が「既定」だから。
  * `plan` のつもりが `acceptEdits` で走る（その逆も）という、いちばん高くつく事故になる。
+ *
+ * `budgetUsd` は数値なので輪の外で扱う。**替えられる形にしてあるのは、予算切れが終端ではないから。**
+ * 上限に当たった run を上げて続ける道がここしか無い（そのまま送ると同じ上限で走り直す。
+ * 実測で上限は子ごとに数え直す）。空にすれば上限なしへ外せる。
  *
  * 文字列でも `null` でもない値（数値・配列・真偽値）は空へ丸めずに断る。
  * 丸めると「指定したのに外れた」が画面のどこにも出ない。
@@ -464,6 +474,18 @@ export function mergeSwitch(prev, patch) {
     if (next[key] === value) continue;
     next[key] = value;
     changed.push(key);
+  }
+
+  // 予算だけは数値。**丸めたあとの値で比べる**（`budgetUsd()` は範囲へ丸めて小数2桁に切る）。
+  // 生の値で比べると、画面から来た '20' といまの 20 が違って見えて、
+  // 何も変わらないのに子を畳んで起こし直すことになる
+  if ('budgetUsd' in src) {
+    const res = budgetUsd(src.budgetUsd);
+    if (!res.ok) return { ok: false, reason: res.reason };
+    if ((next.budgetUsd ?? null) !== res.value) {
+      next.budgetUsd = res.value;
+      changed.push('budgetUsd');
+    }
   }
 
   // 同じ指定で起こし直すのは、ただ会話を1回中断するだけで得るものが無い。

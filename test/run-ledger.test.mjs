@@ -9,7 +9,8 @@ import assert from 'node:assert/strict';
 
 import { classifyStreamLine } from '../src/parse/stream.mjs';
 import {
-  createRunLedger, isRunOver, mergeRuns, quietFor, RUN_STATE_LABELS, RUN_MAX, STALL_MS,
+  createRunLedger, isChildDone, isRunOver, mergeRuns, quietFor,
+  RUN_STATE_LABELS, RUN_MAX, STALL_MS,
 } from '../src/run/ledger.mjs';
 import { sysInit, sAssistant, sResult, S_ID } from './helpers.mjs';
 
@@ -47,13 +48,23 @@ function started(opts = {}) {
 test('isRunOver は終わった3つだけを真にする', () => {
   for (const s of ['stopped', 'failed', 'done']) assert.equal(isRunOver(s), true);
   // stopping と switching は終端ではない。**ここを真にすると切り替えが起こし直せなくなる**
-  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping', 'switching']) {
+  // budget も同じ。真にすると `detach()` が `entry.spec` を捨て、上げて続ける道が消える
+  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping', 'switching', 'budget']) {
     assert.equal(isRunOver(s), false);
   }
 });
 
+test('isChildDone は終わった3つ ＋ 予算切れ', () => {
+  // 「もう動かない」（`isRunOver`）と「いま子がいない」（`isChildDone`）は別の話。
+  // 混ぜると、予算切れが終端になるか、上限に当たった子が畳まれずに残るかのどちらかになる
+  for (const s of ['stopped', 'failed', 'done', 'budget']) assert.equal(isChildDone(s), true);
+  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping', 'switching']) {
+    assert.equal(isChildDone(s), false);
+  }
+});
+
 test('状態の言い方は全部そろっている', () => {
-  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping', 'switching', 'stopped', 'failed', 'done']) {
+  for (const s of ['starting', 'running', 'waiting', 'stalled', 'budget', 'stopping', 'switching', 'stopped', 'failed', 'done']) {
     assert.equal(typeof RUN_STATE_LABELS[s], 'string');
   }
 });
@@ -157,22 +168,136 @@ test('往復のたびに turns が増える', () => {
   assert.equal(led.rows()[0].turns, 2);
 });
 
-test('予算超過は台帳の側から終わらせる（実測でプロセスは死なない）', () => {
-  const { led, id } = started();
-  const evs = feed(led, id, sResult({
+/** 上限に当たった result を1本流す。 */
+function exhaust(led, id, now = T + 1000, sessionId = S_ID) {
+  return feed(led, id, sResult({
+    sessionId,
     subtype: 'error_max_budget_usd',
     isError: true,
     text: null,
     terminal_reason: 'budget_exhausted',
     errors: ['Reached maximum budget ($0.01)'],
-  }), T + 1000);
+  }), now);
+}
+
+test('予算超過は budget。失敗にしない（何も失敗していない）', () => {
+  const { led, id } = started();
+  const evs = exhaust(led, id);
 
   const [row] = led.rows();
-  assert.equal(row.state, 'failed');
+  assert.equal(row.state, 'budget');
+  assert.equal(row.stateLabel, '予算切れ');
+  // 終端にすると `detach()` が起動指定を捨て、上げて続ける道がその瞬間に消える
+  assert.equal(isRunOver(row.state), false);
+  // ただし子はもういない（殻の側が畳む）
+  assert.equal(isChildDone(row.state), true);
   assert.equal(row.reason, 'Reached maximum budget ($0.01)');
   // 理由が速報にも出る。状態だけ変えて黙らない
-  assert.equal(evs.at(-1).kind, 'note');
-  assert.equal(evs.at(-1).text, row.reason);
+  assert.equal(evs.at(-2).kind, 'note');
+  assert.equal(evs.at(-2).text, row.reason);
+  // 「そのまま送れば続く」を書く。実測で上限は子ごとに数え直すので、上げなくても進む
+  assert.match(evs.at(-1).text, /そのまま送れば同じ上限で続きます/);
+});
+
+test('予算切れで畳んだ close を異常終了にしない', () => {
+  const { led, id } = started();
+  exhaust(led, id);
+  // 実測で stdin を閉じると code=1 で閉じる。素で落とすと「異常終了しました（code 1）」に化ける
+  assert.deepEqual(led.onExit(id, { code: 1 }, T + 1200), []);
+
+  const [row] = led.rows();
+  assert.equal(row.state, 'budget');
+  assert.equal(row.reason, 'Reached maximum budget ($0.01)');
+  assert.equal(row.pid, null);
+});
+
+test('予算切れのあいだに届いた行は捨てる', () => {
+  const { led, id } = started();
+  exhaust(led, id);
+  // 実測で system/hook_response が result の後に来ることがある。
+  // 通すと「予算切れ」と言った後ろに本文が並ぶ
+  assert.deepEqual(feed(led, id, sAssistant('あとから来た行'), T + 1100), []);
+  assert.equal(led.rows()[0].state, 'budget');
+});
+
+test('予算切れから続きを起こすと理由が落ちる', () => {
+  const { led, id } = started();
+  exhaust(led, id);
+  led.onExit(id, { code: 1 }, T + 1200);
+
+  // そのまま送った側（`restart()`）の経路。`setPid` が先に来る
+  assert.equal(led.setPid(id, 9999), true);
+  const [row] = led.rows();
+  assert.equal(row.state, 'running');
+  // 残すと「予算の上限に達しました」が動いている run の理由として出続ける
+  assert.equal(row.reason, null);
+  assert.equal(row.pid, 9999);
+});
+
+test('予算切れへ指示を送ると実行中へ戻る', () => {
+  const { led, id } = started();
+  exhaust(led, id);
+  led.markInput(id, T + 2000);
+
+  const [row] = led.rows();
+  assert.equal(row.state, 'running');
+  assert.equal(row.reason, null);
+});
+
+test('予算切れは切り替えられる。替えた額を言葉にする', () => {
+  const { led, id } = started();
+  exhaust(led, id);
+  led.onExit(id, { code: 1 }, T + 1200);
+
+  const evs = led.markSwitching(id, spec({ budgetUsd: 20 }), T + 2000);
+  assert.equal(led.rows()[0].state, 'switching');
+  assert.equal(led.rows()[0].budgetUsd, 20);
+  assert.match(evs.at(-1).text, /予算を 20 に/);
+});
+
+test('外したときは「上限なし」と書く', () => {
+  const { led, id } = started();
+  const evs = led.markSwitching(id, spec({ budgetUsd: null }), T + 100);
+  assert.match(evs.at(-1).text, /予算を上限なしに/);
+  assert.equal(led.rows()[0].budgetUsd, null);
+});
+
+test('畳む子がいないなら切り替えの旗を立てない', () => {
+  const { led, id } = started();
+  exhaust(led, id);
+  led.onExit(id, { code: 1 }, T + 1200);   // ここで pid が null になる
+
+  led.markSwitching(id, spec({ budgetUsd: 20 }), T + 2000);
+  led.setPid(id, 7777);
+  // 立てっぱなしにすると、この子が自分で異常終了したときに `onExit` が切り替えと読み、
+  // 終端へ落ちないまま `RUN_MAX` の枠を掴み続ける
+  led.onExit(id, { code: 1 }, T + 3000);
+  assert.equal(led.rows()[0].state, 'failed');
+});
+
+test('予算切れを無音にしない', () => {
+  const { led, id } = started();
+  exhaust(led, id);
+  // `tick` が見るのは `running` と `starting` だけ。ここを広げると
+  // 上限に当たって待っているものが「出力が…止まっています」に化ける
+  assert.deepEqual(led.tick(T + STALL_MS * 2), { changed: [], events: [] });
+  assert.equal(led.rows()[0].state, 'budget');
+  assert.equal(led.rows()[0].reason, 'Reached maximum budget ($0.01)');
+});
+
+test('予算切れは本数の枠を掴んだまま数える', () => {
+  const led = createRunLedger({ minIntervalMs: 0 });
+  for (let i = 0; i < RUN_MAX; i += 1) {
+    // 返る session_id を spec と合わせる。食い違うと台帳が `failed`（終端）にするので、
+    // 数えたいものが数えられない
+    const sid = `s-${i}`;
+    const id = led.add(spec({ sessionId: sid }), T);
+    led.setPid(id, 100 + i);
+    exhaust(led, id, T + 100, sid);
+  }
+  // 子はいないが、続きを打てる run として残っている。空いていると数えると
+  // 続きを打った瞬間に `RUN_MAX` を超える
+  assert.equal(led.canStart(T + 200).ok, false);
 });
 
 test('予算超過ではない失敗では止めない。理由だけ残す', () => {
@@ -541,6 +666,9 @@ test('一覧の行に毎秒動く値を載せない', () => {
   for (const key of ['lastLineAt', 'counts', 'costUSD', 'idleMs', 'events']) {
     assert.equal(key in row, false, `${key} を rows() に載せてはいけない`);
   }
+  // 予算は毎秒動かない（切り替えたときだけ変わる）ので載せてよい。
+  // ここに無いと実行パネルの「替えて続ける」が欄を埋められない
+  assert.equal(row.budgetUsd, 5);
   // 詳しい値は詳細を開いたときだけ引く側にある
   const d = led.get(id);
   assert.equal(d.lastLineAt, T + 2000);
@@ -724,6 +852,19 @@ test('無音を不明の位置へ沈めない', () => {
   assert.equal(row.state, 'awaiting-reply');
   assert.equal(row.ball, 'master');
   assert.equal(row.stateLabel, '無音');
+});
+
+test('予算切れも一覧では「あなたの番」の位置', () => {
+  const { led, id } = started();
+  exhaust(led, id);
+
+  const [row] = mergeRuns([listRow({ state: 'running' })], led.rows(), T + 2000);
+  // unknown（rank 4）に沈めると、上げるか止めるかを決める人が気づけない
+  assert.equal(row.state, 'awaiting-reply');
+  assert.equal(row.ball, 'master');
+  assert.equal(row.stateLabel, '予算切れ');
+  // 終端ではないので生きている側に置く。続きは実行パネルから打つ
+  assert.equal(row.alive, true);
 });
 
 test('終わった run は状態を上書きしない', () => {

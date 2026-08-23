@@ -54,7 +54,9 @@ const EVENT_LABELS = {
  */
 function toneOf(state) {
   if (state === 'waiting') return 'hot';
-  if (state === 'stalled' || state === 'failed') return 'warn';
+  // 予算切れを `hot`（あなたの番）にしない。あちらは送れば進むが、
+  // こちらは上限を上げるか、同じ上限でもう一度回すと決めないと1行も動かない
+  if (state === 'stalled' || state === 'failed' || state === 'budget') return 'warn';
   return null;
 }
 
@@ -269,11 +271,15 @@ export function render() {
  *
  * サーバー側（run/index.mjs の isRunOver）と同じ3つにしてある。
  * **stopping と switching を入れない。** どちらも途中の姿で、そこから running へ戻る。
+ * **budget（予算切れ）も入れない。** 上限を上げれば続けられるので、
+ * ここに入れると3つのボタンが全部落ちて出口が無くなる。
  */
 const RUN_OVER = new Set(['stopped', 'failed', 'done']);
 
 /** 替えたものの言い方。サーバーは changed を**キー名の配列**で返す。 */
-const SWITCH_LABELS = { model: 'モデル', effort: '思考量', permissionMode: '権限モード' };
+const SWITCH_LABELS = {
+  model: 'モデル', effort: '思考量', permissionMode: '権限モード', budgetUsd: '予算',
+};
 
 /** 「止める」の2段押し。1回目からこの時間で元へ戻る。 */
 const STOP_CONFIRM_MS = 5000;
@@ -401,6 +407,13 @@ function collectSwitch() {
   const mode = ops.swMode.value;
   if (mode && mode !== row.permissionMode) out.permissionMode = mode;
 
+  // 予算だけは数。空欄は「上限なし」の指定なので、null にしてキーごと送る。
+  // **比べる前に数へ直す。** 欄の値は文字列なので、生のままだと '5' といまの 5 が
+  // 違って見えて、何も変えていないのに子を畳んで起こし直すことになる
+  const raw = ops.swBudget.value.trim();
+  const budget = raw === '' ? null : Number(raw);
+  if (budget !== (row.budgetUsd ?? null)) out.budgetUsd = budget;
+
   return Object.keys(out).length > 0 ? out : null;
 }
 
@@ -430,6 +443,12 @@ async function post(kind) {
 
   const body = { prompt: text };
   if (kind === 'switch') {
+    // <input type="number"> は数として読めない中身のとき value が空になる。
+    // 空は「上限なし」の指定なので、そのまま通すと打ち間違いが黙って上限を外す
+    if (ops.swBudget.validity?.badInput) {
+      say('予算は数で書いてください', 'bad');
+      return;
+    }
     const patch = collectSwitch();
     if (!patch) {
       say('替えるところがありません', 'bad');
@@ -596,6 +615,12 @@ function buildOps() {
   const swMode = el('select', 'settings-select');
   gridRow(grid, 'run-sw-mode', '権限モード', swMode, 'ここで選んだ内容で走る。途中で許可は求めない');
 
+  // 予算切れから抜ける道はここだけ（そのまま送ると同じ上限で回り直す）
+  const swBudget = el('input', 'settings-num');
+  swBudget.type = 'number';
+  swBudget.step = '0.01';
+  gridRow(grid, 'run-sw-budget', '上限', swBudget, '空にすると上限なし。上限は起こし直すたびに数え直す');
+
   const apply = el('button', 'btn', 'この内容で続ける');
   apply.type = 'button';
   apply.addEventListener('click', () => post('switch'));
@@ -610,7 +635,7 @@ function buildOps() {
   wrap.append(det);
 
   ops = {
-    bar, wrap, prompt, send, stop, msg, det, swModel, swEffort, swMode, apply,
+    bar, wrap, prompt, send, stop, msg, det, swModel, swEffort, swMode, swBudget, apply,
     runId: null, busy: false, over: false, stopArmed: false, stopTimer: null, lastRow: null,
   };
   return ops;
@@ -622,6 +647,11 @@ function prefillSwitch(row) {
   ops.swEffort.value = row.effort ?? '';
   // 知らない値だと <select> が空になる。そのときは選び直してもらう
   if (row.permissionMode) ops.swMode.value = row.permissionMode;
+  // `null`（上限なし）と、サーバーが古くて項目ごと無いときは同じ空欄でよい。
+  // どちらも「上限を渡していない」で、押しても何も変わらない
+  ops.swBudget.value = row.budgetUsd === null || row.budgetUsd === undefined
+    ? ''
+    : String(row.budgetUsd);
 }
 
 /**
@@ -644,6 +674,10 @@ function fillSwitch() {
     { value: '', label: '指定しない（CLI の既定）' },
     ...(runOptions.efforts ?? []).map((v) => ({ value: v, label: EFFORT_LABELS[v] ?? v })),
   ]);
+
+  const b = runOptions.budget ?? {};
+  if (Number.isFinite(b.min)) ops.swBudget.min = String(b.min);
+  if (Number.isFinite(b.max)) ops.swBudget.max = String(b.max);
 
   ops.det.hidden = modes.length === 0;
   // 中身が無いなら器ごと隠す（上の線だけが残ると意味のない区切りに見える）

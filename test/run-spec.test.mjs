@@ -557,6 +557,67 @@ test('差分が丸ごと壊れていても落ちない', () => {
   }
 });
 
+/*
+ * 予算だけは数値なので、上の輪（文字列のキー）とは別の道を通る。
+ * ここが通らないと、上限に当たった run を上げて続ける道が無くなる
+ * （予算切れは終端ではないので、続ける先はこの切り替えしかない）。
+ */
+
+test('予算を替えられる。changed にはキー名で載る', () => {
+  const got = merged({ budgetUsd: 20 });
+  assert.equal(got.next.budgetUsd, 20);
+  assert.deepEqual(got.changed, ['budgetUsd']);
+});
+
+test('予算は丸めたあとの値で比べる', () => {
+  // 画面の input は文字列を返す。生で比べると '5' !== 5 で「替えた」ことになり、
+  // 何も変わらないのに子を畳んで起こし直す
+  assert.equal(mergeSwitch(PREV, { budgetUsd: '5' }).ok, false, '同じ額なので替えるところが無い');
+  // 範囲へ丸めた先が同じでも同じ扱い（上限は 50）
+  assert.equal(mergeSwitch({ ...PREV, budgetUsd: 50 }, { budgetUsd: 999 }).ok, false);
+
+  const got = merged({ budgetUsd: '20' });
+  assert.equal(got.next.budgetUsd, 20, '数値へ直して入れる');
+});
+
+test('予算は空にすれば上限なしへ外せる', () => {
+  for (const raw of [null, '', '   ']) {
+    const got = merged({ budgetUsd: raw });
+    assert.equal(got.next.budgetUsd, null);
+    assert.deepEqual(got.changed, ['budgetUsd']);
+  }
+  // 元から無いものを外そうとしても、替えたことにしない
+  assert.equal(mergeSwitch({ ...PREV, budgetUsd: null }, { budgetUsd: '' }).ok, false);
+});
+
+test('使えない予算は 0 へ丸めずに断る', () => {
+  for (const raw of [0, -5, 'あ', true, [], {}]) {
+    const got = mergeSwitch(PREV, { budgetUsd: raw });
+    assert.equal(got.ok, false, `値: ${JSON.stringify(raw)}`);
+    assert.equal(got.reason, '予算の指定が不正です');
+  }
+});
+
+test('替えた予算がそのまま argv に出る', () => {
+  const got = merged({ budgetUsd: 20 });
+  const built = buildRunSpec(
+    { ...got.next, prompt: '続けて', resume: true, sessionId: PREV.sessionId },
+    { ...CTX, allowedDirs: [PREV.cwd] },
+  );
+  assert.equal(built.ok, true, built.reason ?? '');
+  const i = built.spec.args.indexOf('--max-budget-usd');
+  assert.ok(i >= 0, '上限を渡していない');
+  assert.equal(built.spec.args[i + 1], '20');
+
+  // 外したぶんは argv に出ない（既定の $5 で勝手に打ち切られないこと）
+  const off = merged({ budgetUsd: '' });
+  const b2 = buildRunSpec(
+    { ...off.next, prompt: '続けて', resume: true, sessionId: PREV.sessionId },
+    { ...CTX, allowedDirs: [PREV.cwd] },
+  );
+  assert.equal(b2.spec.args.includes('--max-budget-usd'), false);
+});
+
 test('元の spec を書き換えない', () => {
   const prev = { ...PREV };
   merged({ model: 'claude-sonnet-5', effort: null }, prev);

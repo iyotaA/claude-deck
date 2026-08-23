@@ -96,6 +96,9 @@ export const RUN_STATE_LABELS = Object.freeze({
   waiting: 'あなたの番',
   // 見たのは「出力が来ていない」だけ。「応答なし」と書くと、圧縮中の正常な run を故障として報告することになる
   stalled: '無音',
+  // **終端ではない。** 自分で置いた上限に当たっただけで、上げれば同じ会話の続きが打てる。
+  // だから下の OVER には入れない（入れると `entry.spec` が捨てられ、続ける道がその瞬間に消える）
+  budget: '予算切れ',
   stopping: '停止中',
   switching: '切り替え中',
   stopped: '停止しました',
@@ -103,7 +106,12 @@ export const RUN_STATE_LABELS = Object.freeze({
   done: '終了しました',
 });
 
-/** もう動かない状態。ここに入ったら子プロセスはいない。 */
+/**
+ * もう動かない状態。ここから戻る道は無い。
+ *
+ * **「子プロセスがいない」とは別の話。** 予算切れ（`budget`）は子がいないのに終端ではない。
+ * 子の有無で分けたいときは `isChildDone()` を見る。
+ */
 const OVER = new Set(['stopped', 'failed', 'done']);
 
 /**
@@ -117,6 +125,24 @@ const OVER = new Set(['stopped', 'failed', 'done']);
  */
 export function isRunOver(state) {
   return OVER.has(state);
+}
+
+/**
+ * その run の子プロセスはもういないか。
+ *
+ * 終端の3つに `budget`（予算切れ）を足したもの。あちらは**終端ではないのに子がいない。**
+ * 実測で予算超過ではプロセスが死なないので、殻（`run/index.mjs`）の側から畳む。
+ * 畳んだあとも台帳には残り、上限を上げるか、そのまま送れば続きが打てる。
+ *
+ * 使うのは2箇所。`run/index.mjs` が畳むかどうかを決めるのと、
+ * こちらが遅れて届いた行を捨てるのと。**`isRunOver` と混ぜない**
+ * （混ぜると、予算切れが終端になるか、終端に届いた行が本文として並ぶかのどちらかになる）。
+ *
+ * @param {string} state 状態
+ * @returns {boolean}
+ */
+export function isChildDone(state) {
+  return OVER.has(state) || state === 'budget';
 }
 
 /**
@@ -206,16 +232,20 @@ export function createRunLedger({
   }
 
   /**
-   * 無音から戻るときに、無音の理由を落とす。
+   * その状態のためだけに置いた理由を落とす。
    *
    * 残すと、行が届いて動いているのに一覧の理由が「出力が…止まっています」のままになる。
-   * **触るのは `stalled` のときだけ。** `waiting` の理由は前の往復の結果の話なので残す。
+   * 予算切れも同じで、上限を上げて続けたあとに「予算の上限に達しました」が残ると、
+   * **いま止まっている理由**として読まれる。
+   *
+   * **触るのは `stalled` と `budget` のときだけ。**
+   * `waiting` の理由は前の往復の結果の話なので残す。
    *
    * @param {object} run 対象の run
    * @returns {void}
    */
-  function clearStallReason(run) {
-    if (run.state === 'stalled') run.reason = null;
+  function clearStateReason(run) {
+    if (run.state === 'stalled' || run.state === 'budget') run.reason = null;
   }
 
   /**
@@ -256,6 +286,9 @@ export function createRunLedger({
       reason: run.reason,
       startedAt: run.startedAt,
       turns: run.turns,
+      // 毎秒動かない（切り替えたときだけ変わる）ので粗い行に載せてよい。
+      // 実行パネルの「替えて続ける」が `rows()` 側しか見ないため、ここに無いと欄を埋められない
+      budgetUsd: run.budgetUsd,
     };
   }
 
@@ -331,6 +364,7 @@ export function createRunLedger({
      *
      * `waiting` からも `running` へ戻すのは、`perTurn` の run を起こし直したときのため。
      * `switching` も同じ理由で戻す（前の子を畳んで新しい子を起こした直後がここに来る）。
+     * `budget`（予算切れ）も同じ。上限に当たった子を畳んだあと、続きを起こした直後がここ。
      *
      * @param {string} runId 対象
      * @param {number|null} pid 子の PID
@@ -340,7 +374,13 @@ export function createRunLedger({
       const run = runs.get(runId);
       if (!run || isRunOver(run.state)) return false;
       run.pid = typeof pid === 'number' && Number.isFinite(pid) ? pid : null;
-      if (run.state === 'starting' || run.state === 'waiting' || run.state === 'switching') {
+      if (run.state === 'starting' || run.state === 'waiting'
+        || run.state === 'switching' || run.state === 'budget') {
+        // **状態を替える前に落とす。** `clearStateReason` はいまの状態を見て決めるので、
+        // 後ろに置くと `running` になった run を見て何もしない。
+        // そのまま送って起こし直したとき（`restart()`）に効くのはここだけで、
+        // 残すと「予算の上限に達しました」が動いている run の理由として出続ける
+        clearStateReason(run);
         run.state = 'running';
       }
       return true;
@@ -356,17 +396,23 @@ export function createRunLedger({
      */
     apply(runId, classified, now) {
       const run = runs.get(runId);
-      // 終端に落ちた後に届いた行は捨てる。
-      // 止めた直後には数行が遅れて届くので、これが無いと「停止しました」の後に本文が並ぶ
-      if (!run || isRunOver(run.state)) return [];
+      // 子がいないあいだに届いた行は捨てる。
+      // 止めた直後には数行が遅れて届くので、これが無いと「停止しました」の後に本文が並ぶ。
+      // 予算切れも同じ（子は殻の側が畳んでいる最中）。続きを打てば `setPid` が
+      // `running` へ戻すので、そこから先の行はまた通る
+      if (!run || isChildDone(run.state)) return [];
 
       run.lastLineAt = now;
       run.counts.lines += 1;
       if (classified?.kind === 'broken') run.counts.broken += 1;
 
-      // 行が届いた＝動いている。沈黙から戻す
-      clearStallReason(run);
-      if (run.state === 'starting' || run.state === 'stalled') run.state = 'running';
+      // 行が届いた＝動いている。沈黙から戻す。
+      // **落とすのは戻すときだけ。** 外に出すと、状態を1つ足した日に
+      // 「札はそのままで理由だけ消える」という読めない見え方になる
+      if (run.state === 'starting' || run.state === 'stalled') {
+        clearStateReason(run);
+        run.state = 'running';
+      }
 
       const pushed = toRunEvents(classified).map((ev) => pushEvent(run, ev, now));
 
@@ -387,10 +433,18 @@ export function createRunLedger({
         if (typeof ev.costUSD === 'number') run.costUSD = ev.costUSD;
 
         if (ev.terminalReason === 'budget_exhausted') {
-          // 実測で**プロセスは死なない**。台帳側から終わらせないと「実行中」のまま残り続ける
-          run.state = 'failed';
+          // 実測で**プロセスは死なない**ので、子は殻の側（`reapIfDone`）が畳む。
+          //
+          // **`failed` にしない。** 何も失敗していない。自分で置いた上限に当たっただけで、
+          // 上げれば同じ会話の続きが打てる。終端にすると `detach()` が `entry.spec` を捨てるので、
+          // 上限を上げて続ける道（`switch`）がその瞬間に消える。「失敗しました」の札も嘘になる
+          run.state = 'budget';
           run.reason = oneLine(ev.errors, REASON_MAX) ?? '予算の上限に達しました';
           pushed.push(pushNote(run, run.reason, now));
+          // **上限は子ごとに数え直す**（実測。`/switch` のあとで費用が起点へ戻る）。
+          // だから「そのまま送る」でも同じ額ぶん進む。黙っていると
+          // 「上限を上げないと動かない」と読まれる
+          pushed.push(pushNote(run, 'そのまま送れば同じ上限で続きます。上限そのものを替えるなら「替えて続ける」から', now));
           break;
         }
 
@@ -423,8 +477,10 @@ export function createRunLedger({
       // 沈黙の時計を戻す。戻さないと、長く待たせた後の1通目で即 stalled になる
       run.lastLineAt = now;
       const ev = pushNote(run, '指示を送りました', now);
-      clearStallReason(run);
-      if (run.state === 'waiting' || run.state === 'stalled') run.state = 'running';
+      clearStateReason(run);
+      if (run.state === 'waiting' || run.state === 'stalled' || run.state === 'budget') {
+        run.state = 'running';
+      }
       return [ev];
     },
 
@@ -442,7 +498,7 @@ export function createRunLedger({
       const run = runs.get(runId);
       if (!run || isRunOver(run.state)) return [];
       // 落とさないと、実行パネルの「理由」の行が「止まった理由」として読まれる
-      clearStallReason(run);
+      clearStateReason(run);
       run.stopRequested = true;
       run.state = 'stopping';
       return [pushNote(run, '停止しています', now)];
@@ -476,10 +532,18 @@ export function createRunLedger({
       if (spec.permissionMode !== run.permissionMode) {
         parts.push(`権限モードを ${spec.permissionMode} に`);
       }
+      // 予算は「外した」も意味を持つ（上限なし）ので、null をそのまま言葉にする
+      if (spec.budgetUsd !== run.budgetUsd) {
+        parts.push(spec.budgetUsd === null ? '予算を上限なしに' : `予算を ${spec.budgetUsd} に`);
+      }
 
-      // 止めるときと同じ。替えた先の run に前の無音の理由を持ち越さない
-      clearStallReason(run);
-      run.switchRequested = true;
+      // 止めるときと同じ。替えた先の run に前の理由（無音・予算切れ）を持ち越さない
+      clearStateReason(run);
+      // pid が無ければ畳む工程そのものが無い（`perTurn` と予算切れがそれ）。
+      // 旗を立てても消費する `close` が来ないので立てっぱなしになり、
+      // 起こし直した子が自分で異常終了したときに `onExit` がそれを切り替えと読む。
+      // すると終端へ落ちず、`RUN_MAX` の枠を掴んだまま永久に残る
+      run.switchRequested = run.pid !== null;
       run.state = 'switching';
       run.model = spec.model ?? null;
       run.effort = spec.effort ?? null;
@@ -549,6 +613,11 @@ export function createRunLedger({
         return [pushNote(run, '切り替えのため、いったん止めました', now)];
       }
 
+      // 予算切れで畳んだぶん。**ここで終端にしない。** 上限に当たった子を
+      // 殻の側が畳んでいるだけなので、`budget` のまま残して続きを打てる形を保つ。
+      // 実測で stdin を閉じると `code=1` で閉じるので、下まで落とすと「異常終了」に化ける
+      if (run.state === 'budget') return [];
+
       if (run.state === 'waiting' && code === 0) {
         run.perTurn = true;
         return [pushNote(run, '1往復ぶんで終了しました。続けて入力できます', now)];
@@ -615,7 +684,6 @@ export function createRunLedger({
       if (!run) return null;
       return {
         ...toRow(run),
-        budgetUsd: run.budgetUsd,
         lastLineAt: run.lastLineAt,
         costUSD: run.costUSD,
         counts: { ...run.counts },
@@ -689,6 +757,9 @@ const RUN_TO_LIST_STATE = Object.freeze({
   switching: 'running',
   waiting: 'awaiting-reply',
   stalled: 'awaiting-reply',
+  // 予算切れも「あなたの番」の位置。上げて続けるか止めるかを決めるのは人なので、
+  // 待たせているものとして同じ高さに並べる
+  budget: 'awaiting-reply',
   stopped: 'ended',
   failed: 'ended',
   done: 'ended',
