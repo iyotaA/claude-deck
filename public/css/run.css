@@ -45,6 +45,37 @@
    隠す指定を自分で持たせる */
 .run-drop[hidden] { display: none; }
 
+/* ------------------------------------------------------- 状態の札 */
+
+/* 見出しの札は一覧のカードと同じ `.state`（点 ＋ 太字 ＋ 状態色）を借りている。
+   本体は list.css にあるので、ここに書くのはその語彙に足りない印だけ。 */
+
+/* 予算切れは点をやめて「$」の輪にする。
+   一覧では `awaiting-reply`（あなたの番）の位置に置いていて色も同じ --warn なので、
+   点のままだと札の文字を読むまで見分けが付かない。
+
+   絵文字にしないのは、あちらが自分の色を持っていて --warn が乗らないため
+   （状態色は点と細いバーだけに使い、面は塗らない。だから輪は縁だけで、中は塗らない）。
+   文字を印に使うのは、既にある `?`（自信が無い印）と同じ形。
+
+   list.css より後に読まれるうえ属性が1つ増えているので、読む順に頼らずに勝つ */
+.state[data-mark="budget"]::before {
+  content: "$";
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: .95rem;
+  height: .95rem;
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 /* ---------------------------------------------------------- 出来事 */
 
 .run-ev {
@@ -248,6 +279,24 @@
   border-top: 1px solid var(--border);
 }
 
+/* 選び直しの3列は設定モーダルの .settings-grid を借りているが、
+   あちらの「狭いときは縦に積む」は @media（窓の幅）で判定している。
+   モーダルの幅は窓に付いて動くのでそれで合っていたが、
+   ここの幅は窓でなく deck の列で決まる。実測で、窓は広いまま
+   右のインスペクタを開いただけで説明の列が潰れ、文字が縦１列になった。
+
+   幅を当てにするのをやめて、ここでは常にラベル＋入力の2列にして
+   説明を次の行へ回す。詳細ペインはもともと狭いので、
+   3列が入る幅があるという前提そのものがここでは成り立たない */
+.run-ops .settings-grid {
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+}
+
+.run-ops .settings-grid .settings-hint {
+  grid-column: 1 / -1;
+  margin-bottom: .35rem;
+}
+
 /* 起こすフォームの本文欄と同じ見た目。あちらのクラスをそのまま借りると
    .runform- という名前が実行パネルの中に出てきて、どちらの都合か読めなくなる */
 .run-prompt {
@@ -300,6 +349,49 @@
   border-left: 2px solid var(--border);
 }
 
+/* ------------------------------------------- 中央下の入力欄 */
+
+/* どのタブを見ていても手が届く場所。器は index.html に置いたまま、
+   中身（run-view.js / run-resume.js の節点）だけを差し替える。
+   面は塗らず上の線1本で本体と分ける（状態色を面に使わないのと同じ作法）。
+   display を書かないので、hidden はブラウザ既定のまま効く */
+.composer {
+  padding: .7rem 1.3rem .8rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.composer-in { min-width: 0; }
+
+/* 入力欄が伸びて、ボタンは右。狭くなればボタンが下へ回る */
+.composer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: .5rem;
+}
+
+/* flex の子は既定で縮まないので min-width を落とす。
+   落とさないと長い1行を打った瞬間に入力欄がボタンを押し出す */
+.composer-row .run-prompt {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.composer-btns {
+  display: flex;
+  flex: 0 0 auto;
+  gap: .35rem;
+}
+
+.composer-btns .btn { white-space: nowrap; }
+
+/* 一言と但し書きは行の下。行の中へ入れると3つ目の列になって入力欄が縮む */
+.composer-in > .settings-msg,
+.composer-in > .settings-hint {
+  margin: .35rem 0 0;
+}
+
 /* ---------------------------------------------------- 狭い窓向け */
 
 /* モーダルと同じで、この機能の都合は narrow.css へ散らさずここに置く。
@@ -307,4 +399,8 @@
    裸で書くと広い窓にもそのまま当たる） */
 @media (max-width: 860px) {
   .run-log { max-height: 18rem; }
+
+  /* 左右は縮めない。本体（.detail-scroll の 1.3rem）と行頭が揃わなくなる。
+     縦だけ詰める（狭い画面では高さのほうが惜しい） */
+  .composer { padding: .6rem 1.3rem .7rem; }
 }

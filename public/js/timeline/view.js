@@ -101,7 +101,6 @@ export function attach(ref) {
   tlRef = {
     host: ref.host,
     count: ref.count ?? null,
-    nav: null,
     items: ref.items ?? [],
     dropped: ref.dropped ?? 0,
   };
@@ -114,16 +113,6 @@ export function attach(ref) {
  */
 export function detach() {
   tlRef = null;
-}
-
-/**
- * 目次の件数の差し替え先を教える。
- *
- * パネルが3枚に届かないと目次自体が出ないので、null が来ることもある
- * @param {HTMLElement|null} node
- */
-export function setNav(node) {
-  if (tlRef) tlRef.nav = node ?? null;
 }
 
 /**
@@ -262,8 +251,6 @@ export function render({ reset = false } = {}) {
       ? `${num(matched.length)} / ${num(all.length)} 件`
       : `${num(all.length)} 件${tlRef.dropped ? `（説明 ${num(tlRef.dropped)} 件は省略）` : ''}`;
   if (tlRef.count) tlRef.count.textContent = label;
-  // 目次の件数も絞り込みで動く。放っておくと古い数が上に残る
-  if (tlRef.nav) tlRef.nav.textContent = num(matched.length);
 
   mark('timeline', t0);
 }

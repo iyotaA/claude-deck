@@ -289,8 +289,26 @@ test('指示は argv に載らない', () => {
  * 予算
  */
 
-test('指定が無ければ既定', () => {
-  assert.equal(spec({}).budgetUsd, DEFAULT_BUDGET_USD);
+test('指定が無ければ上限なし。既定値へ丸めない', () => {
+  // 画面の欄を空にしたときがこれ。DEFAULT_BUDGET_USD は「欄に最初から入る値」であって
+  // 「省いたときの値」ではない（0 と不明を分ける）。
+  // 丸めていたころ、上限を外したつもりが $5 で止まる形になっていた
+  for (const v of [undefined, null, '', '   ']) {
+    assert.equal(spec({ budgetUsd: v }).budgetUsd, null, `値: ${JSON.stringify(v)}`);
+  }
+  assert.equal(spec({}).budgetUsd, null, 'キーごと無い');
+});
+
+test('上限なしなら argv に --max-budget-usd を付けない', () => {
+  // 付けると CLI 側で上限が効く。「上限なし」を値で表す手が無いので、フラグごと落とす
+  assert.equal(spec({}).args.includes('--max-budget-usd'), false);
+});
+
+test('欄に入る既定値は範囲の中にある', () => {
+  // 画面は options の default をそのまま value に入れるので、範囲の外だと
+  // 押した瞬間に丸められて「入れた額と違う額で走る」ことになる
+  assert.ok(DEFAULT_BUDGET_USD >= BUDGET_MIN_USD, `既定 ${DEFAULT_BUDGET_USD} が下限未満`);
+  assert.ok(DEFAULT_BUDGET_USD <= BUDGET_MAX_USD, `既定 ${DEFAULT_BUDGET_USD} が上限超え`);
 });
 
 test('範囲の外は丸める。400 では断らない', () => {
@@ -298,9 +316,11 @@ test('範囲の外は丸める。400 では断らない', () => {
   assert.equal(spec({ budgetUsd: 0.001 }).budgetUsd, BUDGET_MIN_USD);
 });
 
-test('0 や負や壊れた値は既定に倒す', () => {
-  for (const v of [0, -3, 'あ', null, undefined, NaN, Infinity]) {
-    assert.equal(spec({ budgetUsd: v }).budgetUsd, DEFAULT_BUDGET_USD, `値: ${v}`);
+test('0 や負や数として読めない値は断る', () => {
+  // 黙って上限なしに倒すと、打ち間違いが「歯止め無しで走る」に化ける。
+  // 丸めてよいのは範囲外の数値までで、数として読めないものは別の扱いにする
+  for (const v of [0, -3, 'あ', NaN, Infinity, {}, []]) {
+    assert.equal(reject({ budgetUsd: v }), '予算の指定が不正です', `値: ${String(v)}`);
   }
 });
 
@@ -373,7 +393,7 @@ test('いちばん素の argv', () => {
     '--output-format', 'stream-json',
     '--replay-user-messages',
     '--permission-mode', 'plan',
-    '--max-budget-usd', '5',
+    // 予算を指定していないので --max-budget-usd は入らない
     '--session-id', ID,
   ]);
 });
@@ -397,7 +417,7 @@ test('全部指定した argv', () => {
 });
 
 test('続きの argv', () => {
-  const s = spec({ resume: true, sessionId: ID, model: 'opus' });
+  const s = spec({ resume: true, sessionId: ID, model: 'opus', budgetUsd: 5 });
   assert.deepEqual(s.args, [
     '--print',
     '--verbose',
@@ -535,6 +555,67 @@ test('差分が丸ごと壊れていても落ちない', () => {
     assert.equal(got.ok, false, `値: ${JSON.stringify(v)}`);
     assert.equal(got.reason, '切り替える内容がありません');
   }
+});
+
+/*
+ * 予算だけは数値なので、上の輪（文字列のキー）とは別の道を通る。
+ * ここが通らないと、上限に当たった run を上げて続ける道が無くなる
+ * （予算切れは終端ではないので、続ける先はこの切り替えしかない）。
+ */
+
+test('予算を替えられる。changed にはキー名で載る', () => {
+  const got = merged({ budgetUsd: 20 });
+  assert.equal(got.next.budgetUsd, 20);
+  assert.deepEqual(got.changed, ['budgetUsd']);
+});
+
+test('予算は丸めたあとの値で比べる', () => {
+  // 画面の input は文字列を返す。生で比べると '5' !== 5 で「替えた」ことになり、
+  // 何も変わらないのに子を畳んで起こし直す
+  assert.equal(mergeSwitch(PREV, { budgetUsd: '5' }).ok, false, '同じ額なので替えるところが無い');
+  // 範囲へ丸めた先が同じでも同じ扱い（上限は 50）
+  assert.equal(mergeSwitch({ ...PREV, budgetUsd: 50 }, { budgetUsd: 999 }).ok, false);
+
+  const got = merged({ budgetUsd: '20' });
+  assert.equal(got.next.budgetUsd, 20, '数値へ直して入れる');
+});
+
+test('予算は空にすれば上限なしへ外せる', () => {
+  for (const raw of [null, '', '   ']) {
+    const got = merged({ budgetUsd: raw });
+    assert.equal(got.next.budgetUsd, null);
+    assert.deepEqual(got.changed, ['budgetUsd']);
+  }
+  // 元から無いものを外そうとしても、替えたことにしない
+  assert.equal(mergeSwitch({ ...PREV, budgetUsd: null }, { budgetUsd: '' }).ok, false);
+});
+
+test('使えない予算は 0 へ丸めずに断る', () => {
+  for (const raw of [0, -5, 'あ', true, [], {}]) {
+    const got = mergeSwitch(PREV, { budgetUsd: raw });
+    assert.equal(got.ok, false, `値: ${JSON.stringify(raw)}`);
+    assert.equal(got.reason, '予算の指定が不正です');
+  }
+});
+
+test('替えた予算がそのまま argv に出る', () => {
+  const got = merged({ budgetUsd: 20 });
+  const built = buildRunSpec(
+    { ...got.next, prompt: '続けて', resume: true, sessionId: PREV.sessionId },
+    { ...CTX, allowedDirs: [PREV.cwd] },
+  );
+  assert.equal(built.ok, true, built.reason ?? '');
+  const i = built.spec.args.indexOf('--max-budget-usd');
+  assert.ok(i >= 0, '上限を渡していない');
+  assert.equal(built.spec.args[i + 1], '20');
+
+  // 外したぶんは argv に出ない（既定の $5 で勝手に打ち切られないこと）
+  const off = merged({ budgetUsd: '' });
+  const b2 = buildRunSpec(
+    { ...off.next, prompt: '続けて', resume: true, sessionId: PREV.sessionId },
+    { ...CTX, allowedDirs: [PREV.cwd] },
+  );
+  assert.equal(b2.spec.args.includes('--max-budget-usd'), false);
 });
 
 test('元の spec を書き換えない', () => {

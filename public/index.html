@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="favicon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="favicon-192.png">
 <!-- CSS は宣言順で勝ち負けが付く。この順番を入れ替えない。
-     narrow.css は上の10枚を上書きするので必ず最後 -->
+     narrow.css は上の11枚を上書きするので必ず最後 -->
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/list.css">
@@ -21,6 +21,8 @@
 <link rel="stylesheet" href="css/update.css">
 <link rel="stylesheet" href="css/usage.css">
 <link rel="stylesheet" href="css/run.css">
+<link rel="stylesheet" href="css/palette.css">
+<link rel="stylesheet" href="css/board.css">
 <link rel="stylesheet" href="css/narrow.css">
 </head>
 <body>
@@ -33,6 +35,14 @@
       <span class="bars" aria-hidden="true"></span>
     </button>
     <h1>ClaudeDeck<span class="sub">セッションの状態</span></h1>
+    <!-- 見る目的が2つあるので、モードで分ける。同居させると「どれから手をつけるか」と
+         「いまの作業」が同じ画面で場所を取り合う（それが組み替えの発端そのもの）。
+         押した状態は aria-pressed で表す（.list-tabs と同じ理由。role="tab" は使わない） -->
+    <div class="modes" role="group" aria-label="画面のモード">
+      <button class="tab" id="mode-work" type="button" aria-pressed="true">作業台</button>
+      <button class="tab" id="mode-board" type="button" aria-pressed="false">監視盤</button>
+      <button class="tab" id="mode-usage" type="button" aria-pressed="false">数値</button>
+    </div>
     <div class="summary" id="summary"></div>
     <div class="topbar-actions">
       <!-- いまの版。触ると更新の確認の結果が出る。
@@ -60,6 +70,37 @@
   </header>
 
   <div class="deck">
+    <!-- 監視盤。.deck の中に置く。.app 直下には置けない（grid-template-rows が
+         2行しか宣言していないので、3つ目の子を足すと高さの配分が崩れる）。
+         説明の帯は .list-head を借りる（クラス単体のセレクタなので、ここでも効く） -->
+    <div class="list-head board-head" id="board-head" hidden>
+      ボールの所在。左から順に手をつける
+      <span class="note-small">押すと、そのセッションの作業台に入ります</span>
+      <button class="btn board-rest" id="board-rest" type="button" hidden></button>
+      <span class="n" id="board-count">0</span>
+    </div>
+    <div class="board" id="board" hidden></div>
+    <!-- 数値（横断）。監視盤と同じくモードなので、.deck の中に置く（.app 直下には
+         置けない。grid-template-rows が2行しか宣言していないため）。
+         ログを全文読む一番重い窓口なので、開いたときに1回だけ引く。
+         モデルの選択肢は応答から組むので、ここには「すべて」だけを置く -->
+    <div class="list-head usage-head" id="usage-head" hidden>
+      <select id="usage-days" aria-label="集計する期間">
+        <option value="">期間を絞らない</option>
+        <option value="7">7日</option>
+        <option value="30">30日</option>
+      </select>
+      <select id="usage-limit" aria-label="集計するセッション数">
+        <option value="10">10本</option>
+        <option value="30">30本</option>
+        <option value="60">60本</option>
+      </select>
+      <select id="usage-model" aria-label="集計するモデル">
+        <option value="">すべてのモデル</option>
+      </select>
+      <span id="usage-count"></span>
+    </div>
+    <div class="usage-pane" id="usage" hidden></div>
     <section class="list-pane" id="list-pane" aria-label="セッション一覧">
       <!-- role="tab" は使わない。正式なタブは矢印キーでタブ間を移動する約束が付くが、
            この下の一覧が上下キーをカードの移動に使っている。同じペインに矢印キーの
@@ -67,7 +108,6 @@
       <div class="list-tabs">
         <button class="tab" id="tab-live" type="button" aria-pressed="true">稼働中</button>
         <button class="tab" id="tab-archive" type="button" aria-pressed="false">書庫</button>
-        <button class="tab" id="tab-usage" type="button" aria-pressed="false">数値</button>
         <!-- 引き出しのときだけ出る。開いている間はハンバーガーが下に隠れるため。
              タブ行に置くのは、書庫を出しているあいだも閉じられるようにするため -->
         <button class="drawer-close" id="list-close" type="button" aria-label="一覧を閉じる">&#215;</button>
@@ -93,30 +133,43 @@
       </div>
       <ul class="list" id="archive" hidden></ul>
 
-      <!-- 数値（横断）。ログを全文読む一番重い窓口なので、開いたときに1回だけ引く。
-           モデルの選択肢は応答から組むので、ここには「すべて」だけを置く -->
-      <div class="list-head usage-head" id="usage-head" hidden>
-        <select id="usage-days" aria-label="集計する期間">
-          <option value="">期間を絞らない</option>
-          <option value="7">7日</option>
-          <option value="30">30日</option>
-        </select>
-        <select id="usage-limit" aria-label="集計するセッション数">
-          <option value="10">10本</option>
-          <option value="30">30本</option>
-          <option value="60">60本</option>
-        </select>
-        <select id="usage-model" aria-label="集計するモデル">
-          <option value="">すべてのモデル</option>
-        </select>
-        <span id="usage-count"></span>
-      </div>
-      <div class="usage-pane" id="usage" hidden></div>
+      <!-- 幅を変えるつまみ。列の境目にまたがるが、絶対配置なので上の並びには入らない。
+           狭い画面（引き出し）と監視盤・数値モードでは出ない（前者は narrow.css、
+           後者は .list-pane ごと消えるので自動的に消える） -->
+      <button class="splitter" id="split-list" type="button"
+              aria-label="一覧の幅を変える。矢印キーでも動かせる（Home で既定に戻る）"></button>
     </section>
 
-    <section class="detail-pane" id="detail" aria-label="セッションの詳細" tabindex="-1">
-      <div class="detail-empty">左の一覧からセッションを選ぶと、ここに中身が出ます</div>
+    <!-- 詳細ペイン。中身が流れる箱と、下に留まる入力欄の2段に割ってある。
+         入力欄を #detail の中に置くと renderDetail() の replaceChildren() で毎回消えるので、
+         器はここに出して中身だけ差し替える（レールのボタンと同じ流儀） -->
+    <section class="detail-pane" aria-label="セッションの詳細">
+      <div class="detail-scroll" id="detail" tabindex="-1">
+        <div class="detail-empty">左の一覧からセッションを選ぶと、ここに中身が出ます</div>
+      </div>
+      <!-- 中央下の入力欄。どのタブを見ていても手が届く場所に置く。
+           中身は detail.js が run-view.js / run-resume.js の節点を差し込む -->
+      <div class="composer" id="composer" hidden></div>
     </section>
+
+    <!-- 右のインスペクタ。作業しながら横目で見るもの（数値・成果・状態）をここへ寄せる。
+         閉じているあいだは hidden で丸ごと外し、grid の列も消える。
+         器は作り直さず、中身（#insp-body）だけを差し替える -->
+    <aside class="insp" id="insp" aria-label="このセッションの詳しいところ" hidden>
+      <div class="insp-head">
+        <h2 id="insp-title"></h2>
+        <button class="iclose" id="insp-close" type="button" aria-label="閉じる">&times;</button>
+      </div>
+      <div class="insp-body" id="insp-body"></div>
+
+      <!-- こちらは閉じているあいだ .insp ごと hidden になるので、消す手当ては要らない -->
+      <button class="splitter" id="split-insp" type="button"
+              aria-label="詳しいところの幅を変える。矢印キーでも動かせる（Home で既定に戻る）"></button>
+    </aside>
+
+    <!-- 右端のレール。中身は detail.js が組む（並びと語彙を1箇所に持つため）。
+         閉じていても幅は取ったままにする。消すと押すたびに中央の幅が跳ねる -->
+    <nav class="rail" id="rail" aria-label="詳しいところを開く"></nav>
   </div>
 
   <!-- 引き出しの背後を覆う膜。押すと閉じる -->
@@ -276,7 +329,7 @@
         <input class="settings-num" id="run-budget" type="number" step="0.01">
         <span class="settings-unit">USD</span>
       </span>
-      <p class="settings-hint">ここに達すると止まります</p>
+      <p class="settings-hint">空欄なら上限なし。入れた額に達すると止まります</p>
     </section>
   </div>
 
@@ -287,6 +340,29 @@
     <button class="btn is-primary" id="runform-start" type="button">起こす</button>
   </div>
 
+</dialog>
+
+<!-- 画面の中のコマンド入力（Ctrl+K）。セッションへ移る・情報を出す・起こす を横断で引く。
+     中身は開くたびに palette.js が組む。ここに置くのは器だけ -->
+<dialog class="pal" id="palette" aria-label="コマンド入力">
+  <div class="pal-in">
+    <span class="pal-caret" aria-hidden="true">&gt;</span>
+    <input class="pal-q" id="pal-q" type="text" role="combobox" aria-expanded="true"
+           aria-controls="pal-list" autocomplete="off" spellcheck="false"
+           placeholder="セッションの名前か、やりたいことを打つ">
+  </div>
+  <!-- 選んでいる項目は aria-activedescendant で伝える。id は並び順から作るので、
+       絞り込みで作り直しても取り違えない -->
+  <div class="pal-list" id="pal-list" role="listbox" aria-label="できること"></div>
+  <!-- 押した結果を出す帯。文を返すのはターミナルの前面化だけ。
+       出ているあいだは閉じない（結果を読ませたいので） -->
+  <p class="pal-msg" id="pal-msg" role="status" hidden></p>
+  <p class="pal-foot">
+    <span><span class="kbd">↑</span><span class="kbd">↓</span> 選ぶ</span>
+    <span><span class="kbd">Enter</span> 実行</span>
+    <span><span class="kbd">Esc</span> 閉じる</span>
+    <span class="pal-tip">打った文字で、上の全部を横断して絞り込む</span>
+  </p>
 </dialog>
 <!-- ESM なので読み込む順を人が守る必要はない。import が解決の順を決める。
      読むのはこの1本だけ。増やすと、また順番が意味を持ってしまう -->

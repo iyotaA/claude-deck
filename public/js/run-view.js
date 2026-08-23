@@ -1,6 +1,6 @@
 /* この画面から起こした実行のパネル。
  *
- * 層3。detail-panels.js・agents.js・usage-panel.js と同格で、返す形も同じ（{section, nav} か null）。
+ * 層3。detail-panels.js・agents.js・usage-panel.js と同格で、返す形も同じ（節点か null）。
  *
  * ## 中だけ差し替える
  *
@@ -54,7 +54,9 @@ const EVENT_LABELS = {
  */
 function toneOf(state) {
   if (state === 'waiting') return 'hot';
-  if (state === 'stalled' || state === 'failed') return 'warn';
+  // 予算切れを `hot`（あなたの番）にしない。あちらは送れば進むが、
+  // こちらは上限を上げるか、同じ上限でもう一度回すと決めないと1行も動かない
+  if (state === 'stalled' || state === 'failed' || state === 'budget') return 'warn';
   return null;
 }
 
@@ -269,11 +271,40 @@ export function render() {
  *
  * サーバー側（run/index.mjs の isRunOver）と同じ3つにしてある。
  * **stopping と switching を入れない。** どちらも途中の姿で、そこから running へ戻る。
+ * **budget（予算切れ）も入れない。** 上限を上げれば続けられるので、
+ * ここに入れると3つのボタンが全部落ちて出口が無くなる。
  */
 const RUN_OVER = new Set(['stopped', 'failed', 'done']);
 
+/**
+ * 見出しに出す状態の札。
+ *
+ * 一覧のカードと同じ `.state`（点 ＋ 太字 ＋ 状態色）を借りる。**見た目を新しく作らない。**
+ * 素の `.count` に乗せていたときは `--fg-faint` の細字だったので、
+ * このパネルでいちばん知りたいもの（いまどうなっているか）がいちばん薄く出ていた。
+ *
+ * 予算切れだけは点ではなく「$」の印にする（`run.css` の `[data-mark]`）。
+ * 一覧では `awaiting-reply`（あなたの番）の位置に置いていて色も同じ `--warn` なので、
+ * 点のままだと札の文字を読むまで見分けが付かない。
+ *
+ * @param {object} row 台帳の行
+ * @returns {HTMLElement}
+ */
+function stateBadge(row) {
+  const badge = el('span', 'state', row.stateLabel ?? row.state);
+  // 色は必ず変数経由で取る（一覧の STATE_COLOR と同じ渡し方）。
+  // 色が付かない状態は、動いているか・もう動かないかの2つに分ける
+  const tone = toneOf(row.state);
+  const color = tone ? `var(--${tone})` : (RUN_OVER.has(row.state) ? 'var(--off)' : 'var(--calm)');
+  badge.style.setProperty('--state-color', color);
+  if (row.state === 'budget') badge.dataset.mark = 'budget';
+  return badge;
+}
+
 /** 替えたものの言い方。サーバーは changed を**キー名の配列**で返す。 */
-const SWITCH_LABELS = { model: 'モデル', effort: '思考量', permissionMode: '権限モード' };
+const SWITCH_LABELS = {
+  model: 'モデル', effort: '思考量', permissionMode: '権限モード', budgetUsd: '予算',
+};
 
 /** 「止める」の2段押し。1回目からこの時間で元へ戻る。 */
 const STOP_CONFIRM_MS = 5000;
@@ -401,6 +432,13 @@ function collectSwitch() {
   const mode = ops.swMode.value;
   if (mode && mode !== row.permissionMode) out.permissionMode = mode;
 
+  // 予算だけは数。空欄は「上限なし」の指定なので、null にしてキーごと送る。
+  // **比べる前に数へ直す。** 欄の値は文字列なので、生のままだと '5' といまの 5 が
+  // 違って見えて、何も変えていないのに子を畳んで起こし直すことになる
+  const raw = ops.swBudget.value.trim();
+  const budget = raw === '' ? null : Number(raw);
+  if (budget !== (row.budgetUsd ?? null)) out.budgetUsd = budget;
+
   return Object.keys(out).length > 0 ? out : null;
 }
 
@@ -430,6 +468,12 @@ async function post(kind) {
 
   const body = { prompt: text };
   if (kind === 'switch') {
+    // <input type="number"> は数として読めない中身のとき value が空になる。
+    // 空は「上限なし」の指定なので、そのまま通すと打ち間違いが黙って上限を外す
+    if (ops.swBudget.validity?.badInput) {
+      say('予算は数で書いてください', 'bad');
+      return;
+    }
     const patch = collectSwitch();
     if (!patch) {
       say('替えるところがありません', 'bad');
@@ -531,16 +575,22 @@ function onStop() {
   doStop();
 }
 
-/** 器を1回だけ組む。以降はこの節点を append し直して使う。 */
+/**
+ * 器を1回だけ組む。以降はこの節点を append し直して使う。
+ *
+ * 器は2つに割ってある。毎回使うもの（入力欄・送る・止める）は中央下の composer へ、
+ * ときどき使うもの（替えて続ける）はパネルへ。
+ * composer 側は詳細ペインの外に置かれるので作り直されず、打っている途中でも消えない。
+ */
 function buildOps() {
-  const wrap = el('div', 'run-ops');
-
-  const label = el('label', 'settings-label', '続きの指示');
-  label.htmlFor = 'run-ops-prompt';
+  // ── 中央下の入力欄
+  const bar = el('div', 'composer-in');
 
   const prompt = el('textarea', 'run-prompt');
   prompt.id = 'run-ops-prompt';
-  prompt.rows = 3;
+  prompt.rows = 2;
+  // 見えるラベルは置かない。placeholder が用を足すので、常時の文字を1行でも減らす
+  prompt.setAttribute('aria-label', '続きの指示');
 
   // 本文欄の Enter は改行。送るのは Ctrl+Enter。
   // 長い指示を書いている途中に Enter で走り出すのがいちばん困る（起こすフォームと同じ）
@@ -559,14 +609,22 @@ function buildOps() {
   stop.addEventListener('click', onStop);
 
   const msg = el('p', 'settings-msg');
+  msg.setAttribute('role', 'status');
 
-  const foot = el('div', 'run-ops-foot');
-  foot.append(send, stop, msg);
+  const btns = el('div', 'composer-btns');
+  btns.append(send, stop);
 
-  // ── 替えて続ける。畳んでおく（普段は使わないので、送る・止めるの邪魔をしない）
+  const line = el('div', 'composer-row');
+  line.append(prompt, btns);
+
+  bar.append(line, msg);
+
+  // ── 替えて続ける。パネル側に残して畳んでおく（普段は使わないので手元に置かない）
+  const wrap = el('div', 'run-ops');
+  // 選択肢を引けるまで器ごと出さない。中身が無いのに上の線だけ残ると意味のない区切りに見える
+  wrap.hidden = true;
+
   const det = el('details', 'run-switch');
-  // 選択肢を引けるまで出さない。中身の無い <select> を見せない
-  det.hidden = true;
   det.append(el('summary', null, 'モデルなどを替えて続ける'));
 
   const grid = el('div', 'settings-grid');
@@ -582,6 +640,12 @@ function buildOps() {
   const swMode = el('select', 'settings-select');
   gridRow(grid, 'run-sw-mode', '権限モード', swMode, 'ここで選んだ内容で走る。途中で許可は求めない');
 
+  // 予算切れから抜ける道はここだけ（そのまま送ると同じ上限で回り直す）
+  const swBudget = el('input', 'settings-num');
+  swBudget.type = 'number';
+  swBudget.step = '0.01';
+  gridRow(grid, 'run-sw-budget', '上限', swBudget, '空にすると上限なし。上限は起こし直すたびに数え直す');
+
   const apply = el('button', 'btn', 'この内容で続ける');
   apply.type = 'button';
   apply.addEventListener('click', () => post('switch'));
@@ -593,10 +657,10 @@ function buildOps() {
   swBody.append(grid, swFoot);
   det.append(swBody);
 
-  wrap.append(label, prompt, foot, det);
+  wrap.append(det);
 
   ops = {
-    wrap, prompt, send, stop, msg, det, swModel, swEffort, swMode, apply,
+    bar, wrap, prompt, send, stop, msg, det, swModel, swEffort, swMode, swBudget, apply,
     runId: null, busy: false, over: false, stopArmed: false, stopTimer: null, lastRow: null,
   };
   return ops;
@@ -608,6 +672,11 @@ function prefillSwitch(row) {
   ops.swEffort.value = row.effort ?? '';
   // 知らない値だと <select> が空になる。そのときは選び直してもらう
   if (row.permissionMode) ops.swMode.value = row.permissionMode;
+  // `null`（上限なし）と、サーバーが古くて項目ごと無いときは同じ空欄でよい。
+  // どちらも「上限を渡していない」で、押しても何も変わらない
+  ops.swBudget.value = row.budgetUsd === null || row.budgetUsd === undefined
+    ? ''
+    : String(row.budgetUsd);
 }
 
 /**
@@ -631,7 +700,13 @@ function fillSwitch() {
     ...(runOptions.efforts ?? []).map((v) => ({ value: v, label: EFFORT_LABELS[v] ?? v })),
   ]);
 
+  const b = runOptions.budget ?? {};
+  if (Number.isFinite(b.min)) ops.swBudget.min = String(b.min);
+  if (Number.isFinite(b.max)) ops.swBudget.max = String(b.max);
+
   ops.det.hidden = modes.length === 0;
+  // 中身が無いなら器ごと隠す（上の線だけが残ると意味のない区切りに見える）
+  ops.wrap.hidden = ops.det.hidden;
   if (ops.lastRow) prefillSwitch(ops.lastRow);
 }
 
@@ -655,10 +730,12 @@ async function loadOptions() {
 }
 
 /**
- * 器をいまの実行に合わせて、詳細ペインへ入れる節点を返す。
+ * 器をいまの実行に合わせる。節点は2つ（composer と パネル）あるので ops をそのまま返す。
+ *
+ * 同じ描き直しの中で2回呼ばれても害は無い（2回目は runId が一致するので何も起きない）。
  *
  * @param {object} row 台帳の行
- * @returns {HTMLElement}
+ * @returns {object}
  */
 function syncOps(row) {
   if (!ops) buildOps();
@@ -691,7 +768,7 @@ function syncOps(row) {
   // 中身は1回だけ引く。取れなければ切り替えの節は畳んだまま出さない
   loadOptions();
 
-  return ops.wrap;
+  return ops;
 }
 
 /**
@@ -703,7 +780,10 @@ function syncOps(row) {
 function saveFocus() {
   focusMemo = null;
   const node = document.activeElement;
-  if (!ops || !node || !ops.wrap.contains(node)) return;
+  // 器が2つに割れているので両方見る。composer 側は作り直されないが、
+  // ここで控えても restoreFocus() が「人が先に触っていたら奪わない」で降りるので害は無い
+  if (!ops || !node) return;
+  if (!ops.bar.contains(node) && !ops.wrap.contains(node)) return;
 
   focusMemo = {
     runId: ops.runId,
@@ -740,18 +820,35 @@ function restoreFocus() {
 }
 
 /**
+ * 中央下の入力欄に入れる節点。この画面から起こした実行のときだけ返す。
+ *
+ * **どのタブを見ていても呼ばれる。** パネル（runPanel）は「いま」のタブにしか出ないが、
+ * 入力欄はタブに関係なく手が届く場所に置くので、同期はこちらにも要る。
+ *
+ * @param {string|null} sessionId 開いているセッション
+ * @returns {HTMLElement|null}
+ */
+export function composerFor(sessionId) {
+  const row = runFor(sessionId);
+  if (!row) return null;
+  return syncOps(row).bar;
+}
+
+/**
  * 実行パネル。この画面から起こしたセッションのときだけ出す。
  *
  * @param {string|null} sessionId 開いているセッション
- * @returns {{section: HTMLElement, nav: object}|null}
+ * @returns {HTMLElement|null}
  */
 export function runPanel(sessionId) {
   const row = runFor(sessionId);
   if (!row) return null;
 
-  const label = row.stateLabel ?? row.state;
-  const tone = toneOf(row.state);
-  const p = panel('この画面から起こした実行', { id: SEC.run, count: label, tone });
+  const p = panel('この画面から起こした実行', {
+    id: SEC.run,
+    count: stateBadge(row),
+    tone: toneOf(row.state),
+  });
 
   p.body.append(factsOf(row));
 
@@ -762,12 +859,12 @@ export function runPanel(sessionId) {
   const log = el('div', 'run-log');
   p.body.append(log);
 
-  // 操作（送る・止める・替える）。器は使い回すので、ここでは付け直すだけ
-  p.body.append(syncOps(row));
+  // 替えて続ける。送る・止めるは中央下の composer 側にある（composerFor）
+  p.body.append(syncOps(row).wrap);
 
   attach({ log, drop, runId: row.runId });
   render();
   restoreFocus();
 
-  return { section: p.section, nav: { id: SEC.run, label: '実行', count: label, tone } };
+  return p.section;
 }

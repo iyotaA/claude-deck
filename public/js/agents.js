@@ -129,7 +129,7 @@ function agentRow(a, sessionId) {
  *
  * @param {object} subagents detail.subagents
  * @param {string} sessionId いま開いているセッション
- * @returns {{section: HTMLElement, nav: object}|null} 出すものが無ければ null
+ * @returns {HTMLElement|null} 出すものが無ければ null
  */
 export function agentsPanel(subagents, sessionId) {
   const items = subagents?.items ?? [];
@@ -149,8 +149,5 @@ export function agentsPanel(subagents, sessionId) {
   for (const a of items) ul.append(agentRow(a, sessionId));
   p.body.append(ul);
 
-  return {
-    section: p.section,
-    nav: { id: SEC.agents, label: 'サブエージェントの記録', count: items.length },
-  };
+  return p.section;
 }

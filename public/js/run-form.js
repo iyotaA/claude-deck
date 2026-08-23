@@ -206,7 +206,13 @@ function show() {
   dom.runform.close();
 }
 
-function open() {
+/**
+ * 起こすフォームを開く。
+ *
+ * 上のバーのボタンとパレット（Ctrl+K）が同じ口を通る。
+ * 開くたびに前回の結果を消して、中身は1回だけ引く
+ */
+export function openRunForm() {
   started = null;
   dom.runformShow.hidden = true;
   say('');
@@ -218,7 +224,7 @@ function open() {
 }
 
 export function initRunForm() {
-  dom.runformOpen.addEventListener('click', open);
+  dom.runformOpen.addEventListener('click', openRunForm);
   dom.runformClose.addEventListener('click', () => dom.runform.close());
 
   // 背面を押したら閉じる。dialog 自身に余白を持たせていないので、

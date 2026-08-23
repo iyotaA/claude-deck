@@ -1,0 +1,170 @@
+/* ClaudeDeck ── 画面の中のコマンド入力（Ctrl+K）
+ *
+ * <dialog> の既定は canvas / canvastext という別系統の色を使う。
+ * そのままだと配色を暗くしてもここだけ白く残るので、面と文字を意味トークンで上書きする。
+ * 作法は settings.css と同じ（余白を dialog 自身に持たせない・::backdrop を自分で塗る）。
+ *
+ * 状態の点は list.css の .state をそのまま借りる。
+ * あちらのセレクタは .card を親に取っていないクラス単体なので、ここでも効く。
+ *
+ * 狭い窓向けの指定はここに閉じる。幅と上の空きを min() で決めているので、
+ * narrow.css に足すものは無い。
+ */
+
+.pal {
+  /* 余白を dialog 自身に持たせない。持たせると、その余白を押したときに
+     背面を押したのと同じに見えて閉じるので、中と外の境目が分からなくなる */
+  padding: 0;
+  /* 上寄せ。真ん中に出すと、1文字打つごとに項目の数が変わって箱が上下に動く。
+     margin: auto の上だけを固定するので、左右は中央のまま */
+  margin-top: min(6.5rem, 12vh);
+  width: min(37rem, calc(100vw - 2rem));
+  max-height: min(34rem, calc(100vh - 9rem));
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+}
+
+.pal::backdrop { background: rgb(0 0 0 / 45%); }
+
+.pal[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+}
+
+/* ---------------------------------------------------------------- 打つところ */
+
+.pal-in {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .65rem .85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.pal-caret {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* 枠を持たない。器（.pal-in）の下線が入力欄の枠を兼ねている */
+.pal-q {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 1rem;
+}
+
+/* 焦点の枠を消すのは、開いているあいだ焦点がここから動かないから。
+   項目は listbox の option で、選んでいる1件は .on と aria-activedescendant で示す。
+   焦点が移る先が無いので、枠が無くても迷子にならない */
+.pal-q:focus { outline: none; }
+.pal-q::placeholder { color: var(--fg-faint); }
+
+/* -------------------------------------------------------------------- 並び */
+
+.pal-list {
+  overflow-y: auto;
+  padding-bottom: .35rem;
+}
+
+.pal-g {
+  padding: .5rem .85rem .15rem;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--fg-faint);
+}
+
+.pal-i {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .32rem .85rem;
+  font-size: .86rem;
+  cursor: pointer;
+}
+
+/* 選んでいる1件。面は塗るが状態色は使わない（状態色は点と細いバーだけの決まり） */
+.pal-i.on {
+  background: var(--bg-elev);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.pal-i .verb { font-weight: 600; }
+
+/* 見出しは1行で切る。パレットは縦に何件並ぶかのほうが大事なので折り返させない */
+.pal-i .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 説明は右端へ。縮む側は見出しにする（説明が消えると何のセッションか分からなくなる） */
+.pal-i .desc {
+  margin-left: auto;
+  padding-left: .6rem;
+  font-size: .76rem;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+/* 1件も残らなかったとき。空白にすると、打っても何も起きていないように見える */
+.pal-none {
+  padding: .9rem .85rem;
+  font-size: .84rem;
+  color: var(--fg-muted);
+}
+
+/* ------------------------------------------------------------ 押した結果 */
+
+/* 文を返すのはターミナルの前面化だけ（focusTerminal）。
+   display を書かないので hidden が素で効く */
+.pal-msg {
+  margin: 0;
+  padding: .45rem .85rem;
+  border-top: 1px solid var(--border);
+  font-size: .8rem;
+  color: var(--fg-muted);
+}
+
+/* ---------------------------------------------------------------------- 足 */
+
+.pal-foot {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: .45rem .85rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+  font-size: .74rem;
+  color: var(--fg-faint);
+}
+
+/* 使い方の一言は右端へ。狭いと折り返って2行になる（消すより折るほうがよい） */
+.pal-tip { margin-left: auto; }
+
+/* キーの見た目。足の面が --bg-elev なので、キーは --bg にして浮かせる */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: .06rem .38rem;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  color: var(--fg-muted);
+}
+
+.kbd + .kbd { margin-left: .15rem; }

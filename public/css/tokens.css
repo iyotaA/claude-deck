@@ -33,23 +33,34 @@
   --l-off:       #8A99AC;
   --l-shadow: 0 1px 2px rgb(22 32 46 / 6%), 0 4px 12px rgb(22 32 46 / 4%);
 
-  /* 暗いほう */
-  --d-bg:        #0B1220;
-  --d-bg-elev:   #141C2B;
-  --d-bg-sunk:   #0F1725;
-  --d-code-bg:   #111A28;
-  --d-fg:        #E8EDF5;
-  --d-fg-muted:  #9AAABF;
-  --d-fg-faint:  #6F8098;
-  --d-border:    #26324A;
-  --d-border-strong: #35435F;
+  /* 暗いほう。
+   * 色調は青みを抜いた暖かい濃いグレー（Claude のサイトに寄せている）。
+   * 前はネイビー（#0B1220 系）だったが、青の面と青の強調（--d-accent）が
+   * 同じ系統で、押せるものと地面の区別が弱かった。
+   *
+   * 面の上下は明るいほうと逆で、カードがいちばん暗く、地がその1段上、
+   * 押せるものがさらに上。暗い側でカードを明るくすると、数の多いカードが
+   * 全部浮いて同じ重さに見える。
+   *
+   * --d-accent は青のまま置く。Claude の terracotta にすると
+   * --d-hot（あなたの操作で止まっている）と見分けが付かなくなる。
+   */
+  --d-bg:        #1C1B19;
+  --d-bg-elev:   #2B2A27;
+  --d-bg-sunk:   #232220;
+  --d-code-bg:   #262624;
+  --d-fg:        #F5F4EF;
+  --d-fg-muted:  #C2C0B6;
+  --d-fg-faint:  #918E85;
+  --d-border:    #3A3934;
+  --d-border-strong: #4E4C46;
   --d-accent:    #4C8DFF;
-  --d-accent-fg: #0B1220;
+  --d-accent-fg: #1C1B19;
   --d-hot:       #FF6B5A;
   --d-warn:      #F2B01E;
   --d-calm:      #4C8DFF;
   --d-done:      #4ACB84;
-  --d-off:       #6F8098;
+  --d-off:       #918E85;
   --d-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 14px rgb(0 0 0 / 22%);
 
   /* ── 意味トークン。画面側はこちらだけを使う ──────────────── */

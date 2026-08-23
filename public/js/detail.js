@@ -1,16 +1,36 @@
 /* 詳細ペインの組み立て。
  *
  * 層4。パネル1枚ずつの中身は detail-head / detail-wait / detail-panels / agents が持ち、
- * ここは「どの順で積むか」と「作り直すかどうか」だけを決める。
+ * ここは「どのタブに入れるか」と「作り直すかどうか」だけを決める。
  *
- * 積む順は読む順。あなたの番 → この画面から起こした実行 → 決めたこと → TODO → 圧縮 →
- * 時系列 → サブエージェント → ファイル → セッションの状態。
+ * 以前は11枚のパネルを1本の縦棒に積んでいた。同時に置きうる情報の塊が多すぎて、
+ * いま何を見ればいいのかが分からなくなっていたので、役目で割って2箇所に分けてある。
+ *
+ * 中央（TAB_DEFS）は「その作業をするのに要るもの」。どれか1つが必ず出ている。
+ *
+ *   いま … あなたの番 / この画面から起こした実行 / 続きを起こす
+ *   経過 … 文脈の圧縮 / 時系列
+ *   調査 … サブエージェントの記録
+ *
+ * 右のインスペクタ（INSP_DEFS）は「作業しながら横目で見るもの」。既定では閉じている。
+ *
+ *   数値 … 何にトークンを使ったか
+ *   成果 … 決めたこと / TODO / 書き換えたファイル
+ *   状態 … セッションの状態
+ *
+ * 分けたのは、この3つを中央に混ぜると、数字を見るために作業の手元を隠すことになるため。
+ * 右なら中央と同時に見られる。**同時に開くのは1つだけ**にしてあるのは、
+ * 3つ並べると元の縦棒に戻るから。
+ *
+ * **選んだタブのぶんだけ組む。** 全部組んで CSS で隠す形にはしない。
+ * timelinePanel() は必ず Timeline.attach() を呼ぶので、隠した節点を掴んだままになり、
+ * 画面に出ていない時系列へ描き続けることになる。
  */
-import { el } from './util.js';
+import { el, num } from './util.js';
 import { mark } from './perf.js';
-import { dom, store, STATE_COLOR } from './store.js';
+import { dom, store, syncQuery, STATE_COLOR } from './store.js';
 import { headOf, detailErrorNow } from './rows.js';
-import { panel, navBlock, SEC } from './panel.js';
+import { panel } from './panel.js';
 import { detailActions, summaryBlock } from './detail-head.js';
 import { waitingBlock } from './detail-wait.js';
 import {
@@ -22,6 +42,53 @@ import { runStampFor } from './runs.js';
 import * as RunView from './run-view.js';
 import * as RunResume from './run-resume.js';
 import * as Timeline from './timeline/index.js';
+
+/**
+ * 「いま」のタブに色を付ける状態。あなたの手が要るものだけ。
+ *
+ * running（Claude が動いている）には付けない。選んでいるタブの下線が --accent で、
+ * 実行中の色（--calm）と同じ青なので、押されているのか色が付いているのか分からなくなる
+ */
+const NOW_TONE = {
+  'needs-answer': 'is-hot',
+  'needs-plan-approval': 'is-hot',
+  'needs-approval': 'is-hot',
+  'awaiting-reply': 'is-warn',
+};
+
+/**
+ * 中央タブの定義。並びがそのまま画面の並び。id は store.detailTab の値。
+ *
+ * count はタブの右肩に出す数。**データを直に読む。**
+ * パネルの戻り値からは取れない（選んでいないタブのパネルは組まないため）。
+ *
+ * 0 のときは数を出さない。ほとんどのセッションはサブエージェントを持たないので、
+ * すべてのタブに 0 が並ぶだけになる。空かどうかは押したときの1行で言う。
+ * そこでなら「まだ読めていない」と「無い」を書き分けられる
+ *
+ * needsDetail は「会話ログの全文（store.detail）が無いと何も組めない」印。
+ * 立っているタブは、読めていなければ既存の取得中・失敗の表示へ倒す
+ */
+export const TAB_DEFS = [
+  { id: 'now', label: 'いま' },
+  { id: 'log', label: '経過', needsDetail: true, count: (c) => c.d?.digest.items.length ?? null },
+  { id: 'agents', label: '調査', needsDetail: true, count: (c) => c.d?.subagents?.items?.length ?? null },
+];
+
+/**
+ * 右のインスペクタの定義。並びがそのままレールの並び。id は store.inspector の値。
+ *
+ * 形は TAB_DEFS と同じにしてある。中央と右で組み方を変えると、
+ * どちらかに足したときにもう片方の作法を思い出せなくなる。
+ *
+ * title はインスペクタの見出し。レールのボタンは幅 2.3rem しか無いので短い語を出し、
+ * 開いた先で何を見ているのかを言い直す
+ */
+export const INSP_DEFS = [
+  { id: 'usage', label: '数値', title: '何にトークンを使ったか' },
+  { id: 'out', label: '成果', title: 'このセッションの成果', needsDetail: true },
+  { id: 'basics', label: '状態', title: 'セッションの状態' },
+];
 
 /**
  * いま出してよい数値。
@@ -68,6 +135,12 @@ function detailKeyOf() {
   return [
     store.selected ?? '',
     detailErrorNow() ?? '',
+    // 開いているタブ。混ぜないと、押しても renderDetailIfNeeded() が素通りする
+    store.detailTab,
+    // 右のインスペクタ（閉じているときは空文字）。いまは setInspector() が
+    // 自分で renderDetail() を呼ぶので無くても動くが、混ぜておかないと
+    // 別の経路（Ctrl+K など）から store.inspector を動かしたときに黙って素通りする
+    store.inspector ?? '',
     row?.state ?? '',
     row?.stateLabel ?? '',
     row?.stateReason ?? '',
@@ -118,6 +191,264 @@ export function renderDetailIfNeeded() {
   renderDetail();
 }
 
+/**
+ * 中央のタブを替える。
+ *
+ * 画面のタブとパレット（Ctrl+K）が同じ口を通る。
+ * 押したあとの後始末（URL の同期・描き直し・巻き戻し）を2箇所に書かないため
+ *
+ * 語彙の外の id は黙って捨てる。ここは画面の外からも呼ばれるので、
+ * 知らない値で落ちない形にしておく
+ *
+ * @param {string} id TAB_DEFS の id
+ */
+export function setDetailTab(id) {
+  if (store.detailTab === id) return;
+  if (!TAB_DEFS.some((t) => t.id === id)) return;
+  store.detailTab = id;
+  syncQuery();
+  renderDetail();
+  // 前のタブで下まで読んでいた位置が残ると、移った先の途中から始まってしまう
+  dom.detail.scrollTop = 0;
+}
+
+/**
+ * 中央タブの帯。
+ *
+ * 上に残す（sticky）。詳細は縦に長いので、下まで読んでから別のタブへ移るときに
+ * 一番上まで戻らせない
+ *
+ * @param {{row: object, d: object|null}} ctx タブの数を出すための材料
+ */
+function tabBar(ctx) {
+  const bar = el('nav', 'detail-tabs');
+  bar.setAttribute('aria-label', 'このセッションの何を見るか');
+
+  for (const t of TAB_DEFS) {
+    const b = el('button', 'detail-tab', t.label);
+    b.type = 'button';
+    const on = store.detailTab === t.id;
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    // 「いま」だけは、別のタブを見ているあいだも手が要ることが分かるように色を付ける
+    if (t.id === 'now' && NOW_TONE[ctx.row.state]) b.classList.add(NOW_TONE[ctx.row.state]);
+    const n = t.count ? t.count(ctx) : null;
+    if (n) b.append(el('span', 'n', num(n)));
+    b.addEventListener('click', () => setDetailTab(t.id));
+    bar.append(b);
+  }
+  return bar;
+}
+
+/**
+ * 選んでいるタブの中身を組んで stack へ積む。
+ *
+ * 空のときに黙って空白にしない。1行だけでも書いておかないと、
+ * 押したのに何も起きていないように見える
+ *
+ * @param {HTMLElement} stack 積む先
+ * @param {{row: object, d: object|null}} ctx
+ */
+function fillTab(stack, ctx) {
+  const { row, d } = ctx;
+  const add = (node) => { if (node) stack.append(node); };
+  const none = (text) => stack.append(el('p', 'tab-none', text));
+
+  switch (store.detailTab) {
+    case 'log':
+      // 圧縮を時系列の上に置く。どこで文脈が切れたかは、時系列の読み方そのものを変える
+      add(compactionPanel(d));
+      // timelinePanel は必ず節点を返す（Timeline.attach() を呼ぶのはここだけ）
+      add(timelinePanel(d));
+      break;
+
+    case 'agents': {
+      const p = agentsPanel(d.subagents, row.sessionId);
+      if (p) add(p);
+      else none('このセッションはサブエージェントを呼んでいません');
+      break;
+    }
+
+    default: {
+      // 'now'。何を待っているか → この画面から起こした実行 → 続きを起こす。
+      // if (d) の外なのは、起こした直後はまだ会話ログが1行も無いため
+      // （ログが出るまで何も出ないと、押したのに何も起きていないように見える）
+      const before = stack.childElementCount;
+      add(waitingBlock(row, d));
+      add(RunView.runPanel(row.sessionId));
+      add(RunResume.resumePanel(row));
+      if (stack.childElementCount === before) none('いまあなたの手が要るものはありません');
+      break;
+    }
+  }
+}
+
+/**
+ * 全文（store.detail）が無いと何も組めないタブの倒し方。
+ *
+ * 中央と右で同じ形にする。片方だけ言い方を変えると、同じ「読めていない」が
+ * 場所によって違う顔で出ることになる
+ *
+ * @param {HTMLElement} stack 積む先
+ * @param {string|null} error 取れなかった理由
+ */
+function fillPending(stack, error) {
+  if (!error) {
+    stack.append(el('div', 'loading', 'ログを読んでいます…'));
+    return;
+  }
+  const p = panel('詳細を読み込めませんでした');
+  p.body.append(el('p', 'note', error));
+  stack.append(p.section);
+}
+
+/**
+ * 右のインスペクタの中身を組んで stack へ積む。
+ *
+ * 中央の fillTab() と同じ作法（空なら1行だけ書く）。
+ * 中央から移した3つなので、中身は移す前と同じものを出す
+ *
+ * @param {HTMLElement} stack 積む先
+ * @param {{row: object, d: object|null}} ctx
+ */
+function fillInsp(stack, ctx) {
+  const { row, d } = ctx;
+  const add = (node) => { if (node) stack.append(node); };
+  const none = (text) => stack.append(el('p', 'tab-none', text));
+
+  switch (store.inspector) {
+    case 'out': {
+      const before = stack.childElementCount;
+      add(decisionsPanel(d));
+      add(todoPanel(d));
+      add(filesPanel(d));
+      if (stack.childElementCount === before) none('まだ決めたこと・TODO・書き換えたファイルはありません');
+      break;
+    }
+
+    case 'basics':
+      add(basicsPanel(row, d));
+      break;
+
+    default: {
+      // 'usage'。詳細（d）が読めていなくても出せる。
+      // 別の窓口から来るので、詳細の失敗に巻き込む理由が無い
+      const p = usagePanel(usageNow(), d, usageErrorNow(), baselineNow());
+      if (p) add(p);
+      else if (usageNow()) none('このセッションには数えられる要求がありません');
+      else none('数値を読んでいます…');
+      break;
+    }
+  }
+}
+
+/**
+ * インスペクタの開閉を器へ当てる。
+ *
+ * hidden で丸ごと外すと grid の列も消える（.deck の列は開閉で2種類ある）。
+ * 目印を付けるのは .app 側で、これは .is-list-open と同じ流儀
+ *
+ * @param {boolean} open 開くなら true
+ */
+function applyInspOpen(open) {
+  dom.insp.hidden = !open;
+  dom.app.classList.toggle('is-insp-open', open);
+}
+
+/**
+ * レールのボタンの状態を合わせる。
+ *
+ * ボタン自体は initInspector() で1回だけ組む。**毎回作り直さない。**
+ * 詳細ペインは他の理由でもよく組み直されるので、そのたびに節点を捨てると
+ * キーボードで辿っている途中の focus が飛ぶ
+ *
+ * @param {object|null} row 選んでいるセッション（無ければ null）
+ */
+function syncRail(row) {
+  for (const b of dom.rail.querySelectorAll('.rail-btn')) {
+    b.setAttribute('aria-pressed', store.inspector === b.dataset.insp ? 'true' : 'false');
+    // 出す中身がまだ無いので押させない。**隠さない**（列の幅が変わって中央が跳ねる）
+    b.disabled = !row;
+  }
+}
+
+/**
+ * 右のインスペクタを組み直す。開いていなければ何もしない。
+ *
+ * 中央と同じ材料（ctx）で組む。中央だけ差し替えると、セッションを選び直したあとも
+ * 右に前のセッションの数字が残る
+ *
+ * @param {{row: object, d: object|null, error: string|null}} ctx
+ */
+function renderInspector(ctx) {
+  const def = INSP_DEFS.find((t) => t.id === store.inspector);
+  if (!def) return;
+  dom.inspTitle.textContent = def.title;
+
+  const stack = el('div', 'stack');
+  if (def.needsDetail && !ctx.d) fillPending(stack, ctx.error);
+  else fillInsp(stack, ctx);
+  dom.inspBody.append(stack);
+}
+
+/**
+ * 右のインスペクタを開く／閉じる。
+ *
+ * 同じものを押したら閉じる。レールは開く口と閉じる口を兼ねている
+ *
+ * @param {string|null} id INSP_DEFS の id。null で閉じる
+ */
+export function setInspector(id) {
+  store.inspector = store.inspector === id ? null : id;
+  syncQuery();
+  renderDetail();
+}
+
+/**
+ * レールを組んで、閉じるボタンを配線する。起動時に1回だけ呼ぶ。
+ *
+ * レールは詳細の中身ではなく画面の枠なので、セッションを選んでいなくても出したままにする。
+ * 選ぶまでは押せない（syncRail が disabled を当てる）
+ */
+export function initInspector() {
+  for (const t of INSP_DEFS) {
+    const b = el('button', 'rail-btn');
+    b.type = 'button';
+    b.dataset.insp = t.id;
+    b.disabled = true;
+    b.setAttribute('aria-pressed', 'false');
+    b.append(el('span', 'rail-label', t.label));
+    b.addEventListener('click', () => setInspector(t.id));
+    dom.rail.append(b);
+  }
+  dom.inspClose.addEventListener('click', () => setInspector(null));
+}
+
+/**
+ * 中央下の入力欄を、いまの行に合わせる。
+ *
+ * **中身の節点は run-view.js / run-resume.js が module-level に1つだけ持っている。**
+ * 同じものが既に入っていれば触らない。差し替えると打っている途中に caret が飛ぶ。
+ * 器を詳細ペイン（`dom.detail`）の中に置いていないのはこのためで、
+ * あちらは描き直しのたびに `replaceChildren()` される。
+ *
+ * 出す順は「続きを起こす」が先。終わった実行にも `RunView` は節点を返す
+ * （「この実行はもう終わっています」の死んだ入力欄）ので、後ろに回さないと
+ * 押せる「続きを起こす」が押せない欄に隠れる。
+ *
+ * @param {object|null} row 一覧の行と同じ形のもの
+ */
+function syncComposer(row) {
+  const node = row
+    ? (RunResume.composerFor(row) ?? RunView.composerFor(row.sessionId))
+    : null;
+
+  if (dom.composer.firstElementChild !== node) {
+    dom.composer.replaceChildren();
+    if (node) dom.composer.append(node);
+  }
+  dom.composer.hidden = !node;
+}
+
 export function renderDetail() {
   const t0 = performance.now();
   // row と呼んでいるのは一覧の行と同じ形のもの。一覧に居なければ詳細から組む
@@ -130,6 +461,15 @@ export function renderDetail() {
   RunView.detach();
   RunResume.detach();
   dom.detail.replaceChildren();
+  // 右も同じ材料で組み直す。中央だけ差し替えると、選び直したあとも
+  // 右に前のセッションの数字が残ったままになる
+  dom.inspBody.replaceChildren();
+  syncRail(row);
+  // 選ぶ前は出すものが無いので閉じる。store.inspector は残しておいて、
+  // 選んだら開いた状態で戻る（URL に ?insp= で渡した指定も保たれる）
+  applyInspOpen(Boolean(store.inspector) && Boolean(row));
+  // 入力欄は詳細ペインの外。どのタブでも、取得に失敗していても同じ場所に留める
+  syncComposer(row);
 
   // 入口を3つに割る。ひとまとめにすると「選んでいない」「取得中」「取得に失敗した」が
   // すべて同じ空表示になり、存在しない id を開いても何も起きていないように見える
@@ -158,6 +498,8 @@ export function renderDetail() {
   if (row.stateLabel) {
     const state = el('span', 'state', row.stateLabel);
     state.style.color = STATE_COLOR[row.state] ?? 'var(--off)';
+    // 予算切れだけは点ではなく印にする（理由は list.js の buildCard 側に書いた）
+    if (row.run?.state === 'budget') state.dataset.mark = 'budget';
     sub.append(state);
   }
   if (row.cwd) sub.append(el('span', 'path', row.cwd));
@@ -166,75 +508,27 @@ export function renderDetail() {
 
   const d = store.detail?.sessionId === store.selected ? store.detail : null;
 
-  // なぜこの作業をしているか。読む順として、待ちの内容より先に来る必要がある
+  // なぜこの作業をしているか。どのタブを見ていても要るので、帯より上に置く
   if (d) {
     const summary = summaryBlock(d.summary);
     if (summary) wrap.append(summary);
   }
 
+  const ctx = { row, d, error };
+  wrap.append(tabBar(ctx));
+
   const stack = el('div', 'stack');
-  /** 上のジャンプ用リンクに出す並び。パネルを積むのと同じ順に足していく */
-  const sections = [];
-  /**
-   * パネル1枚を積む。null（出すものが無い）はそのまま素通りする。
-   *
-   * 積む順と目次の並びを1箇所で揃えるための小道具。別々に書くと、
-   * パネルを1枚足したときに目次だけ順番がずれる
-   *
-   * @param {{section: HTMLElement, nav?: object}|null} p
-   */
-  const add = (p) => {
-    if (!p) return;
-    stack.append(p.section);
-    if (p.nav) sections.push(p.nav);
-  };
-
-  // 何を待っているか。自分の番のときはここが最初に読む場所になるので、目的の直下に置く
-  add(waitingBlock(row, d));
-
-  // この画面から起こした実行。いま動いているものが最上位に来るべきなので待ちの直下に置く。
-  // if (d) の外なのは、起こした直後はまだ会話ログが1行も無いため
-  // （ログが出るまで何も出ないと、押したのに何も起きていないように見える）
-  add(RunView.runPanel(row.sessionId));
-
-  // 終わっているセッションの続きを起こす口。実行パネルの直下に置く。
-  // 動いているあいだは resumePanel() 自身が null を返すので、口は同時に2つ出ない
-  add(RunResume.resumePanel(row));
-
-  if (d) {
-    add(decisionsPanel(d));
-    add(todoPanel(d));
-    add(compactionPanel(d));
-    add(timelinePanel(d));
-    // 時系列の下、書き換えたファイルの前。調査の記録は時系列の続きとして読まれる
-    add(agentsPanel(d.subagents, row.sessionId));
-    add(filesPanel(d));
-  } else if (error) {
-    const p = panel('詳細を読み込めませんでした');
-    p.body.append(el('p', 'note', error));
-    stack.append(p.section);
-  } else {
-    stack.append(el('div', 'loading', 'ログを読んでいます…'));
-  }
-
-  // 数値。ここまでが「何が起きたか」で、ここからは「このセッションの性質」。
-  // 詳細（d）が読めていなくても出せる（別の窓口から来るので）
-  add(usagePanel(usageNow(), d, usageErrorNow(), baselineNow()));
-
-  add(basicsPanel(row, d));
-
-  // ジャンプ用リンクはパネルを積み終わってから作る（あるものだけを並べたいので）
-  const nav = navBlock(sections);
-  if (nav) {
-    wrap.append(nav);
-    // 目次の件数の差し替え先を教えておく。パネルが3枚に届かないと目次自体が出ないので、
-    // 取れないこともある（Timeline 側が null を見て素通りする）
-    Timeline.setNav(nav.querySelector(`[data-sec="${SEC.timeline}"] .n`));
-  }
+  const def = TAB_DEFS.find((t) => t.id === store.detailTab) ?? TAB_DEFS[0];
+  // 全文が無いと何も組めないタブ。既存の取得中・失敗の表示へ倒す
+  if (def.needsDetail && !d) fillPending(stack, error);
+  else fillTab(stack, ctx);
 
   wrap.append(stack);
+  // 右のインスペクタ。開いていなければ何もしない
+  renderInspector(ctx);
   // 時系列の中身はここで入れる。まだ document に付いていないので、
-  // 120件を組んでもレイアウトの計算は1回で済む
+  // 120件を組んでもレイアウトの計算は1回で済む。
+  // 「経過」以外のタブでは Timeline.attach() を通っていないので、何もしないで帰る
   Timeline.render();
   dom.detail.append(wrap);
   mark('detail', t0);

@@ -1,7 +1,8 @@
-/* 左のペインの3つ目のタブ「数値」。セッションを跨いだ集計。
+/* 3つ目のモード「数値」。セッションを跨いだ集計。
  *
- * 層7。`archive.js` と同格で、**あちらから呼ばれる**（タブの出し分けは setTab の仕事）。
- * **ここから `archive.js` を import しない。** 向きが両方に付くと、その場では動くのに
+ * 層7。出し分けを持っているのは `board.js` の `setMode` で、**あちらから呼ばれる**
+ * （`main.js` が `initBoard({ onUsage: showUsage })` で差す）。
+ * **ここから `board.js` を import しない。** 向きが両方に付くと、その場では動くのに
  * 順番を変えた瞬間に立ち上がらなくなる。
  *
  * ログを全文読む一番重い窓口（実測で60本 1秒台）を叩くので、**開いたときに1回だけ引く。**
@@ -15,9 +16,21 @@ import { dom, store } from './store.js';
 import { setListOpen } from './drawer.js';
 import { select } from './session.js';
 import {
-  block, hitRateNote, statTile, barList, tableDetails,
+  block, hitRateNote, statTile, barList, trendList, tableDetails, deltaText,
   tokensStrict, pctStrict, numStrict,
 } from './usage-chart.js';
+
+/**
+ * カードを押されたあとに作業台へ移す口。`initUsageTab` で外から差す。
+ *
+ * 数値モードは全幅で、中央の詳細ペインが消えている（`usage.css`）。押した1本を
+ * 見せるには作業台へ戻すしかないが、その判断（`setMode`）を持っているのは
+ * `board.js` の側で、**こちらから import すると向きが両方に付く。**
+ * `runs.js` の `subscribeRuns(fn)` と同じ切り方で、配線だけ外に出す。
+ *
+ * @type {(() => void)|null}
+ */
+let onPick = null;
 
 /** 横棒に出すツールの数。残りは下の表で読む。 */
 const BARS_MAX = 8;
@@ -147,6 +160,56 @@ function toolsBlock(d) {
 }
 
 /**
+ * スキルを呼ぶたびの推移を積む。
+ *
+ * 平均だけでは向きが読めない。実データでは平均 213k のスキルが
+ * 214k → 101k → 619k → 118k → 13k と桁で動いていた。
+ * 「前回より軽くなったか」はこの並びを見ないと分からない。
+ *
+ * **但し書きは上の節のものがそのまま効く。** 測っているのは呼んだ直後の一続きなので、
+ * 下がったのは楽な仕事だっただけかもしれない。だから**増減で色を変えない**
+ * （中央値との差を色分けしないのは詳細ペイン側と同じ扱い）。
+ *
+ * @param {HTMLElement} box 積む先
+ * @param {object[]} skills
+ * @param {number} [undated] 時刻が読めず、並べられなかった区間の数
+ */
+function appendTrends(box, skills, undated) {
+  // 絵は2点から描ける。差の文字が付くのは `trend`（比べる相手が3件）のあるものだけ。
+  // **絵と差で条件を分ける。** 揃えると、3回呼んだスキルの並びが丸ごと見えなくなる
+  const rows = skills.filter((s) => (s.series?.length ?? 0) >= 2);
+
+  const list = trendList(rows.map((s) => ({
+    label: s.skill,
+    values: s.series.map((p) => p.ite),
+    value: tokensStrict(s.series[s.series.length - 1].ite),
+    sub: (s.trend ? deltaText(s.trend.last, s.trend.prevMedian) : null) ?? '',
+    alt: `${s.skill} を呼ぶたびの実消費の移り変わり`,
+  })));
+  if (list) {
+    // 上の棒とは別の話（量 と 向き）なので `note-part` で破線を引いて区切る
+    box.append(el('p', 'note note-part', '呼ぶたびの実消費です。左が古く、右がいちばん新しい回。'));
+    box.append(list);
+    // しきい値の数字は書かない。決めているのはサーバー側なので、
+    // ここに写すと片方だけ古くなる（`percentile` を2箇所に書かないのと同じ理屈）
+    box.append(el('p', 'spark-caption',
+      '右端の割合は、最新の1回と、それより前の中央値との差です。'
+      + '比べる相手が足りないものは差を出しません。'));
+  }
+
+  // 絵から落ちたぶんと、並べようがなかったぶん。**どちらも黙って捨てない**
+  const omitted = rows.reduce((n, s) => n + (s.seriesOmitted ?? 0), 0);
+  if (omitted > 0) {
+    box.append(el('p', 'note note-sub',
+      `古い ${omitted} 回は絵から外しました（新しいほうだけ描いています）。`));
+  }
+  if (undated > 0) {
+    box.append(el('p', 'note note-sub',
+      `時刻が読めなかった ${undated} 回は推移に並べていません（回数と合計には入っています）。`));
+  }
+}
+
+/**
  * スキルを呼んだあと。
  *
  * **注記は折りたたまずに常時出す。ここを消すなら、この節ごと消すこと。**
@@ -189,6 +252,8 @@ function skillsBlock(d) {
     box.append(el('p', 'note note-sub',
       `呼んだ回数が ${RANK_MIN_RUNS} 回に満たない ${few} 件は順位から外しました（表に「参考」として出ます）。`));
   }
+
+  appendTrends(box, skills, d.skillsUndated);
 
   box.append(tableDetails(
     `全 ${skills.length} 件を表で見る`,
@@ -235,6 +300,12 @@ function usageCard(row) {
   if (meta.childElementCount > 0) card.append(meta);
 
   card.addEventListener('click', () => {
+    // **作業台へ移すのを先にやる。** 詳細ペインは数値モードのあいだ display で消えていて、
+    // このあとの setListOpen が焦点をそこへ移す。出す前に呼ぶと焦点が行き場を失う
+    onPick?.();
+    // 'live' にしない。60本には24時間より古いものが混ざるので、`apply()` の
+    // 「一覧から消えたら選択を外す」（`selectedFrom === 'live'` のときだけ働く）に
+    // 引っかかって、押した直後に先頭へ飛ぶ
     select(row.sessionId, 'usage');
     setListOpen(false, dom.detail);
   });
@@ -310,7 +381,7 @@ function renderModelOptions() {
   sel.value = u.model ?? '';
 }
 
-/** 数値タブの中身を描き直す */
+/** 数値モードの中身を描き直す */
 function renderUsage() {
   const u = store.usageTab;
   dom.usage.replaceChildren();
@@ -417,9 +488,9 @@ async function loadUsage() {
 }
 
 /**
- * 数値タブを出す。`archive.js` の setTab から呼ばれる。
+ * 数値モードを出す。`board.js` の setMode から（initBoard に差した口経由で）呼ばれる。
  *
- * 引くのは1回だけ。開くたびに引き直すと、タブを行き来しただけで
+ * 引くのは1回だけ。開くたびに引き直すと、モードを行き来しただけで
  * 60本ぶんのログを読み直すことになる。
  */
 export function showUsage() {
@@ -427,8 +498,15 @@ export function showUsage() {
   else renderUsage();
 }
 
-/** 数値タブの絞り込みの配線。`archive.js` の initTabs から1回だけ呼ぶ */
-export function initUsageTab() {
+/**
+ * 数値モードの絞り込みの配線。`main.js` から1回だけ呼ぶ。
+ *
+ * @param {object} [opts]
+ * @param {() => void} [opts.onPick] セッションのカードが押されたときに先に呼ぶもの。
+ *   作業台へ戻すために使う（判断を持っているのは呼ぶ側）
+ */
+export function initUsageTab({ onPick: pick = null } = {}) {
+  onPick = pick;
   const u = store.usageTab;
   dom.usageLimit.value = String(u.limit);
   dom.usageDays.value = u.days ? String(u.days) : '';

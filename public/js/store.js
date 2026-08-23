@@ -46,9 +46,12 @@ export const SUMMARY_ORDER = [
  *  ?tq=<語> … 時系列の検索語
  *  ?hide=<種類,種類> … 時系列で隠す種類。空で付けると「何も隠さない」になる
  *  ?nolive=1 … 自動更新をつながない
- *  ?tab=archive|usage … 書庫（終了したものも含む全セッション）や数値を開いた状態にする
+ *  ?mode=board|usage … 監視盤（列で見る）や数値（横断の集計）で開く
+ *  ?tab=archive … 書庫（終了したものも含む全セッション）を開いた状態にする
  *  ?aq=<語> … 書庫の検索語
  *  ?asort=recent|oldest|size … 書庫の並び順
+ *  ?dtab=log|agents … 詳細ペインの中央のどのタブを開くか
+ *  ?insp=usage|out|basics … 右のインスペクタをどのタブで開くか（付けなければ閉じた状態）
  */
 export const query = new URLSearchParams(location.search);
 
@@ -56,13 +59,70 @@ export const query = new URLSearchParams(location.search);
 export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
 
 /**
+ * 画面のモード。知らない値は 'work' に落とす。
+ *
+ * 見る目的が3つある。「いまの作業」（作業台）・「どれから手をつけるか」（監視盤）・
+ * 「何にトークンを使ったか」（数値）。同居させると同じ画面で場所を取り合うので、
+ * モードとして分けている。
+ *
+ * 数値がタブではなくモードなのは、**出す中身がセッション1本のものではない**から。
+ * 左のペインは「どのセッションを選ぶか」の場所なので、そこに横断の集計を置くと、
+ * 選ぶための場所に、選んでいるものと関係のない数字が出ることになる。
+ *
+ * 集合で持つ。三項演算子で二値に畳むと、3つ目を足した日に
+ * 黙って 'work' へ落ちる形になる（実際に3つ目を足した）
+ */
+export const MODES = new Set(['work', 'board', 'usage']);
+
+/**
+ * 開くモードを決める。
+ *
+ * `?tab=usage` を拾うのは、数値が左のペインのタブだった版（0.3.0 で配った）の
+ * URL が実在するため。**ここは読み替えを入れる。** INSPECTOR_TABS の側で
+ * 入れなかったのは、あれがまだ誰にも配っていなかったからで、方針の違いではない。
+ */
+function initialMode() {
+  const m = query.get('mode');
+  if (MODES.has(m)) return m;
+  return query.get('tab') === 'usage' ? 'usage' : 'work';
+}
+
+/**
  * 左のペインに出せるもの。知らない値は 'live' に落とす。
  *
  * 集合で持つのは、増やしたときに三項演算子を書き換えなくて済むようにするため。
  * 以前は `=== 'archive' ? 'archive' : 'live'` と書いてあり、
- * 3つ目を足したときに黙って 'live' へ落ちる形になっていた
+ * 3つ目を足したときに黙って 'live' へ落ちる形になっていた。
+ *
+ * 数値は 3つ目のタブだったが、モード（MODES）へ移した。
+ * **2つに戻っても集合のままにする。** 三項に畳み直すと、次に足したときに
+ * 同じ地雷（黙って 'live' へ落ちる）を踏み直すことになる
  */
-export const TABS = new Set(['live', 'archive', 'usage']);
+export const TABS = new Set(['live', 'archive']);
+
+/**
+ * 詳細ペインの中央に出せるもの。知らない値は 'now' に落とす。
+ *
+ * 以前は11枚のパネルを縦に積んでいた。同時に置きうる情報の塊が多すぎて、
+ * いま何を見ればいいのかが分からなくなっていたので、役目で割ってある。
+ * 中央は「その作業をするのに要るもの」の3つだけ。残りは右のインスペクタへ寄せた。
+ *
+ * TABS と同じく集合で持つ。三項演算子で二値に畳むと、増やすたびに
+ * 判定と syncQuery の2箇所を直すことになる
+ */
+export const DETAIL_TABS = new Set(['now', 'log', 'agents']);
+
+/**
+ * 右のインスペクタに出せるもの。知らない値は null（閉じた状態）に落とす。
+ *
+ * 中央と分けてあるのは、この3つが「作業しながら横目で見るもの」だから。
+ * 中央のタブに混ぜると、数字を見るために作業の手元（いま・経過）を隠すことになる。
+ *
+ * 中央から移したので `?dtab=usage` のような古い指定は DETAIL_TABS に無く、
+ * 既定（いま）へ落ちる。**読み替えは入れない。** 段1 はまだ誰にも配っていないので、
+ * 拾うべき古いブックマークが存在しない
+ */
+export const INSPECTOR_TABS = new Set(['usage', 'out', 'basics']);
 
 export const dom = {
   app: document.getElementById('app'),
@@ -70,17 +130,33 @@ export const dom = {
   listCount: document.getElementById('list-count'),
   summary: document.getElementById('summary'),
   detail: document.getElementById('detail'),
+  // 中央下の入力欄の器。詳細ペインの外に置いてあるので replaceChildren() で消えない
+  composer: document.getElementById('composer'),
   live: document.getElementById('live'),
   reload: document.getElementById('reload'),
   themeToggle: document.getElementById('theme-toggle'),
   onlyLive: document.getElementById('only-live'),
+  // 監視盤（board.js）。作業台とは別のモードなので、器も別に持つ
+  modeWork: document.getElementById('mode-work'),
+  modeBoard: document.getElementById('mode-board'),
+  modeUsage: document.getElementById('mode-usage'),
+  boardHead: document.getElementById('board-head'),
+  boardCount: document.getElementById('board-count'),
+  boardRest: document.getElementById('board-rest'),
+  board: document.getElementById('board'),
   listPane: document.getElementById('list-pane'),
   listToggle: document.getElementById('list-toggle'),
   listClose: document.getElementById('list-close'),
   scrim: document.getElementById('scrim'),
+  // 右のインスペクタと、その開閉をするレール。detail.js だけが使う。
+  // 器は index.html に置いたまま作り直さず、中身（inspBody）だけを差し替える
+  insp: document.getElementById('insp'),
+  inspTitle: document.getElementById('insp-title'),
+  inspClose: document.getElementById('insp-close'),
+  inspBody: document.getElementById('insp-body'),
+  rail: document.getElementById('rail'),
   tabLive: document.getElementById('tab-live'),
   tabArchive: document.getElementById('tab-archive'),
-  tabUsage: document.getElementById('tab-usage'),
   liveHead: document.getElementById('live-head'),
   archiveHead: document.getElementById('archive-head'),
   archive: document.getElementById('archive'),
@@ -131,6 +207,12 @@ export const dom = {
   runEffort: document.getElementById('run-effort'),
   runBudget: document.getElementById('run-budget'),
   runNote: document.getElementById('run-note'),
+  // 画面の中のコマンド入力（Ctrl+K）。palette.js だけが使う。
+  // 開いているかどうかも URL には持たせない（開いた状態を人に渡す意味が無い）
+  palette: document.getElementById('palette'),
+  palQ: document.getElementById('pal-q'),
+  palList: document.getElementById('pal-list'),
+  palMsg: document.getElementById('pal-msg'),
   // 更新のお知らせ。update.js だけが使う
   ver: document.getElementById('ver'),
   update: document.getElementById('update'),
@@ -212,13 +294,38 @@ export const store = {
    */
   hiddenKinds: initialHiddenKinds(query.get('hide')),
   /**
+   * いまのモード。MODES のどれか。
+   *
+   * tab と同じく localStorage には残さない。監視盤や数値を開いたまま保存すると、
+   * 次に開いたときに作業台へ戻る道が「押す」しか無い状態で始まってしまう。
+   * 固定したい人は ?mode=board のようにブックマークする
+   */
+  mode: initialMode(),
+  /**
    * 左のペインに出しているもの。TABS のどれか。
    *
-   * localStorage には残さない。書庫や数値を開いたまま保存すると、次に開いたときに
+   * localStorage には残さない。書庫を開いたまま保存すると、次に開いたときに
    * 「誰が待っているか」が見えない状態で始まってしまう。
    * 固定したい人は ?tab=archive のようにブックマークする
    */
   tab: TABS.has(query.get('tab')) ? query.get('tab') : 'live',
+  /**
+   * 詳細ペインの中央に出しているタブ。DETAIL_TABS のどれか。
+   *
+   * localStorage には残さない（tab と同じ理由）。
+   * セッションを選び直しても戻さない。見たいものは人ごとに決まっていて、
+   * セッションごとに変わるものではないため
+   */
+  detailTab: DETAIL_TABS.has(query.get('dtab')) ? query.get('dtab') : 'now',
+  /**
+   * 右のインスペクタ。INSPECTOR_TABS のどれか、または null で閉じている。
+   *
+   * **開閉と「どれを見ているか」を1つの値で持つ。** 2つに分けると
+   * 「開いているのにどのタブも選んでいない」という組み合わせが作れてしまい、
+   * そこへ落ちたときに空の枠だけが右に残る。
+   * レールは同じボタンをもう一度押すと閉じるので、その形が素直に書ける
+   */
+  inspector: INSPECTOR_TABS.has(query.get('insp')) ? query.get('insp') : null,
   /** 書庫の状態。rows はサーバの応答そのまま（logSize と mtimeMs を持つ） */
   archive: {
     rows: [],
@@ -282,7 +389,7 @@ export const store = {
  * pushState は使わない。検索欄は1文字ごとにここを通るので、履歴が入力の回数だけ積まれ、
  * 戻るボタンが使えなくなる。replaceState なら今のアドレスだけが差し替わる。
  *
- * 触るキーは session / only / tq / hide / tab / aq / asort だけ。
+ * 触るキーは session / only / tq / hide / mode / tab / aq / asort / dtab / insp だけ。
  * theme と nolive は「開くときの指定」なので、こちらから書き換えない
  */
 export function syncQuery() {
@@ -301,11 +408,17 @@ export function syncQuery() {
   const hide = hideQueryValue(store.hiddenKinds);
   if (hide === null) params.delete('hide');
   else params.set('hide', hide);
+  // 既定（作業台）のときだけキーを落とす。tab と同じ扱い
+  set('mode', store.mode === 'work' ? null : store.mode);
   // 既定（稼働中）のときだけキーを落とす。3値になったので三項では書かない
   set('tab', store.tab === 'live' ? null : store.tab);
   set('aq', store.tab === 'archive' ? store.archive.q : null);
   // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
   set('asort', store.tab === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
+  // 既定（いま）のときだけキーを落とす。tab と同じ扱い
+  set('dtab', store.detailTab === 'now' ? null : store.detailTab);
+  // 閉じているときはキーを付けない。null は set() が消してくれる
+  set('insp', store.inspector);
 
   const qs = params.toString();
   const next = qs ? `${location.pathname}?${qs}` : location.pathname;

@@ -325,10 +325,8 @@ test('自分で止めたときは標準エラーを理由にしない', async ()
   assert.equal(row.reason, null);
 });
 
-test('予算超過の result が来たら子を落としにいく', async () => {
-  const h = harness();
-  const res = h.start();
-
+/** 上限に当たった result を1本流して、殻が畳み終わるまで待つ。 */
+async function exhaust(h, res) {
   feed(h.children[0], sResult({
     sessionId: res.row.sessionId,
     subtype: 'error_max_budget_usd',
@@ -337,10 +335,80 @@ test('予算超過の result が来たら子を落としにいく', async () => 
     errors: ['Reached maximum budget ($0.01)'],
   }));
   await settle();
+  await settle();
+}
 
-  // 実測でプロセスは死なない。台帳が終わりと決めたら殻が落とす
+test('予算超過の result が来たら子を落としにいく。ただし終わりにしない', async () => {
+  const h = harness();
+  const res = h.start();
+  await exhaust(h, res);
+
+  // 実測でプロセスは死なない。子が要らなくなったと台帳が決めたら殻が落とす
   assert.equal(h.stops.length, 1);
-  assert.equal(h.runner.get(res.runId).state, 'failed');
+  // **`failed` にしない。** 何も失敗していない（自分で置いた上限に当たっただけ）
+  assert.equal(h.runner.get(res.runId).state, 'budget');
+  assert.equal(h.runner.get(res.runId).reason, 'Reached maximum budget ($0.01)');
+  // 畳んだ close を異常終了として上書きしない
+  assert.equal(h.runner.get(res.runId).exitCode, 0);
+});
+
+test('予算切れの子を二度畳みにいかない', async () => {
+  const h = harness();
+  const res = h.start();
+  await exhaust(h, res);
+
+  // 実測で system/hook_response が result の後に来ることがある。
+  // `reapIfDone` は stdout の data ごとに走るので、これで2回目が出る
+  feed(h.children[0], sAssistant('あとから来た行'));
+  await settle();
+
+  assert.equal(h.stops.length, 1);
+});
+
+test('予算切れへそのまま送ると、同じ上限で起こし直す', async () => {
+  const h = harness();
+  const res = h.start();
+  await exhaust(h, res);
+
+  const out = h.runner.input(res.runId, 'つづき');
+
+  // 終端にしていると 409「もう終わっています」で断られる
+  assert.equal(out.ok, true);
+  assert.equal(out.status, 202);
+  // 起動指定が残っているので起こし直せる（`detach` が `live` から消していない）
+  assert.equal(h.calls.length, 2);
+  // **上限は子ごとに数え直す**（実測）。だから同じ額でも先へ進む
+  const at = h.calls[1].args.indexOf('--max-budget-usd');
+  assert.ok(at >= 0, '--max-budget-usd が付いていない');
+  assert.equal(h.calls[1].args[at + 1], '5');
+
+  const row = h.runner.get(res.runId);
+  assert.equal(row.state, 'running');
+  // 「予算の上限に達しました」が動いている run の理由として残らないこと
+  assert.equal(row.reason, null);
+});
+
+test('予算切れは上限を上げて続けられる', async () => {
+  const h = harness();
+  const res = h.start();
+  await exhaust(h, res);
+
+  const out = await h.runner.switch(res.runId, { budgetUsd: 20 }, 'つづき');
+
+  assert.equal(out.ok, true);
+  assert.equal(out.status, 202);
+  assert.deepEqual(out.changed, ['budgetUsd']);
+  // 子はもういないので、畳む工程は増えない
+  assert.equal(h.stops.length, 1);
+  assert.equal(h.calls.length, 2);
+  const at = h.calls[1].args.indexOf('--max-budget-usd');
+  assert.equal(h.calls[1].args[at + 1], '20');
+
+  const row = h.runner.get(res.runId);
+  assert.equal(row.state, 'running');
+  assert.equal(row.budgetUsd, 20);
+  // ID は変えない（--fork-session を使わない）
+  assert.equal(row.sessionId, res.row.sessionId);
 });
 
 test('別のセッションの行が来たら止めにいく', async () => {

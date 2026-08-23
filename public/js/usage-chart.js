@@ -248,6 +248,43 @@ export function sparkline(values, label) {
 }
 
 /**
+ * スパークラインを1行ずつ並べる。
+ *
+ * 器は `barList` と同じ4列（名前・絵・値・添え）を借りる。
+ * **並べて比べるものだと見た目で伝えるため**で、違うのは2列目が棒ではなく折れ線なところだけ。
+ *
+ * 棒は「量」を長さで語るが、こちらは「向き」を形で語る。
+ * だから1位の強調をしない（`is-top` は付けない）。順位はもう棒の側で付いている。
+ *
+ * 2点に足りない行は**黙って飛ばす**のではなく、呼ぶ側が事前に外す。
+ * ここで飛ばしてしまうと「絵が出ない行がある」ことに呼ぶ側が気づけない
+ * （返り値が null になるのは1行も描けなかったときだけ）。
+ *
+ * @param {{label: string, values: number[], value: string, sub?: string, alt: string}[]} rows
+ * @returns {HTMLElement|null} 1行も描けなければ null
+ */
+export function trendList(rows) {
+  const list = el('ul', 'bars');
+  for (const row of rows) {
+    const chart = sparkline(row.values, row.alt);
+    if (!chart) continue;
+
+    const li = el('li', 'bar is-trend');
+    li.append(el('span', 'bar-label', row.label));
+
+    // SVG は器の高さいっぱいに伸びるので、高さを持つ器で包む
+    const frame = el('span', 'trend-spark');
+    frame.append(chart);
+    li.append(frame);
+
+    li.append(el('span', 'bar-value', row.value));
+    li.append(el('span', 'bar-sub', row.sub ?? ''));
+    list.append(li);
+  }
+  return list.children.length ? list : null;
+}
+
+/**
  * 折りたたんだ表。絵の対にする。
  *
  * 絵だけだと値が読めない。色や長さに頼らずに数を確かめられる道を、必ず横に置く。

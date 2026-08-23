@@ -70,8 +70,17 @@ export const PERMISSION_MODE_LABELS = Object.freeze({
 /** CLI の `--effort` の語彙。実物の --help から採った。 */
 export const EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
 
-/** ボタン1つで金が減る機能なので、既定で上限を掛ける。 */
-export const DEFAULT_BUDGET_USD = 5;
+/**
+ * 予算の既定（USD）。**画面の欄に最初から入る値**でもある。
+ *
+ * 5 では足りなかった。実プロジェクト（1指示の途中で compact が2回走る規模）で
+ * 13往復・$6.52 かかって予算切れになり、`--resume` で起こし直したほうも $6.09 で同じ死に方をした。
+ * 合計 $12.6 使って1つも仕事が終わらないので、実測の3倍を既定にしてある。
+ *
+ * ボタン1つで金が減る機能なので、既定では上限を掛ける側に倒す。
+ * 掛けたくなければ欄を空にする（`budgetUsd()` を見よ）。
+ */
+export const DEFAULT_BUDGET_USD = 20;
 
 /** 下限。これ未満だと何もできずに終わるだけなので、下限で受ける。 */
 export const BUDGET_MIN_USD = 0.01;
@@ -240,20 +249,36 @@ export function resolveCwd(input, { allowedDirs = [], platform = process.platfor
 }
 
 /**
- * 予算を範囲に丸める。
+ * 予算を決める。**指定が無ければ「上限なし」。**
  *
- * 400 で断らずに丸めるのは parseArchiveQuery と同じ作法。
- * 上限は下げる方向、下限は上げる方向にしか動かないので、丸めても危ないほうへは倒れない。
+ * 以前は未指定も壊れた値もまとめて既定（当時 $5）へ倒していた。
+ * それだと「上限を外したつもりが $5 で止まる」ことになり、実際にそれで踏んだ
+ * （画面の欄には既定値が最初から入るので、消しても既定へ戻っていた）。
+ * **0 と不明を分けるのと同じ扱いで、指定が無いことを値に化けさせない。**
+ *
+ * 3通りに分ける。
+ *
+ * - キーが無い・`null`・空文字 … `null`（`--max-budget-usd` を付けない）
+ * - 読める数値 … 範囲に丸める。400 で断らないのは parseArchiveQuery と同じ作法で、
+ *   上限は下げる方向・下限は上げる方向にしか動かないので危ないほうへは倒れない
+ * - 読めない値 … **断る。** 黙って上限なしにすると、打ち間違いが「歯止め無しで走る」に化ける。
+ *   丸めてよいのは範囲外の数値までで、数として読めないものは別の扱いにする
  *
  * @param {*} v 画面から来た値
- * @returns {number} セント単位まで
+ * @returns {{ok:true, value:number|null}|{ok:false, reason:string}} value は USD かセント単位、
+ *          または上限なしの null
  */
 function budgetUsd(v) {
+  // str() は文字列以外を '' にするので、数値より先に通してはいけない（20 が「上限なし」に化ける）
+  if (v === undefined || v === null) return { ok: true, value: null };
+  if (typeof v === 'string' && v.trim() === '') return { ok: true, value: null };
+
   const n = typeof v === 'number' ? v : Number(str(v));
-  if (!Number.isFinite(n) || n <= 0) return DEFAULT_BUDGET_USD;
+  if (!Number.isFinite(n) || n <= 0) return { ok: false, reason: '予算の指定が不正です' };
+
   const clamped = Math.min(BUDGET_MAX_USD, Math.max(BUDGET_MIN_USD, n));
   // 浮動小数のごみを CLI へ渡さない（0.1+0.2 の類）
-  return Math.round(clamped * 100) / 100;
+  return { ok: true, value: Math.round(clamped * 100) / 100 };
 }
 
 /**
@@ -277,9 +302,12 @@ function buildArgs(spec) {
     // 「読まれたが応答が無い」を切り分けられる
     '--replay-user-messages',
     '--permission-mode', spec.permissionMode,
-    // --print と一緒でないと効かない。こちらは常に --print なので必ず効く
-    '--max-budget-usd', String(spec.budgetUsd),
   ];
+
+  // 上限を指定したときだけ付ける。**付けなければ CLI 側も上限なしで走る。**
+  // 空欄を既定値へ化けさせないための分岐で、ここだけは並びが動く（テストに両方の形がある）。
+  // --print と一緒でないと効かない。こちらは常に --print なので必ず効く
+  if (spec.budgetUsd !== null) args.push('--max-budget-usd', String(spec.budgetUsd));
 
   // 新規は自分で決めた ID を渡す。続きは --resume。どちらも ID は変わらない
   if (spec.resume) args.push('--resume', spec.sessionId);
@@ -346,6 +374,9 @@ export function buildRunSpec(input = {}, {
     return { ok: false, reason: '思考量の指定が不正です' };
   }
 
+  const budget = budgetUsd(src.budgetUsd);
+  if (!budget.ok) return { ok: false, reason: budget.reason };
+
   const resume = src.resume === true;
   let sessionId;
   if (resume) {
@@ -365,7 +396,7 @@ export function buildRunSpec(input = {}, {
     permissionMode: rawMode,
     model: model || null,
     effort: effort || null,
-    budgetUsd: budgetUsd(src.budgetUsd),
+    budgetUsd: budget.value,
     resume,
   };
   spec.args = buildArgs(spec);
@@ -373,7 +404,12 @@ export function buildRunSpec(input = {}, {
   return { ok: true, spec };
 }
 
-/** 切り替えで差し替えてよいキー。ここに `cwd` と `sessionId` を足さない */
+/**
+ * 切り替えで差し替えてよい文字列のキー。ここに `cwd` と `sessionId` を足さない。
+ *
+ * **`budgetUsd` はここに入れない。** 数値なので、この輪の中では
+ * 「文字列でも null でもない値は断る」に引っかかる。下で別に扱う。
+ */
 const SWITCHABLE = Object.freeze(['model', 'effort', 'permissionMode']);
 
 /** 断るときの言い方。キー名をそのまま出すと、画面を見ている人には読めない */
@@ -381,6 +417,7 @@ const SWITCH_LABELS = Object.freeze({
   model: 'モデル',
   effort: '思考量',
   permissionMode: '権限モード',
+  budgetUsd: '予算',
 });
 
 /**
@@ -397,6 +434,10 @@ const SWITCH_LABELS = Object.freeze({
  *
  * `permissionMode` だけ外せないのは、外した先が「既定」だから。
  * `plan` のつもりが `acceptEdits` で走る（その逆も）という、いちばん高くつく事故になる。
+ *
+ * `budgetUsd` は数値なので輪の外で扱う。**替えられる形にしてあるのは、予算切れが終端ではないから。**
+ * 上限に当たった run を上げて続ける道がここしか無い（そのまま送ると同じ上限で走り直す。
+ * 実測で上限は子ごとに数え直す）。空にすれば上限なしへ外せる。
  *
  * 文字列でも `null` でもない値（数値・配列・真偽値）は空へ丸めずに断る。
  * 丸めると「指定したのに外れた」が画面のどこにも出ない。
@@ -433,6 +474,18 @@ export function mergeSwitch(prev, patch) {
     if (next[key] === value) continue;
     next[key] = value;
     changed.push(key);
+  }
+
+  // 予算だけは数値。**丸めたあとの値で比べる**（`budgetUsd()` は範囲へ丸めて小数2桁に切る）。
+  // 生の値で比べると、画面から来た '20' といまの 20 が違って見えて、
+  // 何も変わらないのに子を畳んで起こし直すことになる
+  if ('budgetUsd' in src) {
+    const res = budgetUsd(src.budgetUsd);
+    if (!res.ok) return { ok: false, reason: res.reason };
+    if ((next.budgetUsd ?? null) !== res.value) {
+      next.budgetUsd = res.value;
+      changed.push('budgetUsd');
+    }
   }
 
   // 同じ指定で起こし直すのは、ただ会話を1回中断するだけで得るものが無い。
