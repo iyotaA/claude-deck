@@ -4,8 +4,14 @@
  * 同じ判断を2通りに描くと、場所によって違って見えるため（index.js が外へ出している）。
  *
  * bodyText は長い本文を切る。切った跡に元の長さを添えるのはここの仕事。
+ *
+ * 畳んだ中の全文は Markdown として描く（mdView）。頭出しのほうは素の文字のまま。
+ * あちらは文字数で切っているので、記法の途中で切れた断片を描くことになる
+ * （**が片方だけ残った、表の途中で終わった、など）。切る単位をブロックへ移すまでは
+ * 素の文字のほうが読める。
  */
 import { el, num, ymd, hms, markUp, marked, countHits } from '../util.js';
+import { mdView } from '../md-view.js';
 import { store } from '../store.js';
 
 /**
@@ -40,7 +46,7 @@ export function bodyText(text, limit, maxLines, fullLength = null, needle = null
   const hits = countHits(t, needle);
   if (hits > countHits(head, needle)) more.open = true;
   more.append(el('summary', null, hits ? `${label}　一致 ${num(hits)} 件` : label));
-  more.append(marked('pre', null, t, needle));
+  more.append(mdView(t, needle));
   return [marked('div', 'tl-text', `${head.trimEnd()}…`, needle), more];
 }
 
@@ -134,7 +140,9 @@ function lineageNodes(lineage) {
     const at = typeof disk.mtimeMs === 'number' ? new Date(disk.mtimeMs) : null;
     const when = at ? `　${ymd(at)} ${hms(at)} 更新` : '';
     d.append(el('summary', null, `いまのファイルの中身　${num(disk.chars)} 字${when}`));
-    d.append(el('pre', null, disk.text));
+    // 提出したときの本文（planBlock 側）と見比べるものなので、描き方を揃える。
+    // 片方だけ Markdown にすると、同じ文でも別物に見える
+    d.append(mdView(disk.text));
     out.push(d);
   }
   return out;
@@ -167,7 +175,7 @@ export function planBlock(item, compact, needle = null) {
     const label = lineage?.disk?.text ? '提出したときの本文' : 'プラン全文';
     d.append(el('summary', null, hits ? `${label}　一致 ${num(hits)} 件` : label));
     if (hits) d.open = true;
-    d.append(marked('pre', null, item.plan, needle));
+    d.append(mdView(item.plan, needle));
     box.append(d);
   }
   return box;
