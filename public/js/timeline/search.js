@@ -1,80 +1,16 @@
-/* 検索と絞り込み。当てた箇所の目印、種類ごとの数え上げ、出す並びの決定。
+/* 検索と絞り込み。種類ごとの数え上げと、出す並びの決定。
  *
  * 検索の相手は item から作った1本の文字列（searchTextOf）。item ごとに WeakMap で
  * 覚えるので、1文字打つたびに作り直さない。
  *
- * 目印（markUp / marked / countHits）は blocks.js と item.js が使い、
+ * 当てた箇所の目印（markUp / marked / countHits）はここに無い。util.js（層0）にある。
+ * Markdown の描画（md-view.js）からも呼ぶことになり、timeline/ の中のファイルを
+ * 外から直に import しない決まりに反するので移した。
+ *
  * 絞り込みの結果（filterTimeline / countKinds）は view.js が使う。
  */
-import { el } from '../util.js';
 import { store } from '../store.js';
 import { KIND_LABELS, DECISION_KINDS } from './kinds.js';
-
-/**
- * 検索語に当たった所を <mark> で囲んだ節点の並びを返す。
- *
- * innerHTML は使わない。当たった所は要素として作り、それ以外は createTextNode で入れる。
- * ログ本文にタグが書かれていても、ただの文字として出る。
- *
- * 正規表現も使わない。検索語は人が打つ文字列なので、記号のたびにエスケープが要る。
- *
- * @param {string|null} text
- * @param {string|null} needle 検索語。null なら素の文字として1つ返す
- * @returns {Array<Node>}
- */
-export function markUp(text, needle) {
-  const t = String(text ?? '');
-  if (!needle) return [document.createTextNode(t)];
-
-  // 大小を無視して探す。ただし toLowerCase で長さが変わる文字（İ など）が混ざると
-  // 元の文字列と位置がずれて、関係ない所を切り出す。
-  // そのときだけ大小を区別する検索に落とす。ずれた強調を出すより外れるほうがまし
-  const lower = t.toLowerCase();
-  const nLower = needle.toLowerCase();
-  const exact = lower.length !== t.length || nLower.length !== needle.length;
-  const hay = exact ? t : lower;
-  const pin = exact ? needle : nLower;
-
-  const out = [];
-  let from = 0;
-  for (;;) {
-    const hit = hay.indexOf(pin, from);
-    if (hit < 0) break;
-    if (hit > from) out.push(document.createTextNode(t.slice(from, hit)));
-    out.push(el('mark', null, t.slice(hit, hit + pin.length)));
-    from = hit + pin.length;
-  }
-  if (!out.length) return [document.createTextNode(t)];
-  if (from < t.length) out.push(document.createTextNode(t.slice(from)));
-  return out;
-}
-
-/**
- * 検索語の強調つきで節点を1つ作る。
- *
- * el() と同じ形で呼べるようにしてある。needle が null なら el() と同じものができる
- */
-export function marked(tag, className, text, needle) {
-  const node = el(tag, className);
-  node.append(...markUp(text, needle));
-  return node;
-}
-
-/** 検索語が何回出てくるか。markUp と同じ数え方（大小は無視、重なりは数えない） */
-export function countHits(text, needle) {
-  if (!needle) return 0;
-  const hay = String(text ?? '').toLowerCase();
-  const pin = needle.toLowerCase();
-  if (!pin) return 0;
-  let n = 0;
-  let from = 0;
-  for (;;) {
-    const hit = hay.indexOf(pin, from);
-    if (hit < 0) return n;
-    n += 1;
-    from = hit + pin.length;
-  }
-}
 
 /**
  * この item を検索語と突き合わせる文字列。

@@ -4,16 +4,29 @@
  * 同じ判断を2通りに描くと、場所によって違って見えるため（index.js が外へ出している）。
  *
  * bodyText は長い本文を切る。切った跡に元の長さを添えるのはここの仕事。
+ *
+ * 本文は頭出しも畳んだ中も Markdown として描く。切る単位は文字数ではなくブロック
+ * （md.js の headBlocks）。文字数で切ると記法の途中で切れた断片を描くことになる
+ * （** が片方だけ残った、表の途中で終わった、など）。
+ *
+ * 器のクラスは `.md` と `.tl-text` を併せて付ける。あとの1つは種類ごとの装飾
+ * （prompt と echo の枠・say と recap の色）を持っているので、外すとそれが消える。
  */
-import { el, num, ymd, hms } from '../util.js';
+import { el, num, ymd, hms, markUp, marked, countHits } from '../util.js';
+import { parseMarkdown, headBlocks, blocksText } from '../md.js';
+import { mdBlocks, mdView } from '../md-view.js';
 import { store } from '../store.js';
-import { markUp, marked, countHits } from './search.js';
 
 /**
  * 長い本文は頭だけ出して、続きは折りたたむ。
  *
  * 時系列は「ざっと目で追える」ことが値なので、1件が画面を埋めてはいけない。
  * 全文は残すが、開いたときだけ見せる。
+ *
+ * パースは1回だけ。頭出しと全文の両方をその結果から描く（mdBlocks）。
+ *
+ * 予算（limit / maxLines）が測るのは描いたあとの文字数なので、記法の記号のぶんだけ
+ * 以前より多く入る。前は畳まれていた本文がそのまま全部出ることがある。
  *
  * @param {string|null} text 出す本文（サーバ側で既に切られていることがある）
  * @param {number} limit 頭出しの文字数
@@ -24,25 +37,35 @@ import { markUp, marked, countHits } from './search.js';
 export function bodyText(text, limit, maxLines, fullLength = null, needle = null) {
   const t = String(text ?? '').trim();
   if (!t) return [];
-  const lines = t.split('\n');
-  if (t.length <= limit && lines.length <= maxLines) return [marked('div', 'tl-text', t, needle)];
 
-  let head = lines.slice(0, maxLines).join('\n');
-  if (head.length > limit) head = head.slice(0, limit);
+  const blocks = parseMarkdown(t);
+  const head = headBlocks(blocks, limit, maxLines);
+  const node = mdBlocks(head.blocks, needle);
+  // 種類ごとの装飾（prompt と echo の枠・say と recap の色）は .tl-text が持っている
+  node.classList.add('tl-text');
+  if (!head.cut) return [node];
+
+  // 切り跡の「…」は CSS の ::after で出す。DOM にも選択範囲にも入らないので、
+  // コピーした本文に混ざらない
+  node.classList.add('is-cut');
+
   const more = el('details', 'more');
   // ここで持っているのが本当の全文かどうかで文言を変える。サーバ側が既に切っているのに
-  // 「全文」と書くと嘘になる（say は 1,200 字、recap は 2,000 字で切られている）
+  // 「全文」と書くと嘘になる（say は 1,200 字、recap は 2,000 字で切られている）。
+  // 字数は素の本文のまま数える（fullLength がそちらの物差しで作られているため）
   const clipped = typeof fullLength === 'number' && fullLength > t.length;
   const label = clipped
     ? `全 ${fullLength.toLocaleString('ja-JP')} 字（このうち ${t.length.toLocaleString('ja-JP')} 字まで表示）`
     : `全文（${t.length.toLocaleString('ja-JP')}字）`;
   // 検索語が頭出しに無く、続きの中にあるときは開いた状態で出す。
-  // 閉じたまま出すと「一致した行なのに、見ても語が見つからない」ことになる
-  const hits = countHits(t, needle);
-  if (hits > countHits(head, needle)) more.open = true;
+  // 閉じたまま出すと「一致した行なのに、見ても語が見つからない」ことになる。
+  // 数えるのは描いたあとの文字（blocksText）。素の文字列を数えると、
+  // 画面に出ていない記号まで数に入る
+  const hits = countHits(blocksText(blocks), needle);
+  if (hits > countHits(blocksText(head.blocks), needle)) more.open = true;
   more.append(el('summary', null, hits ? `${label}　一致 ${num(hits)} 件` : label));
-  more.append(marked('pre', null, t, needle));
-  return [marked('div', 'tl-text', `${head.trimEnd()}…`, needle), more];
+  more.append(mdBlocks(blocks, needle));
+  return [node, more];
 }
 
 /**
@@ -135,7 +158,9 @@ function lineageNodes(lineage) {
     const at = typeof disk.mtimeMs === 'number' ? new Date(disk.mtimeMs) : null;
     const when = at ? `　${ymd(at)} ${hms(at)} 更新` : '';
     d.append(el('summary', null, `いまのファイルの中身　${num(disk.chars)} 字${when}`));
-    d.append(el('pre', null, disk.text));
+    // 提出したときの本文（planBlock 側）と見比べるものなので、描き方を揃える。
+    // 片方だけ Markdown にすると、同じ文でも別物に見える
+    d.append(mdView(disk.text));
     out.push(d);
   }
   return out;
@@ -163,12 +188,14 @@ export function planBlock(item, compact, needle = null) {
 
   if (item.plan && !compact) {
     const d = el('details', 'more');
-    const hits = countHits(item.plan, needle);
+    const blocks = parseMarkdown(item.plan);
+    // 数えるのは描いたあとの文字。素のままだと記号まで数に入る（bodyText と同じ理由）
+    const hits = countHits(blocksText(blocks), needle);
     // 系譜を出すときは、どちらの本文かが分かるように言い方を変える
     const label = lineage?.disk?.text ? '提出したときの本文' : 'プラン全文';
     d.append(el('summary', null, hits ? `${label}　一致 ${num(hits)} 件` : label));
     if (hits) d.open = true;
-    d.append(marked('pre', null, item.plan, needle));
+    d.append(mdBlocks(blocks, needle));
     box.append(d);
   }
   return box;
