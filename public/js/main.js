@@ -11,16 +11,20 @@
  *   層0  util.js / perf.js / timeline/kinds.js       誰にも依存しない
  *   層1  store.js（kinds.js を直に見る）/ panel.js / detail-head.js / usage-chart.js
  *   層2  rows.js / drawer.js / runs.js / timeline/（外からは index.js の1枚として見る）
- *   層3  detail-wait.js / detail-panels.js / agents.js / usage-panel.js / run-view.js
+ *   層3  detail-wait.js / detail-panels.js / agents.js / usage-panel.js /
+ *        run-view.js / run-resume.js
  *   層4  detail.js
  *   層5  session.js
  *   層6  list.js
- *   層7  archive.js / usage-tab.js / stream.js / settings.js / update.js / run-form.js
+ *   層7  archive.js / usage-tab.js / stream.js / settings.js / update.js /
+ *        run-form.js / palette.js
  *   層8  このファイル
  *
  * 数値は2つに分かれている。1本ぶんが usage-panel.js（層3・詳細ペイン）、
  * 横断が usage-tab.js（層7・左のペイン）。絵の部品（usage-chart.js）だけを共有する。
- * 層7 の中の向きは archive.js → usage-tab.js の片方向。逆を足すと循環になる。
+ * 層7 の中の向きは archive.js → usage-tab.js と palette.js → run-form.js の2本。
+ * どちらも片方向で、逆を足すと循環になる。palette.js は層7 のいちばん下流で、
+ * 誰からも import されない（呼ぶのはこのファイルだけ）。
  *
  * timeline/ の中も6枚で層をなしているが、外から見るときは index.js の1枚として扱う。
  * 中の向きは timeline/index.js の冒頭に書いてある。
@@ -53,6 +57,7 @@ import { setLive, fetchOnce, connect } from './stream.js';
 import { initSettings } from './settings.js';
 import { initUpdate } from './update.js';
 import { initRunForm } from './run-form.js';
+import { initPalette } from './palette.js';
 
 function initTheme() {
   const forced = query.get('theme');
@@ -107,6 +112,7 @@ initTabs();
 initSettings();
 initUpdate();
 initRunForm();
+initPalette();
 initListKeys(dom.list, 'live');
 initListKeys(dom.archive, 'archive');
 

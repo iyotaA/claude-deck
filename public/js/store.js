@@ -166,6 +166,12 @@ export const dom = {
   runEffort: document.getElementById('run-effort'),
   runBudget: document.getElementById('run-budget'),
   runNote: document.getElementById('run-note'),
+  // 画面の中のコマンド入力（Ctrl+K）。palette.js だけが使う。
+  // 開いているかどうかも URL には持たせない（開いた状態を人に渡す意味が無い）
+  palette: document.getElementById('palette'),
+  palQ: document.getElementById('pal-q'),
+  palList: document.getElementById('pal-list'),
+  palMsg: document.getElementById('pal-msg'),
   // 更新のお知らせ。update.js だけが使う
   ver: document.getElementById('ver'),
   update: document.getElementById('update'),

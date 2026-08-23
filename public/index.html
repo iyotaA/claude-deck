@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="favicon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="favicon-192.png">
 <!-- CSS は宣言順で勝ち負けが付く。この順番を入れ替えない。
-     narrow.css は上の10枚を上書きするので必ず最後 -->
+     narrow.css は上の11枚を上書きするので必ず最後 -->
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/list.css">
@@ -21,6 +21,7 @@
 <link rel="stylesheet" href="css/update.css">
 <link rel="stylesheet" href="css/usage.css">
 <link rel="stylesheet" href="css/run.css">
+<link rel="stylesheet" href="css/palette.css">
 <link rel="stylesheet" href="css/narrow.css">
 </head>
 <body>
@@ -310,6 +311,29 @@
     <button class="btn is-primary" id="runform-start" type="button">起こす</button>
   </div>
 
+</dialog>
+
+<!-- 画面の中のコマンド入力（Ctrl+K）。セッションへ移る・情報を出す・起こす を横断で引く。
+     中身は開くたびに palette.js が組む。ここに置くのは器だけ -->
+<dialog class="pal" id="palette" aria-label="コマンド入力">
+  <div class="pal-in">
+    <span class="pal-caret" aria-hidden="true">&gt;</span>
+    <input class="pal-q" id="pal-q" type="text" role="combobox" aria-expanded="true"
+           aria-controls="pal-list" autocomplete="off" spellcheck="false"
+           placeholder="セッションの名前か、やりたいことを打つ">
+  </div>
+  <!-- 選んでいる項目は aria-activedescendant で伝える。id は並び順から作るので、
+       絞り込みで作り直しても取り違えない -->
+  <div class="pal-list" id="pal-list" role="listbox" aria-label="できること"></div>
+  <!-- 押した結果を出す帯。文を返すのはターミナルの前面化だけ。
+       出ているあいだは閉じない（結果を読ませたいので） -->
+  <p class="pal-msg" id="pal-msg" role="status" hidden></p>
+  <p class="pal-foot">
+    <span><span class="kbd">↑</span><span class="kbd">↓</span> 選ぶ</span>
+    <span><span class="kbd">Enter</span> 実行</span>
+    <span><span class="kbd">Esc</span> 閉じる</span>
+    <span class="pal-tip">打った文字で、上の全部を横断して絞り込む</span>
+  </p>
 </dialog>
 <!-- ESM なので読み込む順を人が守る必要はない。import が解決の順を決める。
      読むのはこの1本だけ。増やすと、また順番が意味を持ってしまう -->

@@ -6,6 +6,36 @@
 import { el, stamp } from './util.js';
 
 /**
+ * ターミナルの窓を前面に出す。
+ *
+ * 詳細ペインのボタンとパレット（Ctrl+K）が同じ口を通る。
+ * 返すのは画面に出す1行だけで、出す場所は呼ぶ側が決める。
+ *
+ * **投げない。** 失敗も文にして返す。押した側は必ず何か書けるので、
+ * 押したのに何も起きないという見え方にならない
+ *
+ * @param {number} pid 出したい窓を持っているプロセス
+ * @returns {Promise<string>} 結果を伝える1行
+ */
+export async function focusTerminal(pid) {
+  try {
+    // content-type は必須。書き込み口の門番がここを見て、
+    // 他所のページからの <form> による送信を弾いている（src/shared/origin.mjs）
+    const res = await fetch(`/api/focus?pid=${encodeURIComponent(pid)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    const data = await res.json();
+    if (!data.ok) return `出せません: ${data.reason}`;
+    // 窓は前に出るがタブは選べない。出たつもりで待たせないよう、そこは正直に書く
+    if (data.tabbed) return `${data.app} を前面に出しました。タブの切り替えは手動でどうぞ`;
+    return `前面に出しました（${data.detail ?? ''}）`;
+  } catch (err) {
+    return `出せません: ${err.message}`;
+  }
+}
+
+/**
  * 詳細の操作ボタン。
  *
  * 指示を送り込むことはしない（非公開の仕組みに乗ると壊れやすい）。
@@ -21,27 +51,8 @@ export function detailActions(row) {
     focus.addEventListener('click', async () => {
       focus.disabled = true;
       hint.textContent = '呼んでいます…';
-      try {
-        // content-type は必須。書き込み口の門番がここを見て、
-        // 他所のページからの <form> による送信を弾いている（src/shared/origin.mjs）
-        const res = await fetch(`/api/focus?pid=${encodeURIComponent(row.pid)}`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-        });
-        const data = await res.json();
-        if (!data.ok) {
-          hint.textContent = `出せません: ${data.reason}`;
-        } else if (data.tabbed) {
-          // 窓は前に出るがタブは選べない。出たつもりで待たせないよう、そこは正直に書く
-          hint.textContent = `${data.app} を前面に出しました。タブの切り替えは手動でどうぞ`;
-        } else {
-          hint.textContent = `前面に出しました（${data.detail ?? ''}）`;
-        }
-      } catch (err) {
-        hint.textContent = `出せません: ${err.message}`;
-      } finally {
-        focus.disabled = false;
-      }
+      hint.textContent = await focusTerminal(row.pid);
+      focus.disabled = false;
     });
     box.append(focus);
   }

@@ -69,7 +69,7 @@ const NOW_TONE = {
  * needsDetail は「会話ログの全文（store.detail）が無いと何も組めない」印。
  * 立っているタブは、読めていなければ既存の取得中・失敗の表示へ倒す
  */
-const TAB_DEFS = [
+export const TAB_DEFS = [
   { id: 'now', label: 'いま' },
   { id: 'log', label: '経過', needsDetail: true, count: (c) => c.d?.digest.items.length ?? null },
   { id: 'agents', label: '調査', needsDetail: true, count: (c) => c.d?.subagents?.items?.length ?? null },
@@ -84,7 +84,7 @@ const TAB_DEFS = [
  * title はインスペクタの見出し。レールのボタンは幅 2.3rem しか無いので短い語を出し、
  * 開いた先で何を見ているのかを言い直す
  */
-const INSP_DEFS = [
+export const INSP_DEFS = [
   { id: 'usage', label: '数値', title: '何にトークンを使ったか' },
   { id: 'out', label: '成果', title: 'このセッションの成果', needsDetail: true },
   { id: 'basics', label: '状態', title: 'セッションの状態' },
@@ -192,6 +192,27 @@ export function renderDetailIfNeeded() {
 }
 
 /**
+ * 中央のタブを替える。
+ *
+ * 画面のタブとパレット（Ctrl+K）が同じ口を通る。
+ * 押したあとの後始末（URL の同期・描き直し・巻き戻し）を2箇所に書かないため
+ *
+ * 語彙の外の id は黙って捨てる。ここは画面の外からも呼ばれるので、
+ * 知らない値で落ちない形にしておく
+ *
+ * @param {string} id TAB_DEFS の id
+ */
+export function setDetailTab(id) {
+  if (store.detailTab === id) return;
+  if (!TAB_DEFS.some((t) => t.id === id)) return;
+  store.detailTab = id;
+  syncQuery();
+  renderDetail();
+  // 前のタブで下まで読んでいた位置が残ると、移った先の途中から始まってしまう
+  dom.detail.scrollTop = 0;
+}
+
+/**
  * 中央タブの帯。
  *
  * 上に残す（sticky）。詳細は縦に長いので、下まで読んでから別のタブへ移るときに
@@ -212,14 +233,7 @@ function tabBar(ctx) {
     if (t.id === 'now' && NOW_TONE[ctx.row.state]) b.classList.add(NOW_TONE[ctx.row.state]);
     const n = t.count ? t.count(ctx) : null;
     if (n) b.append(el('span', 'n', num(n)));
-    b.addEventListener('click', () => {
-      if (store.detailTab === t.id) return;
-      store.detailTab = t.id;
-      syncQuery();
-      renderDetail();
-      // 前のタブで下まで読んでいた位置が残ると、移った先の途中から始まってしまう
-      dom.detail.scrollTop = 0;
-    });
+    b.addEventListener('click', () => setDetailTab(t.id));
     bar.append(b);
   }
   return bar;
