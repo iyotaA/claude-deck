@@ -96,6 +96,8 @@ export const dom = {
   listCount: document.getElementById('list-count'),
   summary: document.getElementById('summary'),
   detail: document.getElementById('detail'),
+  // 中央下の入力欄の器。詳細ペインの外に置いてあるので replaceChildren() で消えない
+  composer: document.getElementById('composer'),
   live: document.getElementById('live'),
   reload: document.getElementById('reload'),
   themeToggle: document.getElementById('theme-toggle'),

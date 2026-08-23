@@ -409,6 +409,32 @@ export function initInspector() {
   dom.inspClose.addEventListener('click', () => setInspector(null));
 }
 
+/**
+ * 中央下の入力欄を、いまの行に合わせる。
+ *
+ * **中身の節点は run-view.js / run-resume.js が module-level に1つだけ持っている。**
+ * 同じものが既に入っていれば触らない。差し替えると打っている途中に caret が飛ぶ。
+ * 器を詳細ペイン（`dom.detail`）の中に置いていないのはこのためで、
+ * あちらは描き直しのたびに `replaceChildren()` される。
+ *
+ * 出す順は「続きを起こす」が先。終わった実行にも `RunView` は節点を返す
+ * （「この実行はもう終わっています」の死んだ入力欄）ので、後ろに回さないと
+ * 押せる「続きを起こす」が押せない欄に隠れる。
+ *
+ * @param {object|null} row 一覧の行と同じ形のもの
+ */
+function syncComposer(row) {
+  const node = row
+    ? (RunResume.composerFor(row) ?? RunView.composerFor(row.sessionId))
+    : null;
+
+  if (dom.composer.firstElementChild !== node) {
+    dom.composer.replaceChildren();
+    if (node) dom.composer.append(node);
+  }
+  dom.composer.hidden = !node;
+}
+
 export function renderDetail() {
   const t0 = performance.now();
   // row と呼んでいるのは一覧の行と同じ形のもの。一覧に居なければ詳細から組む
@@ -428,6 +454,8 @@ export function renderDetail() {
   // 選ぶ前は出すものが無いので閉じる。store.inspector は残しておいて、
   // 選んだら開いた状態で戻る（URL に ?insp= で渡した指定も保たれる）
   applyInspOpen(Boolean(store.inspector) && Boolean(row));
+  // 入力欄は詳細ペインの外。どのタブでも、取得に失敗していても同じ場所に留める
+  syncComposer(row);
 
   // 入口を3つに割る。ひとまとめにすると「選んでいない」「取得中」「取得に失敗した」が
   // すべて同じ空表示になり、存在しない id を開いても何も起きていないように見える

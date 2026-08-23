@@ -531,16 +531,22 @@ function onStop() {
   doStop();
 }
 
-/** 器を1回だけ組む。以降はこの節点を append し直して使う。 */
+/**
+ * 器を1回だけ組む。以降はこの節点を append し直して使う。
+ *
+ * 器は2つに割ってある。毎回使うもの（入力欄・送る・止める）は中央下の composer へ、
+ * ときどき使うもの（替えて続ける）はパネルへ。
+ * composer 側は詳細ペインの外に置かれるので作り直されず、打っている途中でも消えない。
+ */
 function buildOps() {
-  const wrap = el('div', 'run-ops');
-
-  const label = el('label', 'settings-label', '続きの指示');
-  label.htmlFor = 'run-ops-prompt';
+  // ── 中央下の入力欄
+  const bar = el('div', 'composer-in');
 
   const prompt = el('textarea', 'run-prompt');
   prompt.id = 'run-ops-prompt';
-  prompt.rows = 3;
+  prompt.rows = 2;
+  // 見えるラベルは置かない。placeholder が用を足すので、常時の文字を1行でも減らす
+  prompt.setAttribute('aria-label', '続きの指示');
 
   // 本文欄の Enter は改行。送るのは Ctrl+Enter。
   // 長い指示を書いている途中に Enter で走り出すのがいちばん困る（起こすフォームと同じ）
@@ -559,14 +565,22 @@ function buildOps() {
   stop.addEventListener('click', onStop);
 
   const msg = el('p', 'settings-msg');
+  msg.setAttribute('role', 'status');
 
-  const foot = el('div', 'run-ops-foot');
-  foot.append(send, stop, msg);
+  const btns = el('div', 'composer-btns');
+  btns.append(send, stop);
 
-  // ── 替えて続ける。畳んでおく（普段は使わないので、送る・止めるの邪魔をしない）
+  const line = el('div', 'composer-row');
+  line.append(prompt, btns);
+
+  bar.append(line, msg);
+
+  // ── 替えて続ける。パネル側に残して畳んでおく（普段は使わないので手元に置かない）
+  const wrap = el('div', 'run-ops');
+  // 選択肢を引けるまで器ごと出さない。中身が無いのに上の線だけ残ると意味のない区切りに見える
+  wrap.hidden = true;
+
   const det = el('details', 'run-switch');
-  // 選択肢を引けるまで出さない。中身の無い <select> を見せない
-  det.hidden = true;
   det.append(el('summary', null, 'モデルなどを替えて続ける'));
 
   const grid = el('div', 'settings-grid');
@@ -593,10 +607,10 @@ function buildOps() {
   swBody.append(grid, swFoot);
   det.append(swBody);
 
-  wrap.append(label, prompt, foot, det);
+  wrap.append(det);
 
   ops = {
-    wrap, prompt, send, stop, msg, det, swModel, swEffort, swMode, apply,
+    bar, wrap, prompt, send, stop, msg, det, swModel, swEffort, swMode, apply,
     runId: null, busy: false, over: false, stopArmed: false, stopTimer: null, lastRow: null,
   };
   return ops;
@@ -632,6 +646,8 @@ function fillSwitch() {
   ]);
 
   ops.det.hidden = modes.length === 0;
+  // 中身が無いなら器ごと隠す（上の線だけが残ると意味のない区切りに見える）
+  ops.wrap.hidden = ops.det.hidden;
   if (ops.lastRow) prefillSwitch(ops.lastRow);
 }
 
@@ -655,10 +671,12 @@ async function loadOptions() {
 }
 
 /**
- * 器をいまの実行に合わせて、詳細ペインへ入れる節点を返す。
+ * 器をいまの実行に合わせる。節点は2つ（composer と パネル）あるので ops をそのまま返す。
+ *
+ * 同じ描き直しの中で2回呼ばれても害は無い（2回目は runId が一致するので何も起きない）。
  *
  * @param {object} row 台帳の行
- * @returns {HTMLElement}
+ * @returns {object}
  */
 function syncOps(row) {
   if (!ops) buildOps();
@@ -691,7 +709,7 @@ function syncOps(row) {
   // 中身は1回だけ引く。取れなければ切り替えの節は畳んだまま出さない
   loadOptions();
 
-  return ops.wrap;
+  return ops;
 }
 
 /**
@@ -703,7 +721,10 @@ function syncOps(row) {
 function saveFocus() {
   focusMemo = null;
   const node = document.activeElement;
-  if (!ops || !node || !ops.wrap.contains(node)) return;
+  // 器が2つに割れているので両方見る。composer 側は作り直されないが、
+  // ここで控えても restoreFocus() が「人が先に触っていたら奪わない」で降りるので害は無い
+  if (!ops || !node) return;
+  if (!ops.bar.contains(node) && !ops.wrap.contains(node)) return;
 
   focusMemo = {
     runId: ops.runId,
@@ -740,6 +761,21 @@ function restoreFocus() {
 }
 
 /**
+ * 中央下の入力欄に入れる節点。この画面から起こした実行のときだけ返す。
+ *
+ * **どのタブを見ていても呼ばれる。** パネル（runPanel）は「いま」のタブにしか出ないが、
+ * 入力欄はタブに関係なく手が届く場所に置くので、同期はこちらにも要る。
+ *
+ * @param {string|null} sessionId 開いているセッション
+ * @returns {HTMLElement|null}
+ */
+export function composerFor(sessionId) {
+  const row = runFor(sessionId);
+  if (!row) return null;
+  return syncOps(row).bar;
+}
+
+/**
  * 実行パネル。この画面から起こしたセッションのときだけ出す。
  *
  * @param {string|null} sessionId 開いているセッション
@@ -762,8 +798,8 @@ export function runPanel(sessionId) {
   const log = el('div', 'run-log');
   p.body.append(log);
 
-  // 操作（送る・止める・替える）。器は使い回すので、ここでは付け直すだけ
-  p.body.append(syncOps(row));
+  // 替えて続ける。送る・止めるは中央下の composer 側にある（composerFor）
+  p.body.append(syncOps(row).wrap);
 
   attach({ log, drop, runId: row.runId });
   render();

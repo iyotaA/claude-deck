@@ -318,6 +318,49 @@
   border-left: 2px solid var(--border);
 }
 
+/* ------------------------------------------- 中央下の入力欄 */
+
+/* どのタブを見ていても手が届く場所。器は index.html に置いたまま、
+   中身（run-view.js / run-resume.js の節点）だけを差し替える。
+   面は塗らず上の線1本で本体と分ける（状態色を面に使わないのと同じ作法）。
+   display を書かないので、hidden はブラウザ既定のまま効く */
+.composer {
+  padding: .7rem 1.3rem .8rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.composer-in { min-width: 0; }
+
+/* 入力欄が伸びて、ボタンは右。狭くなればボタンが下へ回る */
+.composer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: .5rem;
+}
+
+/* flex の子は既定で縮まないので min-width を落とす。
+   落とさないと長い1行を打った瞬間に入力欄がボタンを押し出す */
+.composer-row .run-prompt {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.composer-btns {
+  display: flex;
+  flex: 0 0 auto;
+  gap: .35rem;
+}
+
+.composer-btns .btn { white-space: nowrap; }
+
+/* 一言と但し書きは行の下。行の中へ入れると3つ目の列になって入力欄が縮む */
+.composer-in > .settings-msg,
+.composer-in > .settings-hint {
+  margin: .35rem 0 0;
+}
+
 /* ---------------------------------------------------- 狭い窓向け */
 
 /* モーダルと同じで、この機能の都合は narrow.css へ散らさずここに置く。
@@ -325,4 +368,8 @@
    裸で書くと広い窓にもそのまま当たる） */
 @media (max-width: 860px) {
   .run-log { max-height: 18rem; }
+
+  /* 左右は縮めない。本体（.detail-scroll の 1.3rem）と行頭が揃わなくなる。
+     縦だけ詰める（狭い画面では高さのほうが惜しい） */
+  .composer { padding: .6rem 1.3rem .7rem; }
 }

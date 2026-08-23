@@ -114,8 +114,16 @@
       <div class="usage-pane" id="usage" hidden></div>
     </section>
 
-    <section class="detail-pane" id="detail" aria-label="セッションの詳細" tabindex="-1">
-      <div class="detail-empty">左の一覧からセッションを選ぶと、ここに中身が出ます</div>
+    <!-- 詳細ペイン。中身が流れる箱と、下に留まる入力欄の2段に割ってある。
+         入力欄を #detail の中に置くと renderDetail() の replaceChildren() で毎回消えるので、
+         器はここに出して中身だけ差し替える（レールのボタンと同じ流儀） -->
+    <section class="detail-pane" aria-label="セッションの詳細">
+      <div class="detail-scroll" id="detail" tabindex="-1">
+        <div class="detail-empty">左の一覧からセッションを選ぶと、ここに中身が出ます</div>
+      </div>
+      <!-- 中央下の入力欄。どのタブを見ていても手が届く場所に置く。
+           中身は detail.js が run-view.js / run-resume.js の節点を差し込む -->
+      <div class="composer" id="composer" hidden></div>
     </section>
 
     <!-- 右のインスペクタ。作業しながら横目で見るもの（数値・成果・状態）をここへ寄せる。

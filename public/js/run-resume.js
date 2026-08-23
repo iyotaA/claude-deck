@@ -147,21 +147,24 @@ function setBusy(on) {
   ui.go.disabled = on;
 }
 
-/** 器を1つだけ作る。以降は中身を差し替えて使い回す。 */
+/**
+ * 器を1つだけ作る。以降は中身を差し替えて使い回す。
+ *
+ * 器は2つに割ってある。毎回使うもの（入力欄・起こす）は中央下の composer へ、
+ * ときどき使うもの（モデルなどの指定と、状況の説明）はパネルへ。
+ * composer 側は詳細ペインの外に置かれるので作り直されず、打っている途中でも消えない。
+ */
 function buildUi() {
-  const wrap = el('div', 'run-ops');
+  // ── 中央下の入力欄
+  const bar = el('div', 'composer-in');
 
-  wrap.append(el('p', 'run-note',
-    'ターミナル側はもう動いていません。同じセッションのまま、この画面から続きを起こせます。'));
-  wrap.append(el('p', 'run-note',
-    'ここから起こしたセッションは、途中であなたに許可を求めません。'));
-
-  const label = el('label', 'settings-label', '続きの指示');
-  label.htmlFor = 'run-resume-prompt';
   const prompt = el('textarea', 'run-prompt');
   prompt.id = 'run-resume-prompt';
-  prompt.rows = 3;
+  prompt.rows = 2;
   prompt.spellcheck = false;
+  prompt.placeholder = 'このセッションの続きを起こす（Ctrl+Enter でも起こせる）';
+  // 見えるラベルは置かない。placeholder が用を足すので、常時の文字を1行でも減らす
+  prompt.setAttribute('aria-label', '続きの指示');
   // 本文欄の Enter は改行。起こすのは Ctrl+Enter。
   // 長い指示を書いている途中に Enter で走り出すのがいちばん困る（起こすフォームと同じ）
   prompt.addEventListener('keydown', (ev) => {
@@ -169,6 +172,31 @@ function buildUi() {
     ev.preventDefault();
     start();
   });
+
+  const go = el('button', 'btn is-primary', '続きを起こす');
+  go.type = 'button';
+  go.addEventListener('click', start);
+
+  const btns = el('div', 'composer-btns');
+  btns.append(go);
+
+  const line = el('div', 'composer-row');
+  line.append(prompt, btns);
+
+  const msg = el('p', 'settings-msg');
+  msg.setAttribute('role', 'status');
+
+  // 許可を求めないことだけは手元にも書く。**パネルの説明を読んでいなくても押せる**ので、
+  // いちばん外せない1行をここへ置く（残りの説明はパネル側）
+  bar.append(line, el('p', 'settings-hint', '途中で許可は求めません'), msg);
+
+  // ── 状況の説明と、モデルなどの指定。パネル側に残す
+  const wrap = el('div', 'run-ops');
+
+  wrap.append(el('p', 'run-note',
+    'ターミナル側はもう動いていません。同じセッションのまま、この画面から続きを起こせます。'));
+  wrap.append(el('p', 'run-note',
+    'ここから起こしたセッションは、途中であなたに許可を求めません。'));
 
   const grid = el('div', 'settings-grid');
   const model = el('input', 'settings-text');
@@ -193,17 +221,10 @@ function buildUi() {
     'このモードは許可を一切求めず、何でも実行します。');
   danger.hidden = true;
 
-  const go = el('button', 'btn is-primary', '続きを起こす');
-  go.type = 'button';
-  go.addEventListener('click', start);
-  const msg = el('p', 'settings-msg');
-  msg.setAttribute('role', 'status');
-  const foot = el('div', 'run-ops-foot');
-  foot.append(go, msg);
+  wrap.append(grid, danger);
 
-  wrap.append(label, prompt, grid, danger, foot);
   return {
-    wrap, prompt, grid, model, effort, mode, budget, danger, go, msg,
+    bar, wrap, prompt, grid, model, effort, mode, budget, danger, go, msg,
     sessionId: null, cwd: null, busy: false, filled: false,
   };
 }
@@ -215,7 +236,7 @@ function buildUi() {
  * 打ちかけの指示も選んだモデルもそのまま残す（詳細ペインは他の理由でもよく作り直される）。
  *
  * @param {object} row 詳細ペインが持っている行
- * @returns {HTMLElement} 器
+ * @returns {object} 器（composer 側とパネル側の2つを持つ）
  */
 function syncUi(row) {
   if (!ui) ui = buildUi();
@@ -228,7 +249,7 @@ function syncUi(row) {
     focusMemo = null;
   }
   ui.cwd = row.cwd;
-  return ui.wrap;
+  return ui;
 }
 
 /** 起こす。空欄はキーごと送らない（サーバー側が「無ければ既定」で組む）。 */
@@ -289,7 +310,10 @@ async function start() {
 function saveFocus() {
   focusMemo = null;
   const node = document.activeElement;
-  if (!ui || !node || !ui.wrap.contains(node)) return;
+  // 器が2つに割れているので両方見る。composer 側は作り直されないが、
+  // ここで控えても restoreFocus() が「人が先に触っていたら奪わない」で降りるので害は無い
+  if (!ui || !node) return;
+  if (!ui.bar.contains(node) && !ui.wrap.contains(node)) return;
   focusMemo = {
     sessionId: ui.sessionId, node,
     start: typeof node.selectionStart === 'number' ? node.selectionStart : null,
@@ -316,6 +340,23 @@ function restoreFocus() {
 }
 
 /**
+ * 中央下の入力欄に入れる節点。終わっているセッションのときだけ返す。
+ *
+ * **どのタブを見ていても呼ばれる。** パネル（resumePanel）は「いま」のタブにしか出ないが、
+ * 入力欄はタブに関係なく手が届く場所に置くので、選択肢の当て込みもこちらに要る。
+ *
+ * @param {object|null} row 詳細ペインが持っている行
+ * @returns {HTMLElement|null}
+ */
+export function composerFor(row) {
+  if (!canOffer(row)) return null;
+  const bar = syncUi(row).bar;
+  applyOptions();
+  loadOptions();
+  return bar;
+}
+
+/**
  * 詳細ペインを組み直す前に呼ぶ。焦点を控えるだけで、器は捨てない。
  *
  * `Timeline.detach()` / `RunView.detach()` と同じ役目。
@@ -335,7 +376,7 @@ export function resumePanel(row) {
   const p = panel('このセッションの続きを起こす', { id: SEC.resume });
   const dl = el('dl', 'facts');
   fact(dl, 'フォルダ', row.cwd);
-  p.body.append(dl, syncUi(row));
+  p.body.append(dl, syncUi(row).wrap);
   // 引けていれば即座に反映され、まだなら着いた時点で `applyOptions()` が当たる
   applyOptions();
   loadOptions();
