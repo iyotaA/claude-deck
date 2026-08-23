@@ -156,17 +156,35 @@ function blockNode(b, needle) {
 }
 
 /**
- * Markdown を1本描く。
+ * ブロックの並びを描く。
  *
  * 返すのは器（div.md）1つ。中の見た目は markdown.css が `.md` の下だけで決めるので、
  * どのパネルへ入れても同じに見える。
  *
- * @param {string|null} text 本文
+ * 口が mdView と2つあるのは、頭出し（timeline/blocks.js の bodyText）が
+ * 同じ本文から「頭だけ」と「全文」の2つを描くため。文字列を受ける口しか無いと
+ * 1件につき2回パースすることになる。パースは1回で済ませて、
+ * 切ったブロックの並びと元の並びをそれぞれこちらへ渡す。
+ *
+ * @param {Array<object>} blocks md.js のブロックの並び
  * @param {string|null} [needle] 検索語。あれば当たった所に <mark> を付ける
  * @returns {HTMLElement}
  */
-export function mdView(text, needle) {
+export function mdBlocks(blocks, needle) {
   const host = el('div', 'md');
-  for (const b of parseMarkdown(text)) host.append(blockNode(b, needle));
+  for (const b of blocks) host.append(blockNode(b, needle));
   return host;
+}
+
+/**
+ * Markdown を1本、文字列から描く。
+ *
+ * 切らずに全部描く場所（プランの本文・「あなたの番」の応答）はこちらを呼ぶ。
+ *
+ * @param {string|null} text 本文
+ * @param {string|null} [needle] 検索語
+ * @returns {HTMLElement}
+ */
+export function mdView(text, needle) {
+  return mdBlocks(parseMarkdown(text), needle);
 }

@@ -366,17 +366,232 @@ export function parseMarkdown(text) {
   return blocks;
 }
 
+/* ------------------------------------------------------------ 頭出し（切る） */
+
+/** spans の中身を繋いで、描いたときの文字にする */
+function spansText(spans) {
+  return spans.map((s) => s.v).join('');
+}
+
+/** 行数。空の文字は0行と数える（hr のように文字を持たないブロックがある） */
+function countLines(text) {
+  return text ? text.split('\n').length : 0;
+}
+
 /**
- * 記法が1つも無い（＝素の文字と同じ）か。
+ * ブロック1つを、描いたときの文字へ直す。
  *
- * 段落が1つで、その中が地の文だけなら、Markdown として描いても素で描いても同じ。
- * 呼ぶ側が「切る単位を文字数のままにするか、ブロックにするか」を決めるのに使う。
+ * 測るのも数えるのも同じこの関数を通す。切る予算（頭出し）と検索の一致件数が
+ * 別の物差しで測られると、「一致 3 件」と出ているのに画面に色が付かない状態になる。
+ * 記法の記号（** や | や #）は描かれないので、ここでも落とす。
+ *
+ * @param {object} b ブロック
+ */
+function blockText(b) {
+  if (b.type === 'code') return b.text;
+  if (b.type === 'hr') return '';
+  if (b.type === 'list') return b.items.map((it) => spansText(it.spans)).join('\n');
+  // 表はセルを \t で繋ぐ。空文字で繋ぐと、隣のセルと跨いだ語が一致してしまう
+  if (b.type === 'table') return [b.head, ...b.rows].map((r) => r.map(spansText).join('\t')).join('\n');
+  return spansText(b.spans);
+}
+
+/**
+ * ブロックの並びを、描いたときの文字へ直す。
+ *
+ * 使うのは検索の一致件数を数えるところだけ。素の文字列を数えると記号まで数に入る。
+ *
+ * @param {Array<object>} blocks ブロックの並び
+ */
+export function blocksText(blocks) {
+  return blocks.map(blockText).filter(Boolean).join('\n');
+}
+
+/**
+ * ブロック1つの大きさ。文字数と行数で測る。
+ *
+ * ピクセルではなく文字で測るのは、ここが DOM を触らない層だから。
+ * 目当ては「1件が画面を埋めない」ことなので、この粗さで足りる。
+ *
+ * @param {object} b ブロック
+ */
+function blockSize(b) {
+  const t = blockText(b);
+  // hr は文字を持たないが、1行ぶんの場所は取る
+  return { chars: t.length, lines: b.type === 'hr' ? 1 : countLines(t) };
+}
+
+/**
+ * 行数の予算を文字数へ直す。maxLines 本目の改行までの長さ。
+ *
+ * @param {string} text 対象
+ * @param {number} maxLines 行数の予算
+ */
+function charsForLines(text, maxLines) {
+  if (maxLines <= 0) return 0;
+  let at = -1;
+  for (let k = 0; k < maxLines; k += 1) {
+    const next = text.indexOf('\n', at + 1);
+    if (next < 0) return text.length;
+    at = next;
+  }
+  return at;
+}
+
+/** 文字数と行数、どちらの予算にも収まる長さ */
+function roomChars(text, room) {
+  return Math.min(room.chars, charsForLines(text, room.lines));
+}
+
+/**
+ * spans を頭から n 文字ぶんだけ取る。
+ *
+ * 返すのは必ず新しい span なので、呼ぶ側が中身を書き換えてよい
+ * （末尾の空白を落とすのに使う）。
+ *
+ * 装飾の途中で切れることはある。**太字** の途中で切れれば途中まで太字で描かれるが、
+ * それは描いた結果を切っているだけで、記号が本文へ漏れることはない。
+ *
+ * @param {Array<object>} spans md.js の spans
+ * @param {number} n 取る文字数
+ */
+function cutSpans(spans, n) {
+  if (n <= 0) return [];
+  const out = [];
+  let left = n;
+  for (const s of spans) {
+    if (s.v.length <= left) {
+      out.push({ type: s.type, v: s.v });
+      left -= s.v.length;
+      continue;
+    }
+    const v = s.v.slice(0, left);
+    if (v) out.push({ type: s.type, v });
+    break;
+  }
+
+  // 末尾の空白と改行は落とす。切り跡の「…」の前に隙間が空くと、切ったのか
+  // もともと空いているのかが読めない
+  const last = out[out.length - 1];
+  if (last) {
+    last.v = last.v.replace(/\s+$/, '');
+    if (!last.v) out.pop();
+  }
+  return out;
+}
+
+/**
+ * ブロック1つを、予算に収まるところまで切る。
+ *
+ * 切り方は種類ごとに違う。共通しているのは「途中で終わったことが読めるようにする」で、
+ * 中途半端な単位で終わらせない。
+ *
+ * @param {object} b ブロック
+ * @param {{chars: number, lines: number}} room 残りの予算
+ * @returns {object|null} 切ったブロック。1文字も入らなければ null
+ */
+function trimBlock(b, room) {
+  if (room.chars <= 0 || room.lines <= 0) return null;
+
+  // 線だけが残っても何も伝えない
+  if (b.type === 'hr') return null;
+
+  if (b.type === 'p' || b.type === 'h') {
+    const spans = cutSpans(b.spans, roomChars(spansText(b.spans), room));
+    if (!spans.length) return null;
+    return b.type === 'h' ? { ...b, spans } : { type: 'p', spans };
+  }
+
+  if (b.type === 'code') {
+    let text = b.text.split('\n').slice(0, room.lines).join('\n');
+    if (text.length > room.chars) text = text.slice(0, room.chars);
+    text = text.replace(/\s+$/, '');
+    if (!text) return null;
+    // open はそのまま持っていく。あれは「源のフェンスが閉じていない」印なので、
+    // 頭出しで切ったことをここで立ててはいけない（意味が2つになる）
+    return { ...b, text };
+  }
+
+  if (b.type === 'list') {
+    const items = [];
+    let chars = 0;
+    let lines = 0;
+    for (const it of b.items) {
+      const t = spansText(it.spans);
+      const size = { chars: t.length, lines: countLines(t) };
+      if (chars + size.chars <= room.chars && lines + size.lines <= room.lines) {
+        items.push(it);
+        chars += size.chars;
+        lines += size.lines;
+        continue;
+      }
+      // 1件目が単体で入りきらないときだけ、その項目を切って入れる。
+      // 2件目以降は切らずに止める（項目の途中で終わると、次の項目があるように見える）
+      if (!items.length) {
+        const spans = cutSpans(it.spans, roomChars(t, room));
+        if (spans.length) items.push({ ...it, spans });
+      }
+      break;
+    }
+    // 深さの並びは先頭から取れば必ず有効（md-view.js のスタックは
+    // 「深さは1つずつしか増えない」ことだけを前提にしている）
+    return items.length ? { type: 'list', items } : null;
+  }
+
+  if (b.type === 'table') {
+    // 見出しの行は予算を超えても残す。見出しの無い表は表として読めない
+    const rows = [];
+    let chars = blockText({ ...b, rows: [] }).length;
+    let lines = 1;
+    for (const row of b.rows) {
+      const t = row.map(spansText).join('\t');
+      if (chars + t.length > room.chars || lines + 1 > room.lines) break;
+      rows.push(row);
+      chars += t.length;
+      lines += 1;
+    }
+    return { type: 'table', align: b.align, head: b.head, rows };
+  }
+
+  return null;
+}
+
+/**
+ * ブロックの並びを、頭から予算ぶんだけ取る。
+ *
+ * 時系列は「ざっと目で追える」ことが値なので、1件が画面を埋めてはいけない。
+ * 以前は文字数で切っていたが、それだと記法の途中で切れた断片
+ * （** が片方だけ・表の途中・フェンスが開いたまま）を描くことになる。
+ * 切る単位をブロックへ移すと、頭出しも Markdown として描ける。
+ *
+ * 測るのは描いたあとの文字数なので、記号のぶんだけ以前より多く入る。
+ * つまり前は畳まれていた本文が、そのまま全部出ることがある。
  *
  * @param {Array<object>} blocks parseMarkdown の結果
+ * @param {number} limit 文字数の予算
+ * @param {number} maxLines 行数の予算
+ * @returns {{blocks: Array<object>, cut: boolean}} cut は続きがあるか
  */
-export function isPlain(blocks) {
-  if (blocks.length === 0) return true;
-  if (blocks.length > 1) return false;
-  const b = blocks[0];
-  return b.type === 'p' && b.spans.every((s) => s.type === 'text');
+export function headBlocks(blocks, limit, maxLines) {
+  const out = [];
+  let chars = 0;
+  let lines = 0;
+
+  for (const b of blocks) {
+    const size = blockSize(b);
+    if (chars + size.chars <= limit && lines + size.lines <= maxLines) {
+      out.push(b);
+      chars += size.chars;
+      lines += size.lines;
+      continue;
+    }
+    const kept = trimBlock(b, { chars: limit - chars, lines: maxLines - lines });
+    if (kept) out.push(kept);
+    // 末尾に残った区切り線は落とす。この後ろには切り跡の「…」しか来ないので、
+    // 区切る先の無い線だけが残る（trimBlock が hr を落とすのと同じ理由）。
+    // 予算に収まる経路は trimBlock を通らないので、ここで見る
+    while (out.length && out[out.length - 1].type === 'hr') out.pop();
+    return { blocks: out, cut: true };
+  }
+  return { blocks: out, cut: false };
 }

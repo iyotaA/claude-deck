@@ -4,13 +4,14 @@
  * 画面側のファイルだが、パーサは DOM を1つも触らないので Node から import できる
  * （拡張子が .js なのは public/ の決まり。package.json が type:module なので ESM で読める）。
  *
- * 見るのは2点に絞ってある。
+ * 見るのは3点に絞ってある。
  *   1. 記法を記法として読めること
  *   2. 途中で切れた入力で壊れないこと（clip() が「…（以下省略）」を足すので日常的に来る）
+ *   3. 頭出し（headBlocks）が中途半端な単位で終わらないこと
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMarkdown, inlineSpans, isPlain } from '../public/js/md.js';
+import { parseMarkdown, inlineSpans, headBlocks, blocksText } from '../public/js/md.js';
 
 /** spans を「装飾の種類:中身」の並びに畳む。読みやすさのため */
 const flat = (spans) => spans.map((s) => `${s.type}:${s.v}`);
@@ -242,12 +243,119 @@ test('見出しは段落を切る', () => {
   assert.deepEqual(b.map((x) => x.type), ['p', 'h', 'p']);
 });
 
-/* ------------------------------------------------------------------ 素の文字か */
+/* ------------------------------------------------------------------ 頭出し */
 
-test('isPlain は記法が無いときだけ true', () => {
-  assert.equal(isPlain(parseMarkdown('ただの文\n改行あり')), true);
-  assert.equal(isPlain(parseMarkdown('')), true);
-  assert.equal(isPlain(parseMarkdown('**太字**あり')), false);
-  assert.equal(isPlain(parseMarkdown('# 見出し')), false);
-  assert.equal(isPlain(parseMarkdown('一\n\n二')), false);
+/** 頭出しの結果を「種類:中身」の並びに畳む */
+const heads = (r) => r.blocks.map((b) => {
+  if (b.type === 'p' || b.type === 'h') return `${b.type}:${b.spans.map((x) => x.v).join('')}`;
+  if (b.type === 'code') return `code:${b.text}`;
+  if (b.type === 'list') return `list:${b.items.map((i) => i.spans.map((x) => x.v).join('')).join('|')}`;
+  if (b.type === 'table') return `table:${b.rows.length}`;
+  return b.type;
+});
+
+test('予算に収まればそのまま返す', () => {
+  const blocks = parseMarkdown('一行だけ');
+  const r = headBlocks(blocks, 100, 10);
+  assert.equal(r.cut, false);
+  // ブロックを作り直さない。だから全文と頭出しで同じ並びを使い回せる
+  assert.equal(r.blocks[0], blocks[0]);
+});
+
+test('ブロックの境目で切る', () => {
+  const r = headBlocks(parseMarkdown('あいうえお\n\nかきくけこ'), 7, 10);
+  assert.equal(r.cut, true);
+  assert.deepEqual(heads(r), ['p:あいうえお', 'p:かき']);
+});
+
+test('行数の予算でも切る', () => {
+  const r = headBlocks(parseMarkdown('あ\nい\nう\nえ'), 100, 2);
+  assert.deepEqual(heads(r), ['p:あ\nい']);
+  assert.equal(r.cut, true);
+});
+
+test('段落の切り跡の前に空白を残さない', () => {
+  // 「…」の前に隙間が空くと、切ったのか元から空いているのかが読めない
+  const r = headBlocks(parseMarkdown('あい   うえお'), 5, 10);
+  assert.deepEqual(heads(r), ['p:あい']);
+});
+
+test('装飾の途中で切れても記号は漏れない', () => {
+  // 切っているのは描いた結果。** が本文へ出てくることはない
+  const r = headBlocks(parseMarkdown('ふつう **太字のとても長い所**'), 8, 10);
+  assert.deepEqual(flat(r.blocks[0].spans), ['text:ふつう ', 'strong:太字のと']);
+});
+
+test('見出しは切っても段を保つ', () => {
+  const r = headBlocks(parseMarkdown('# 見出しが長い'), 3, 10);
+  assert.equal(r.blocks[0].type, 'h');
+  assert.equal(r.blocks[0].level, 1);
+  assert.deepEqual(flat(r.blocks[0].spans), ['text:見出し']);
+});
+
+test('閉じているフェンスを切っても open を立てない', () => {
+  // open は「源のフェンスが閉じていない」印。頭出しで切ったことをここで立てると
+  // 意味が2つになる（続きがあることは器の側の切り跡が出す）
+  const r = headBlocks(parseMarkdown('```\na\nb\nc\n```'), 100, 2);
+  assert.equal(r.blocks[0].text, 'a\nb');
+  assert.equal(r.blocks[0].open, false);
+  assert.equal(r.cut, true);
+
+  // 源が閉じていないぶんはそのまま持っていく
+  const open = headBlocks(parseMarkdown('```\na\nb\nc'), 100, 2);
+  assert.equal(open.blocks[0].open, true);
+});
+
+test('表は見出しの行を予算より優先して残す', () => {
+  // 見出しの無い表は表として読めない
+  const r = headBlocks(parseMarkdown('| aaaa | bbbb |\n|---|---|\n| 1 | 2 |'), 3, 1);
+  assert.equal(r.blocks[0].type, 'table');
+  assert.equal(r.blocks[0].head.length, 2);
+  assert.equal(r.blocks[0].rows.length, 0);
+});
+
+test('表は行の途中で切らない', () => {
+  const r = headBlocks(parseMarkdown('| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |'), 8, 10);
+  assert.deepEqual(heads(r), ['table:1']);
+  assert.deepEqual(r.blocks[0].rows[0].map(flat), [['text:1'], ['text:2']]);
+});
+
+test('箇条書きは2件目以降を切らない', () => {
+  // 項目の途中で終わると、まだ続きの行があるように見える
+  const r = headBlocks(parseMarkdown('- あいう\n- えおか\n- きくけ'), 7, 10);
+  assert.deepEqual(heads(r), ['list:あいう|えおか']);
+});
+
+test('箇条書きの1件目だけは切って入れる', () => {
+  // ここで諦めると、箇条書きしか無い本文の頭出しが空になる
+  const r = headBlocks(parseMarkdown('- あいうえおかきくけこ\n- 次'), 4, 10);
+  assert.deepEqual(heads(r), ['list:あいうえ']);
+});
+
+test('末尾に残った区切り線は落とす', () => {
+  // 後ろには切り跡の「…」しか来ないので、区切る先の無い線だけが残る
+  const r = headBlocks(parseMarkdown('あい\n\n---\n\nうえ'), 2, 10);
+  assert.deepEqual(heads(r), ['p:あい']);
+  assert.equal(r.cut, true);
+});
+
+test('1文字も入らなければブロック0件で切ったと返す', () => {
+  const r = headBlocks(parseMarkdown('あいう'), 0, 10);
+  assert.deepEqual(r.blocks, []);
+  assert.equal(r.cut, true);
+});
+
+/* ------------------------------------------------------------ 描いたあとの文字 */
+
+test('blocksText は記法の記号を含まない', () => {
+  // 予算も検索の一致数も、これ1つを物差しにする。素の文字を数えると
+  // ** や | まで数に入り、「一致 3 件」と出ているのに画面に色が付かない
+  const src = '# 見出し\n\n**太字**と `code`\n\n---\n\n- 項目';
+  assert.equal(blocksText(parseMarkdown(src)), '見出し\n太字と code\n項目');
+});
+
+test('blocksText は表のセルをタブで繋ぐ', () => {
+  // 空文字で繋ぐと、隣のセルと跨いだ語が一致してしまう
+  const src = '| a | b |\n|---|---|\n| 1 | 2 |';
+  assert.equal(blocksText(parseMarkdown(src)), 'a\tb\n1\t2');
 });
