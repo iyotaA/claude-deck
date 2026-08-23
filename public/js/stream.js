@@ -51,6 +51,10 @@ function apply(payload) {
     renderBoard();
     return;
   }
+  // 数値タブのあいだも同じ。左は数値で埋まり、中央も右も消えている（usage.css）。
+  // 監視盤と違うのは一覧の描き直しまで一緒に落ちる点で、#list は隠れているので
+  // 描いても誰も見ない。出るときに setTab() が追いつかせる
+  if (store.tab === 'usage') return;
   // 書庫を出しているあいだ #list には触らない。replaceChildren すると
   // 見えていない一覧のスクロール位置が毎秒先頭へ飛ぶ
   if (store.tab !== 'archive') renderList();

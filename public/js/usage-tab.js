@@ -19,6 +19,18 @@ import {
   tokensStrict, pctStrict, numStrict,
 } from './usage-chart.js';
 
+/**
+ * カードを押されたあとにタブを移す口。`initUsageTab` で外から差す。
+ *
+ * 数値タブは全幅で、中央の詳細ペインが消えている（`usage.css`）。押した1本を
+ * 見せるには作業台へ戻すしかないが、その判断（`setTab`）を持っているのは
+ * `archive.js` の側で、**こちらから import すると向きが両方に付く。**
+ * `runs.js` の `subscribeRuns(fn)` と同じ切り方で、配線だけ外に出す。
+ *
+ * @type {(() => void)|null}
+ */
+let onPick = null;
+
 /** 横棒に出すツールの数。残りは下の表で読む。 */
 const BARS_MAX = 8;
 
@@ -287,6 +299,12 @@ function usageCard(row) {
   if (meta.childElementCount > 0) card.append(meta);
 
   card.addEventListener('click', () => {
+    // **タブを移すのを先にやる。** 詳細ペインは数値タブのあいだ display で消えていて、
+    // このあとの setListOpen が焦点をそこへ移す。出す前に呼ぶと焦点が行き場を失う
+    onPick?.();
+    // 'live' にしない。60本には24時間より古いものが混ざるので、`apply()` の
+    // 「一覧から消えたら選択を外す」（`selectedFrom === 'live'` のときだけ働く）に
+    // 引っかかって、押した直後に先頭へ飛ぶ
     select(row.sessionId, 'usage');
     setListOpen(false, dom.detail);
   });
@@ -479,8 +497,15 @@ export function showUsage() {
   else renderUsage();
 }
 
-/** 数値タブの絞り込みの配線。`archive.js` の initTabs から1回だけ呼ぶ */
-export function initUsageTab() {
+/**
+ * 数値タブの絞り込みの配線。`archive.js` の initTabs から1回だけ呼ぶ。
+ *
+ * @param {object} [opts]
+ * @param {() => void} [opts.onPick] セッションのカードが押されたときに先に呼ぶもの。
+ *   タブを作業台へ戻すために使う（判断を持っているのは呼ぶ側）
+ */
+export function initUsageTab({ onPick: pick = null } = {}) {
+  onPick = pick;
   const u = store.usageTab;
   dom.usageLimit.value = String(u.limit);
   dom.usageDays.value = u.days ? String(u.days) : '';

@@ -219,8 +219,25 @@
 }
 
 /* 行の高さが絵のぶん増えるので、行間も少し広げる。
-   詰めると隣の行の折れ線と地続きに見えて、1本の長い線に読める */
-.bar.is-trend { padding: .1rem 0; }
+   詰めると隣の行の折れ線と地続きに見えて、1本の長い線に読める。
+
+   列は借りものを組み替える。**棒と折れ線で幅の要求が逆だから。**
+   棒は量を長さで語るので長いほど差が読めるが、折れ線は形で語るので
+   引き伸ばすと山と谷が潰れて平らに見える（`preserveAspectRatio: 'none'` で
+   器の縦横比がそのまま絵の比になる。全幅にしたとき 48:1 まで伸びて形が消えた）。
+
+   余りは5列目に吸わせて、値と回数を絵のすぐ右に置く。棒と同じ位置に流すと、
+   値が 1000px 先に離れてどの行のものか追えなくなる。
+
+   **1列目も上限を決める。** `.bar` は行ごとに独立した grid なので、
+   `auto` のままだと名前の長さで絵の開始位置が行ごとにずれ、
+   右端に張り付かない値まで階段状に並ぶ（棒の側は 1fr が最後にあるので揃っていた）。
+   `minmax(0, …)` にしてあるのは、狭い画面の引き出しで縮めるため
+   （広いところでは常に上限まで伸びるので、固定と同じに揃う） */
+.bar.is-trend {
+  padding: .1rem 0;
+  grid-template-columns: minmax(0, 13rem) minmax(0, 14rem) auto auto minmax(0, 1fr);
+}
 
 /* -------------------------------------------------------------- 表の対 */
 
@@ -369,14 +386,45 @@
   font-size: .82rem;
 }
 
-/* 広いときだけ左のペインを少し広げる。
-   5列の表と横棒が 20rem では窮屈で、表がほぼ常に横スクロールになる。
+/* 数値タブは全幅で見せる。中央の詳細ペインも、右のインスペクタとレールも消す。
+
+   ダッシュボードを 34rem の中に閉じ込める理由が無い（5列の表と横棒がほぼ常に
+   横スクロールになっていた）うえ、数値を読んでいるあいだ隣に出ている
+   セッションの詳細は**選んだ覚えのないもの**で、読まないのに場所を取る。
+
+   前例は board.css の .is-board（監視盤モード）。あちらはモードとして分けたが、
+   こちらはタブなので目印は .list-pane 側に付いている（archive.js の is-usage）。
+
+   詳細度は .deck:has(.list-pane.is-usage) が (0,3,0) で、
+   base.css の .is-insp-open .deck (0,2,0) と board.css の .is-board .deck (0,2,0) に
+   素で勝つ。**読む順ではなく詳細度で決まる。**
+   board.css の .is-board.is-insp-open .deck だけは同じ (0,3,0) だが、
+   あちらも 1 列なので取り合いにならない。
 
    **必ず @media で囲む。** narrow.css の .deck は @media の中にあるが、
    メディアクエリは詳細度を足さないので、:has() を付けたこちらが素で勝ってしまう。
    囲まないと、狭い画面で引き出しが壊れる */
 @media (min-width: 861px) {
   .deck:has(.list-pane.is-usage) {
-    grid-template-columns: minmax(20rem, 34rem) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 子セレクタにするのは、この3つが .deck の直下にしか無いことを示すため。
+     .is-board が使っている display での消し方に合わせる（hidden ではない） */
+  .deck:has(.list-pane.is-usage) > .detail-pane,
+  .deck:has(.list-pane.is-usage) > .insp,
+  .deck:has(.list-pane.is-usage) > .rail { display: none; }
+
+  /* 隣が無くなったので仕切りの線も要らない。
+     残すと画面のいちばん右端に、何も分けていない縦線が1本立つ */
+  .list-pane.is-usage { border-right: 0; }
+
+  /* カードは全幅だと横に伸びきって、中身（1行のタイトルと札2つ）に対して間延びする。
+     余った幅は列に使う。**並び順は変えない。** 既定の行方向のまま、実消費の多い順が
+     左上から右へ流れる（監視盤が store.rows を順に振り分けたのと同じで、
+     比較器をこちらに持たない） */
+  .is-usage .usage-rows {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
   }
 }

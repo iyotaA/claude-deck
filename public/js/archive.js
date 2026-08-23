@@ -9,7 +9,8 @@
 import { el, kb, shortStamp, stamp, agentTag } from './util.js';
 import { dom, store, syncQuery, ARCHIVE_SORTS, TABS } from './store.js';
 import { setListOpen } from './drawer.js';
-import { select } from './session.js';
+import { select, loadDetail } from './session.js';
+import { renderDetailIfNeeded } from './detail.js';
 import { renderList } from './list.js';
 import { showUsage, initUsageTab } from './usage-tab.js';
 
@@ -212,6 +213,7 @@ async function loadArchive({ append = false } = {}) {
  *   （まだ ?session= を store に取り込んでいないので、書き戻すと指定が消える）
  */
 export function setTab(tab, { sync = true } = {}) {
+  const prev = store.tab;
   store.tab = TABS.has(tab) ? tab : 'live';
   const now = store.tab;
 
@@ -226,10 +228,18 @@ export function setTab(tab, { sync = true } = {}) {
   dom.archive.hidden = now !== 'archive';
   dom.usageHead.hidden = now !== 'usage';
   dom.usage.hidden = now !== 'usage';
-  // 数値のときだけ左のペインを少し広げる（幅の指定は usage.css）。
-  // 5列の表と横棒が 20rem では窮屈で、ほぼ常に横スクロールになるため
+  // 数値のときだけ左のペインを全幅にする（幅と、中央・右を消すのは usage.css）。
+  // 目印をここに付けているのは、幅の話が CSS 側だけで閉じるため
   dom.listPane.classList.toggle('is-usage', now === 'usage');
   if (sync) syncQuery();
+
+  // 数値のあいだ apply() は中央を飛ばしている（stream.js）。出るときに追いつかせる。
+  // **数値から出たときだけ。** live ⇄ 書庫では詳細ペインが消えていないので、
+  // 止めていたものが無く、払う理由が無い。setMode('work') と同じ形
+  if (prev === 'usage' && now !== 'usage') {
+    renderDetailIfNeeded();
+    loadDetail(store.selected, { silent: true });
+  }
 
   if (now === 'live') {
     // まだ一覧を受け取っていない起動直後は描かない。空表示が一瞬出るのを避ける
@@ -249,7 +259,11 @@ export function initTabs() {
   dom.tabLive.addEventListener('click', () => setTab('live'));
   dom.tabArchive.addEventListener('click', () => setTab('archive'));
   dom.tabUsage.addEventListener('click', () => setTab('usage'));
-  initUsageTab();
+  // 数値タブは全幅で、詳細ペインが消えている（usage.css）。押した1本を見せるには
+  // 作業台へ戻すしかないので、その口だけを渡す。**向きはこちらから片方向のまま。**
+  // あちらから setTab を呼ぶと循環になる（監視盤のカードが buildCard(row, onPick) で
+  // 後始末だけ差し替えられているのと同じ形）
+  initUsageTab({ onPick: () => setTab('live') });
 
   dom.archiveQ.value = store.archive.q ?? '';
   dom.archiveSort.value = store.archive.sort;
