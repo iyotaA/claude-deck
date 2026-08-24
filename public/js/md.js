@@ -13,7 +13,13 @@
  * assistant の発言 3,278 件のうち 47.8% が何らかの記法を含み、内訳は
  * インラインコード 41.9% / 太字 23.2% / フェンス 9.5% / 箇条書き 8.2% /
  * 見出し 7.7% / 表 7.1% / 水平線 2.7% / 番号付き 2.1%。
- * リンク 0.2% / 引用 0.3% / チェックボックス 0% / 打ち消し 0% は出さない。
+ * リンク 0.2% / 引用 0.3% / 打ち消し 0% は出さない。
+ *
+ * チェックリスト（`- [ ]` / `- [x]` / `- [~]`）は後から足した。
+ * assistant の発言には1件も無いが（0 件 / 2,534 件）、プランの本文と
+ * ユーザーの指示文には来る（実測 2026-08-24。指示文 40 ログで 129 行・15 件、
+ * プラン 40 ログで 5 行・1 件）。承認待ちのプランは切らずに全部描く場所なので、
+ * そこに素の `- [ ]` が並ぶと、どこまで終わったのかが読めない。
  *
  * 出さない記法は素の文字として残る。つまり作らなくても「いまと同じ見え方」で、
  * 作らないことによる害が無い。リンクをここに足さないのは、
@@ -32,7 +38,8 @@
  *   { type: 'hr' }                        水平線
  *
  * 項目（list.items の1件）の形。
- *   { depth, ordered, num, spans }
+ *   { depth, ordered, num, task, spans }
+ *   task は null（ふつうの項目）か 'todo' / 'doing' / 'done'
  *
  * 装飾（spans の1件）の形。
  *   { type: 'text',   v }
@@ -51,6 +58,23 @@ const UL_RE = /^([ \t]*)([-*+])[ \t]+(.*)$/;
 
 /** 番号付き。1. と 1) の両方を受ける */
 const OL_RE = /^([ \t]*)(\d{1,9})[.)][ \t]+(.*)$/;
+
+/**
+ * チェックリストの印。箇条書き・番号付きの本文の頭に来る。
+ *
+ * 受けるのは4つだけ（`[ ]` `[x]` `[X]` `[~]`）。中を1文字なら何でも通す形にすると、
+ * `- [2] 消す対象の一覧とサイズを記録` のような手順の番号が
+ * 空のチェックボックスに化ける（実測4件。ユーザーの指示文）。
+ *
+ * `[~]`（進行中）は GFM に無く、Claude が独自に書くもの。実測1件で、
+ * TODO の in_progress と同じ意味で使われていた。
+ *
+ * 印の後ろは空白か行末。`- [x]abc` を読まないのは、記法として曖昧なため。
+ */
+const TASK_RE = /^\[([ xX~])\](?:[ \t]+|$)/;
+
+/** 印 → 状態。TODO パネル（pending / in_progress / completed）と同じ3つに寄せる */
+const TASK_STATE = { ' ': 'todo', x: 'done', X: 'done', '~': 'doing' };
 
 /** コードフェンスの開き。``` と ~~~ の両方を受け、後ろの語を言語として拾う */
 const FENCE_RE = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)/;
@@ -237,11 +261,16 @@ function readList(lines, from) {
       const indent = m[1].length;
       while (stack.length && indent < stack[stack.length - 1]) stack.pop();
       if (!stack.length || indent > stack[stack.length - 1]) stack.push(indent);
+      const text = m[3].trim();
+      const task = TASK_RE.exec(text);
       items.push({
         depth: Math.min(stack.length - 1, MAX_DEPTH),
         ordered: !!ol,
         num: ol ? Number(ol[2]) : null,
-        text: m[3].trim(),
+        task: task ? TASK_STATE[task[1]] : null,
+        // 印は本文から剥がす。残すと画面に `□ [ ] やること` と二重に出るうえ、
+        // blocksText（切る予算と「一致 N 件」の物差し）にも入ってしまう
+        text: task ? text.slice(task[0].length) : text,
       });
       continue;
     }
@@ -265,6 +294,7 @@ function readList(lines, from) {
         depth: it.depth,
         ordered: it.ordered,
         num: it.num,
+        task: it.task,
         spans: inlineSpans(it.text),
       })),
     },

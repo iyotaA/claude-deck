@@ -1,7 +1,7 @@
 /* Markdown の見た目。md-view.js が組んだ `.md` の中だけを塗る。
  *
  * 色は新しく作らない。使うのは既にある意味トークン（--border / --code-bg /
- * --bg-elev / --fg-faint）だけ。足すと tokens.css の二重定義
+ * --bg-elev / --fg-faint / --accent / --done）だけ。足すと tokens.css の二重定義
  * （prefers-color-scheme 側と [data-theme="dark"] 側）を両方直す義務が生まれる。
  *
  * detail.css より後に読む。`pre` と `code` はあちらが裸のセレクタで持っているので、
@@ -159,6 +159,35 @@
 }
 
 .md-list li + li { margin-top: .25rem; }
+
+/* ---- チェックリスト ---- */
+
+/* 印は ::marker で出す。理由は3つ。
+   (1) 本文を選択してコピーしたときに混ざらない（`.md.is-cut::after` と同じ理由）
+   (2) bullet と同じ場所に入るので、印の無い項目と同じリストに混ざっても本文の左端が揃う
+   (3) list-style を切って印の位置を自分で作らなくて済む
+   ::marker で使えるのは content と color と font-* だけなので、図形は描かずに字を置く。
+
+   記号と色は TODO パネル（panels.css）から借りる。同じ詳細ペインに並ぶので、
+   同じ「済んだ」を片方は ✓・片方は別の印で描くと、別の意味に見える。
+   ✓ は `.todo li[data-status="completed"] .st::before` と同じ字、
+   進行中の --accent も `[data-status="in_progress"]` と同じ。色は1つも新しく作らない。
+
+   md.js が印（`[x]` など）を本文から剥がしているので、ここで出しても二重にならない */
+.md-list li[data-task]::marker {
+  /* 全角の □ / ■ は本文と同じ大きさだと重いので1段落とす */
+  font-size: .82em;
+}
+
+.md-list li[data-task="todo"]::marker  { content: '□ '; color: var(--fg-faint); }
+.md-list li[data-task="doing"]::marker { content: '■ '; color: var(--accent); }
+.md-list li[data-task="done"]::marker  { content: '✓ '; color: var(--done); }
+
+/* 済んだ項目は本文を1段落とす。TODO パネルの completed と同じ扱いで、
+   残っているものが目で拾えるようにする。
+   取り消し線は付けない。あちらの `.subject` は1行の短い題だが、こちらは
+   長い文が来る（実測でプランの1項目が「Phase 1: 初期理解 (Excel対象把握 …) — 探偵A/B 完了」） */
+.md-list li[data-task="done"] { color: var(--fg-faint); }
 
 /* ------------------------------------------------------- 表 */
 

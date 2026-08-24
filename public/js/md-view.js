@@ -44,6 +44,9 @@ function spanNodes(spans, needle) {
  * 深さは1つずつしか増えない（md.js がスタックで決めているため）ので、
  * 「1つ深くなったら直前の項目の中へ新しいリストを挿す」だけで足りる。
  *
+ * チェックリスト（`- [x]` など）の項目は data-task を持つ。印そのものは
+ * CSS が出すので、ここでは目印を付けるだけにする。
+ *
  * 同じ深さで種類が変わったら（番号付きのあとに箇条書きが続くなど）、
  * 兄弟として別のリストを開く。1つの ol の中に混ぜると番号が続いてしまう。
  * そのために器（div.md-list）を1枚かぶせてある。
@@ -72,6 +75,10 @@ function listNode(block, needle) {
     }
 
     const li = el('li');
+    // チェックリストの印は CSS の ::marker が出す（markdown.css）。
+    // 文字を節点に入れないのは、本文を選択してコピーしたときに混ざるため
+    // （.md.is-cut::after の「…」と同じ理由）。印は md.js が本文から剥がしてある
+    if (it.task) li.dataset.task = it.task;
     li.append(...spanNodes(it.spans, needle));
     cur.list.append(li);
     cur.li = li;
