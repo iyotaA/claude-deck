@@ -171,6 +171,71 @@ test('項目の中の装飾も読む', () => {
   assert.deepEqual(flat(b[0].items[0].spans), ['code:a.js', 'text: を ', 'strong:消す']);
 });
 
+/* ------------------------------------------------------------ チェックリスト */
+
+test('チェックリストの4つの印を読む', () => {
+  // [~] は GFM に無く Claude が独自に書くもの。実測1件で in_progress の意味だった
+  const b = parseMarkdown('- [ ] 未\n- [x] 済\n- [X] 済\n- [~] 中');
+  assert.deepEqual(b[0].items.map((i) => i.task), ['todo', 'done', 'done', 'doing']);
+});
+
+test('印は本文から剥がす', () => {
+  // 残すと画面に印が二重に出るうえ、blocksText（予算と一致数の物差し）にも入る
+  const b = parseMarkdown('- [x] Phase 1: 初期理解');
+  assert.deepEqual(flat(b[0].items[0].spans), ['text:Phase 1: 初期理解']);
+});
+
+test('チェックボックスではない [n] を印にしない', () => {
+  // 実データにある手順の番号（ユーザーの指示文で4件）。中を1文字なら何でも通す形に
+  // すると、この番号が消えて空のチェックボックスに化ける
+  const b = parseMarkdown('- [2] 消す対象の一覧とサイズを記録\n- [3] フルバックアップ');
+  assert.deepEqual(b[0].items.map((i) => i.task), [null, null]);
+  assert.deepEqual(flat(b[0].items[0].spans), ['text:[2] 消す対象の一覧とサイズを記録']);
+});
+
+test('印の後ろに空白が無ければ読まない', () => {
+  // `- [x]abc` は記法として曖昧なので、素の文字として残す
+  const b = parseMarkdown('- [x]くっついている');
+  assert.equal(b[0].items[0].task, null);
+  assert.deepEqual(flat(b[0].items[0].spans), ['text:[x]くっついている']);
+});
+
+test('印だけで本文が無い行も読む', () => {
+  const b = parseMarkdown('- [ ]');
+  assert.equal(b[0].items[0].task, 'todo');
+  assert.deepEqual(b[0].items[0].spans, []);
+});
+
+test('番号付きでもチェックリストを読む', () => {
+  // 実測では箇条書きだけだが、ul と ol で分ける理由が無い
+  const b = parseMarkdown('1. [x] 済\n2. [ ] 未');
+  assert.deepEqual(b[0].items.map((i) => i.task), ['done', 'todo']);
+  assert.deepEqual(b[0].items.map((i) => i.ordered), [true, true]);
+});
+
+test('ふつうの項目の task は null', () => {
+  // 0 と不明を分けるのと同じで、印が無いことを 'todo' に丸めない
+  const b = parseMarkdown('- ただの項目');
+  assert.equal(b[0].items[0].task, null);
+});
+
+test('入れ子でも印を読む', () => {
+  const b = parseMarkdown('- [ ] 親\n  - [x] 子');
+  assert.deepEqual(b[0].items.map((i) => [i.depth, i.task]), [[0, 'todo'], [1, 'done']]);
+});
+
+test('印の中の装飾は印を剥がしたあとで読む', () => {
+  const b = parseMarkdown('- [x] `a.js` を **消す**');
+  assert.equal(b[0].items[0].task, 'done');
+  assert.deepEqual(flat(b[0].items[0].spans), ['code:a.js', 'text: を ', 'strong:消す']);
+});
+
+test('blocksText に印は入らない', () => {
+  // 印は ::marker で出すので画面に文字として出ない。物差しに入れると
+  // 「一致 N 件」と画面の色が食い違う
+  assert.equal(blocksText(parseMarkdown('- [x] 済\n- [ ] 未')), '済\n未');
+});
+
 /* ------------------------------------------------------------------ 表 */
 
 test('表は区切り行があるときだけ', () => {
