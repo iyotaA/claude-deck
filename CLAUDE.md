@@ -247,7 +247,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/runs/options` | 起こすフォームの選択肢。cwd の候補・権限モード・**モデルの候補**・思考量・予算の範囲・CLI の様子・いまの本数 |
 | `GET /api/runs/events?from=<seq>` | 取りこぼしの穴埋め。SSE が切れているあいだの速報を拾う |
 | `GET /api/runs/stream?from=<seq>` | **実行専用の SSE。**`/api/stream` には相乗りさせない |
-| `GET /api/runs/:id` | 1本ぶんの全部入り。粗い `rows()` と違って `counts` や `costUSD` も入る |
+| `GET /api/runs/:id` | 1本ぶんの全部入り。粗い `rows()` と違って `counts` や `lastLineAt` も入る |
 | `GET /api/health` | 生存確認。二重起動の判定にも使う。版・通知の設定と数え・**自動起動の様子**・**claude CLI を掴めたか**・**抱えている実行の数**もここに出る |
 | `GET /api/settings/notify` | 通知の設定。URL はマスク済み。出どころ（`sources` / `envSet`）も返す |
 | `GET /api/update` | 更新の状態。ランチャが書いた紙 ＋ `canApply`（いまの起動のされ方で当てられるか） |

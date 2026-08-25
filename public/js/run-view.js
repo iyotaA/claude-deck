@@ -43,6 +43,20 @@ function toneOf(state) {
   return null;
 }
 
+/**
+ * ドルの額を読める形にする。
+ *
+ * 桁を1本に決めない。1本の起動は 0.01 ドルを切ることもあれば数ドルにもなるので、
+ * 2桁だと前者が全部 `$0.00` になり、4桁だと後者が `$12.3456` で読みづらい。
+ *
+ * @param {unknown} n 額。数でなければ null（**0 と不明は別物**なので 0 は通す）
+ * @returns {string|null} 出せないなら null（fact が欄ごと落とす）
+ */
+function usd(n) {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return null;
+  return `$${n >= 1 ? n.toFixed(2) : n.toFixed(4)}`;
+}
+
 /** 実行の見出しに出す情報。状態が変わるまで動かない値だけを並べる。 */
 function factsOf(row) {
   const dl = el('dl', 'facts');
@@ -53,6 +67,10 @@ function factsOf(row) {
   fact(dl, '始めた時刻', row.startedAt ? stamp(row.startedAt) : null);
   fact(dl, 'PID', row.pid);
   fact(dl, '往復', row.turns);
+  // この起動で使った額。**速報を外したとき、この値だけがどこにも出なくなった**ので
+  // 行へ移して facts に置いた（`result` の行にしか無く、往復と同時にしか動かない）。
+  // 1往復も閉じていなければ null が来て欄ごと消える。**0 と不明を分ける**
+  fact(dl, '費用', usd(row.costUSD));
   // 0 が正常終了。fact が落とすのは null / undefined / 空文字だけなので、0 はそのまま出る
   // （util.js の tokens() と違って `if (!n)` ではない。ここは 0 と不明が別物として出る）
   fact(dl, '終了コード', row.exitCode);

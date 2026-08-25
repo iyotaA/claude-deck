@@ -1013,6 +1013,12 @@ export function createRunLedger({
       reason: run.reason,
       startedAt: run.startedAt,
       turns: run.turns,
+      // ここまでに使った額（累計）。**`turns` と同じ `result` でしか動かない。**
+      // 増えるのは往復が閉じた回だけで、そのとき `turns` も一緒に動くから、
+      // 粗い行に載せても差分判定に新しい変化点を作らない（毎秒 push にならない）。
+      // 行へ移したのは、実行の速報を画面から外してこの値の出口が無くなったため。
+      // まだ1往復も閉じていなければ null。**0 と不明を分ける**ので 0 を書かない
+      costUSD: run.costUSD,
       // 毎秒動かない（切り替えたときだけ変わる）ので粗い行に載せてよい。
       // 実行パネルの「替えて続ける」が `rows()` 側しか見ないため、ここに無いと欄を埋められない
       budgetUsd: run.budgetUsd,
@@ -1839,7 +1845,6 @@ export function createRunLedger({
       return {
         ...toRow(run),
         lastLineAt: run.lastLineAt,
-        costUSD: run.costUSD,
         counts: { ...run.counts },
       };
     },

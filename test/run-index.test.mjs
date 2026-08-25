@@ -832,7 +832,9 @@ test('rows と stats は台帳をそのまま見せる', () => {
   assert.equal(row.runId, res.runId);
   assert.equal(row.cwd, CWD);
   // 毎秒動く値を混ぜない（refresh() の差分判定を素通りして毎秒 push になる）
-  for (const key of ['lastLineAt', 'counts', 'costUSD', 'idleMs']) {
+  // 費用（costUSD）はここに入らない。`turns` と同じ `result` の回にしか動かないので、
+  // 載せても新しい変化点にならない（どの値が良くてどれが駄目かは run-ledger 側が見ている）
+  for (const key of ['lastLineAt', 'counts', 'idleMs']) {
     assert.equal(key in row, false, `${key} を rows() に載せてはいけない`);
   }
   assert.equal(h.runner.stats().active, 1);

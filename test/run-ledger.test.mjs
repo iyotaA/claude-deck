@@ -669,17 +669,47 @@ test('一覧の行に毎秒動く値を載せない', () => {
 
   const [row] = led.rows();
   // ここに載せると refresh() の差分判定を素通りして毎秒 push になる
-  for (const key of ['lastLineAt', 'counts', 'costUSD', 'idleMs', 'events']) {
+  for (const key of ['lastLineAt', 'counts', 'idleMs', 'events']) {
     assert.equal(key in row, false, `${key} を rows() に載せてはいけない`);
   }
   // 予算は毎秒動かない（切り替えたときだけ変わる）ので載せてよい。
   // ここに無いと実行パネルの「替えて続ける」が欄を埋められない
   assert.equal(row.budgetUsd, 5);
+  // 費用も載せてよい。動くのは `result` の回だけで、そのとき turns も一緒に動くので
+  // 差分判定に新しい変化点を作らない（詳細ペインの facts が出す）
+  assert.equal(row.costUSD, 0.4);
+  assert.equal(row.turns, 1);
   // 詳しい値は詳細を開いたときだけ引く側にある
   const d = led.get(id);
   assert.equal(d.lastLineAt, T + 2000);
   assert.equal(d.costUSD, 0.4);
   assert.equal(d.counts.lines, 2);
+});
+
+test('1往復も閉じていない実行の費用は 0 ではなく不明', () => {
+  const { led, id } = started();
+  feed(led, id, sAssistant('走ってる'), T + 1000);
+
+  const [row] = led.rows();
+  // 使っていないのではなく、まだ分からない。0 を書くと「無料で済んだ」と読める
+  assert.equal(row.costUSD, null);
+  assert.equal(row.turns, 0);
+});
+
+test('費用は往復が閉じるまで動かない', () => {
+  const { led, id } = started();
+  feed(led, id, sResult({ costUSD: 0.4 }), T + 1000);
+
+  // 時計だけ進めても行は変わらない（毎秒 push にならないことの確かめ）
+  const before = JSON.stringify(led.rows());
+  led.tick(T + 5000);
+  assert.equal(JSON.stringify(led.rows()), before);
+
+  // 次の往復が閉じたら、費用と往復が一緒に動く
+  feed(led, id, sResult({ costUSD: 0.9 }), T + 6000);
+  const [row] = led.rows();
+  assert.equal(row.costUSD, 0.9);
+  assert.equal(row.turns, 2);
 });
 
 test('読めなかった行も数える', () => {
