@@ -133,6 +133,36 @@ export const PENDING_MAX = 8;
  */
 export const PERMISSION_TIMEOUT_MS = 600000;
 
+/**
+ * 子を殺さずに替えられるもの。**キーは run と spec の項目名、`subtype` は要求の名前。**
+ *
+ * 3つの表（subtype・パラメタ名・日本語）に割らずに1つへまとめてある。
+ * 割ると項目を1つ足すときに直す場所が3箇所になり、必ずどれかが漏れる。
+ *
+ * `params` のキーが項目名と揃っていないのは向こうの都合（実測。
+ * `set_permission_mode` は `{mode}`、`set_model` は `{model}`）。だから `key` を持つ。
+ *
+ * **思考量（`set_max_thinking_tokens`）は入れていない。** 要求そのものは受け付けるが、
+ * 画面が持っているのは `--effort` の語（`low`〜`max`）で、あちらが欲しいのはトークン数。
+ * 対応表が `claude.exe` から読み取れず、当てずっぽうの数を撃つと
+ * **黙って意図しない思考量で走る**（誤りが画面のどこにも出ない）。測れるまで入れない。
+ */
+export const LIVE_FIELDS = Object.freeze({
+  permissionMode: { subtype: 'set_permission_mode', key: 'mode', label: '権限モード' },
+  model: { subtype: 'set_model', key: 'model', label: 'モデル' },
+});
+
+/**
+ * 「替えました」の答えを待つ上限。過ぎたら控えを捨てる。
+ *
+ * **過ぎても状態は変えない。** 撃ったのに返事が無いなら、いまどちらで走っているかは
+ * こちらには分からない。片方に倒して表示すると、それは推測を事実として出したことになる。
+ *
+ * 10秒なのは、これが「人を待つ時間」ではなく「相手のプロセスが1行返す時間」だから。
+ * 無いと、版が上がって応答を返さなくなった日に画面が永久に「切り替え中」で固まる。
+ */
+export const LIVE_ACK_TIMEOUT_MS = 10000;
+
 /** 要求カードに載せる本文の上限。プランの全文がここに入る。 */
 export const ASK_BODY_MAX = 8000;
 
@@ -528,6 +558,7 @@ export function createRunLedger({
   historyMax = HISTORY_MAX,
   pendingMax = PENDING_MAX,
   permissionTimeoutMs = PERMISSION_TIMEOUT_MS,
+  liveAckTimeoutMs = LIVE_ACK_TIMEOUT_MS,
 } = {}) {
   /** @type {Map<string, object>} runId → run */
   const runs = new Map();
@@ -631,7 +662,7 @@ export function createRunLedger({
    */
   function clearPending(run) {
     run.pending.clear();
-    run.modePending = null;
+    run.livePending.clear();
   }
 
   /**
@@ -720,11 +751,11 @@ export function createRunLedger({
    *
    * **自分が返した `control_response` も stdout にそのまま echo で戻ってくる**（実測 2026-08-25）。
    * ただし向こうの `request_id` は `pending` にしか入らず、こちらが採番した id は
-   * `modePending` にしか入らない。だから**採番した id と一致するかどうかだけ**で、
+   * `livePending` にしか入らない。だから**採番した id と一致するかどうかだけ**で、
    * 自分のこだまと本物の応答を分けられる。合わないものは黙って捨てる。
    *
-   * 受理を待ってから `permissionMode` を書き換えるのは、このアプリが全域で守っている
-   * 「0 と不明を分ける」の一環。**「plan のつもりが acceptEdits で走っている」は最も高くつく誤表示。**
+   * 受理を待ってから書き換えるのは、このアプリが全域で守っている「0 と不明を分ける」の一環。
+   * **「plan のつもりが acceptEdits で走っている」は最も高くつく誤表示。**
    *
    * @param {object} run 対象の run
    * @param {object} info `{requestId, ok, error, response}`
@@ -732,17 +763,47 @@ export function createRunLedger({
    * @returns {Array<object>} 積んだ速報
    */
   function takeControlResult(run, info, now) {
-    const p = run.modePending;
-    if (!p || !info.requestId || info.requestId !== p.requestId) return [];
-    run.modePending = null;
+    const id = typeof info.requestId === 'string' ? info.requestId : '';
+    const p = id ? run.livePending.get(id) : null;
+    if (!p) return [];
+    run.livePending.delete(id);
+    const f = LIVE_FIELDS[p.field];
     if (!info.ok) {
-      return [pushNote(run, `権限モードを ${p.mode} に替えられませんでした（${info.error ?? '理由不明'}）`, now)];
+      return [pushNote(run, `${f.label}を ${p.value} に替えられませんでした（${info.error ?? '理由不明'}）`, now)];
     }
-    run.permissionMode = p.mode;
-    // `kind` を増やさず `note` に `mode` を1つ添えてある。
+    run[p.field] = p.value;
+    // `kind` を増やさず `note` に `applied` を1つ添えてある。
     // 新しい kind を作ると画面の `bodyOf` が既定の枝に落ちて**中身の無い行**が出るし、
-    // 殻（`index.mjs`）が `entry.spec.permissionMode` を同期するのに要るのはこの1語だけ
-    return [pushEvent(run, { kind: 'note', text: `権限モードを ${p.mode} にしました`, mode: p.mode }, now)];
+    // 殻（`index.mjs`）が `entry.spec` を同期するのに要るのはこの2語だけ
+    return [pushEvent(run, {
+      kind: 'note',
+      text: `${f.label}を ${p.value} にしました`,
+      applied: { field: p.field, value: p.value },
+    }, now)];
+  }
+
+  /**
+   * 返事の無いまま時間切れになった「替えました」の控えを捨てる。
+   *
+   * **状態は変えない。** 撃ったのに返事が無いなら、いまどちらで走っているかは分からない。
+   * 古いほうに据え置くのも新しいほうへ倒すのも、どちらも推測を事実として出すことになる。
+   * だから言うのは「分からない」だけにする（`stalled` が「応答なし」と診断しないのと同じ）。
+   *
+   * @param {object} run 対象の run
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報。時間切れが無ければ空
+   */
+  function sweepLive(run, now) {
+    if (run.livePending.size === 0) return [];
+    const out = [];
+    for (const [id, p] of [...run.livePending]) {
+      // 時計が巻き戻ったとき（負）に捨てないよう、この向きで書く
+      if (!(now - p.at >= liveAckTimeoutMs)) continue;
+      run.livePending.delete(id);
+      const label = LIVE_FIELDS[p.field].label;
+      out.push(pushNote(run, `${label}の切り替えに返事がありませんでした。いまの${label}は分かりません`, now));
+    }
+    return out;
   }
 
   /**
@@ -826,6 +887,10 @@ export function createRunLedger({
       // 答えて消えたことも取りこぼしも次のフレームで自己修復する。
       // 中身は要求が来た時と消えた時にしか変わらない＝毎秒 push にはならない
       asks: [...run.pending.values()].map(askRow),
+      // 撃ったが返事待ちの切り替え。**行に載せるのは `asks` と同じ理由。**
+      // 別のタブで替えた最中にもう一方が二重に撃つのを止められるし、
+      // 押した窓を閉じても「切り替え中」が残る。`at` を載せないのは毎秒の差分判定のため
+      switching: [...run.livePending.values()].map((p) => ({ field: p.field, value: p.value })),
     };
   }
 
@@ -892,7 +957,9 @@ export function createRunLedger({
         /** @type {Map<string, object>} requestId → 未応答の要求 */
         pending: new Map(),
         /** @type {object|null} こちらが撃った `set_permission_mode` の控え。受理されるまで持つ */
-        modePending: null,
+        // 撃った「替えました」の控え。`Map<requestId, {field, value, at}>`。
+        // **受理されるまで持つ**（受理を待たずに書き換えないため）
+        livePending: new Map(),
         counts: { lines: 0, broken: 0, events: 0 },
       });
       lastStartAt = now;
@@ -1124,13 +1191,15 @@ export function createRunLedger({
       // 断ったときに撃たないのは、プランを差し戻したのにモードだけ抜けるのを防ぐため
       if (behavior === 'allow' && typeof decision.then === 'string' && decision.then
         && typeof decision.thenRequestId === 'string' && decision.thenRequestId) {
-        run.modePending = { requestId: decision.thenRequestId, mode: decision.then, at: now };
+        run.livePending.set(decision.thenRequestId, {
+          field: 'permissionMode', value: decision.then, at: now,
+        });
         outbox.push({
           runId,
           kind: 'control-request',
           requestId: decision.thenRequestId,
-          subtype: 'set_permission_mode',
-          params: { mode: decision.then },
+          subtype: LIVE_FIELDS.permissionMode.subtype,
+          params: { [LIVE_FIELDS.permissionMode.key]: decision.then },
         });
         events.push(pushNote(run, `権限モードを ${decision.then} に替えています`, now));
       }
@@ -1138,6 +1207,72 @@ export function createRunLedger({
       // 全部答えたら動き出す。**1件でも残っていれば許可待ちのまま。**
       // 並列のツール呼び出しでは複数まとめて来るので、1件答えただけでは進まない
       if (run.pending.size === 0 && run.state === 'needs-permission') run.state = 'running';
+      return { ok: true, events };
+    },
+
+    /**
+     * 子を殺さずに設定を替える。**撃つだけ。** 効いたかどうかは `takeControlResult` が決める。
+     *
+     * 断る理由の切り分けはここでやり、**HTTP のどの番号にするかは殻（`run/index.mjs`）が決める。**
+     * `answer()` と同じ作法。
+     *
+     * **値の語彙は検証しない**（`spec.mjs` の `checkPermissionMode` / `checkModel` が持っている）。
+     * 受け取るのは検証済みの値と、殻が採番した `requestId`。採番をここでやると `randomUUID` が
+     * 要って、「時刻すら外から受ける純関数の器」という作りが崩れる。
+     *
+     * **台帳を触る前に全部確かめる。** 途中で断ると、1つ目だけ撃たれて2つ目が撃たれない
+     * 半端な状態になる（呼んだ側からは「400 だった」としか見えないのに、片方は替わっている）。
+     *
+     * @param {string} runId 対象
+     * @param {Array<{field:string, value:string, requestId:string}>} wants 替えたいもの
+     * @param {number} now 時刻
+     * @returns {{ok:boolean, code?:string, reason?:string, events:Array<object>}}
+     *          `code` は `no-run` / `over` / `no-child` / `bad` / `same` / `switching`
+     */
+    setLive(runId, wants, now) {
+      const run = runs.get(runId);
+      if (!run) return { ok: false, code: 'no-run', events: [] };
+      if (isRunOver(run.state)) return { ok: false, code: 'over', events: [] };
+      // 予算切れなど、終端ではないが子がいないもの。こちらは建て直す（`/switch`）しかない
+      if (isChildDone(run.state)) return { ok: false, code: 'no-child', events: [] };
+
+      const list = Array.isArray(wants) ? wants : [];
+      if (list.length === 0) return { ok: false, code: 'bad', events: [] };
+
+      const seen = new Set();
+      for (const w of list) {
+        const f = LIVE_FIELDS[w?.field];
+        if (!f || typeof w.value !== 'string' || !w.value
+          || typeof w.requestId !== 'string' || !w.requestId) {
+          return { ok: false, code: 'bad', events: [] };
+        }
+        // 同じ項目を2つ並べられると、後から来た答えがどちらのものか分からなくなる
+        if (seen.has(w.field)) return { ok: false, code: 'bad', events: [] };
+        seen.add(w.field);
+        if (run[w.field] === w.value) {
+          return { ok: false, code: 'same', reason: `${f.label}はいまと同じです`, events: [] };
+        }
+        for (const p of run.livePending.values()) {
+          if (p.field !== w.field) continue;
+          // 二重に撃つと、返ってきた答えのどちらが後なのか決められない。
+          // 10秒（`liveAckTimeoutMs`）で控えが落ちるので、詰まったままにはならない
+          return { ok: false, code: 'switching', reason: `${f.label}はいま切り替え中です`, events: [] };
+        }
+      }
+
+      const events = [];
+      for (const w of list) {
+        const f = LIVE_FIELDS[w.field];
+        run.livePending.set(w.requestId, { field: w.field, value: w.value, at: now });
+        outbox.push({
+          runId,
+          kind: 'control-request',
+          requestId: w.requestId,
+          subtype: f.subtype,
+          params: { [f.key]: w.value },
+        });
+        events.push(pushNote(run, `${f.label}を ${w.value} に替えています`, now));
+      }
       return { ok: true, events };
     },
 
@@ -1333,6 +1468,14 @@ export function createRunLedger({
         const swept = sweepAsks(run, now);
         if (swept.length > 0) {
           events.push(...swept);
+          changed.push(run.runId);
+        }
+
+        // 「替えました」の返事の時間切れ。**状態（`state`）は変えないが、行は変わる。**
+        // `switching` が空に戻るので `changed` に入れる。入れないと画面が「切り替え中」のまま残る
+        const settled = sweepLive(run, now);
+        if (settled.length > 0) {
+          events.push(...settled);
           changed.push(run.runId);
         }
 

@@ -13,7 +13,7 @@
  * だから外から来た値は、全部この1枚で受けてから先へ渡す。
  *
  * - cwd は**許可リストの配下だけ**。任意の文字列を受けない
- * - 権限モードは語彙で固定。`manual` はまだ画面に出さない（理由は PERMISSION_MODES のところ）
+ * - 権限モードは語彙で固定。値を確かめるのは `checkPermissionMode()` の1箇所
  * - `bypassPermissions` は環境変数が立っているときだけ語彙に入る
  * - **`-` で始まる値はどの項目でも弾く**。argv は配列で渡すので `shell` の穴は無いが、
  *   `--model` の値が `--dangerously-skip-permissions` だったら commander は
@@ -34,20 +34,18 @@ import { randomUUID } from 'node:crypto';
 import { isSwitchOn } from '../shared/env.mjs';
 
 /**
- * 画面に出す権限モード。
- *
- * `manual` をまだ入れていない。**理由は「返し方が分からないから」ではない。**
- * 実測（2026-08-25・claude 2.1.243）で `control_request` の受け方も `control_response` の
- * 返し方も確かめ、`--permission-prompt-tool stdio` を付けて画面から答えられるようにした。
- * 残っているのは語彙と見せ方の話だけなので、ラベルを英語主に揃えるときに一緒に足す。
+ * 画面に出す権限モード。**危なくない順に並べる。** 画面の選択肢もこの順で出る。
  *
  * **argv の語彙と control の語彙は別物**（どちらも実測）。
  * `--permission-mode manual` で起こしても `system/init` は `"default"` と名乗り、
  * `set_permission_mode` の側は `manual` を受け付けて `default` に正規化する。
- * 逆に argv 側には `default` が無い。読み替えが要るのは画面へ出すときだけなので、
- * 使う場所ができるまで表は作らない（使われない読み替え表が一番古くなる）。
+ * 逆に argv 側には `default` が無い。
+ *
+ * **それでも読み替え表は作らない。** 台帳は `system/init` の `permissionMode` を読んでいない
+ * （`run.permissionMode` が動くのは起動指定と `set_permission_mode` の受理だけ）ので、
+ * 食い違う場所が無い。使われない読み替え表が一番古くなる。
  */
-export const PERMISSION_MODES = Object.freeze(['plan', 'acceptEdits', 'auto']);
+export const PERMISSION_MODES = Object.freeze(['plan', 'manual', 'acceptEdits', 'auto']);
 
 /**
  * 環境変数が立っているときだけ語彙に加わるモード。
@@ -61,16 +59,27 @@ export const BYPASS_MODE = 'bypassPermissions';
 export const DEFAULT_PERMISSION_MODE = 'plan';
 
 /**
- * 画面に出す日本語。
+ * 画面に出す言い方。**CLI の名前を主にして、日本語は括弧で補う。**
+ *
+ * 普段ターミナルで見ているのは `plan mode on` のような英語のほうで、
+ * 日本語だけだと画面と手元が別の言葉になる。並べるのは同じものだと分かるようにする。
+ *
+ * `on` は「いま入っている」という状態の話なので**ここには入れない。**
+ * 画面が「いま: 」を前に置く。語彙を2本（選択肢用と状態用）にすると直す場所が2箇所になる。
+ *
+ * `acceptEdits` の括弧が変わったのは文言の好みではなく、**挙動が実際に変わったから。**
+ * 前の「ファイルの変更まで自動で通す」は「Bash は断って先へ進む」を前提にしていて、
+ * `--permission-prompt-tool stdio` を付けた時点で嘘になっている（いまは確認が画面に出る）。
  *
  * サーバー側に置くのは STATE_LABELS の前例に倣ったもの。
  * 語彙を1つ増やすときに直す場所を1箇所にしておく。
  */
 export const PERMISSION_MODE_LABELS = Object.freeze({
-  plan: '読むだけ（書き換えない）',
-  acceptEdits: 'ファイルの変更まで自動で通す',
-  auto: 'おまかせ（Claude が自分で判断する）',
-  [BYPASS_MODE]: '何も聞かずに全部実行する（危険）',
+  plan: 'plan mode（読むだけ・書き換えない）',
+  manual: 'manual mode（毎回確認する）',
+  acceptEdits: 'accept edits（ファイル変更は自動・コマンドは確認）',
+  auto: 'auto mode（Claude が判断・危ないものだけ確認）',
+  [BYPASS_MODE]: 'bypass permissions（何も確認しない・危険）',
 });
 
 /** CLI の `--effort` の語彙。実物の --help から採った。 */
@@ -154,6 +163,50 @@ export function allowedModes(env = process.env) {
   const modes = [...PERMISSION_MODES];
   if (isSwitchOn(env?.CLAUDE_DECK_RUN_ALLOW_BYPASS)) modes.push(BYPASS_MODE);
   return modes;
+}
+
+/**
+ * 権限モードの値を1つ確かめる。
+ *
+ * **`buildRunSpec()`（起こすとき）と `POST /api/runs/:id/mode`（途中で替えるとき）で共有する。**
+ * bypass だけ断り方が違うので、2箇所に書くと必ず片方が古くなる。
+ *
+ * 既定へ倒すのは呼び出し側の仕事にしてある。起こすときは `plan` に倒すが、
+ * 途中で替えるときに空を `plan` と読むと**押し間違いで読み取り専用に落ちる。**
+ *
+ * @param {*} raw 画面から来た値
+ * @param {object} [env] 環境変数
+ * @returns {{ok: true, mode: string} | {ok: false, reason: string}}
+ */
+export function checkPermissionMode(raw, env = process.env) {
+  const mode = str(raw);
+  if (!mode) return { ok: false, reason: '権限モードの指定がありません' };
+  if (allowedModes(env).includes(mode)) return { ok: true, mode };
+  // bypass だけは理由を分けて出す。語彙に無いのではなく、この環境で出していないだけなので
+  return {
+    ok: false,
+    reason: mode === BYPASS_MODE
+      ? 'このモードは環境変数で許可されていません'
+      : '権限モードの指定が不正です',
+  };
+}
+
+/**
+ * モデルの値を1つ確かめる。こちらも起こすときと途中で替えるときで共有する。
+ *
+ * **空を通さない。** 起こすときは指定しない道（CLI の既定に任せる）があるので、
+ * 呼ぶかどうかを呼び出し側が決める。
+ *
+ * @param {*} raw 画面から来た値
+ * @returns {{ok: true, model: string} | {ok: false, reason: string}}
+ */
+export function checkModel(raw) {
+  const model = str(raw);
+  if (!model) return { ok: false, reason: 'モデルの指定がありません' };
+  if (flagLike(model) || model.length > MODEL_MAX || !MODEL_RE.test(model)) {
+    return { ok: false, reason: 'モデルの指定が不正です' };
+  }
+  return { ok: true, model };
 }
 
 /**
@@ -367,19 +420,16 @@ export function buildRunSpec(input = {}, {
     return { ok: false, reason: `指示が長すぎます（${PROMPT_MAX} 文字まで）` };
   }
 
-  const modes = allowedModes(env);
+  // 起こすときだけ、空を既定へ倒してから確かめる
   const rawMode = str(src.permissionMode) || DEFAULT_PERMISSION_MODE;
-  if (!modes.includes(rawMode)) {
-    // bypass だけは理由を分けて出す。語彙に無いのではなく、この環境で出していないだけなので
-    const reason = rawMode === BYPASS_MODE
-      ? 'このモードは環境変数で許可されていません'
-      : '権限モードの指定が不正です';
-    return { ok: false, reason };
-  }
+  const checkedMode = checkPermissionMode(rawMode, env);
+  if (!checkedMode.ok) return { ok: false, reason: checkedMode.reason };
 
+  // モデルは指定しない道がある（CLI の既定に任せる）ので、空のときは確かめない
   const model = str(src.model);
-  if (model && (flagLike(model) || model.length > MODEL_MAX || !MODEL_RE.test(model))) {
-    return { ok: false, reason: 'モデルの指定が不正です' };
+  if (model) {
+    const checkedModel = checkModel(model);
+    if (!checkedModel.ok) return { ok: false, reason: checkedModel.reason };
   }
 
   const effort = str(src.effort);

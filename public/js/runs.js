@@ -66,7 +66,7 @@ const listeners = new Set();
  * 行のうち、詳細ペインの作りに影響する値だけを1本の文字列にする。
  *
  * **出来事が増えただけでは動かない。** 動くのは「現れた」「状態が変わった」「終わった」
- * 「許可を訊かれた・答えた」の4つ。
+ * 「許可を訊かれた・答えた」「設定を替えた」の5つ。
  * detail.js の detailKeyOf() がこれを見るので、速報のたびに詳細ペインを作り直すと
  * 開いた <details> と入力中の caret が消える。
  *
@@ -79,7 +79,15 @@ function stampOf(row) {
   // 許可要求は1件目の id だけ見る。**来た瞬間と消えた瞬間にだけ動く値**なので、
   // 速報が数百行来ても作り直しは起きない（この関数の性質はそのまま保たれる）
   const ask = row.asks?.[0]?.id ?? '';
-  return [row.runId, row.state, exit, row.reason ?? '', row.turns ?? '', ask].join(':');
+  // 子を殺さずに替えたぶん。**撃った瞬間と、受理・拒否・時間切れで落ち着いた瞬間にだけ動く。**
+  // 入れないと、替わったのに切り替えの欄が古い値のままになり、
+  // 「替えています…」が消えないまま残る（消す権利は行の側にある）
+  const live = [
+    row.permissionMode ?? '',
+    row.model ?? '',
+    (row.switching ?? []).map((c) => c.field).join('+'),
+  ].join('/');
+  return [row.runId, row.state, exit, row.reason ?? '', row.turns ?? '', ask, live].join(':');
 }
 
 /** 登録した相手へ配る。1人が投げても残りへ配り続ける。 */

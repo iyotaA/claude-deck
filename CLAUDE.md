@@ -137,7 +137,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - `notify/index.mjs:createNotifier`
 - `update/state.mjs:loadUpdateState`
 - `startup/state.mjs:loadStartupState`
-- `run/index.mjs:createRunner`（`server.mjs` が触る唯一の口。13個の関数を返す）
+- `run/index.mjs:createRunner`（`server.mjs` が触る唯一の口。14個の関数を返す）
 - `run/spec.mjs:buildRunSpec`（起動指定を検証して argv まで組む）
 - `os/focus.mjs:focusTerminal`
 - `os/claude.mjs:probeClaude` / `claudeInfo`（探すのと、結果を読むのを分けてある）
@@ -255,6 +255,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `POST /api/runs/:id/input` | 走っている（または待っている）ものへ1行送る |
 | `POST /api/runs/:id/answer` | 許可要求に答える。許可・拒否と、続けて撃つ権限モードと、選択式の質問へ選んだ札（`choices`）。**質問用の窓口を分けない**（実体は同じ `can_use_tool` の1本の道） |
 | `POST /api/runs/:id/stop` | 止める。3段階。もう終わっているものへの連打は 200 |
+| `POST /api/runs/:id/mode` | **子を殺さずに**権限モード・モデルを替える。202（受理はまだ分からない）。指示文は要らない |
 | `POST /api/runs/:id/switch` | モデル・思考量・権限モードを替えて `--resume` で続ける。202 |
 | `POST /api/settings/notify` | 保存して即反映。応答は GET と同じ形 |
 | `POST /api/settings/notify/test` | テスト送信を1通。3秒のクールダウン付き |
@@ -305,6 +306,10 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 `POST /api/runs/:id/answer` はその中間で `ANSWER_BODY_MAX`（64KB）。
 来るのは選んだ札だけだが、質問の「その他（自分で書く）」は1問 2000 文字まで受けるので、
 8件ぶんが日本語なら 48KB になる。8KB のままだと断りが「HTTP 400」としか出ない。
+
+`POST /api/runs/:id/mode` は**既定の 8KB のまま**。
+来るのは語が2つだけで、**指示文を要求しないことがこの窓口の値打ち**なので、
+ここで長い本文を受ける口を開けると `/switch` との住み分けが崩れる。
 
 ルーティングは**完全一致を正規表現より手前に置く**。
 `/api/runs/events` と `/api/runs/stream` は `/^\/api\/runs\/([\w-]{1,64})$/` にも当たるので、

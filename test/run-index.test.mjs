@@ -1074,3 +1074,112 @@ test('畳んだあとに要求が残らない', async () => {
   assert.deepEqual(row.asks, []);
   assert.equal(row.state, 'stopped');
 });
+
+/*
+ * 子を殺さずに替える（setLive）
+ */
+
+test('替えたいぶんだけ control_request を書く。指示文は要らない', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  const out = h.runner.setLive(res.runId, { permissionMode: 'acceptEdits', model: 'claude-sonnet-5' });
+  assert.equal(out.status, 202, '受理されたかはまだ分からない。撃っただけ');
+
+  const lines = (await stdinText(child)).trim().split('\n').map((t) => JSON.parse(t));
+  assert.equal(lines.length, 2, 'user 行は1つも混ざらない');
+  assert.deepEqual(lines.map((l) => l.request.subtype), ['set_permission_mode', 'set_model']);
+  assert.equal(lines[0].request.mode, 'acceptEdits');
+  assert.equal(lines[1].request.model, 'claude-sonnet-5');
+  // 番号は殻が採番する。2本が同じ番号だと、返ってきた答えをどちらにも当てられる
+  assert.notEqual(lines[0].request_id, lines[1].request_id);
+  assert.ok(lines.every((l) => l.request_id.startsWith('req_')));
+});
+
+test('受理されるまで替わらない。子の建て直しも起きない', async () => {
+  const h = harness();
+  const res = h.start();
+  const sid = res.row.sessionId;
+  const child = h.children[0];
+  await stdinText(child);
+
+  h.runner.setLive(res.runId, { permissionMode: 'acceptEdits' });
+  assert.equal(h.runner.get(res.runId).permissionMode, 'plan');
+  assert.equal(h.calls.length, 1, '殺していない');
+  assert.equal(h.children[0].pid, 1000);
+
+  const shot = JSON.parse((await stdinText(child)).trim());
+  feed(child, sControlResponse(shot.request_id, { sessionId: sid }));
+  await settle();
+  assert.equal(h.runner.get(res.runId).permissionMode, 'acceptEdits');
+  assert.equal(h.calls.length, 1, '受理されたあとも建て直していない');
+});
+
+test('受理されたら起動指定のモデルも替わる', async () => {
+  // 権限モードと同じ落とし穴。忘れると建て直しで古いモデルへ戻る
+  const h = harness();
+  const res = h.start(req({ model: 'claude-opus-5' }));
+  const sid = res.row.sessionId;
+  const child = h.children[0];
+  await stdinText(child);
+
+  h.runner.setLive(res.runId, { model: 'claude-sonnet-5' });
+  const shot = JSON.parse((await stdinText(child)).trim());
+  feed(child, sControlResponse(shot.request_id, { sessionId: sid }));
+  await settle();
+
+  feed(child, sResult({ sessionId: sid }));
+  await settle();
+  child.close(0);
+  await settle();
+  h.runner.input(res.runId, '続けて');
+
+  const args = h.calls[1].args;
+  assert.equal(args[args.indexOf('--model') + 1], 'claude-sonnet-5');
+});
+
+test('替えられなかったら起動指定も替えない', async () => {
+  const h = harness();
+  const res = h.start();
+  const sid = res.row.sessionId;
+  const child = h.children[0];
+  await stdinText(child);
+
+  h.runner.setLive(res.runId, { permissionMode: 'auto' });
+  const shot = JSON.parse((await stdinText(child)).trim());
+  feed(child, sControlResponse(shot.request_id, { sessionId: sid, ok: false, error: 'だめ' }));
+  await settle();
+  assert.equal(h.runner.get(res.runId).permissionMode, 'plan');
+});
+
+test('替えるときの断る番号', async () => {
+  const h = harness();
+  const res = h.start();
+  await stdinText(h.children[0]);
+
+  assert.equal(h.runner.setLive('しらない', { permissionMode: 'auto' }).status, 404);
+  assert.equal(h.runner.setLive(res.runId, {}).status, 400);
+  assert.equal(h.runner.setLive(res.runId, { permissionMode: 'yolo' }).status, 400);
+  assert.equal(h.runner.setLive(res.runId, { model: '--help' }).status, 400);
+  // 既定では環境変数で許していない
+  assert.equal(h.runner.setLive(res.runId, { permissionMode: 'bypassPermissions' }).status, 400);
+  assert.equal(h.runner.setLive(res.runId, { permissionMode: 'plan' }).status, 400, 'いまと同じ');
+});
+
+test('子が閉じたあとは替えずに 409。建て直すほうへ案内する', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, sResult({ sessionId: res.row.sessionId }));
+  await settle();
+  child.close(0);
+  await settle();
+
+  const out = h.runner.setLive(res.runId, { permissionMode: 'auto' });
+  assert.equal(out.status, 409);
+  assert.ok(out.reason.includes('替えて続ける'));
+});

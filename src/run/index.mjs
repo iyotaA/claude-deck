@@ -46,7 +46,9 @@ import {
 } from '../parse/stream.mjs';
 import { oneLine } from '../shared/text.mjs';
 import { LINE_MAX, claudeInfo, createLineSplitter, spawnClaude, stopClaude } from '../os/claude.mjs';
-import { PERMISSION_MODES, PROMPT_MAX, buildRunSpec, mergeSwitch } from './spec.mjs';
+import {
+  PERMISSION_MODES, PROMPT_MAX, buildRunSpec, checkModel, checkPermissionMode, mergeSwitch,
+} from './spec.mjs';
 import { RUN_MAX, createRunLedger, isChildDone, isRunOver } from './ledger.mjs';
 
 /**
@@ -75,6 +77,23 @@ const ANSWER_DENY = Object.freeze({
   // **理由は台帳が持っている。** どの質問が足りないかは原文を見ないと言えないので、
   // ここの文字列は使われず `res.reason` に差し替わる（読む人が迷わないよう既定も書いておく）
   'bad-choices': { status: 400, reason: '選んだ内容では答えられません' },
+});
+
+/**
+ * 子を殺さずに替えるときの断り方。
+ *
+ * `no-child` を `over` と分けてあるのは、**行き先が違うから。**
+ * もう終わっているものは何もできないが、予算切れで子だけいないものは
+ * 「替えて続ける」（`/switch`）で建て直せる。同じ 409 でもそれを言わないと詰まる。
+ */
+const LIVE_DENY = Object.freeze({
+  'no-run': { status: 404, reason: 'その実行は見つかりません' },
+  over: { status: 409, reason: 'その実行はもう終わっています' },
+  'no-child': { status: 409, reason: 'いま子がいません（「替えて続ける」を使ってください）' },
+  bad: { status: 400, reason: '替え方が不正です' },
+  // 下の2つは台帳が項目名つきの理由を持っているので、そちらに差し替わる
+  same: { status: 400, reason: 'いまと同じです' },
+  switching: { status: 409, reason: 'いま切り替え中です' },
 });
 
 /**
@@ -173,23 +192,25 @@ export function createRunner({
   }
 
   /**
-   * 権限モードが替わったことを起動指定にも書き戻す。
+   * 子を殺さずに替えたものを、起動指定にも書き戻す。
    *
-   * **忘れると `restart()` と `switchRun()` が古いモードで建て直す。**
+   * **忘れると `restart()` と `switchRun()` が古い値で建て直す。**
    * 画面には替わったと出ているのに、次の子は plan で立つ——
    * 「替えたのに戻っていた」という、いちばん気づきにくい壊れ方になる。
    *
-   * 見るのは `ev.mode`（受理の知らせに1つだけ付く）。
+   * 見るのは `ev.applied`（受理の知らせに1つだけ付く `{field, value}`）。
    * 新しい kind を作らないのは、画面側が知らない kind を空の本文で描くため。
+   * **項目名で分岐しない。** `LIVE_FIELDS` に1つ足したときにここを直し忘れる道を作らない。
    *
    * @param {Array<object>} events 台帳が積んだ出来事
    * @returns {void}
    */
-  function syncMode(events) {
+  function syncLive(events) {
     for (const ev of events) {
-      if (typeof ev?.mode !== 'string' || !ev.mode) continue;
+      const applied = ev?.applied;
+      if (typeof applied?.field !== 'string' || typeof applied?.value !== 'string') continue;
       const spec = live.get(ev.runId)?.spec;
-      if (spec) spec.permissionMode = ev.mode;
+      if (spec) spec[applied.field] = applied.value;
     }
   }
 
@@ -199,7 +220,7 @@ export function createRunner({
    * 順に意味がある。
    *
    * 1. **stdin へ書くのが先。** 相手は答えを待って1行も進めていない
-   * 2. 受理された権限モードを起動指定へ書き戻す
+   * 2. 受理された切り替えを起動指定へ書き戻す
    * 3. 速報を配る（配布の失敗で子の読み取りを止めない）
    *
    * @param {Array<object>} events 台帳が積んだ出来事
@@ -227,7 +248,7 @@ export function createRunner({
     }
 
     const all = extra.length > 0 ? [...list, ...extra] : list;
-    syncMode(all);
+    syncLive(all);
     emit(all);
     return failed;
   }
@@ -581,6 +602,65 @@ export function createRunner({
   }
 
   /**
+   * 子を殺さずに設定を替える。
+   *
+   * **`/switch`（建て直し）との住み分けは呼ぶ側が決める。**
+   * 子が生きていればこちら、予算切れなどで子がいなければあちら。
+   * こちらに「いなければ建て直す」近道を作ると、呼ぶ側から見て
+   * 「指示文が要るときと要らないときがある窓口」になり、判断が窓口の中に隠れる。
+   *
+   * **202 を返す。** 撃っただけで、受理されたかはまだ分からない。
+   * 確定するのは `control_response` が返って `takeControlResult` が書き戻したときで、
+   * そのとき速報が1本流れて行の値が変わる。
+   *
+   * @param {string} runId 実行の識別子
+   * @param {object} body `{permissionMode?, model?}`
+   * @returns {{ok:boolean, status:number, row?:object, reason?:string}}
+   */
+  function setLive(runId, body) {
+    const at = clock();
+    const row = ledger.get(runId);
+    if (!row) return { ok: false, status: 404, reason: 'その実行は見つかりません' };
+    if (isRunOver(row.state)) return { ok: false, status: 409, reason: 'その実行はもう終わっています' };
+    // 予算切れは終端ではないが子がいない。加えて `waiting` は
+    // 「1往復閉じて子がいない」ときと「許可待ちが時間切れになった（子は生きている）」ときで
+    // 同じ札になるので、**状態だけでは足りない。**
+    // 撃つ先が在るかを知っているのは殻だけなので、ここで見る。
+    // 見ないと台帳に控えだけ積んで書けず、案内の 409 が素っ気ない 500 になる
+    const child = live.get(runId)?.child;
+    if (isChildDone(row.state) || !child?.stdin || child.stdin.destroyed) {
+      return { ok: false, status: 409, reason: 'いま子がいません（「替えて続ける」を使ってください）' };
+    }
+
+    // **採番はここ。** 台帳に `randomUUID` を持ち込むと「時刻すら外から受ける」作りが崩れる
+    const wants = [];
+    if (body?.permissionMode !== undefined) {
+      const checked = checkPermissionMode(body.permissionMode, env);
+      if (!checked.ok) return { ok: false, status: 400, reason: checked.reason };
+      wants.push({ field: 'permissionMode', value: checked.mode, requestId: nextRequestId() });
+    }
+    if (body?.model !== undefined) {
+      const checked = checkModel(body.model);
+      if (!checked.ok) return { ok: false, status: 400, reason: checked.reason };
+      wants.push({ field: 'model', value: checked.model, requestId: nextRequestId() });
+    }
+    if (wants.length === 0) return { ok: false, status: 400, reason: '替えるものがありません' };
+
+    const res = ledger.setLive(runId, wants, at);
+    if (!res.ok) {
+      const deny = LIVE_DENY[res.code] ?? { status: 500, reason: '替えられませんでした' };
+      // 台帳が項目名つきの理由を持っているときはそちらを出す
+      return { ok: false, status: deny.status, reason: res.reason ?? deny.reason };
+    }
+
+    // 書けたかどうかはここで初めて分かる。**書けていないのに 202 を返さない**
+    if (commit(res.events).includes(runId)) {
+      return { ok: false, status: 500, reason: '替えられませんでした', row: ledger.get(runId) };
+    }
+    return { ok: true, status: 202, row: ledger.get(runId) };
+  }
+
+  /**
    * 止める。
    *
    * `stdin.end()` → `taskkill /T` → `taskkill /T /F` の3段は `stopClaude` の中。
@@ -762,6 +842,7 @@ export function createRunner({
     start,
     input,
     answer,
+    setLive,
     stop,
     // `switch` は予約語だが、プロパティ名としては使える。
     // 窓口の名前（`POST /api/runs/:id/switch`）と揃えるほうが読みやすい

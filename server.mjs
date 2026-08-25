@@ -760,6 +760,41 @@ async function handleRunAnswer(req, res, runId) {
 }
 
 /**
+ * 子を殺さずに権限モード・モデルを替える。
+ *
+ * **本文の上限は既定の `BODY_MAX`（8KB）。** 来るのは語が1〜2つだけで、指示文は来ない。
+ * `/switch` と違って**指示文を要求しない**のがこの窓口の値打ちなので、
+ * ここで長い本文を受ける口を開けると住み分けが崩れる。
+ *
+ * **202 を返す。** 撃っただけで、効いたかどうかは `control_response` が返るまで分からない。
+ * 行の `switching` に載るので、画面はそれが消えるのを待つ。
+ *
+ * 断る番号は `run/index.mjs` が決める（理由の文字列で振り分けない）。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ * @param {string} runId 実行の識別子
+ */
+async function handleRunMode(req, res, runId) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    return;
+  }
+
+  const r = runner.setLive(runId, body);
+  // 撃った時点で行の `switching` が変わる。押した窓以外にも「切り替え中」を出す
+  pushRunRows();
+  if (!r.ok) {
+    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
+    return;
+  }
+  sendJson(res, r.status, { ok: true, run: r.row });
+}
+
+/**
  * 止める。3段階（stdin を閉じる → taskkill /T → taskkill /T /F）は os/claude.mjs の中。
  *
  * @param {object} res レスポンス
@@ -916,11 +951,12 @@ function handleWrite(req, res, pathname, url) {
   }
   // 完全一致（/api/runs）より後ろに置く。こちらのほうが具体的だが、
   // 上は同じ文字列との一致なので取り違えは起きない
-  const runPost = pathname.match(/^\/api\/runs\/([\w-]{1,64})\/(input|stop|switch|answer)$/);
+  const runPost = pathname.match(/^\/api\/runs\/([\w-]{1,64})\/(input|stop|switch|answer|mode)$/);
   if (runPost) {
     if (runPost[2] === 'input') handleRunInput(req, res, runPost[1]);
     else if (runPost[2] === 'switch') handleRunSwitch(req, res, runPost[1]);
     else if (runPost[2] === 'answer') handleRunAnswer(req, res, runPost[1]);
+    else if (runPost[2] === 'mode') handleRunMode(req, res, runPost[1]);
     else handleRunStop(res, runPost[1]);
     return;
   }

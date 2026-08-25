@@ -11,7 +11,7 @@ import { classifyStreamLine } from '../src/parse/stream.mjs';
 import {
   createRunLedger, isChildDone, isRunOver, mergeRuns, quietFor,
   RUN_STATE_LABELS, RUN_MAX, STALL_MS, ASK_BODY_MAX, PENDING_MAX, PERMISSION_TIMEOUT_MS,
-  buildQuestionInput,
+  buildQuestionInput, LIVE_FIELDS, LIVE_ACK_TIMEOUT_MS,
 } from '../src/run/ledger.mjs';
 import {
   sysInit, sAssistant, sResult, sPermission, sQuestion, sControlResponse, S_ID,
@@ -1456,4 +1456,158 @@ test('質問でない要求に choices を付けたら断る', () => {
   const res = led.answer(id, 'p1', { behavior: 'allow', choices: { 0: 'はい' } }, T + 2000);
   assert.equal(res.ok, false);
   assert.equal(res.code, 'bad');
+});
+
+/*
+ * 子を殺さずに替える（setLive）
+ */
+
+test('替えたいぶんだけ control-request を積む', () => {
+  const { led, id } = started();
+  const res = led.setLive(id, [
+    { field: 'permissionMode', value: 'acceptEdits', requestId: 'm1' },
+    { field: 'model', value: 'claude-sonnet-5', requestId: 'm2' },
+  ], T + 10);
+
+  assert.equal(res.ok, true);
+  const out = led.takeOutbox();
+  assert.deepEqual(out.map((o) => o.subtype), ['set_permission_mode', 'set_model']);
+  // パラメタのキーは向こうの都合で項目名と揃っていない（実測）
+  assert.deepEqual(out[0].params, { mode: 'acceptEdits' });
+  assert.deepEqual(out[1].params, { model: 'claude-sonnet-5' });
+});
+
+test('受理されるまで書き換えず、切り替え中だと行に出す', () => {
+  const { led, id } = started();
+  led.setLive(id, [{ field: 'permissionMode', value: 'auto', requestId: 'm1' }], T + 10);
+
+  assert.equal(led.rows()[0].permissionMode, 'plan', '撃った直後はまだ plan');
+  assert.deepEqual(led.rows()[0].switching, [{ field: 'permissionMode', value: 'auto' }]);
+
+  feed(led, id, sControlResponse('m1'), T + 20);
+  assert.equal(led.rows()[0].permissionMode, 'auto');
+  assert.deepEqual(led.rows()[0].switching, [], '落ち着いたら消える');
+});
+
+test('モデルも同じ道で替わる', () => {
+  const { led, id } = started();
+  led.setLive(id, [{ field: 'model', value: 'claude-sonnet-5', requestId: 'm1' }], T + 10);
+  feed(led, id, sControlResponse('m1'), T + 20);
+  assert.equal(led.rows()[0].model, 'claude-sonnet-5');
+});
+
+test('断られたら書き換えず、そう言う', () => {
+  const { led, id } = started();
+  led.setLive(id, [{ field: 'permissionMode', value: 'auto', requestId: 'm1' }], T + 10);
+  const events = feed(led, id, sControlResponse('m1', { ok: false, error: '知らないモード' }), T + 20);
+
+  assert.equal(led.rows()[0].permissionMode, 'plan');
+  assert.deepEqual(led.rows()[0].switching, []);
+  assert.ok(events.some((e) => e.kind === 'note'));
+});
+
+test('返事が来なければ控えを捨てるが、値も状態も変えない', () => {
+  // 撃ったのに返事が無いなら、いまどちらで走っているかは分からない。
+  // 片方に倒して表示すると、推測を事実として出したことになる
+  const { led, id } = started({ liveAckTimeoutMs: 1000 });
+  led.setLive(id, [{ field: 'permissionMode', value: 'auto', requestId: 'm1' }], T + 10);
+
+  assert.deepEqual(led.tick(T + 500).events.filter((e) => e.kind === 'note'), [], 'まだ待つ');
+
+  const { changed, events } = led.tick(T + 1100);
+  assert.deepEqual(changed, [id], '行が変わるので押し出す');
+  assert.ok(events.some((e) => e.kind === 'note' && e.text.includes('分かりません')));
+  assert.equal(led.rows()[0].permissionMode, 'plan', 'どちらとも言えないので据え置く');
+  assert.equal(led.rows()[0].state, 'running', '状態は変えない');
+  assert.deepEqual(led.rows()[0].switching, []);
+});
+
+test('時間切れの既定は10秒。人を待つ時間ではない', () => {
+  assert.equal(LIVE_ACK_TIMEOUT_MS, 10000);
+  assert.ok(LIVE_ACK_TIMEOUT_MS < STALL_MS);
+});
+
+test('いまと同じ値は撃たない', () => {
+  const { led, id } = started();
+  const res = led.setLive(id, [{ field: 'permissionMode', value: 'plan', requestId: 'm1' }], T + 10);
+  assert.equal(res.ok, false);
+  assert.equal(res.code, 'same');
+  assert.ok(res.reason.includes('権限モード'), '何がと同じかを言う');
+  assert.deepEqual(led.takeOutbox(), []);
+});
+
+test('同じ項目を二重に撃たせない', () => {
+  // 二重に撃つと、返ってきた答えのどちらが後なのか決められない
+  const { led, id } = started();
+  led.setLive(id, [{ field: 'permissionMode', value: 'auto', requestId: 'm1' }], T + 10);
+  led.takeOutbox();
+
+  const res = led.setLive(id, [{ field: 'permissionMode', value: 'acceptEdits', requestId: 'm2' }], T + 20);
+  assert.equal(res.code, 'switching');
+  assert.deepEqual(led.takeOutbox(), []);
+
+  // 別の項目なら通る
+  assert.equal(led.setLive(id, [{ field: 'model', value: 'x', requestId: 'm3' }], T + 30).ok, true);
+});
+
+test('子がいなければ撃たない。終わったものとは分けて返す', () => {
+  const { led, id } = started();
+  exhaust(led, id, T + 10);
+  assert.equal(led.rows()[0].state, 'budget');
+  assert.equal(led.setLive(id, [{ field: 'model', value: 'x', requestId: 'm1' }], T + 20).code, 'no-child');
+
+  // 予算切れは `onExit` でも `budget` のまま（上げて続ける道を残すため）なので、
+  // 終端は別の run で確かめる
+  const b = started();
+  b.led.onExit(b.id, 0, null, T + 30);
+  assert.equal(b.led.setLive(b.id, [{ field: 'model', value: 'y', requestId: 'm2' }], T + 40).code, 'over');
+  assert.equal(b.led.setLive('よその id', [{ field: 'model', value: 'y', requestId: 'm3' }], T + 40).code, 'no-run');
+});
+
+test('形が違うものは1本も積まずに断る', () => {
+  const { led, id } = started();
+  const bad = [
+    [],
+    [{ field: 'effort', value: 'high', requestId: 'm1' }],
+    [{ field: 'model', value: '', requestId: 'm1' }],
+    [{ field: 'model', value: 'x' }],
+    [{ field: 'model', value: 'x', requestId: 'm1' }, { field: 'model', value: 'y', requestId: 'm2' }],
+  ];
+  for (const wants of bad) {
+    assert.equal(led.setLive(id, wants, T + 10).code, 'bad', JSON.stringify(wants));
+  }
+  assert.deepEqual(led.takeOutbox(), [], '1本も積まない');
+});
+
+test('先に確かめてから積む。片方だけ撃たれる形を作らない', () => {
+  // 途中で断ると、呼んだ側には「400 だった」としか見えないのに片方は替わっている
+  const { led, id } = started();
+  const res = led.setLive(id, [
+    { field: 'model', value: 'claude-sonnet-5', requestId: 'm1' },
+    { field: 'permissionMode', value: 'plan', requestId: 'm2' },
+  ], T + 10);
+  assert.equal(res.code, 'same', '2つ目がいまと同じ');
+  assert.deepEqual(led.takeOutbox(), [], '1つ目も積まれていない');
+});
+
+test('止めると決めたら切り替えの控えも捨てる', () => {
+  const { led, id } = started();
+  led.setLive(id, [{ field: 'permissionMode', value: 'auto', requestId: 'm1' }], T + 10);
+  led.takeOutbox();
+  led.markStopping(id, T + 20);
+  assert.deepEqual(led.rows()[0].switching, []);
+
+  // 捨てたあとに答えが来ても書き換えない
+  feed(led, id, sControlResponse('m1'), T + 30);
+  assert.equal(led.rows()[0].permissionMode, 'plan');
+});
+
+test('替えられる項目の表は、要求の名前とパラメタ名を1箇所に持つ', () => {
+  // 3つの表に割ると、項目を足すときに必ずどれかが漏れる
+  assert.deepEqual(Object.keys(LIVE_FIELDS), ['permissionMode', 'model']);
+  for (const [key, f] of Object.entries(LIVE_FIELDS)) {
+    assert.ok(f.subtype && f.key && f.label, key);
+  }
+  // 思考量は入れない（`--effort` の語とトークン数の対応が測れていない）
+  assert.equal(LIVE_FIELDS.effort, undefined);
 });

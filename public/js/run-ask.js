@@ -56,10 +56,16 @@ const ASK_GUIDE = {
   tool: { title: '実行を許可する', lead: 'このツールを実行してよいかを決めてください' },
 };
 
-/** 権限モードの言い方。ボタンの括弧に出す。 */
+/**
+ * 権限モードの言い方。ボタンの括弧に出す。
+ *
+ * `spec.mjs` の `PERMISSION_MODE_LABELS` とわざと重複させている（`RUN_OVER` と同じ切り方。
+ * ここへ配るために `run-view.js` の選択肢を借りると向きができる）。
+ * **括弧の中まで同じ言い方に揃える。** 片方だけ直すと、同じ語に別の説明が付く。
+ */
 const THEN_LABELS = {
-  auto: 'auto — Claude が判断・危ないものだけ確認',
-  acceptEdits: 'auto-accept edits — ファイルの変更まで自動で通す',
+  auto: 'auto mode — Claude が判断・危ないものだけ確認',
+  acceptEdits: 'accept edits — ファイル変更は自動・コマンドは確認',
 };
 
 /** 本文の頭出し。長い Bash コマンドや差分をここで畳む。 */
@@ -341,6 +347,8 @@ function askCard(runId, ask) {
   const row = el('div', 'ask-btns');
   // 送れない理由の1行（選択式のときだけ questionForm が返す）
   let hint = null;
+  // ボタンの下に置く案内。いまはツール許可のときだけ
+  let foot = null;
   const why = el('input', 'settings-text ask-why');
   why.type = 'text';
   // 空でも送れる。止めたいときに文章を考えさせない
@@ -382,12 +390,20 @@ function askCard(runId, ask) {
     }
     btns.push(button('断る', null,
       () => send(ctx, { behavior: 'deny', message: reason() })));
+    // **毎回訊かれるのを止める道を、訊かれている場所で言う。**
+    // 押せる導線にしていないのは、実行パネル（`run-view.js`）の節点を掴む必要があり、
+    // 「`run-view.js` とは向きを作らない」を崩すことになるため（`run-resume.js` と同じ線）
+    foot = el('p', 'settings-hint',
+      '毎回この確認を出したくないときは、下の「権限モード・モデルを替える」から替えられます。'
+      + 'いまの子はそのまま続きます。');
   }
 
   row.append(...btns);
   card.append(why);
   if (hint) card.append(hint);
-  card.append(row, msg);
+  card.append(row);
+  if (foot) card.append(foot);
+  card.append(msg);
 
   // 直前に失敗したものだけ、作り直したあとも理由を出す
   if (lastFail?.askId === ask.id) {

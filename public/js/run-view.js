@@ -121,7 +121,7 @@ function resultBody(ev) {
   fact(dl, 'このターンの往復', ev.numTurns);
   // total_cost_usd のほうは累積（実測 0.803025 → 0.843727）。同じ行に並んでいるので混ぜやすい。
   //
-  // ただし**累積するのは同じ子のあいだだけ。**「モデルなどを替えて続ける」は子を起こし直すので、
+  // ただし**累積するのは同じ子のあいだだけ。**「権限モード・モデルを替える」の建て直し側は子を起こし直すので、
   // そこで起点に戻る（実測 0.401036 → 切り替え後の最初の result で 0.130617）。
   // だから「ここまで」とは書かない。切り替えを挟んだぶんは、並んだ result を足したものが合計になる
   fact(dl, 'この起動ぶんの費用', typeof ev.costUSD === 'number' ? `$${ev.costUSD.toFixed(4)}` : null);
@@ -275,6 +275,23 @@ export function render() {
  * ここに入れると3つのボタンが全部落ちて出口が無くなる。
  */
 const RUN_OVER = new Set(['stopped', 'failed', 'done']);
+
+/**
+ * 子プロセスがもういない状態。**終わったもの ＋ 予算切れ。**
+ *
+ * 予算切れは終端ではない（続きから起こし直せる）が、子は死んでいる。
+ * だから撃つ（`/mode`）ことはできず、建て直す（`/switch`）しかない。
+ * サーバー側の `isChildDone` と同じ線で、あちらと同じく `RUN_OVER` とは分けてある。
+ */
+const RUN_NO_CHILD = new Set([...RUN_OVER, 'budget']);
+
+/**
+ * 子を殺さずに替えられる項目。サーバーの `LIVE_FIELDS` と同じ並び。
+ *
+ * **思考量と上限はここに無い。** 思考量は `--effort` の語とあちらが欲しいトークン数の
+ * 対応が測れておらず、上限は argv でしか渡せない。どちらも建て直しが要る。
+ */
+const LIVE_KEYS = new Set(['permissionMode', 'model']);
 
 /**
  * 見出しに出す状態の札。
@@ -446,6 +463,89 @@ function collectSwitch() {
 function switchedText(data) {
   const names = (data.changed ?? []).map((k) => SWITCH_LABELS[k] ?? k);
   return names.length > 0 ? `${names.join('・')}を替えて続けます` : '替えて続けます';
+}
+
+/**
+ * 押されたときにどちらの窓口へ行くかを決める。**判断は画面がやる。**
+ *
+ * - 子が生きていて、替えるのが権限モードとモデルだけ → `/mode`（指示文なしで即時）
+ * - それ以外 → `/switch`（指示文つきで建て直し）
+ *
+ * サーバーの `/switch` に「権限モードだけなら撃つだけで済ませる」近道を作らないのは、
+ * 呼ぶ側から見て**「指示文が要るときと要らないときがある窓口」**になり、
+ * 判断が窓口の中に隠れるから。隠すならこちら側に置く。
+ *
+ * @returns {Promise<void>}
+ */
+async function applySwitch() {
+  if (ops.busy || ops.over) return;
+
+  // <input type="number"> は数として読めない中身のとき value が空になる。
+  // 空は「上限なし」の指定なので、そのまま通すと打ち間違いが黙って上限を外す。
+  // **どちらへ行くかを決める前に見る。** 壊れた数のまま `collectSwitch()` を読むと、
+  // 「上限を外す」が混ざった中身で道を選ぶことになる
+  if (ops.swBudget.validity?.badInput) {
+    say('予算は数で書いてください', 'bad');
+    return;
+  }
+
+  const patch = collectSwitch();
+  if (!patch) {
+    say('替えるところがありません', 'bad');
+    return;
+  }
+
+  // 空の `model` は「外して CLI の既定へ戻す」の指定。撃つ道では表せない
+  // （`set_model` に空は渡せない）ので、こちらも建て直しへ回す
+  const live = !RUN_NO_CHILD.has(ops.lastRow?.state)
+    && Object.entries(patch).every(([k, v]) => LIVE_KEYS.has(k) && typeof v === 'string' && v !== '');
+  if (live) {
+    await postMode(patch);
+    return;
+  }
+  // 建て直すほうは指示文が要る。足りなければ post() が言う
+  await post('switch');
+}
+
+/**
+ * 子を殺さずに替える。
+ *
+ * **202 しか返らない。** 撃っただけで効いたかは分からないので、ここでは
+ * 「送った」までしか言わない。替わったかどうかは行（`row.switching` が消え、
+ * `row.permissionMode` が変わる）と速報の1行で分かる。
+ *
+ * @param {object} patch 替えるもの（`{permissionMode?, model?}`）
+ * @returns {Promise<void>}
+ */
+async function postMode(patch) {
+  const runId = ops.runId;
+  if (!runId) return;
+
+  setBusy(true);
+  say('替えています…');
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/mode`, {
+      method: 'POST',
+      // 付け忘れると書き込み口の門番に断られる
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    const data = await res.json().catch(() => null);
+
+    // 返ってくるまでに別の実行へ移っていることがある。
+    // そのまま書くと、**他人の実行の**メッセージ欄を書き換えることになる
+    if (ops.runId !== runId) return;
+
+    if (!res.ok || !data?.ok) {
+      say(data?.reason ?? `替えられませんでした（HTTP ${res.status}）`, 'bad');
+      return;
+    }
+    say('替えを送りました', 'good');
+  } catch (err) {
+    if (ops.runId === runId) say(`替えられませんでした（${err.message}）`, 'bad');
+  } finally {
+    if (ops.runId === runId) setBusy(false);
+  }
 }
 
 /**
@@ -625,7 +725,7 @@ function buildOps() {
   wrap.hidden = true;
 
   const det = el('details', 'run-switch');
-  det.append(el('summary', null, 'モデルなどを替えて続ける'));
+  det.append(el('summary', null, '権限モード・モデルを替える'));
 
   const grid = el('div', 'settings-grid');
 
@@ -646,21 +746,31 @@ function buildOps() {
   swBudget.step = '0.01';
   gridRow(grid, 'run-sw-budget', '上限', swBudget, '空にすると上限なし。上限は起こし直すたびに数え直す');
 
-  const apply = el('button', 'btn', 'この内容で続ける');
+  const apply = el('button', 'btn', 'この内容にする');
   apply.type = 'button';
-  apply.addEventListener('click', () => post('switch'));
+  apply.addEventListener('click', applySwitch);
+
+  // 押したときに何が起きるかは、子が生きているかで変わる。**ボタンの文字は動かさない。**
+  // 手を伸ばしている最中に押すものの名前が変わるほうが危ない
+  const swHow = el('p', 'settings-hint');
 
   const swFoot = el('div', 'run-ops-foot');
-  swFoot.append(apply, el('p', 'settings-hint', 'いまの子をいったん止めて、同じ会話を続きから起こし直す'));
+  swFoot.append(apply, swHow);
+
+  // 撃ったが返事待ちのぶん。**消すのは `say()` ではなく行**（`row.switching`）。
+  // 画面が自分で消すと、失敗していたのに消えた＝替わったように見える
+  const swPending = el('p', 'settings-msg');
+  swPending.setAttribute('role', 'status');
 
   const swBody = el('div', 'run-switch-body');
-  swBody.append(grid, swFoot);
+  swBody.append(grid, swFoot, swPending);
   det.append(swBody);
 
   wrap.append(det);
 
   ops = {
     bar, wrap, prompt, send, stop, msg, det, swModel, swEffort, swMode, swBudget, apply,
+    swHow, swPending,
     runId: null, busy: false, over: false, stopArmed: false, stopTimer: null, lastRow: null,
   };
   return ops;
@@ -760,6 +870,19 @@ function syncOps(row) {
   } else {
     ops.prompt.placeholder = '続きを書いて送る（Ctrl+Enter でも送れる）';
   }
+
+  // 押したときに何が起きるかは、子が生きているかで変わる。**行を見て毎回書き直す。**
+  // 走っている最中に予算が切れると建て直しへ変わるので、固定文にできない
+  ops.swHow.textContent = RUN_NO_CHILD.has(row.state)
+    ? 'いまの子をいったん止めて、同じ会話を続きから起こし直す（指示文が要る）'
+    : '権限モードとモデルは、いまの子のまま替わる。思考量と上限は起こし直しになる（指示文が要る）';
+
+  // 撃ったが返事待ちのぶん。**消すのは行のほう。**
+  // 受理・拒否・時間切れのどれでもサーバー側で消えるので、ここで消し忘れる道が無い
+  const waiting = (row.switching ?? []).map((c) => SWITCH_LABELS[c.field] ?? c.field);
+  ops.swPending.textContent = waiting.length > 0
+    ? `${waiting.join('・')}を替えています。返事を待っています…`
+    : '';
 
   // 人が開いて書き換えているあいだは上書きしない。
   // 状態が変わるたびに選び直されると、押す直前に値が入れ替わる
