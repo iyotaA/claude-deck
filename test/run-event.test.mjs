@@ -84,8 +84,8 @@ test('ツール結果は1件ずつ、短い要約にして持つ', () => {
     ],
   }));
   assert.deepEqual(evs, [
-    { kind: 'tool-result', id: 't1', isError: false, text: 'ok' },
-    { kind: 'tool-result', id: 't2', isError: true, text: 'だめ' },
+    { kind: 'tool-result', id: 't1', isError: false, nonExecution: null, text: 'ok' },
+    { kind: 'tool-result', id: 't2', isError: true, nonExecution: null, text: 'だめ' },
   ]);
 });
 
@@ -140,13 +140,15 @@ test('読めなかった行は broken として見本だけ残す', () => {
 });
 
 test('知らない type は捨てずに名前だけ残す', () => {
-  const evs = fold({ type: 'rate_limit_event', session_id: S_ID, rate_limit_info: {} });
-  assert.deepEqual(evs, [{ kind: 'other', type: 'rate_limit_event', subtype: null }]);
+  // **実在の type を例に使わない。** 拾う気になった日にテストが落ちる。
+  // 実際 `rate_limit_event` がここに居て、段4で拾った瞬間に落ちた
+  const evs = fold({ type: 'not_a_real_type', session_id: S_ID });
+  assert.deepEqual(evs, [{ kind: 'other', type: 'not_a_real_type', subtype: null }]);
 });
 
-test('system の init 以外も other になる', () => {
-  const evs = fold({ type: 'system', subtype: 'hook_started', session_id: S_ID });
-  assert.deepEqual(evs, [{ kind: 'other', type: 'system', subtype: 'hook_started' }]);
+test('system の知らない subtype は other になる', () => {
+  const evs = fold({ type: 'system', subtype: 'compact_boundary', session_id: S_ID });
+  assert.deepEqual(evs, [{ kind: 'other', type: 'system', subtype: 'compact_boundary' }]);
 });
 
 test('サブエージェントの行には全種類に同じ形で印が付く', () => {
@@ -257,4 +259,60 @@ test('配線のための行は出来事にしない', () => {
   assert.deepEqual(fold({ type: 'control_request', request_id: 'z1', request: { subtype: 'なにこれ' } }), []);
   assert.deepEqual(fold(sControlResponse('r1', { response: { mode: 'auto' } })), []);
   assert.deepEqual(fold(sControlResponse('r2', { ok: false, error: 'だめ' })), []);
+});
+
+/*
+ * 数えるものは並べない（thinking / rate-limit）と、フックと、断られた結果
+ */
+
+test('考えた量と枠の使用率は出来事にしない', () => {
+  // 1往復で8件流れる（実測）。並べると本文が押し流される。畳んで行に載せるのは台帳の仕事
+  assert.deepEqual(fold({
+    type: 'system', subtype: 'thinking_tokens', session_id: S_ID, estimated_tokens: 700,
+  }), []);
+  assert.deepEqual(fold({
+    type: 'rate_limit_event', session_id: S_ID,
+    rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.06 } } },
+  }), []);
+});
+
+test('フックは終わった1件だけを出す', () => {
+  const line = (subtype) => ({
+    type: 'system', subtype, session_id: S_ID,
+    hook_name: 'format', hook_event: 'PostToolUse', outcome: 'success', exit_code: 0,
+  });
+  assert.deepEqual(fold(line('hook_started')), []);
+  assert.deepEqual(fold(line('hook_progress')), []);
+  assert.deepEqual(fold(line('hook_response')), [{
+    kind: 'hook', name: 'format', event: 'PostToolUse', ok: true, exitCode: 0, stderr: null,
+  }]);
+});
+
+test('outcome が無ければ終了コードで成否を読む', () => {
+  const [ev] = fold({
+    type: 'system', subtype: 'hook_response', session_id: S_ID,
+    hook_name: 'lint', exit_code: 2, stderr: 'だめ',
+  });
+  assert.equal(ev.ok, false);
+  assert.equal(ev.stderr, 'だめ');
+});
+
+test('どちらも無ければ成功と決めつけない', () => {
+  const [ev] = fold({ type: 'system', subtype: 'hook_response', session_id: S_ID, hook_name: 'x' });
+  assert.equal(ev.ok, null);
+  assert.equal(ev.exitCode, null);
+});
+
+test('断られたツール結果には印が付く', () => {
+  // `isError` とは別に持つ。画面が「あなたが断った」と「ツールが失敗した」を書き分ける
+  const evs = fold(sUser({
+    results: [
+      { id: 't1', text: 'Error: 断りました', isError: true },
+      { id: 't2', text: 'ok' },
+    ],
+    tool_result_meta: [{ id: 't1', non_execution_kind: 'permission-rule' }],
+  }));
+  assert.equal(evs[0].nonExecution, 'permission-rule');
+  assert.equal(evs[0].isError, true, '印が付いても is_error は書き換えない');
+  assert.equal(evs[1].nonExecution, null, '印が無いほうは null。空文字に丸めない');
 });

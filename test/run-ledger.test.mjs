@@ -1611,3 +1611,121 @@ test('替えられる項目の表は、要求の名前とパラメタ名を1箇�
   // 思考量は入れない（`--effort` の語とトークン数の対応が測れていない）
   assert.equal(LIVE_FIELDS.effort, undefined);
 });
+
+/*
+ * 数えて畳むもの（考えた量・枠の使用率）と、診断のための2つ
+ */
+
+/** 考えている量の行。1往復に何度も刻んで届く。 */
+const sThinking = (tokens) => ({
+  type: 'system', subtype: 'thinking_tokens', session_id: S_ID, estimated_tokens: tokens,
+});
+
+/** 枠の使用率の行。 */
+const sRate = (five, seven) => ({
+  type: 'rate_limit_event', session_id: S_ID,
+  rate_limit_info: {
+    unifiedWindows: {
+      five_hour: { utilization: five, resetsAt: 1787667000 },
+      seven_day: { utilization: seven },
+    },
+  },
+});
+
+test('考えた量は速報に積まず、ターンの終わりの1件に載せる', () => {
+  const { led, id } = started();
+  assert.deepEqual(feed(led, id, sThinking(50), T + 10), [], '1行も積まない');
+  feed(led, id, sThinking(700), T + 20);
+
+  const res = feed(led, id, sResult(), T + 30).find((e) => e.kind === 'result');
+  assert.equal(res.thinkingTokens, 700, '最新の累計が載る');
+});
+
+test('考えた量は行に載せない', () => {
+  // 行は状態が変わったときにしか描き直されない。8件刻みで動く値を置くと古い数が残り続ける
+  const { led, id } = started();
+  feed(led, id, sThinking(700), T + 10);
+  assert.equal(led.rows()[0].thinkingTokens, undefined);
+});
+
+test('考えた量は次のターンへ持ち越さない', () => {
+  const { led, id } = started();
+  feed(led, id, sThinking(700), T + 10);
+  feed(led, id, sResult(), T + 20);
+
+  const res = feed(led, id, sResult(), T + 30).find((e) => e.kind === 'result');
+  assert.equal(res.thinkingTokens, null, '考えなかったターンを 700 と言わない');
+});
+
+test('考えた量が読めない行では前の値を潰さない', () => {
+  const { led, id } = started();
+  feed(led, id, sThinking(700), T + 10);
+  feed(led, id, { type: 'system', subtype: 'thinking_tokens', session_id: S_ID }, T + 20);
+
+  const res = feed(led, id, sResult(), T + 30).find((e) => e.kind === 'result');
+  assert.equal(res.thinkingTokens, 700);
+});
+
+test('枠の使用率は行に出る。速報は積まない', () => {
+  const { led, id } = started();
+  assert.deepEqual(feed(led, id, sRate(0.06, 0.69), T + 10), []);
+  assert.deepEqual(led.rows()[0].rateLimit, { fiveHour: 0.06, sevenDay: 0.69, resetsAt: 1787667000 });
+});
+
+test('どちらの枠も読めない行では上書きしない', () => {
+  // 版が上がって形が変わった日に、一度は取れていた値が「取れていない」に見えるのを防ぐ
+  const { led, id } = started();
+  feed(led, id, sRate(0.06, 0.69), T + 10);
+  feed(led, id, { type: 'rate_limit_event', session_id: S_ID, rate_limit_info: {} }, T + 20);
+  assert.equal(led.rows()[0].rateLimit.fiveHour, 0.06);
+});
+
+test('枠の使用率は最初は「不明」。0 ではない', () => {
+  const { led, id } = started();
+  assert.equal(led.rows()[0].rateLimit, null);
+});
+
+test('捨てた行が増えたときだけ1行積む', () => {
+  // 4MB を超える許可要求が捨てられると、誰も答えず向こうは待ち続ける。
+  // `counts` は画面が引いていないので、増えたときは目に触れる形で出す
+  const { led, id } = started();
+  assert.deepEqual(led.noteDropped(id, 0, T + 10), []);
+
+  const first = led.noteDropped(id, 2, T + 20);
+  assert.equal(first.length, 1);
+  assert.equal(first[0].kind, 'note');
+  assert.ok(first[0].text.includes('2 件'));
+
+  assert.deepEqual(led.noteDropped(id, 2, T + 30), [], '同じ数なら黙る');
+
+  const more = led.noteDropped(id, 5, T + 40);
+  assert.ok(more[0].text.includes('3 件'), '増えたぶんを言う');
+  assert.ok(more[0].text.includes('累計 5 件'));
+  assert.equal(led.get(id).counts.droppedLines, 5, '累計をそのまま持つ。足し込まない');
+});
+
+test('捨てた行の数が壊れていても落ちない', () => {
+  const { led, id } = started();
+  for (const n of [null, undefined, NaN, Infinity, -1, '3']) {
+    assert.deepEqual(led.noteDropped(id, n, T + 10), [], String(n));
+  }
+  assert.equal(led.get(id).counts.droppedLines, 0);
+});
+
+test('標準エラーは終了コード 0 でも残す。空では上書きしない', () => {
+  // `Malformed updatedPermissions` のようなこちらの配線の間違いは、
+  // 終了コード 0 のまま stderr にだけ出る
+  const { led, id } = started();
+  assert.equal(led.noteStderr(id, 'Malformed updatedPermissions'), true);
+  assert.equal(led.rows()[0].lastStderr, 'Malformed updatedPermissions');
+
+  assert.equal(led.noteStderr(id, ''), false);
+  assert.equal(led.noteStderr(id, null), false);
+  assert.equal(led.rows()[0].lastStderr, 'Malformed updatedPermissions', '前の警告を消さない');
+});
+
+test('居ない実行へ言っても落ちない', () => {
+  const { led } = started();
+  assert.deepEqual(led.noteDropped('nope', 3, T), []);
+  assert.equal(led.noteStderr('nope', 'x'), false);
+});

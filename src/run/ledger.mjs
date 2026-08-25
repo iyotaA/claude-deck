@@ -793,6 +793,43 @@ export function createRunLedger({
    * @param {number} now 時刻
    * @returns {Array<object>} 積んだ速報。時間切れが無ければ空
    */
+  /**
+   * 考えた量を畳む。**速報は積まない。**
+   *
+   * `estimated_tokens` はそのターンの累計で、1往復に何度も刻んで届く（実測で8件）。
+   * だから**最新の値でただ上書きする。** ターンが替われば向こうが小さい数から数え直すので、
+   * こちらで「ターンが替わったか」を判断する必要が無い（判断を持たない＝ずれない）。
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `thinkingInfo` の戻り
+   * @returns {void}
+   */
+  function takeThinking(run, info) {
+    // 取れなかったときに 0 で潰さない。前の値をそのまま残す
+    if (typeof info.tokens !== 'number') return;
+    run.thinking = info.tokens;
+  }
+
+  /**
+   * 枠の使用率を畳む。**速報は積まない。**
+   *
+   * **どちらの枠も読めなかった行では上書きしない。**
+   * 版が上がって `unifiedWindows` の形が変わった日に、
+   * 一度は取れていた値が null で潰れて「取れていない」に見えるのを防ぐ。
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `rateLimitInfo` の戻り
+   * @returns {void}
+   */
+  function takeRateLimit(run, info) {
+    if (typeof info.fiveHour !== 'number' && typeof info.sevenDay !== 'number') return;
+    run.rateLimit = {
+      fiveHour: info.fiveHour ?? null,
+      sevenDay: info.sevenDay ?? null,
+      resetsAt: info.resetsAt ?? null,
+    };
+  }
+
   function sweepLive(run, now) {
     if (run.livePending.size === 0) return [];
     const out = [];
@@ -891,6 +928,13 @@ export function createRunLedger({
       // 別のタブで替えた最中にもう一方が二重に撃つのを止められるし、
       // 押した窓を閉じても「切り替え中」が残る。`at` を載せないのは毎秒の差分判定のため
       switching: [...run.livePending.values()].map((p) => ({ field: p.field, value: p.value })),
+      // 枠の使用率。CLI の `/usage` と同じもので、画面にはこれまで出る道が無かった。
+      // API を叩くたびに流れるが、値そのものはめったに動かないので差分判定で止まる
+      rateLimit: run.rateLimit,
+      // CLI が stderr へ吐いた直近の1行。**速報の並びには混ぜない**（本文が読めなくなる）が、
+      // 見出しには出す。`get()` にしか出さないと、画面が `/api/runs/:id` を
+      // 引いていない以上どこにも現れない。普段は null なので欄ごと出ない
+      lastStderr: run.lastStderr,
     };
   }
 
@@ -960,7 +1004,15 @@ export function createRunLedger({
         // 撃った「替えました」の控え。`Map<requestId, {field, value, at}>`。
         // **受理されるまで持つ**（受理を待たずに書き換えないため）
         livePending: new Map(),
-        counts: { lines: 0, broken: 0, events: 0 },
+        /** @type {number|null} そのターンで考えた量（累計）。畳んだ結果だけを持つ */
+        thinking: null,
+        /** @type {object|null} 直近の枠の使用率。`{fiveHour, sevenDay, resetsAt}` */
+        rateLimit: null,
+        /** @type {string|null} 子が stderr へ吐いた直近の1行。失敗していなくても持つ */
+        lastStderr: null,
+        // `droppedLines` は**長すぎて捨てた行の数**。殻（`run/index.mjs`）から入れてもらう。
+        // 台帳は行を読むだけで、捨てる判断は `createLineSplitter` がしているため
+        counts: { lines: 0, broken: 0, events: 0, droppedLines: 0 },
       });
       lastStartAt = now;
       prune();
@@ -991,6 +1043,77 @@ export function createRunLedger({
         clearStateReason(run);
         run.state = 'running';
       }
+      return true;
+    },
+
+    /**
+     * 長すぎて捨てた行の数を記録する。
+     *
+     * ## なぜこれだけ殻から入れてもらうか
+     *
+     * 捨てる判断をしているのは `createLineSplitter`（`os/claude.mjs`）で、台帳は
+     * **捨てられた行を見ることすらできない。** だから数だけ受け取る。
+     *
+     * ## なぜ要るか
+     *
+     * 段1で逃げ道を10通り塞いだあと、**唯一残っているデッドロックの経路**がこれ。
+     * 4MB を超える `control_request`（巨大な `Write` の許可要求など）が届くと、
+     * 行がまるごと捨てられる。こちらは要求が来たことを知らないので誰も答えず、
+     * 向こうは答えを待ち続ける。既存の `stalled`（2分）が状態としては拾うが、
+     * **画面には「反応がありません」としか出ない**ので原因にたどり着けない。
+     *
+     * 段4より前は `splitter.dropped` を誰も読んでいなかった。
+     *
+     * ## 数えるだけでは足りない
+     *
+     * `counts` は `get()`（`/api/runs/:id`）にしか出ず、画面はそこを引いていない。
+     * **数えたものが誰の目にも触れなければ診断にならない**ので、増えたときは速報に1行積む。
+     * めったに起きないこと（実測では一度も起きていない）なので、
+     * 「標準エラーは速報に混ぜない」の理由（本文が読めなくなる）はここには当たらない。
+     *
+     * @param {string} runId 対象
+     * @param {number} n これまでに捨てた行の**累計**（差分ではない）
+     * @param {number} now 時刻
+     * @returns {Array<object>} 積んだ速報。増えていなければ空
+     */
+    noteDropped(runId, n, now) {
+      const run = runs.get(runId);
+      if (!run || typeof n !== 'number' || !Number.isFinite(n) || n < 0) return [];
+
+      const total = Math.floor(n);
+      const before = run.counts.droppedLines;
+      // 累計をそのまま入れる。**足し込まない。**
+      // 殻は `splitter.dropped` を毎回そのまま渡してくるので、足すと二重に数える
+      run.counts.droppedLines = total;
+      if (total <= before) return [];
+
+      return [pushNote(
+        run,
+        `長すぎる行を ${total - before} 件捨てました（累計 ${total} 件）。`
+        + '答えるべき要求が混ざっていた場合、返事が来ないまま止まります',
+        now,
+      )];
+    },
+
+    /**
+     * 子が stderr へ吐いた直近の1行を記録する。
+     *
+     * **失敗していなくても持つ。** これまでは `fail()` のときにしか使っていなかったが、
+     * `Malformed updatedPermissions` のような**こちらの配線の間違い**は
+     * 終了コード 0 のまま stderr にだけ出る。捨てていると自分のミスに気づけない。
+     *
+     * 詳細（`get()`）にだけ出す。行に載せると差分判定をすり抜ける値が増える。
+     *
+     * @param {string} runId 対象
+     * @param {string|null} text 1行に畳んだもの（畳むのは殻の仕事）
+     * @returns {boolean} 記録できたか
+     */
+    noteStderr(runId, text) {
+      const run = runs.get(runId);
+      if (!run) return false;
+      // 空で上書きしない。前に出た警告を消してしまう
+      if (typeof text !== 'string' || !text) return false;
+      run.lastStderr = text;
       return true;
     },
 
@@ -1044,6 +1167,11 @@ export function createRunLedger({
         pushed.push(...refuseControl(run, classified.info ?? {}, now));
       } else if (classified?.kind === 'control-result') {
         pushed.push(...takeControlResult(run, classified.info ?? {}, now));
+      } else if (classified?.kind === 'thinking') {
+        // 速報は積まない。行に載せるだけ（`toRunEvents` も空を返している）
+        takeThinking(run, classified.info ?? {});
+      } else if (classified?.kind === 'rate-limit') {
+        takeRateLimit(run, classified.info ?? {});
       }
 
       for (const ev of pushed) {
@@ -1052,6 +1180,18 @@ export function createRunLedger({
         // `num_turns` は累積ではない（実測。2往復目も 1 に戻る）ので、こちらで数える
         run.turns += 1;
         if (typeof ev.costUSD === 'number') run.costUSD = ev.costUSD;
+
+        // そのターンで考えた量を、終わりの1件にだけ載せて畳む。
+        //
+        // **行（`toRow`）には載せない。** 行は状態が変わったときにしか描き直されないので、
+        // 8件刻みで動く値を置くと古い数が残り続ける（0 と不明を分けるのと同じ理由で、
+        // 古い値を今の値の顔で出さない）。ここなら並んだ位置がそのターンの終わりに固定される。
+        //
+        // 積んだ記録そのものを書き換えている。`pushEvent` はリングに入れた実体を返すので、
+        // ここでの代入はリングにも SSE にも同じものが乗る。**畳む材料（累計）を知っているのは
+        // 台帳だけ**で、`toRunEvents` は1行しか見ないので組めない
+        ev.thinkingTokens = run.thinking;
+        run.thinking = null;
 
         if (ev.terminalReason === 'budget_exhausted') {
           // 実測で**プロセスは死なない**ので、子は殻の側（`reapIfDone`）が畳む。

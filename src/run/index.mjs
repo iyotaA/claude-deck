@@ -320,6 +320,10 @@ export function createRunner({
       for (const line of splitter.push(chunk)) {
         commit(ledger.apply(runId, classifyStreamLine(line), at));
       }
+      // 長すぎて捨てた行の数を台帳へ渡す。**捨てたことは台帳から見えない。**
+      // 4MB 超の `control_request` が捨てられると誰も答えず向こうが永久に待つ、という
+      // 段1で塞ぎ切れなかった唯一の経路が、これで診断できるようになる（`noteDropped` を見ること）
+      commit(ledger.noteDropped(runId, splitter.dropped, at));
       reapIfDone(runId);
     });
 
@@ -329,7 +333,13 @@ export function createRunner({
     // 拾えないと「異常終了しました（code 1）」だけが残って原因が分からなくなる
     child.stderr?.on('data', (chunk) => {
       const text = oneLine(chunk, STDERR_MAX);
-      if (text) entry.stderr = text;
+      if (!text) return;
+      entry.stderr = text;
+      // 台帳にも渡す。**終了コードが 0 でも渡す**のがここの要点。
+      // `Malformed updatedPermissions` のようなこちらの配線の間違いは
+      // 正常終了のまま stderr にだけ出るので、`entry.stderr` に留めていると
+      // 誰の目にも触れないまま消える（段4より前はそうなっていた）
+      ledger.noteStderr(runId, text);
     });
 
     // 実行ファイルが無いときはここにしか来ない
@@ -344,6 +354,7 @@ export function createRunner({
       for (const line of splitter.flush()) {
         commit(ledger.apply(runId, classifyStreamLine(line), at));
       }
+      commit(ledger.noteDropped(runId, splitter.dropped, at));
       // 止めたのでない異常終了のときだけ、標準エラーを理由に使う。
       // 先に `fail` を通すと `onExit` は状態を上書きせず終了コードだけ記録する
       if (code !== 0 && !entry.stopping && entry.stderr) {

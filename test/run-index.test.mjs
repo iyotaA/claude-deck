@@ -1183,3 +1183,41 @@ test('子が閉じたあとは替えずに 409。建て直すほうへ案内す�
   assert.equal(out.status, 409);
   assert.ok(out.reason.includes('替えて続ける'));
 });
+
+test('正常終了でも標準エラーは残る', async () => {
+  // `Malformed updatedPermissions` のようなこちらの配線の間違いは、
+  // 終了コード 0 のまま stderr にだけ出る。理由には使えないが、見えないと直せない
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+
+  child.stderr.write('Warning: Malformed updatedPermissions\n');
+  await settle();
+
+  assert.equal(h.runner.get(res.runId).lastStderr, 'Warning: Malformed updatedPermissions');
+
+  feed(child, sResult({ sessionId: res.row.sessionId }));
+  await settle();
+  child.close(0);
+  await settle();
+
+  const row = h.runner.get(res.runId);
+  assert.equal(row.state, 'waiting', '警告があっても失敗にしない');
+  assert.equal(row.reason, null);
+  assert.ok(row.lastStderr.includes('Malformed'));
+});
+
+test('長すぎて捨てた行は数え、増えたら1行積む', async () => {
+  // 4MB 超の許可要求が捨てられると、こちらは要求が来たことを知らないまま向こうが待ち続ける。
+  // 段4より前は `splitter.dropped` を誰も読んでいなかった
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+
+  child.stdout.write(`${'x'.repeat(5 * 1024 * 1024)}\n`);
+  await settle();
+
+  assert.equal(h.runner.get(res.runId).counts.droppedLines, 1);
+  const notes = h.runner.events().events.filter((e) => e.kind === 'note');
+  assert.ok(notes.some((e) => e.text.includes('長すぎる行')), notes.map((e) => e.text).join(' / '));
+});

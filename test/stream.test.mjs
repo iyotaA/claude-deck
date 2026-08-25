@@ -188,11 +188,12 @@ test('system でも init でなければ other。subtype は残す', () => {
 });
 
 test('知らない type は other にするが、生の type は捨てない', () => {
-  // 上限に当たりかけていることを知らせる行（実測でここへ落ちた）。
-  // **例に control_request を使わない。** あれは許可の道になったので other へは落ちない
-  const got = read({ type: 'rate_limit_event', session_id: S_ID });
+  // **実在の type を例に使わない。** 拾う気になった日にこのテストが落ちる。
+  // ここには `control_request` が居て許可の道になった日に落ち、
+  // 次に置いた `rate_limit_event` も段4で拾った日に落ちた。二度あったので架空の名前にする
+  const got = read({ type: 'not_a_real_type', session_id: S_ID });
   assert.equal(got.kind, 'other');
-  assert.equal(got.type, 'rate_limit_event');
+  assert.equal(got.type, 'not_a_real_type');
   assert.equal(got.sessionId, S_ID);
 });
 
@@ -513,4 +514,110 @@ test('壊れた引数では組まずに投げる', () => {
   assert.throws(() => encodeControlError(null), TypeError);
   assert.throws(() => encodeControlRequest('r1', ''), TypeError);
   assert.throws(() => encodeControlRequest('', 'interrupt'), TypeError);
+});
+
+/*
+ * 数えて畳む行（thinking / rate_limit / hook）と、実行されなかった印
+ *
+ * どれも段4より前は `other` に落ちていた。落ちていること自体は害が無かったが、
+ * 1往復で8件流れる `thinking_tokens` が「その他」として並び、本文を押し流していた。
+ */
+
+test('thinking_tokens は累計と刻みを持つ', () => {
+  const got = read({
+    type: 'system', subtype: 'thinking_tokens', session_id: S_ID,
+    estimated_tokens: 700, estimated_tokens_delta: 50,
+  });
+  assert.equal(got.kind, 'thinking');
+  assert.deepEqual(got.info, { tokens: 700, delta: 50 });
+});
+
+test('考えた量が読めなければ null。0 に丸めない', () => {
+  const got = read({ type: 'system', subtype: 'thinking_tokens', session_id: S_ID });
+  assert.deepEqual(got.info, { tokens: null, delta: null });
+});
+
+test('rate_limit_event は 0〜1 の割合をそのまま持つ', () => {
+  // 百分率に直すのは画面の仕事。ここで掛けると、掛ける場所が2つになる
+  const got = read({
+    type: 'rate_limit_event', session_id: S_ID,
+    rate_limit_info: {
+      status: 'allowed', resetsAt: 1787667000,
+      unifiedWindows: {
+        five_hour: { utilization: 0.06, resetsAt: 1787667000 },
+        seven_day: { utilization: 0.69, resetsAt: 1787763600 },
+      },
+    },
+  });
+  assert.equal(got.kind, 'rate-limit');
+  assert.deepEqual(got.info, {
+    status: 'allowed', fiveHour: 0.06, sevenDay: 0.69, resetsAt: 1787667000,
+  });
+});
+
+test('5時間枠が無ければ7日枠の時刻に倒す', () => {
+  const got = read({
+    type: 'rate_limit_event', session_id: S_ID,
+    rate_limit_info: { unifiedWindows: { seven_day: { utilization: 0.69, resetsAt: 1787763600 } } },
+  });
+  assert.equal(got.info.fiveHour, null);
+  assert.equal(got.info.resetsAt, 1787763600);
+});
+
+test('枠の形が変わっても落ちない', () => {
+  const got = read({ type: 'rate_limit_event', session_id: S_ID, rate_limit_info: 'まだ大丈夫' });
+  assert.equal(got.kind, 'rate-limit');
+  assert.deepEqual(got.info, { status: null, fiveHour: null, sevenDay: null, resetsAt: null });
+});
+
+test('hook は3段階とも hook。どの段階かは subtype に残る', () => {
+  for (const sub of ['hook_started', 'hook_progress', 'hook_response']) {
+    const got = read({ type: 'system', subtype: sub, session_id: S_ID, hook_name: 'format' });
+    assert.equal(got.kind, 'hook', sub);
+    assert.equal(got.subtype, sub);
+    assert.equal(got.info.name, 'format');
+  }
+});
+
+test('フックの出力は持たない。標準エラーだけ持つ', () => {
+  // 実測で `output` と `stdout` に同じ 1484 文字が二重に入っていた。
+  // 人が読むのは失敗したときの stderr だけなので、本文は捨てる
+  const got = read({
+    type: 'system', subtype: 'hook_response', session_id: S_ID,
+    hook_name: 'format', hook_event: 'PostToolUse', outcome: 'success', exit_code: 0,
+    output: 'x'.repeat(1484), stdout: 'x'.repeat(1484), stderr: '警告',
+  });
+  assert.equal(got.info.stderr, '警告');
+  assert.equal(got.info.output, undefined);
+  assert.equal(got.info.stdout, undefined);
+});
+
+test('user の tool_result_meta から「実行されなかった」印を取る', () => {
+  // 断ったときのツール結果は、普通のエラーとまったく同じ顔で返ってくる（実測）。
+  // 区別できるのはこの印だけ
+  const got = read(sUser({
+    results: [{ id: 't1', text: 'Error: だめ', isError: true }],
+    tool_result_meta: [{ id: 't1', non_execution_kind: 'permission-rule' }],
+  }));
+  assert.equal(got.kind, 'user');
+  assert.deepEqual(got.info.nonExecution, [{ id: 't1', kind: 'permission-rule' }]);
+});
+
+test('印は id と種類が揃ったものだけ拾う', () => {
+  const got = read(sUser({
+    results: [{ id: 't1' }],
+    tool_result_meta: [
+      { id: 't1' },
+      { non_execution_kind: 'permission-rule' },
+      null,
+      { tool_use_id: 't2', nonExecutionKind: 'permission-rule' },
+    ],
+  }));
+  assert.deepEqual(got.info.nonExecution, [{ id: 't2', kind: 'permission-rule' }]);
+});
+
+test('印が無い user 行でも形は変わらない', () => {
+  // 画面側が `?.` を書き忘れても落ちないよう、いつも配列で持つ
+  assert.deepEqual(read(sUser({ results: [{ id: 't1' }] })).info.nonExecution, []);
+  assert.deepEqual(read(sUser({ text: 'これ', tool_result_meta: 'こわれ' })).info.nonExecution, []);
 });

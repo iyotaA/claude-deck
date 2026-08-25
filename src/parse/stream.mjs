@@ -52,8 +52,18 @@
  *   これが流れ、そのツールの結果が `isError:true`（`This command requires approval`）になり、
  *   **向こうは止まらずに次の手へ移る**（件数は `result` の `permission_denials` に載る）。
  *   「許可待ちで止まっている」と読み替えると、待っていないものを待っていることにしてしまう。
- *   ただしこれは `--permission-prompt-tool stdio` を**付けていない**ときの測り方。
- *   付けた今は先に `control_request` がこちらへ来るので、断ったときに何が流れるかは未実測
+ *   ただしこれは `--permission-prompt-tool stdio` を**付けていない**ときの測り方。次を見ること
+ *
+ * ## 断ったときに流れるもの（claude 2.1.245・2026-08-25。フラグを付けた後）
+ *
+ * **`system/permission_denied` はもう流れない。** こちらが `control_response` で断ると、
+ * ツール結果が普通のエラーの顔（`is_error:true`）で返り、
+ * 見分ける手がかりは行の直下の `tool_result_meta[].non_execution_kind` だけになる。
+ * 詳しくは `nonExecutionOf` に書いた。**`is_error` だけでは絶対に区別できない。**
+ *
+ * `result.permission_denials` には断ったぶんが
+ * `{tool_name, tool_use_id, tool_input}` の形で入る（**空配列ではない**）。
+ * こちらは件数だけ数えている（`resultInfo`）。
  *
  * ## control 系の実測（claude 2.1.243・2026-08-25）
  *
@@ -291,6 +301,150 @@ function controlResultInfo(res) {
 }
 
 /**
+ * `user` 行の `tool_result_meta` から「なぜ実行されなかったか」の印を取り出す。
+ *
+ * ## 実測（claude 2.1.245・2026-08-25）
+ *
+ * `--permission-prompt-tool stdio` を付けた状態で `control_response` に
+ * `{behavior:'deny', message:'…'}` を返すと、**`system/permission_denied` は流れない。**
+ * 代わりにツール結果が普通のエラーの顔で返り、行の**直下**（`message` の中ではない）に
+ * これが付く。
+ *
+ * ```
+ * "message":{"role":"user","content":[{"type":"tool_result",
+ *    "content":"実測のため断りました","is_error":true,"tool_use_id":"toolu_014C…"}]},
+ * "tool_use_result":"Error: 実測のため断りました",
+ * "tool_result_meta":[{"id":"toolu_014C…","non_execution_kind":"permission-rule"}]
+ * ```
+ *
+ * **これが無いと「あなたが断った」と「ツールが失敗した」が画面で同じ顔になる。**
+ * どちらも `is_error:true` なので、`is_error` だけでは絶対に見分けられない。
+ *
+ * 観測した `non_execution_kind` は `permission-rule` の1種類だけ。
+ * **他の語が来ることを前提に、値をそのまま持つ**（既知の語へ丸めない）。
+ *
+ * `id` はツール結果の `tool_use_id` と対応する。並列にツールを呼ぶと複数入りうるので配列のまま。
+ *
+ * @param {object} line 読めた行
+ * @returns {Array<{id:string, kind:string}>} 印が無ければ空配列
+ */
+function nonExecutionOf(line) {
+  if (!Array.isArray(line.tool_result_meta)) return [];
+
+  const out = [];
+  for (const m of line.tool_result_meta) {
+    if (!m || typeof m !== 'object') continue;
+    const id = str(m.id ?? m.tool_use_id);
+    const kind = str(m.non_execution_kind ?? m.nonExecutionKind);
+    // 両方揃わないと結果と結び付けられない。片方だけ持っても使い道が無い
+    if (id && kind) out.push({ id, kind });
+  }
+  return out;
+}
+
+/**
+ * `system` / `subtype:thinking_tokens` から、考えている量を取り出す。
+ *
+ * ## 実測（claude 2.1.245・2026-08-25）
+ *
+ * ```
+ * {"type":"system","subtype":"thinking_tokens",
+ *  "estimated_tokens":700,"estimated_tokens_delta":50,"uuid":"…","session_id":"…"}
+ * ```
+ *
+ * **1ターンに何度も流れる**（1往復で8件を実測。50→150→200→300→400→500→650→700）。
+ * `estimated_tokens` は**そのターンの累計**で、`result` の
+ * `usage.output_tokens_details.thinking_tokens`（実測 754）とほぼ一致する。
+ *
+ * だから**これを速報の行として1件ずつ積んではいけない。**
+ * 積むと1ターンで8行の「その他」が並び、本文が押し流される（段4より前は実際にそうなっていた）。
+ * 畳んで「いまいくつ」の1つの数にするのは台帳の仕事。
+ *
+ * @param {object} line 読めた行
+ * @returns {{tokens:number|null, delta:number|null}}
+ */
+function thinkingInfo(line) {
+  return {
+    tokens: num(line.estimated_tokens ?? line.estimatedTokens),
+    delta: num(line.estimated_tokens_delta ?? line.estimatedTokensDelta),
+  };
+}
+
+/**
+ * `rate_limit_event` から、枠をどれだけ使ったかを取り出す。
+ *
+ * ## 実測（claude 2.1.245・2026-08-25）
+ *
+ * ```
+ * {"type":"rate_limit_event","rate_limit_info":{
+ *   "status":"allowed","resetsAt":1787667000,"rateLimitType":"five_hour",
+ *   "overageStatus":"rejected","overageDisabledReason":"member_zero_credit_limit",
+ *   "isUsingOverage":false,
+ *   "unifiedWindows":{"five_hour":{"utilization":0.06,"resetsAt":1787667000},
+ *                     "seven_day":{"utilization":0.69,"resetsAt":1787763600}}}}
+ * ```
+ *
+ * - **`utilization` は 0〜1 の割合**（0.69 ＝ 69%）。百分率にするのは画面の仕事
+ * - `resetsAt` は**秒**の unix 時刻。ミリ秒として扱うと 1970 年になる
+ * - CLI が `/usage` で出すのと同じ枠。**画面にはこれまで出る道が無かった**
+ *
+ * `overageStatus` は「上限を超えたぶんを買うか」の設定で、枠の使用量とは別の話。
+ * ここでは拾わない（出しても押せる口が無く、読む人を迷わせるだけ）。
+ *
+ * @param {object} line 読めた行
+ * @returns {{status:string|null, fiveHour:number|null, sevenDay:number|null, resetsAt:number|null}}
+ */
+function rateLimitInfo(line) {
+  const rl = line.rate_limit_info && typeof line.rate_limit_info === 'object'
+    ? line.rate_limit_info
+    : {};
+  const w = rl.unifiedWindows && typeof rl.unifiedWindows === 'object' ? rl.unifiedWindows : {};
+  const use = (k) => num(w[k]?.utilization);
+  return {
+    status: str(rl.status),
+    fiveHour: use('five_hour'),
+    sevenDay: use('seven_day'),
+    // 直近で空くほうの時刻。5時間枠のほうが必ず先に空くので、無ければ7日枠に倒す
+    resetsAt: num(w.five_hour?.resetsAt) ?? num(rl.resetsAt) ?? num(w.seven_day?.resetsAt),
+  };
+}
+
+/**
+ * `system` / `subtype:hook_*` から、どのフックがどうなったかを取り出す。
+ *
+ * ## 実測（claude 2.1.245・2026-08-25）
+ *
+ * ```
+ * {"type":"system","subtype":"hook_response","hook_id":"4b04d449-…",
+ *  "hook_name":"SessionStart:startup","hook_event":"SessionStart",
+ *  "output":"# ハンドオフ運用（有効中）…","stdout":"（output と同じ 1484 文字）",
+ *  "stderr":"","exit_code":0,"outcome":"success","uuid":"…","session_id":"…"}
+ * ```
+ *
+ * **`output` と `stdout` は拾わない。** 中身はフックが吐いた文章そのもので、
+ * 実測で 1484 文字あった（しかも同じものが2つのキーに入っている）。
+ * 速報のリング1000件にこれが載ると、フックを何本か入れている人の手元でメモリが数MB増える。
+ * フックの出力は Claude への差し込みであって、**こちらが読み返すものではない。**
+ *
+ * `stderr` だけは拾う。フックが壊れたときに気づける唯一の手がかりで、
+ * 正常時は空文字なので普段は何も増えない。
+ *
+ * @param {object} line 読めた行
+ * @returns {{hookId:string|null, name:string|null, event:string|null,
+ *            outcome:string|null, exitCode:number|null, stderr:string|null}}
+ */
+function hookInfo(line) {
+  return {
+    hookId: str(line.hook_id),
+    name: str(line.hook_name),
+    event: str(line.hook_event),
+    outcome: str(line.outcome),
+    exitCode: num(line.exit_code),
+    stderr: clip(line.stderr, RESULT_TEXT_MAX),
+  };
+}
+
+/**
  * stream-json の1行を読み解く。
  *
  * **`entry` を台帳へそのまま積まないこと。** 大きな `tool_result` は1行が数MBになる。
@@ -299,7 +453,8 @@ function controlResultInfo(res) {
  *
  * @param {string} text 行1本（末尾の改行は付いていても付いていなくてもよい）
  * @returns {{
- *   kind: 'init'|'assistant'|'user'|'result'|'permission'|'control'|'control-result'|'other'|'broken',
+ *   kind: 'init'|'assistant'|'user'|'result'|'permission'|'control'|'control-result'
+ *       |'thinking'|'rate-limit'|'hook'|'other'|'broken',
  *   type: string|null,
  *   subtype: string|null,
  *   sessionId: string|null,
@@ -359,16 +514,28 @@ export function classifyStreamLine(text) {
 
   switch (type) {
     case 'system':
-      // system は init 以外も来る（compact_boundary など）。init だけを名前で扱う
+      // system は subtype ごとに中身がまるで違う。**知っているものだけ名前で扱う。**
+      // ここに無い subtype（`compact_boundary` など）は `other` のまま
       if (subtype === 'init') {
         return { ...base, ...common, kind: 'init', info: initInfo(line) };
+      }
+      if (subtype === 'thinking_tokens') {
+        return { ...base, ...common, kind: 'thinking', info: thinkingInfo(line) };
+      }
+      if (subtype === 'hook_started' || subtype === 'hook_progress' || subtype === 'hook_response') {
+        return { ...base, ...common, kind: 'hook', info: hookInfo(line) };
       }
       return { ...base, ...common, kind: 'other' };
 
     case 'assistant':
-    case 'user':
       // ここだけ会話ログと同じ形。entries.mjs の道具をそのまま当てられる
       return { ...base, ...common, kind: type, entry: line };
+
+    case 'user':
+      // `user` にだけ `tool_result_meta` が付く（実測）。
+      // **`entry` と別に持つ。** entries.mjs の道具は会話ログ用で、
+      // 会話ログ側にこのキーは無いので `toolResults` は見てくれない
+      return { ...base, ...common, kind: type, entry: line, info: { nonExecution: nonExecutionOf(line) } };
 
     case 'result':
       return { ...base, ...common, kind: 'result', info: resultInfo(line) };
@@ -397,9 +564,11 @@ export function classifyStreamLine(text) {
       return { ...base, ...common, subtype: str(res.subtype), kind: 'control-result', info: controlResultInfo(res) };
     }
 
+    case 'rate_limit_event':
+      return { ...base, ...common, kind: 'rate-limit', info: rateLimitInfo(line) };
+
     default:
-      // 実測では `rate_limit_event`（トップレベルの type。`rate_limit_info` を持つ）がここへ落ちた。
-      // 生の type を残してあるので、扱う気になったときに読み直せる
+      // 知らない type。生の type を残してあるので、扱う気になったときに読み直せる
       return { ...base, ...common, kind: 'other' };
   }
 }

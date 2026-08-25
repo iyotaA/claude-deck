@@ -45,8 +45,20 @@ const EVENT_LABELS = {
   echo: 'あなた',
   result: '1往復の終わり',
   note: '記録',
+  hook: 'フック',
   other: 'その他',
   broken: '読めなかった行',
+};
+
+/**
+ * 「実行されなかった理由」の名前。
+ *
+ * 実測で出たのは `permission-rule` の1種類だけ（自分が `control_response` で断ったとき）。
+ * **ここに無い語はそのまま出す。** 版が上がって新しい語が来た日に、
+ * 知らない語を黙って捨てると「エラーになった」としか見えなくなる。
+ */
+const NON_EXEC_LABELS = {
+  'permission-rule': 'あなたが断ったので実行されていません',
 };
 
 /**
@@ -79,11 +91,18 @@ function bodyOf(ev) {
     }
 
     case 'tool-result': {
+      const out = [];
+      // **断ったものはエラーの赤で出さない。** こちらが断った結果は `is_error:true` で返るので
+      // （実測。`stream.mjs` の `nonExecutionOf` を見ること）、印を見ずに色を付けると
+      // 「自分で止めた」と「向こうが壊れた」が画面で同じ顔になる
+      if (ev.nonExecution) out.push(el('div', 'run-skip', NON_EXEC_LABELS[ev.nonExecution] ?? `実行されませんでした（${ev.nonExecution}）`));
+
       const line = el('div', 'run-out');
-      if (ev.isError) line.classList.add('is-error');
+      if (ev.isError && !ev.nonExecution) line.classList.add('is-error');
       // 中身が空でも「返ってきた」ことは伝える（黙って空行にしない）
       line.textContent = ev.text || (ev.isError ? '（エラー。中身なし）' : '（中身なし）');
-      return [line];
+      out.push(line);
+      return out;
     }
 
     case 'init': {
@@ -103,6 +122,20 @@ function bodyOf(ev) {
 
     case 'broken':
       return [el('div', 'run-out is-error', ev.sample ? `読めなかった行: ${ev.sample}` : '読めなかった行')];
+
+    case 'hook': {
+      const line = el('div', 'run-tool');
+      line.append(el('span', 'run-tool-name', ev.name ?? ev.event ?? '(名前なし)'));
+      // ok が null なのは「成功か分からなかった」。そのときは何も言わない（成功と書かない）
+      if (ev.ok === false) {
+        const code = typeof ev.exitCode === 'number' ? `失敗（code ${ev.exitCode}）` : '失敗';
+        line.append(el('span', 'run-tool-detail is-error', code));
+      }
+      const out = [line];
+      // フックの出力は拾っていない（数KBあるため）。stderr だけは出す。壊れたときの唯一の手がかり
+      if (ev.stderr) out.push(el('div', 'run-out is-error', ev.stderr));
+      return out;
+    }
 
     case 'other':
       return [el('div', 'run-other', [ev.type, ev.subtype].filter(Boolean).join(' / ') || '(型なし)')];
@@ -128,6 +161,9 @@ function resultBody(ev) {
   // そこで起点に戻る（実測 0.401036 → 切り替え後の最初の result で 0.130617）。
   // だから「ここまで」とは書かない。切り替えを挟んだぶんは、並んだ result を足したものが合計になる
   fact(dl, 'この起動ぶんの費用', typeof ev.costUSD === 'number' ? `$${ev.costUSD.toFixed(4)}` : null);
+  // そのターンで考えた量。台帳が刻みを畳んだもの（速報には1件も並ばない）。
+  // 0 は「考えなかった」で不明ではないので、そのまま出す
+  fact(dl, '考えた量', typeof ev.thinkingTokens === 'number' ? `${ev.thinkingTokens.toLocaleString()} トークン` : null);
   fact(dl, '止まった理由', ev.terminalReason);
   // 断ったものが無いときは行ごと出さない。0 を隠すのは「取れなかった」ではなく
   // 「起きなかった」ので、0 と不明を分ける原則には触れない
@@ -172,8 +208,37 @@ function factsOf(row) {
   // 0 が正常終了。fact が落とすのは null / undefined / 空文字だけなので、0 はそのまま出る
   // （util.js の tokens() と違って `if (!n)` ではない。ここは 0 と不明が別物として出る）
   fact(dl, '終了コード', row.exitCode);
+  // 枠の使用率（CLI の `/usage` と同じもの）。API を叩くたびに届くが、
+  // 値そのものはめったに動かないので、ここが描き直されるまで古いままでも実害が無い
+  fact(dl, '枠の使用率', rateText(row.rateLimit));
+  // CLI が stderr へ吐いた直近の1行。普段は無いので欄ごと出ない。
+  // 出ているときは、たいていこちら側の配線が間違っている合図
+  fact(dl, 'CLI の警告', row.lastStderr);
   fact(dl, '理由', row.reason);
   return dl;
+}
+
+/**
+ * 枠の使用率を1行にする。
+ *
+ * `utilization` は 0〜1 の割合で届く（実測 0.06 / 0.69）。百分率にするのはここ。
+ * **どちらも取れていなければ行ごと出さない**（`fact` が null を落とす）。
+ *
+ * @param {object|null|undefined} rl `{fiveHour, sevenDay, resetsAt}`
+ * @returns {string|null}
+ */
+function rateText(rl) {
+  if (!rl) return null;
+  const pct = (v) => (typeof v === 'number' ? `${Math.round(v * 100)}%` : null);
+  const parts = [];
+  const h5 = pct(rl.fiveHour);
+  const d7 = pct(rl.sevenDay);
+  if (h5) parts.push(`5時間枠 ${h5}`);
+  if (d7) parts.push(`7日枠 ${d7}`);
+  if (parts.length === 0) return null;
+  // resetsAt は**秒**の unix 時刻（実測）。ミリ秒として渡すと 1970 年になる
+  if (typeof rl.resetsAt === 'number') parts.push(`次に空くのは ${stamp(rl.resetsAt * 1000).slice(5)}`);
+  return parts.join(' / ');
 }
 
 /* ── 描く先を預かる。外から中の状態を触らせない ───────────────── */

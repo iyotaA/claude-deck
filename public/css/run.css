@@ -180,6 +180,22 @@
 
 .run-out.is-error { color: var(--hot); }
 
+/* フックが失敗したときの但し書き。`.run-tool-detail` の色だけ上書きする */
+.run-tool-detail.is-error { color: var(--hot); }
+
+/* 「実行されませんでした」の印。
+   **`.run-out.is-error` の赤にしない。** こちらが断った結果も向こうからは is_error で返るので
+   （実測）、同じ赤にすると「自分で止めた」と「向こうが壊れた」が見分けられなくなる。
+   注意を引く必要はなく、隣のエラー本文が赤で出ていないことを説明できればよい */
+.run-skip {
+  font-size: .74rem;
+  color: var(--fg-faint);
+  border-left: 2px solid var(--border-strong);
+  padding-left: .4rem;
+  margin-bottom: .15rem;
+  overflow-wrap: anywhere;
+}
+
 .run-note {
   font-size: .78rem;
   color: var(--fg-muted);
