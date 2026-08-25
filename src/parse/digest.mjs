@@ -162,6 +162,14 @@ export function buildDigest({ entries = [], scope = 'main', agentId = null } = {
    * スラッシュコマンドのときだけにする
    */
   let replyFrom = null;
+  /**
+   * 最後の発言。押し込んだ項目そのものと、切る前の全文。
+   *
+   * 「いま」タブの待ちブロックはここを出すので、末尾が「…（以下省略）」で
+   * 終わると答えるための材料が足りなくなる。走査のあとで幅を広げ直すために控える。
+   * 参照を持つのは、間引き（trimItems）で落とされたかどうかを照合するため
+   */
+  let lastSay = null;
 
   for (const entry of scoped) {
     const at = timestampOf(entry);
@@ -238,7 +246,7 @@ export function buildDigest({ entries = [], scope = 'main', agentId = null } = {
     const say = textOf(entry);
     if (say) {
       stats.says += 1;
-      items.push({
+      const item = {
         i: index++,
         kind: 'say',
         at,
@@ -246,7 +254,9 @@ export function buildDigest({ entries = [], scope = 'main', agentId = null } = {
         text: clip(say, LIMIT.say),
         // 切る前の長さ。切られた本文から長さを計ると「全文」の字数が嘘になる
         fullLength: say.length,
-      });
+      };
+      items.push(item);
+      lastSay = { item, raw: say };
       if (at !== null) replyFrom = at;
     }
 
@@ -454,6 +464,16 @@ export function buildDigest({ entries = [], scope = 'main', agentId = null } = {
   stats.turns = scoped.filter((e) => e?.type === 'assistant').length;
 
   const trimmed = trimItems(items);
+
+  // 最後の発言だけ、切る幅を LIMIT.sayLast まで広げ直す。
+  // ここでやるのは、間引きに落とされていないことを確かめてからにするため
+  // （落ちていれば elided の印に畳まれていて、画面が拾うのは1つ前の発言になる）。
+  // 項目を作り直して差し替える。走査中に mutate すると、間引きの判断が
+  // 「広げたあとの長さ」を見ることになり、落とす順が入力に依らなくなる
+  if (lastSay && lastSay.raw.length > LIMIT.say) {
+    const at = trimmed.items.indexOf(lastSay.item);
+    if (at !== -1) trimmed.items[at] = { ...lastSay.item, text: clip(lastSay.raw, LIMIT.sayLast) };
+  }
 
   return {
     items: trimmed.items,
