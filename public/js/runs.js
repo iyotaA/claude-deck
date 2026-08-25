@@ -11,18 +11,18 @@
  *
  * ## 取り口を増やさない
  *
- * GET /api/runs/:id（全部入り）は引かない。台帳の行（rows）と速報（events）だけで組む。
+ * GET /api/runs/:id（全部入り）は引かない。組むのに使うのは台帳の行（rows）だけ。
  * 引くと session.js と同じ作法（突き合わせ・キャッシュ・最小間隔・404 の切り分け）を
- * もう一度書くことになる。費用や往復数は result の出来事に載っているので、そちらから拾える。
- */
-
-/**
- * run 1本あたり画面に残す出来事の数。
+ * もう一度書くことになる。
  *
- * サーバー側のリングバッファ（EVENT_MAX = 1000）より小さくしてある。
- * 画面は「いま何が起きているか」を見るためのもので、読み返す正本は会話ログのほう。
+ * ## 速報は溜めない
+ *
+ * 出来事（run の速報）は seq の水位を進めるためだけに受ける。**画面は1件も持たない。**
+ * 読み返す正本は会話ログで、それは詳細ペインの経過タブが描いている。
+ *
+ * **水位取りごと消してはいけない。** つなぎ直しは /api/runs/stream?from=<seq> なので、
+ * 起点が 0 に戻ると、切れるたびにサーバー側のリング（最大1000件）を送り直させる。
  */
-export const EVENTS_PER_RUN = 400;
 
 /**
  * 思考量の言い方。
@@ -108,19 +108,18 @@ const RECONNECT_MS = 3000;
 const rows = new Map();
 /** @type {Map<string, string>} sessionId → runId。詳細ペインから引くための逆引き */
 const bySession = new Map();
-/** @type {Map<string, Array<object>>} runId → 出来事 */
-const events = new Map();
-/** @type {Map<string, number>} runId → 溢れて捨てた件数 */
-const dropped = new Map();
 
 /**
  * @type {object|null} 直近の枠の使用率。**行ではなく封筒から来る**（アカウント共通の値）
  */
 let rate = null;
 
-/** つなぎ直しのあいだにサーバー側で押し出された件数。累積で持つ */
-let missed = 0;
-/** 受け取った出来事の最大 seq。つなぎ直すときの起点になる */
+/**
+ * 受け取った出来事の最大 seq。つなぎ直すときの起点になる。
+ *
+ * **出来事そのものは持たないが、この数だけは進める。** 0 に戻すと
+ * /api/runs/stream?from=0 になり、切れるたびにリング1000件を送り直させる。
+ */
 let lastSeq = 0;
 
 let source = null;
@@ -166,10 +165,10 @@ function stampOf(row) {
 }
 
 /** 登録した相手へ配る。1人が投げても残りへ配り続ける。 */
-function emit(kind) {
+function emit() {
   for (const fn of listeners) {
     try {
-      fn(kind);
+      fn();
     } catch (err) {
       // 画面側の落ち度で SSE の受け口を止めない
       console.error('runs listener', err);
@@ -181,7 +180,7 @@ function emit(kind) {
  * 台帳の行をまるごと入れ替える。
  *
  * サーバーは rows() を毎回まるごと送ってくるので、こちらも差分ではなく総入れ替えにする。
- * 消えた run（HISTORY_MAX を超えて押し出されたもの）は出来事ごと落とす。
+ * 消えた run（HISTORY_MAX を超えて押し出されたもの）は行ごと落とす。
  *
  * @returns {boolean} 画面の作りに影響する変化があったか
  */
@@ -203,8 +202,6 @@ function applyRows(list) {
     if (seen.has(runId)) continue;
     const gone = rows.get(runId);
     rows.delete(runId);
-    events.delete(runId);
-    dropped.delete(runId);
     if (gone?.sessionId && bySession.get(gone.sessionId) === runId) bySession.delete(gone.sessionId);
     changed = true;
   }
@@ -213,32 +210,21 @@ function applyRows(list) {
 }
 
 /**
- * 届いた出来事を積む。
+ * 届いた出来事から seq の水位だけを取る。**中身は捨てる。**
  *
- * @returns {boolean} 1件でも積んだか
+ * 画面は速報を1件も出さないので、溜める先が無い。それでもここを通すのは、
+ * つなぎ直しの起点（/api/runs/stream?from=<seq>）がこの数そのものだから。
+ * 進めるのをやめると、切れるたびにリング1000件を送り直させる。
+ *
+ * @param {unknown} list 速報のフレームに入っていた出来事
  */
-function pushEvents(list) {
-  if (!Array.isArray(list) || list.length === 0) return false;
-
-  let added = false;
+function takeSeq(list) {
+  if (!Array.isArray(list)) return;
   for (const ev of list) {
     // seq は単調増加。つなぎ直しの穴埋めで同じものが再送されるので、見た番号は捨てる
     if (!ev || !Number.isFinite(ev.seq) || ev.seq <= lastSeq) continue;
     lastSeq = ev.seq;
-
-    const runId = typeof ev.runId === 'string' ? ev.runId : null;
-    if (!runId) continue;
-
-    const bucket = events.get(runId) ?? [];
-    bucket.push(ev);
-    while (bucket.length > EVENTS_PER_RUN) {
-      bucket.shift();
-      dropped.set(runId, (dropped.get(runId) ?? 0) + 1);
-    }
-    events.set(runId, bucket);
-    added = true;
   }
-  return added;
 }
 
 /** SSE をつなぐ。切れたら自分で張り直す。 */
@@ -264,8 +250,7 @@ function open() {
     // 2つとも呼ぶ。`||` で繋ぐと短絡して、行が変わった回に枠が取り込まれない
     const rowsChanged = applyRows(data.rows);
     const rateChanged = takeRate(data.rate);
-    if (Number.isFinite(data.missed) && data.missed > 0) missed += data.missed;
-    if (rowsChanged || rateChanged) emit('rows');
+    if (rowsChanged || rateChanged) emit();
   });
 
   source.addEventListener('run', (ev) => {
@@ -275,7 +260,9 @@ function open() {
     } catch {
       return;
     }
-    if (pushEvents(data.events)) emit('events');
+    // 水位だけ取る。**配らない。** 1ターンで数百行来るので、ここで配ると
+    // 詳細ペインが作り直されて、開いた <details> と入力中の caret が毎回消える
+    takeSeq(data.events);
   });
 
   source.addEventListener('error', () => {
@@ -397,34 +384,19 @@ function ageText(ms) {
   return `${Math.floor(h / 24)}日前`;
 }
 
-/** 実行1本ぶんの出来事。無ければ空配列。 */
-export function eventsOf(runId) {
-  return runId ? (events.get(runId) ?? []) : [];
-}
-
-/** 溢れて画面から落とした件数。黙って捨てないための数。 */
-export function droppedOf(runId) {
-  return runId ? (dropped.get(runId) ?? 0) : 0;
-}
-
-/** つなぎ直しのあいだに取りこぼした件数（全体）。 */
-export function runsMissed() {
-  return missed;
-}
-
 /** detail.js の detailKeyOf() に混ぜる印。 */
 export function runStampFor(sessionId) {
   return stampOf(runFor(sessionId));
 }
 
 /**
- * 変化を受け取る。
+ * 台帳が動いたことを受け取る。
  *
- * kind は 'rows'（台帳が動いた）か 'events'（速報が届いた）。
- * 受け取る側がこの2つを分けて扱えるようにしてある。
- * 前者は詳細ペインの作り直し、後者はパネルの中への追記で足りる。
+ * 呼ばれるのは stampOf の5つ（現れた・状態が変わった・終わった・許可を訊かれた
+ * または答えた・設定を替えた）と、枠の使用率が動いたとき。
+ * **速報1件ごとには呼ばない。** 画面が速報を1件も持たないので、配る中身が無い。
  *
- * @param {(kind: 'rows'|'events') => void} fn
+ * @param {() => void} fn
  * @returns {() => void} 解除する関数
  */
 export function subscribeRuns(fn) {
