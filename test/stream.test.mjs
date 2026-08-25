@@ -42,6 +42,24 @@ test('init から、起動できたことを確かめる材料が取れる', () 
   assert.equal(got.info.tools, 2);
 });
 
+test('init が名乗った機能をそのまま持つ', () => {
+  const caps = ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1', 'msg_lifecycle_v1'];
+  const got = read(sysInit({ capabilities: caps }));
+  assert.deepEqual(got.info.capabilities, caps);
+});
+
+test('名乗りが無ければ null。空配列に丸めない', () => {
+  // 「名乗らない版」と「何も持たない版」を混ぜると、
+  // 前者で使えるはずの割り込みを永久に断ることになる
+  const got = read(sysInit());
+  assert.equal(got.info.capabilities, null);
+});
+
+test('名乗りに文字列でないものが混ざっていても落とすだけ', () => {
+  const got = read(sysInit({ capabilities: ['interrupt_receipt_v1', 42, null, ''] }));
+  assert.deepEqual(got.info.capabilities, ['interrupt_receipt_v1']);
+});
+
 test('assistant の発言が読める', () => {
   const got = read(sAssistant('やってみる'));
   assert.equal(got.kind, 'assistant');

@@ -832,6 +832,40 @@ async function handleRunMode(req, res, runId) {
 }
 
 /**
+ * いま走っているターンへ割り込む（CLI の Esc に当たる）。
+ *
+ * **`/stop` と分ける。** あちらは子ごと落として会話を終わらせる。
+ * こちらは子を生かしたまま今の作業だけをやめさせる。
+ * 取り返しの付き方が違うものを同じ窓口にすると、押し間違いが会話ごと消すことになる。
+ *
+ * **本文の上限は既定の `BODY_MAX`（8KB）。** 来るのは真偽が1つだけ。
+ *
+ * **202 を返す。** 撃っただけで届いたかは分からない（`/mode` と同じ）。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ * @param {string} runId 実行の識別子
+ */
+async function handleRunInterrupt(req, res, runId) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    return;
+  }
+
+  const r = runner.interrupt(runId, body);
+  // 撃った時点で行の `interrupting` が変わる。押した窓以外にも「割り込み中」を出す
+  pushRunRows();
+  if (!r.ok) {
+    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
+    return;
+  }
+  sendJson(res, r.status, { ok: true, run: r.row });
+}
+
+/**
  * 止める。3段階（stdin を閉じる → taskkill /T → taskkill /T /F）は os/claude.mjs の中。
  *
  * @param {object} res レスポンス
@@ -988,12 +1022,14 @@ function handleWrite(req, res, pathname, url) {
   }
   // 完全一致（/api/runs）より後ろに置く。こちらのほうが具体的だが、
   // 上は同じ文字列との一致なので取り違えは起きない
-  const runPost = pathname.match(/^\/api\/runs\/([\w-]{1,64})\/(input|stop|switch|answer|mode)$/);
+  const runPost = pathname.match(
+    /^\/api\/runs\/([\w-]{1,64})\/(input|stop|switch|answer|mode|interrupt)$/);
   if (runPost) {
     if (runPost[2] === 'input') handleRunInput(req, res, runPost[1]);
     else if (runPost[2] === 'switch') handleRunSwitch(req, res, runPost[1]);
     else if (runPost[2] === 'answer') handleRunAnswer(req, res, runPost[1]);
     else if (runPost[2] === 'mode') handleRunMode(req, res, runPost[1]);
+    else if (runPost[2] === 'interrupt') handleRunInterrupt(req, res, runPost[1]);
     else handleRunStop(res, runPost[1]);
     return;
   }

@@ -153,6 +153,21 @@ export const LIVE_FIELDS = Object.freeze({
 });
 
 /**
+ * 割り込みが撃てることを CLI が名乗る印。
+ *
+ * `system/init` の `capabilities` に載る（実測 2.1.245 で
+ * `['interrupt_receipt_v1','interrupt_cancel_queued_v1','msg_lifecycle_v1']`）。
+ *
+ * **名乗っていない（配列に無い）ときだけ断る。名乗り自体が無い（null）ときは撃たせる。**
+ * 「不明」を「無い」と読むと、名乗る前の版で使えるはずの割り込みを永久に断ることになる。
+ * 撃って通じなければ 10 秒の `liveAckTimeoutMs` が拾うので、詰まったままにはならない。
+ */
+export const INTERRUPT_CAP = 'interrupt_receipt_v1';
+
+/** 控えている指示ごと取り消せることを名乗る印。名乗っていなければ頼まれても断る。 */
+export const CANCEL_QUEUED_CAP = 'interrupt_cancel_queued_v1';
+
+/**
  * 「替えました」の答えを待つ上限。過ぎたら控えを捨てる。
  *
  * **過ぎても状態は変えない。** 撃ったのに返事が無いなら、いまどちらで走っているかは
@@ -767,6 +782,7 @@ export function createRunLedger({
     const p = id ? run.livePending.get(id) : null;
     if (!p) return [];
     run.livePending.delete(id);
+    if (p.kind === 'interrupt') return takeInterruptResult(run, info, now);
     const f = LIVE_FIELDS[p.field];
     if (!info.ok) {
       return [pushNote(run, `${f.label}を ${p.value} に替えられませんでした（${info.error ?? '理由不明'}）`, now)];
@@ -783,6 +799,29 @@ export function createRunLedger({
   }
 
   /**
+   * 割り込みの答えを読む。**状態は変えない。**
+   *
+   * 割り込みが通ってもそのターンが早く畳まれるだけで、run としては走ったまま。
+   * ここで終端へ倒すと、まだ流れている行を `apply()` が「子のいない run のもの」として捨てる。
+   * 止めるのは `/stop` の仕事で、これは別のこと。
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `{requestId, ok, error, response}`
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報
+   */
+  function takeInterruptResult(run, info, now) {
+    if (!info.ok) {
+      return [pushNote(run, `割り込めませんでした（${info.error ?? '理由不明'}）`, now)];
+    }
+    // 応答に控えの残り数が入ることがある（`still_queued`）。**数でなければ言わない**
+    const left = typeof info.response?.still_queued === 'number' ? info.response.still_queued : null;
+    return [pushNote(run, left === null
+      ? '割り込みました'
+      : `割り込みました（控えが ${left} 件残っています）`, now)];
+  }
+
+  /**
    * 返事の無いまま時間切れになった「替えました」の控えを捨てる。
    *
    * **状態は変えない。** 撃ったのに返事が無いなら、いまどちらで走っているかは分からない。
@@ -793,6 +832,21 @@ export function createRunLedger({
    * @param {number} now 時刻
    * @returns {Array<object>} 積んだ速報。時間切れが無ければ空
    */
+  /**
+   * 起動の行から、向こうが名乗った機能を控える。**速報は積まない。**
+   *
+   * `init` は1本のあいだに何度も流れる（ターンごと・スラッシュコマンドでも）。
+   * **配列で来たときだけ書く。** 読めない行で null に潰すと、一度は名乗っていた機能が
+   * 「名乗っていない」に化けて、割り込みの札が画面から消える。
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `initInfo` の戻り
+   * @returns {void}
+   */
+  function takeInit(run, info) {
+    if (Array.isArray(info?.capabilities)) run.capabilities = info.capabilities;
+  }
+
   /**
    * 考えた量を畳む。**速報は積まない。**
    *
@@ -837,6 +891,11 @@ export function createRunLedger({
       // 時計が巻き戻ったとき（負）に捨てないよう、この向きで書く
       if (!(now - p.at >= liveAckTimeoutMs)) continue;
       run.livePending.delete(id);
+      if (p.kind === 'interrupt') {
+        // ここでも「届かなかった」と診断しない。**返事が無かったことだけ**を言う
+        out.push(pushNote(run, '割り込みに返事がありませんでした。届いたかどうかは分かりません', now));
+        continue;
+      }
       const label = LIVE_FIELDS[p.field].label;
       out.push(pushNote(run, `${label}の切り替えに返事がありませんでした。いまの${label}は分かりません`, now));
     }
@@ -927,7 +986,15 @@ export function createRunLedger({
       // 撃ったが返事待ちの切り替え。**行に載せるのは `asks` と同じ理由。**
       // 別のタブで替えた最中にもう一方が二重に撃つのを止められるし、
       // 押した窓を閉じても「切り替え中」が残る。`at` を載せないのは毎秒の差分判定のため
-      switching: [...run.livePending.values()].map((p) => ({ field: p.field, value: p.value })),
+      switching: [...run.livePending.values()]
+        .filter((p) => p.kind === 'live')
+        .map((p) => ({ field: p.field, value: p.value })),
+      // 撃ったが返事待ちの割り込み。二重に撃たせないために行へ載せる。
+      // 真偽1つで足りるのは、控えるのは同時に1本だけと `interrupt()` が決めているため
+      interrupting: [...run.livePending.values()].some((p) => p.kind === 'interrupt'),
+      // CLI が名乗った機能。**null は「名乗らなかった」で、空配列（何も無い）とは別。**
+      // 画面はこれを見て割り込みの札を出すかどうかを決める。init で入るだけなので毎秒動かない
+      capabilities: run.capabilities,
       // 枠の使用率。CLI の `/usage` と同じもので、画面にはこれまで出る道が無かった。
       // API を叩くたびに流れるが、値そのものはめったに動かないので差分判定で止まる
       rateLimit: run.rateLimit,
@@ -1001,9 +1068,17 @@ export function createRunLedger({
         /** @type {Map<string, object>} requestId → 未応答の要求 */
         pending: new Map(),
         /** @type {object|null} こちらが撃った `set_permission_mode` の控え。受理されるまで持つ */
-        // 撃った「替えました」の控え。`Map<requestId, {field, value, at}>`。
-        // **受理されるまで持つ**（受理を待たずに書き換えないため）
+        // 撃った要求の控え。`Map<requestId, {kind, ..., at}>`。
+        // **受理されるまで持つ**（受理を待たずに書き換えないため）。
+        //
+        // `kind` は `'live'`（値の入れ替え。`field` と `value` を持つ）か
+        // `'interrupt'`（割り込み。替える項目が無いので持たない）。
+        // **割り込みを `LIVE_FIELDS` に足さない。** あれは「項目→subtype→パラメタ名」の表で、
+        // 足すと `LIVE_FIELDS[p.field]` が undefined になり、答えを読む側がその場で落ちる。
+        // 器を分けずに印を1つ持たせたのは、後始末が `livePending.clear()` の1箇所で済むため
         livePending: new Map(),
+        /** @type {string[]|null} CLI が名乗った機能。**無ければ null**（空配列に丸めない） */
+        capabilities: null,
         /** @type {number|null} そのターンで考えた量（累計）。畳んだ結果だけを持つ */
         thinking: null,
         /** @type {object|null} 直近の枠の使用率。`{fiveHour, sevenDay, resetsAt}` */
@@ -1167,6 +1242,9 @@ export function createRunLedger({
         pushed.push(...refuseControl(run, classified.info ?? {}, now));
       } else if (classified?.kind === 'control-result') {
         pushed.push(...takeControlResult(run, classified.info ?? {}, now));
+      } else if (classified?.kind === 'init') {
+        // 速報は `toRunEvents` が既に組んでいる。ここで拾うのは行に載せる名乗りだけ
+        takeInit(run, classified.info ?? {});
       } else if (classified?.kind === 'thinking') {
         // 速報は積まない。行に載せるだけ（`toRunEvents` も空を返している）
         takeThinking(run, classified.info ?? {});
@@ -1332,7 +1410,7 @@ export function createRunLedger({
       if (behavior === 'allow' && typeof decision.then === 'string' && decision.then
         && typeof decision.thenRequestId === 'string' && decision.thenRequestId) {
         run.livePending.set(decision.thenRequestId, {
-          field: 'permissionMode', value: decision.then, at: now,
+          kind: 'live', field: 'permissionMode', value: decision.then, at: now,
         });
         outbox.push({
           runId,
@@ -1403,7 +1481,7 @@ export function createRunLedger({
       const events = [];
       for (const w of list) {
         const f = LIVE_FIELDS[w.field];
-        run.livePending.set(w.requestId, { field: w.field, value: w.value, at: now });
+        run.livePending.set(w.requestId, { kind: 'live', field: w.field, value: w.value, at: now });
         outbox.push({
           runId,
           kind: 'control-request',
@@ -1414,6 +1492,69 @@ export function createRunLedger({
         events.push(pushNote(run, `${f.label}を ${w.value} に替えています`, now));
       }
       return { ok: true, events };
+    },
+
+    /**
+     * いま走っているターンへ割り込む（CLI の Esc に当たる）。
+     *
+     * **止めるのとは別のこと。** `/stop` は子ごと落として run を終わらせる。
+     * こちらは子を生かしたまま「いまやっていることをやめて」と言うだけで、
+     * そのあと続きを打てる。今までは前者しか無かったので、
+     * 長い作業を1つ取り消したいだけでも会話ごと捨てるしかなかった。
+     *
+     * **名乗り（`capabilities`）が無いときは撃たせる。**
+     * 「不明」を「使えない」と読むと、名乗る前の版で永久に断ることになる。
+     * 通じなければ `sweepLive` が 10 秒で控えを落とし「返事がありませんでした」と言う。
+     *
+     * 逆に `cancelQueued` は**名乗っていなければ断る。** 頼まれたことを黙って落とすと、
+     * 「控えも消えたはず」と思い込んだまま続きが流れることになる。
+     *
+     * @param {string} runId 対象
+     * @param {string} requestId 殻が採番した id
+     * @param {{cancelQueued?:boolean}} opts 控えている指示ごと取り消すか
+     * @param {number} now 時刻
+     * @returns {{ok:boolean, code?:string, reason?:string, events:Array<object>}}
+     *          `code` は `no-run` / `over` / `no-child` / `bad` / `unsupported` /
+     *          `no-cancel` / `interrupting`
+     */
+    interrupt(runId, requestId, opts, now) {
+      const run = runs.get(runId);
+      if (!run) return { ok: false, code: 'no-run', events: [] };
+      if (isRunOver(run.state)) return { ok: false, code: 'over', events: [] };
+      if (isChildDone(run.state)) return { ok: false, code: 'no-child', events: [] };
+      if (typeof requestId !== 'string' || !requestId) {
+        return { ok: false, code: 'bad', events: [] };
+      }
+
+      const caps = run.capabilities;
+      if (Array.isArray(caps) && !caps.includes(INTERRUPT_CAP)) {
+        return { ok: false, code: 'unsupported', events: [] };
+      }
+      const cancelQueued = opts?.cancelQueued === true;
+      if (cancelQueued && Array.isArray(caps) && !caps.includes(CANCEL_QUEUED_CAP)) {
+        return { ok: false, code: 'no-cancel', events: [] };
+      }
+
+      for (const p of run.livePending.values()) {
+        // 二重に撃つと、返ってきた `still_queued` がどちらのものか決められない
+        if (p.kind === 'interrupt') return { ok: false, code: 'interrupting', events: [] };
+      }
+
+      run.livePending.set(requestId, { kind: 'interrupt', at: now });
+      outbox.push({
+        runId,
+        kind: 'control-request',
+        requestId,
+        subtype: 'interrupt',
+        // **頼まれていないキーを付けない。** 未知のキーを向こうがどう扱うかは読めない
+        params: cancelQueued ? { cancel_queued: true } : {},
+      });
+      return {
+        ok: true,
+        events: [pushNote(run, cancelQueued
+          ? '割り込んでいます（控えている指示も取り消します）'
+          : '割り込んでいます', now)],
+      };
     },
 
     /**

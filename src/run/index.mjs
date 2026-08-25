@@ -97,6 +97,23 @@ const LIVE_DENY = Object.freeze({
 });
 
 /**
+ * 割り込みの断り方。`LIVE_DENY` と同じ形で、文言だけが違う。
+ *
+ * **`LIVE_DENY` に相乗りさせない。** あちらの `no-child` は
+ * 「替えて続ける」への案内で、割り込みには当てはまらない
+ * （終わったターンに割り込む意味が無い。建て直しても割り込みにはならない）。
+ */
+const INTERRUPT_DENY = Object.freeze({
+  'no-run': { status: 404, reason: 'その実行は見つかりません' },
+  over: { status: 409, reason: 'その実行はもう終わっています' },
+  'no-child': { status: 409, reason: 'いま動いていません' },
+  bad: { status: 400, reason: '割り込み方が不正です' },
+  unsupported: { status: 409, reason: 'この claude は割り込みに対応していません' },
+  'no-cancel': { status: 409, reason: 'この claude は控えている指示の取り消しに対応していません' },
+  interrupting: { status: 409, reason: 'いま割り込み中です' },
+});
+
+/**
  * 実行の配線を作る。
  *
  * @param {object} [opts]
@@ -672,6 +689,46 @@ export function createRunner({
   }
 
   /**
+   * いま走っているターンへ割り込む（CLI の Esc に当たる）。
+   *
+   * **`stop` とは別の口。** あちらは子ごと落として run を終わらせる。
+   * こちらは子を生かしたまま今の作業をやめさせるだけで、そのあと続きを打てる。
+   * 1本にまとめないのは、取り返しの付き方が違うものを同じボタンにすると
+   * 押し間違いが会話ごと消すことになるから。
+   *
+   * **202 を返す。** 撃っただけで、届いたかはまだ分からない（`setLive` と同じ）。
+   *
+   * @param {string} runId 実行の識別子
+   * @param {object} [body] `{cancelQueued?}`
+   * @returns {{ok:boolean, status:number, row?:object, reason?:string}}
+   */
+  function interrupt(runId, body) {
+    const at = clock();
+    const row = ledger.get(runId);
+    if (!row) return { ok: false, status: 404, reason: 'その実行は見つかりません' };
+    if (isRunOver(row.state)) return { ok: false, status: 409, reason: 'その実行はもう終わっています' };
+    // 撃つ先が在るかを知っているのは殻だけ。`setLive` と同じ理由で状態だけでは足りない
+    const child = live.get(runId)?.child;
+    if (isChildDone(row.state) || !child?.stdin || child.stdin.destroyed) {
+      return { ok: false, status: 409, reason: 'いま動いていません' };
+    }
+
+    const res = ledger.interrupt(runId, nextRequestId(), {
+      cancelQueued: body?.cancelQueued === true,
+    }, at);
+    if (!res.ok) {
+      const deny = INTERRUPT_DENY[res.code] ?? { status: 500, reason: '割り込めませんでした' };
+      return { ok: false, status: deny.status, reason: res.reason ?? deny.reason };
+    }
+
+    // 書けたかどうかはここで初めて分かる。**書けていないのに 202 を返さない**
+    if (commit(res.events).includes(runId)) {
+      return { ok: false, status: 500, reason: '割り込めませんでした', row: ledger.get(runId) };
+    }
+    return { ok: true, status: 202, row: ledger.get(runId) };
+  }
+
+  /**
    * 止める。
    *
    * `stdin.end()` → `taskkill /T` → `taskkill /T /F` の3段は `stopClaude` の中。
@@ -854,6 +911,7 @@ export function createRunner({
     input,
     answer,
     setLive,
+    interrupt,
     stop,
     // `switch` は予約語だが、プロパティ名としては使える。
     // 窓口の名前（`POST /api/runs/:id/switch`）と揃えるほうが読みやすい

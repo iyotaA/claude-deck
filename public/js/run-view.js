@@ -354,6 +354,24 @@ const RUN_OVER = new Set(['stopped', 'failed', 'done']);
 const RUN_NO_CHILD = new Set([...RUN_OVER, 'budget']);
 
 /**
+ * 割り込める状態。**「子が生きている」より狭い。**
+ *
+ * `waiting`（あなたの番）には割り込む先の作業が無いし、`needs-permission` は
+ * 答えれば進むので、割り込むより答えるほうが正しい。`stalled` を入れてあるのは、
+ * あれが「2分出力が無い」だけで走ってはいるから（圧縮の最中がここに入る）。
+ */
+const RUN_WORKING = new Set(['running', 'stalled']);
+
+/**
+ * 割り込みが撃てることを CLI が名乗る印。`src/run/ledger.mjs` の `INTERRUPT_CAP` と同じ語。
+ *
+ * **画面は名乗ったときだけ札を出す。** サーバーは名乗りが無い（null）ときも撃たせるが、
+ * あれは「不明を不可と読まない」ための逃げ道で、こちらは押せる顔をした押せないボタンを
+ * 出さないほうを採る。名乗る版なら init が来た時点で出るので、待つのは一瞬。
+ */
+const INTERRUPT_CAP = 'interrupt_receipt_v1';
+
+/**
  * 子を殺さずに替えられる項目。サーバーの `LIVE_FIELDS` と同じ並び。
  *
  * **思考量と上限はここに無い。** 思考量は `--effort` の語とあちらが欲しいトークン数の
@@ -425,7 +443,7 @@ let optionsAsked = false;
  *
  * @type {null | {
  *   bar: HTMLElement, prompt: HTMLTextAreaElement, send: HTMLButtonElement,
- *   stop: HTMLButtonElement, msg: HTMLElement,
+ *   brk: HTMLButtonElement, stop: HTMLButtonElement, msg: HTMLElement,
  *   now: HTMLButtonElement, nowMode: HTMLElement, nowModel: HTMLElement, nowNote: HTMLElement,
  *   dlg: HTMLDialogElement, swModelPick: HTMLSelectElement, swModel: HTMLInputElement,
  *   swEffort: HTMLSelectElement, swMode: HTMLSelectElement, swBudget: HTMLInputElement,
@@ -501,6 +519,14 @@ function applyEnabled() {
   ops.apply.disabled = off;
   // 終わっている実行は替えようが無い。押せる顔のまま断るより、押せなくしておく
   ops.now.disabled = off;
+
+  // 割り込みは「名乗っている」かつ「いま走っている」ときだけ。
+  // 出す・出さないを行ごとに決めるので、状態は `lastRow` から読む
+  const row = ops.lastRow;
+  const named = Array.isArray(row?.capabilities) && row.capabilities.includes(INTERRUPT_CAP);
+  ops.brk.hidden = !named;
+  ops.brk.disabled = off || !RUN_WORKING.has(row?.state) || row?.interrupting === true;
+  ops.brk.textContent = row?.interrupting === true ? '割り込んでいます…' : '割り込む';
 }
 
 /**
@@ -710,6 +736,44 @@ async function post(kind) {
   }
 }
 
+/**
+ * 割り込む（CLI の Esc に当たる）。
+ *
+ * **2段押しにしない。** 止めるのと違って取り返しが付く（子は生きていて、
+ * そのまま続きを打てる）。確認を挟むと、いちばん急いでいる場面で1回ぶん遅れる。
+ *
+ * **控えている指示を消すか（`cancelQueued`）は送らない。** 窓口は受けるが、
+ * 画面には控えの本数を出す道がまだ無いので、選ばせても何を消すのか分からないまま押すことになる。
+ */
+async function doInterrupt() {
+  const runId = ops.runId;
+  if (!runId || ops.busy || ops.over) return;
+
+  setBusy(true);
+  say('割り込んでいます…');
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/interrupt`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    const data = await res.json().catch(() => null);
+    // 返ってくるまでに別の実行へ移っていることがある（`post()` と同じ作法）
+    if (ops.runId !== runId) return;
+
+    if (!res.ok || !data?.ok) {
+      say(data?.reason ?? `割り込めませんでした（HTTP ${res.status}）`, 'bad');
+      return;
+    }
+    // 202。**「割り込みました」と言い切らない。** 届いたかは返事が来るまで分からない
+    say('割り込みを送りました。返事を待っています…');
+  } catch (err) {
+    if (ops.runId === runId) say(`割り込めませんでした（${err.message}）`, 'bad');
+  } finally {
+    if (ops.runId === runId) setBusy(false);
+  }
+}
+
 /** 2段押しを元へ戻す。 */
 function disarmStop() {
   if (ops.stopTimer !== null) {
@@ -831,6 +895,13 @@ function buildOps() {
   send.type = 'button';
   send.addEventListener('click', () => post('input'));
 
+  // 止めるの手前に置く。**並びで軽重を示す。**
+  // 会話ごと消える「止める」がいちばん端で、その1つ内側が取り消せる「割り込む」
+  const brk = el('button', 'btn', '割り込む');
+  brk.type = 'button';
+  brk.hidden = true;
+  brk.addEventListener('click', doInterrupt);
+
   const stop = el('button', 'btn', '止める');
   stop.type = 'button';
   stop.addEventListener('click', onStop);
@@ -839,7 +910,7 @@ function buildOps() {
   msg.setAttribute('role', 'status');
 
   const btns = el('div', 'composer-btns');
-  btns.append(send, stop);
+  btns.append(send, brk, stop);
 
   const line = el('div', 'composer-row');
   line.append(prompt, btns);
@@ -951,7 +1022,7 @@ function buildOps() {
   document.body.append(dlg);
 
   ops = {
-    bar, prompt, send, stop, msg,
+    bar, prompt, send, brk, stop, msg,
     now, nowMode, nowModel, nowNote,
     dlg, swModelPick, swModel, swEffort, swMode, swBudget, apply, swHow, swPending, swMsg,
     runId: null, busy: false, over: false, stopArmed: false, stopTimer: null, lastRow: null,
@@ -1103,6 +1174,8 @@ function syncOps(row) {
     if (ops.dlg.open) ops.dlg.close();
   }
 
+  // **`applyEnabled()` より先に入れる。** 割り込みの札は行の `capabilities` と
+  // `interrupting` を見て出し入れするので、古い行のまま当てると1フレーム遅れる
   ops.lastRow = row;
   ops.over = RUN_OVER.has(row.state);
   applyEnabled();

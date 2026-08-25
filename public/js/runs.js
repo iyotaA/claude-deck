@@ -147,6 +147,12 @@ function stampOf(row) {
     row.permissionMode ?? '',
     row.model ?? '',
     (row.switching ?? []).map((c) => c.field).join('+'),
+    // 割り込み。**撃った瞬間と、返事・時間切れで落ち着いた瞬間にだけ動く。**
+    // 入れないと「割り込んでいます…」の顔のまま戻らない
+    row.interrupting === true ? 'int' : '',
+    // 名乗り。init の1回で入ってそれきり動かないが、**入れないと札が出ない。**
+    // 起きた直後は null で、init が来た次のフレームで初めて配列になる
+    (row.capabilities ?? []).length,
   ].join('/');
   return [row.runId, row.state, exit, row.reason ?? '', row.turns ?? '', ask, live].join(':');
 }

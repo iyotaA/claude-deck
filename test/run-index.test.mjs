@@ -1184,6 +1184,94 @@ test('子が閉じたあとは替えずに 409。建て直すほうへ案内す�
   assert.ok(out.reason.includes('替えて続ける'));
 });
 
+/*
+ * 割り込み（interrupt）
+ */
+
+/** 名乗りを届けてから走らせる。割り込みの札はこれが来て初めて出る。 */
+async function interruptible(h, res) {
+  const child = h.children[0];
+  feed(child, sysInit({
+    sessionId: res.row.sessionId,
+    capabilities: ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1'],
+  }));
+  await stdinText(child);
+  return child;
+}
+
+test('割り込みは control_request を1本書く。子は殺さない', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = await interruptible(h, res);
+
+  const out = h.runner.interrupt(res.runId, {});
+  assert.equal(out.status, 202, '届いたかはまだ分からない。撃っただけ');
+
+  const line = JSON.parse((await stdinText(child)).trim());
+  assert.equal(line.type, 'control_request');
+  assert.equal(line.request.subtype, 'interrupt');
+  assert.ok(line.request_id.startsWith('req_'));
+  assert.equal(h.stops.length, 0, '止めていない');
+  assert.equal(h.runner.get(res.runId).state, 'running', '走ったまま');
+});
+
+test('控えの取り消しを頼んだときだけ cancel_queued が乗る', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = await interruptible(h, res);
+
+  h.runner.interrupt(res.runId, { cancelQueued: true });
+  const line = JSON.parse((await stdinText(child)).trim());
+  assert.equal(line.request.cancel_queued, true);
+});
+
+test('返事が来ると印が消える', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = await interruptible(h, res);
+
+  h.runner.interrupt(res.runId, {});
+  assert.equal(h.runner.get(res.runId).interrupting, true);
+
+  const shot = JSON.parse((await stdinText(child)).trim());
+  feed(child, sControlResponse(shot.request_id, { sessionId: res.row.sessionId }));
+  await settle();
+  assert.equal(h.runner.get(res.runId).interrupting, false);
+});
+
+test('名乗りが行に出る。割り込みの断る番号', async () => {
+  const h = harness();
+  const res = h.start();
+  await stdinText(h.children[0]);
+
+  // init が来る前は「不明」。ここで空配列にすると画面が札を出せなくなる
+  assert.equal(h.runner.get(res.runId).capabilities, null);
+  assert.equal(h.runner.interrupt('しらない', {}).status, 404);
+
+  await interruptible(h, res);
+  assert.deepEqual(h.runner.get(res.runId).capabilities,
+    ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1']);
+
+  assert.equal(h.runner.interrupt(res.runId, {}).status, 202);
+  assert.equal(h.runner.interrupt(res.runId, {}).status, 409, '二重には撃たない');
+});
+
+test('子が閉じたあとは割り込まずに 409。建て直しへは案内しない', async () => {
+  // 終わったターンに割り込む意味は無い。`/switch` を勧めると別のことをさせることになる
+  const h = harness();
+  const res = h.start();
+  const child = await interruptible(h, res);
+
+  feed(child, sResult({ sessionId: res.row.sessionId }));
+  await settle();
+  child.close(0);
+  await settle();
+
+  const out = h.runner.interrupt(res.runId, {});
+  assert.equal(out.status, 409);
+  assert.ok(!out.reason.includes('替えて続ける'));
+});
+
 test('正常終了でも標準エラーは残る', async () => {
   // `Malformed updatedPermissions` のようなこちらの配線の間違いは、
   // 終了コード 0 のまま stderr にだけ出る。理由には使えないが、見えないと直せない

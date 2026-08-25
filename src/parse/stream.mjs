@@ -135,6 +135,17 @@ function num(v) {
 }
 
 /**
+ * 文字列だけを残した配列を返す。
+ *
+ * @param {*} v 何か
+ * @returns {string[]|null} 配列でなければ null（**空配列に丸めない**。「無い」と「空」は別）
+ */
+function strList(v) {
+  if (!Array.isArray(v)) return null;
+  return v.filter((x) => typeof x === 'string' && x);
+}
+
+/**
  * `system` / `subtype:init` から、起動できたことを確かめるための値を取り出す。
  *
  * 実測で載っていたキー（claude 2.1.228）。ここに無いものは仮定しない。
@@ -151,13 +162,19 @@ function num(v) {
  * - `model` は `claude-opus-5[1m]` のように**角括弧が付くことがある**。
  *   `run/spec.mjs` の `MODEL_RE` は角括弧を通さないが、あれは**こちらから指定する側**の話。
  *   受け取る側で弾かない（表示するだけなので害が無い）
- * - `capabilities` に `interrupt_receipt_v1` などが載る。中断の口が公開されている手がかりだが、
- *   いまは使っていないので拾わない
+ * - `capabilities` は向こうが名乗る機能の一覧。実測 2.1.245 で
+ *   `['interrupt_receipt_v1','interrupt_cancel_queued_v1','msg_lifecycle_v1']`。
+ *   割り込みを撃ってよいかを**手で表を書かずに**判定できる唯一の材料なので拾う
  *
  * それでも**キーが無いことを異常にしない。** 版が上がれば形は変わる。取れなければ null で進む。
  *
+ * **`capabilities` は無ければ null。空配列に丸めない。**
+ * 「名乗らない版」と「何も持たない版」は別のことで、空配列にすると前者を後者と読み違えて、
+ * 使えるはずの割り込みを断ることになる。
+ *
  * @param {object} line 読めた行
- * @returns {{model:string|null, cwd:string|null, permissionMode:string|null, tools:number|null}}
+ * @returns {{model:string|null, cwd:string|null, permissionMode:string|null, tools:number|null,
+ *   capabilities:string[]|null}}
  */
 function initInfo(line) {
   const tools = Array.isArray(line.tools) ? line.tools.length : null;
@@ -166,6 +183,7 @@ function initInfo(line) {
     cwd: str(line.cwd),
     permissionMode: str(line.permissionMode ?? line.permission_mode),
     tools,
+    capabilities: strList(line.capabilities),
   };
 }
 

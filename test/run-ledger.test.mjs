@@ -11,7 +11,7 @@ import { classifyStreamLine } from '../src/parse/stream.mjs';
 import {
   createRunLedger, isChildDone, isRunOver, mergeRuns, quietFor,
   RUN_STATE_LABELS, RUN_MAX, STALL_MS, ASK_BODY_MAX, PENDING_MAX, PERMISSION_TIMEOUT_MS,
-  buildQuestionInput, LIVE_FIELDS, LIVE_ACK_TIMEOUT_MS,
+  buildQuestionInput, LIVE_FIELDS, LIVE_ACK_TIMEOUT_MS, INTERRUPT_CAP, CANCEL_QUEUED_CAP,
 } from '../src/run/ledger.mjs';
 import {
   sysInit, sAssistant, sResult, sPermission, sQuestion, sControlResponse, S_ID,
@@ -1728,4 +1728,155 @@ test('居ない実行へ言っても落ちない', () => {
   const { led } = started();
   assert.deepEqual(led.noteDropped('nope', 3, T), []);
   assert.equal(led.noteStderr('nope', 'x'), false);
+});
+
+/*
+ * 割り込み（interrupt）
+ */
+
+/** 名乗りを持たせて走り出させる。 */
+function named(caps = [INTERRUPT_CAP, CANCEL_QUEUED_CAP]) {
+  const { led, id } = started();
+  feed(led, id, sysInit({ capabilities: caps }), T + 5);
+  return { led, id };
+}
+
+test('名乗った機能は行に出る。init が来るまでは null', () => {
+  const { led, id } = started();
+  assert.equal(led.rows()[0].capabilities, null, '起きた直後は「名乗っていない」ではなく「不明」');
+
+  feed(led, id, sysInit({ capabilities: [INTERRUPT_CAP] }), T + 5);
+  assert.deepEqual(led.rows()[0].capabilities, [INTERRUPT_CAP]);
+});
+
+test('名乗りの無い init では前の名乗りを潰さない', () => {
+  const { led, id } = named([INTERRUPT_CAP]);
+  // init はターンごとに来る。版が上がってキーが消えた日に、
+  // 一度は取れていた名乗りが「無い」に化けると割り込みの札が消える
+  feed(led, id, sysInit(), T + 10);
+  assert.deepEqual(led.rows()[0].capabilities, [INTERRUPT_CAP]);
+});
+
+test('割り込みは control-request を1本積み、行に印を出す', () => {
+  const { led, id } = named();
+  const res = led.interrupt(id, 'i1', {}, T + 10);
+
+  assert.equal(res.ok, true);
+  const out = led.takeOutbox();
+  assert.equal(out.length, 1);
+  assert.equal(out[0].subtype, 'interrupt');
+  // 頼まれていないキーは付けない
+  assert.deepEqual(out[0].params, {});
+  assert.equal(led.rows()[0].interrupting, true);
+});
+
+test('控えの取り消しを頼まれたときだけ cancel_queued を付ける', () => {
+  const { led, id } = named();
+  led.interrupt(id, 'i1', { cancelQueued: true }, T + 10);
+  assert.deepEqual(led.takeOutbox()[0].params, { cancel_queued: true });
+});
+
+test('割り込みは切り替えの欄には出ない', () => {
+  // `switching` は「値を替えている」ぶんだけ。混ぜると画面が
+  // `LIVE_FIELDS[undefined]` を引いて落ちる
+  const { led, id } = named();
+  led.interrupt(id, 'i1', {}, T + 10);
+  assert.deepEqual(led.rows()[0].switching, []);
+});
+
+test('返事が来たら印が消える。状態は動かさない', () => {
+  const { led, id } = named();
+  led.interrupt(id, 'i1', {}, T + 10);
+  const events = feed(led, id, sControlResponse('i1'), T + 20);
+
+  assert.equal(led.rows()[0].interrupting, false);
+  assert.equal(led.rows()[0].state, 'running', '割り込んでも run は走ったまま');
+  assert.ok(events.some((e) => e.kind === 'note' && e.text === '割り込みました'));
+});
+
+test('控えの残り数は、数で返ってきたときだけ言う', () => {
+  const { led, id } = named();
+  led.interrupt(id, 'i1', { cancelQueued: true }, T + 10);
+  const events = feed(led, id, sControlResponse('i1', { response: { still_queued: 2 } }), T + 20);
+  assert.ok(events.some((e) => e.kind === 'note' && e.text.includes('2 件')));
+
+  const b = named();
+  b.led.interrupt(b.id, 'i2', {}, T + 10);
+  const ev2 = feed(b.led, b.id, sControlResponse('i2', { response: { still_queued: '2' } }), T + 20);
+  assert.ok(ev2.some((e) => e.kind === 'note' && e.text === '割り込みました'), '文字列は数ではない');
+});
+
+test('断られたらそう言う', () => {
+  const { led, id } = named();
+  led.interrupt(id, 'i1', {}, T + 10);
+  const events = feed(led, id, sControlResponse('i1', { ok: false, error: '走っていません' }), T + 20);
+
+  assert.equal(led.rows()[0].interrupting, false);
+  assert.ok(events.some((e) => e.kind === 'note' && e.text.includes('走っていません')));
+});
+
+test('返事が来なければ控えを捨てるが、届いたとは言わない', () => {
+  const { led, id } = started({ liveAckTimeoutMs: 1000 });
+  feed(led, id, sysInit({ capabilities: [INTERRUPT_CAP] }), T + 5);
+  led.interrupt(id, 'i1', {}, T + 10);
+
+  const { events } = led.tick(T + 1100);
+  assert.ok(events.some((e) => e.kind === 'note' && e.text.includes('分かりません')));
+  assert.equal(led.rows()[0].interrupting, false);
+  assert.equal(led.rows()[0].state, 'running');
+});
+
+test('二重には撃たせない', () => {
+  const { led, id } = named();
+  assert.equal(led.interrupt(id, 'i1', {}, T + 10).ok, true);
+  assert.equal(led.interrupt(id, 'i2', {}, T + 20).code, 'interrupting');
+  // 値の切り替えとは別枠。片方が控えていても、もう片方は撃てる
+  assert.equal(led.setLive(id, [{ field: 'model', value: 'x', requestId: 'm1' }], T + 30).ok, true);
+});
+
+test('名乗っていないと断る。名乗り自体が無ければ撃たせる', () => {
+  // 「不明」を「不可」と読むと、名乗る前の版で永久に断ることになる
+  const bare = started();
+  assert.equal(bare.led.interrupt(bare.id, 'i1', {}, T + 10).ok, true, '名乗り不明なら撃つ');
+
+  const other = named(['msg_lifecycle_v1']);
+  assert.equal(other.led.interrupt(other.id, 'i1', {}, T + 10).code, 'unsupported');
+});
+
+test('控えの取り消しは、名乗っていなければ黙って落とさず断る', () => {
+  const { led, id } = named([INTERRUPT_CAP]);
+  assert.equal(led.interrupt(id, 'i1', { cancelQueued: true }, T + 10).code, 'no-cancel');
+  assert.deepEqual(led.takeOutbox(), [], '断ったのに撃たない');
+  // 取り消し無しなら通る
+  assert.equal(led.interrupt(id, 'i1', {}, T + 10).ok, true);
+});
+
+test('子がいない・終わっている・居ない実行は断る', () => {
+  // 予算切れは終端ではないが子がいない。建て直しても割り込みにはならないので、
+  // ここは `setLive` と違って「替えて続ける」へ案内しない
+  const { led, id } = named();
+  exhaust(led, id, T + 20);
+  assert.equal(led.rows()[0].state, 'budget');
+  assert.equal(led.interrupt(id, 'i1', {}, T + 30).code, 'no-child');
+
+  const b = named();
+  b.led.onExit(b.id, 0, null, T + 30);
+  assert.equal(b.led.interrupt(b.id, 'i1', {}, T + 40).code, 'over');
+  assert.equal(b.led.interrupt('よその id', 'i1', {}, T + 40).code, 'no-run');
+});
+
+test('id を採番し忘れたら断る', () => {
+  const { led, id } = named();
+  for (const bad of [undefined, null, '', 42]) {
+    assert.equal(led.interrupt(id, bad, {}, T + 10).code, 'bad', JSON.stringify(bad));
+  }
+});
+
+test('子が死んだら割り込みの控えも消える', () => {
+  const { led, id } = named();
+  led.interrupt(id, 'i1', {}, T + 10);
+  led.takeOutbox();
+  led.onExit(id, 0, null, T + 20);
+  assert.equal(led.rows()[0].interrupting, false);
+  assert.deepEqual(led.takeOutbox(), [], '書く先が無いので積まない');
 });
