@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="favicon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="favicon-192.png">
 <!-- CSS は宣言順で勝ち負けが付く。この順番を入れ替えない。
-     narrow.css は上の13枚を上書きするので必ず最後 -->
+     narrow.css は上の14枚を上書きするので必ず最後 -->
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/list.css">
@@ -21,6 +21,7 @@
 <link rel="stylesheet" href="css/update.css">
 <link rel="stylesheet" href="css/usage.css">
 <link rel="stylesheet" href="css/run.css">
+<link rel="stylesheet" href="css/ask.css">
 <link rel="stylesheet" href="css/markdown.css">
 <link rel="stylesheet" href="css/palette.css">
 <link rel="stylesheet" href="css/board.css">
@@ -45,6 +46,10 @@
       <button class="tab" id="mode-usage" type="button" aria-pressed="false">数値</button>
     </div>
     <div class="summary" id="summary"></div>
+    <!-- 枠の使用率。アカウント共通の値なので**画面に1つだけ**。
+         .summary とは別の器にする。あちらは renderSummary() が replaceChildren() で
+         毎回まるごと入れ替えるので、混ぜると出どころの違う2つが同じ器を取り合う -->
+    <div class="rate" id="rate" role="status" hidden></div>
     <div class="topbar-actions">
       <!-- いまの版。触ると更新の確認の結果が出る。
            渡された側が自分の版を確かめられる場所が、画面にはここしか無い -->
@@ -279,10 +284,11 @@
 
   <div class="settings-body">
 
-    <!-- この機能でいちばん驚かれる点なので、折りたたまずに常に見せる -->
+    <!-- この機能でいちばん驚かれる点なので、折りたたまずに常に見せる。
+         放っておくと止まることを先に言う（答えるまで待つので、席を外すと進まない） -->
     <p class="runform-warn">
-      この画面から起こすセッションは、途中であなたに許可を求めません。
-      下の権限モードで決めた範囲だけを、最後まで自分で進めます。
+      途中で確認が要るときは、この画面に出ます。答えるまで待ちます。
+      10分答えが無いと自動的に断って、あなたの番として止まります。
     </p>
 
     <section class="settings-sec">
@@ -312,12 +318,17 @@
     </section>
 
     <section class="settings-sec settings-grid">
-      <label class="settings-label" for="run-model">モデル</label>
+      <!-- 候補は「このマシンで実際に使われたモデル」。サーバーが一覧から拾って返す。
+           そこに無いものは「自分で入力」で渡せる（新しいモデルが出た初日のため）。
+           入力欄は選ばれるまで畳んでおく。配線は run-form.js -->
+      <label class="settings-label" for="run-model-pick">モデル</label>
       <span class="settings-row">
-        <input class="settings-text" id="run-model" type="text"
-               spellcheck="false" autocomplete="off" placeholder="空欄なら CLI の既定">
+        <select class="settings-select runform-wide" id="run-model-pick"></select>
+        <input class="settings-text" id="run-model" type="text" hidden
+               spellcheck="false" autocomplete="off" aria-label="モデル名を自分で入力"
+               placeholder="モデル名をそのまま書く">
       </span>
-      <p class="settings-hint">名前をそのまま渡します。使えるかどうかは CLI が決めます</p>
+      <p class="settings-hint">使ったことのあるものを並べています。使えるかどうかは CLI が決めます</p>
 
       <label class="settings-label" for="run-effort">思考量</label>
       <span class="settings-row">

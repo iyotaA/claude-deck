@@ -21,9 +21,15 @@
  * ## 未知の形で落ちない
  *
  * stream-json も公開仕様ではない。知っている `type` だけを名前で拾い、残りは `other` にする。
- * **生の `type` は捨てずに残す。** `control_request`（許可を求めてくる行）のように、
- * いまは扱わないが後で扱いたくなるものがあるため。
+ * **生の `type` は捨てずに残す。** 後で扱いたくなるものがあるため。
  * JSON として読めない行は `broken` にして数えるだけ（transcript.mjs の parseLines と同じ作法）。
+ *
+ * ## 未知の形で「詰まらない」（control 系だけの追加規則）
+ *
+ * `control_request` は他と性質が違う。**答えないと向こうが永久に待つ。**
+ * だから未知の subtype も `other` へ落とさず `control` として拾い、
+ * 呼ぶ側が `encodeControlError()` で断れるようにしてある。
+ * `request_id` が読めないものだけは答えようが無いので `other` に落とす。
  *
  * ## 実測した行の並び（claude 2.1.228・2026-08-15 と 08-16）
  *
@@ -45,7 +51,44 @@
  * - **`system/permission_denied` は止まった印ではない。** `acceptEdits` で Bash を投げると
  *   これが流れ、そのツールの結果が `isError:true`（`This command requires approval`）になり、
  *   **向こうは止まらずに次の手へ移る**（件数は `result` の `permission_denials` に載る）。
- *   「許可待ちで止まっている」と読み替えると、待っていないものを待っていることにしてしまう
+ *   「許可待ちで止まっている」と読み替えると、待っていないものを待っていることにしてしまう。
+ *   ただしこれは `--permission-prompt-tool stdio` を**付けていない**ときの測り方。次を見ること
+ *
+ * ## 断ったときに流れるもの（claude 2.1.245・2026-08-25。フラグを付けた後）
+ *
+ * **`system/permission_denied` はもう流れない。** こちらが `control_response` で断ると、
+ * ツール結果が普通のエラーの顔（`is_error:true`）で返り、
+ * 見分ける手がかりは行の直下の `tool_result_meta[].non_execution_kind` だけになる。
+ * 詳しくは `nonExecutionOf` に書いた。**`is_error` だけでは絶対に区別できない。**
+ *
+ * `result.permission_denials` には断ったぶんが
+ * `{tool_name, tool_use_id, tool_input}` の形で入る（**空配列ではない**）。
+ * こちらは件数だけ数えている（`resultInfo`）。
+ *
+ * ## control 系の実測（claude 2.1.243・2026-08-25）
+ *
+ * `--permission-prompt-tool stdio` を付けると、この2つが加わる。
+ * **SDK の `initialize` ハンドシェイクは要らない**（こちらから何も撃たなくても流れてくる）。
+ *
+ * ```
+ * ← {"type":"control_request","request_id":"<uuid>","request":{
+ *      "subtype":"can_use_tool","tool_name":"Write","display_name":"Write",
+ *      "input":{...},"description":"hello.txt","tool_use_id":"toolu_…",
+ *      "permission_suggestions":[{"type":"setMode","mode":"acceptEdits","destination":"session"}]}}
+ * → {"type":"control_response","response":{"subtype":"success","request_id":"<uuid>",
+ *      "response":{"behavior":"allow"}}}
+ * ```
+ *
+ * - **要求のキーは固定ではない。** `ExitPlanMode` には `description` も
+ *   `permission_suggestions` も無く、代わりに `requires_user_interaction:true` が付く。
+ *   `Write` にはその逆。**有無で分岐せず、無いものは null にする**（`resultInfo` と同じ作法）
+ * - `{"behavior":"allow"}` だけで通る。`updatedInput` は省略でき、省くと元の入力がそのまま使われる
+ * - こちらが stdin へ書いた `control_response` は**そのまま stdout に返ってくる**（自分のこだま）。
+ *   本物の応答と見分ける鍵は `request_id` が誰の採番かだけなので、**その判断はここではできない。**
+ *   採番した側（`run/index.mjs`）が見分ける
+ * - 失敗は `{"subtype":"error","request_id":"…","error":"…"}`。`error` に人が読める理由が入る
+ *   （例: `Cannot set permission mode: must be one of acceptEdits, auto, bypassPermissions,
+ *   default, dontAsk, plan`）。**黙って詰まることは無い**
  */
 import { clip } from '../shared/text.mjs';
 
@@ -92,6 +135,17 @@ function num(v) {
 }
 
 /**
+ * 文字列だけを残した配列を返す。
+ *
+ * @param {*} v 何か
+ * @returns {string[]|null} 配列でなければ null（**空配列に丸めない**。「無い」と「空」は別）
+ */
+function strList(v) {
+  if (!Array.isArray(v)) return null;
+  return v.filter((x) => typeof x === 'string' && x);
+}
+
+/**
  * `system` / `subtype:init` から、起動できたことを確かめるための値を取り出す。
  *
  * 実測で載っていたキー（claude 2.1.228）。ここに無いものは仮定しない。
@@ -108,13 +162,26 @@ function num(v) {
  * - `model` は `claude-opus-5[1m]` のように**角括弧が付くことがある**。
  *   `run/spec.mjs` の `MODEL_RE` は角括弧を通さないが、あれは**こちらから指定する側**の話。
  *   受け取る側で弾かない（表示するだけなので害が無い）
- * - `capabilities` に `interrupt_receipt_v1` などが載る。中断の口が公開されている手がかりだが、
- *   いまは使っていないので拾わない
+ * - `capabilities` は向こうが名乗る機能の一覧。実測 2.1.245 で
+ *   `['interrupt_receipt_v1','interrupt_cancel_queued_v1','msg_lifecycle_v1']`。
+ *   割り込みを撃ってよいかを**手で表を書かずに**判定できる唯一の材料なので拾う
+ * - `slash_commands` は使えるスラッシュコマンドの名前（実測 2.1.245 で 62 個。
+ *   `compact` `context` `cost` など。**先頭の `/` は付いていない**）。
+ *   `terminal_slash_commands`（実測 `['doctor','color']`）は**対話版の画面でしか働かない**もの。
+ *   どちらもそのまま返し、**引き算はここでしない**（この層は行を読むだけで、
+ *   「どれが使えるか」は使う側の判断。混ぜると引き算の理由がこの層に居座る）
  *
  * それでも**キーが無いことを異常にしない。** 版が上がれば形は変わる。取れなければ null で進む。
  *
+ * **`capabilities` も一覧も、無ければ null。空配列に丸めない。**
+ * 「名乗らない版」と「何も持たない版」は別のことで、空配列にすると前者を後者と読み違えて、
+ * 使えるはずの割り込みを断ることになる。スラッシュコマンドも同じで、
+ * 空配列にすると「1つも使えない」と読めてしまう。
+ *
  * @param {object} line 読めた行
- * @returns {{model:string|null, cwd:string|null, permissionMode:string|null, tools:number|null}}
+ * @returns {{model:string|null, cwd:string|null, permissionMode:string|null, tools:number|null,
+ *   capabilities:string[]|null, slashCommands:string[]|null,
+ *   terminalSlashCommands:string[]|null}}
  */
 function initInfo(line) {
   const tools = Array.isArray(line.tools) ? line.tools.length : null;
@@ -123,6 +190,9 @@ function initInfo(line) {
     cwd: str(line.cwd),
     permissionMode: str(line.permissionMode ?? line.permission_mode),
     tools,
+    capabilities: strList(line.capabilities),
+    slashCommands: strList(line.slash_commands),
+    terminalSlashCommands: strList(line.terminal_slash_commands),
   };
 }
 
@@ -207,6 +277,201 @@ function resultInfo(line) {
 }
 
 /**
+ * `control_request` / `subtype:can_use_tool` から、人が答えるのに要るものを取り出す。
+ *
+ * **`input` は切らない。** `AskUserQuestion` の `updatedInput` を組むのに原文が要る。
+ * 切るのはここから先（`run/event.mjs` が速報に載せるとき）で、
+ * 台帳が原文を持つのは `AskUserQuestion` のときだけ、と決めてある。
+ *
+ * @param {string} requestId 答えを返すときの宛先。呼ぶ側で取れたものを渡す
+ * @param {object} req `line.request`
+ * @returns {object} 揃った形（無いキーは null / 空配列）
+ */
+function permissionInfo(requestId, req) {
+  const input = req.input && typeof req.input === 'object' && !Array.isArray(req.input)
+    ? req.input
+    : null;
+  return {
+    requestId,
+    toolName: str(req.tool_name),
+    // 実測ではツール名と同じ値だったが、別物になりうるので分けて持つ
+    displayName: str(req.display_name),
+    // `Write` では書き込み先のファイル名が入っていた。`ExitPlanMode` には無い
+    description: str(req.description),
+    toolUseId: str(req.tool_use_id),
+    // `ExitPlanMode` にだけ付いていた。**無いことを「対話が要らない」と読まない**
+    requiresUserInteraction: req.requires_user_interaction === true,
+    input,
+    // 実測で入っていたのは `{type:'setMode', mode:'acceptEdits', destination:'session'}`。
+    // `destination:'session'` なので、これを撃っても `~/.claude` には触らない
+    suggestions: Array.isArray(req.permission_suggestions) ? req.permission_suggestions : [],
+  };
+}
+
+/**
+ * `control_response` から、こちらが撃った要求の結末を取り出す。
+ *
+ * @param {object} res `line.response`
+ * @returns {{requestId:string|null, ok:boolean, error:string|null, response:object|null}}
+ */
+function controlResultInfo(res) {
+  return {
+    requestId: str(res.request_id ?? res.requestId),
+    ok: str(res.subtype) === 'success',
+    error: clip(res.error ?? res.message, RESULT_TEXT_MAX),
+    // 中身は subtype ごとに違う（`set_permission_mode` なら `{mode}`）。
+    // 解釈はここでしない。撃った側が自分の subtype に合わせて読む
+    response: res.response && typeof res.response === 'object' && !Array.isArray(res.response)
+      ? res.response
+      : null,
+  };
+}
+
+/**
+ * `user` 行の `tool_result_meta` から「なぜ実行されなかったか」の印を取り出す。
+ *
+ * ## 実測（claude 2.1.245・2026-08-25）
+ *
+ * `--permission-prompt-tool stdio` を付けた状態で `control_response` に
+ * `{behavior:'deny', message:'…'}` を返すと、**`system/permission_denied` は流れない。**
+ * 代わりにツール結果が普通のエラーの顔で返り、行の**直下**（`message` の中ではない）に
+ * これが付く。
+ *
+ * ```
+ * "message":{"role":"user","content":[{"type":"tool_result",
+ *    "content":"実測のため断りました","is_error":true,"tool_use_id":"toolu_014C…"}]},
+ * "tool_use_result":"Error: 実測のため断りました",
+ * "tool_result_meta":[{"id":"toolu_014C…","non_execution_kind":"permission-rule"}]
+ * ```
+ *
+ * **これが無いと「あなたが断った」と「ツールが失敗した」が画面で同じ顔になる。**
+ * どちらも `is_error:true` なので、`is_error` だけでは絶対に見分けられない。
+ *
+ * 観測した `non_execution_kind` は `permission-rule` の1種類だけ。
+ * **他の語が来ることを前提に、値をそのまま持つ**（既知の語へ丸めない）。
+ *
+ * `id` はツール結果の `tool_use_id` と対応する。並列にツールを呼ぶと複数入りうるので配列のまま。
+ *
+ * @param {object} line 読めた行
+ * @returns {Array<{id:string, kind:string}>} 印が無ければ空配列
+ */
+function nonExecutionOf(line) {
+  if (!Array.isArray(line.tool_result_meta)) return [];
+
+  const out = [];
+  for (const m of line.tool_result_meta) {
+    if (!m || typeof m !== 'object') continue;
+    const id = str(m.id ?? m.tool_use_id);
+    const kind = str(m.non_execution_kind ?? m.nonExecutionKind);
+    // 両方揃わないと結果と結び付けられない。片方だけ持っても使い道が無い
+    if (id && kind) out.push({ id, kind });
+  }
+  return out;
+}
+
+/**
+ * `system` / `subtype:thinking_tokens` から、考えている量を取り出す。
+ *
+ * ## 実測（claude 2.1.245・2026-08-25）
+ *
+ * ```
+ * {"type":"system","subtype":"thinking_tokens",
+ *  "estimated_tokens":700,"estimated_tokens_delta":50,"uuid":"…","session_id":"…"}
+ * ```
+ *
+ * **1ターンに何度も流れる**（1往復で8件を実測。50→150→200→300→400→500→650→700）。
+ * `estimated_tokens` は**そのターンの累計**で、`result` の
+ * `usage.output_tokens_details.thinking_tokens`（実測 754）とほぼ一致する。
+ *
+ * だから**これを速報の行として1件ずつ積んではいけない。**
+ * 積むと1ターンで8行の「その他」が並び、本文が押し流される（段4より前は実際にそうなっていた）。
+ * 畳んで「いまいくつ」の1つの数にするのは台帳の仕事。
+ *
+ * @param {object} line 読めた行
+ * @returns {{tokens:number|null, delta:number|null}}
+ */
+function thinkingInfo(line) {
+  return {
+    tokens: num(line.estimated_tokens ?? line.estimatedTokens),
+    delta: num(line.estimated_tokens_delta ?? line.estimatedTokensDelta),
+  };
+}
+
+/**
+ * `rate_limit_event` から、枠をどれだけ使ったかを取り出す。
+ *
+ * ## 実測（claude 2.1.245・2026-08-25）
+ *
+ * ```
+ * {"type":"rate_limit_event","rate_limit_info":{
+ *   "status":"allowed","resetsAt":1787667000,"rateLimitType":"five_hour",
+ *   "overageStatus":"rejected","overageDisabledReason":"member_zero_credit_limit",
+ *   "isUsingOverage":false,
+ *   "unifiedWindows":{"five_hour":{"utilization":0.06,"resetsAt":1787667000},
+ *                     "seven_day":{"utilization":0.69,"resetsAt":1787763600}}}}
+ * ```
+ *
+ * - **`utilization` は 0〜1 の割合**（0.69 ＝ 69%）。百分率にするのは画面の仕事
+ * - `resetsAt` は**秒**の unix 時刻。ミリ秒として扱うと 1970 年になる
+ * - CLI が `/usage` で出すのと同じ枠。**画面にはこれまで出る道が無かった**
+ *
+ * `overageStatus` は「上限を超えたぶんを買うか」の設定で、枠の使用量とは別の話。
+ * ここでは拾わない（出しても押せる口が無く、読む人を迷わせるだけ）。
+ *
+ * @param {object} line 読めた行
+ * @returns {{status:string|null, fiveHour:number|null, sevenDay:number|null, resetsAt:number|null}}
+ */
+function rateLimitInfo(line) {
+  const rl = line.rate_limit_info && typeof line.rate_limit_info === 'object'
+    ? line.rate_limit_info
+    : {};
+  const w = rl.unifiedWindows && typeof rl.unifiedWindows === 'object' ? rl.unifiedWindows : {};
+  const use = (k) => num(w[k]?.utilization);
+  return {
+    status: str(rl.status),
+    fiveHour: use('five_hour'),
+    sevenDay: use('seven_day'),
+    // 直近で空くほうの時刻。5時間枠のほうが必ず先に空くので、無ければ7日枠に倒す
+    resetsAt: num(w.five_hour?.resetsAt) ?? num(rl.resetsAt) ?? num(w.seven_day?.resetsAt),
+  };
+}
+
+/**
+ * `system` / `subtype:hook_*` から、どのフックがどうなったかを取り出す。
+ *
+ * ## 実測（claude 2.1.245・2026-08-25）
+ *
+ * ```
+ * {"type":"system","subtype":"hook_response","hook_id":"4b04d449-…",
+ *  "hook_name":"SessionStart:startup","hook_event":"SessionStart",
+ *  "output":"# ハンドオフ運用（有効中）…","stdout":"（output と同じ 1484 文字）",
+ *  "stderr":"","exit_code":0,"outcome":"success","uuid":"…","session_id":"…"}
+ * ```
+ *
+ * **`output` と `stdout` は拾わない。** 中身はフックが吐いた文章そのもので、
+ * 実測で 1484 文字あった（しかも同じものが2つのキーに入っている）。
+ * 速報のリング1000件にこれが載ると、フックを何本か入れている人の手元でメモリが数MB増える。
+ * フックの出力は Claude への差し込みであって、**こちらが読み返すものではない。**
+ *
+ * `stderr` だけは拾う。フックが壊れたときに気づける唯一の手がかりで、
+ * 正常時は空文字なので普段は何も増えない。
+ *
+ * @param {object} line 読めた行
+ * @returns {{hookId:string|null, name:string|null, event:string|null,
+ *            outcome:string|null, exitCode:number|null, stderr:string|null}}
+ */
+function hookInfo(line) {
+  return {
+    hookId: str(line.hook_id),
+    name: str(line.hook_name),
+    event: str(line.hook_event),
+    outcome: str(line.outcome),
+    exitCode: num(line.exit_code),
+    stderr: clip(line.stderr, RESULT_TEXT_MAX),
+  };
+}
+
+/**
  * stream-json の1行を読み解く。
  *
  * **`entry` を台帳へそのまま積まないこと。** 大きな `tool_result` は1行が数MBになる。
@@ -215,7 +480,8 @@ function resultInfo(line) {
  *
  * @param {string} text 行1本（末尾の改行は付いていても付いていなくてもよい）
  * @returns {{
- *   kind: 'init'|'assistant'|'user'|'result'|'other'|'broken',
+ *   kind: 'init'|'assistant'|'user'|'result'|'permission'|'control'|'control-result'
+ *       |'thinking'|'rate-limit'|'hook'|'other'|'broken',
  *   type: string|null,
  *   subtype: string|null,
  *   sessionId: string|null,
@@ -275,24 +541,61 @@ export function classifyStreamLine(text) {
 
   switch (type) {
     case 'system':
-      // system は init 以外も来る（compact_boundary など）。init だけを名前で扱う
+      // system は subtype ごとに中身がまるで違う。**知っているものだけ名前で扱う。**
+      // ここに無い subtype（`compact_boundary` など）は `other` のまま
       if (subtype === 'init') {
         return { ...base, ...common, kind: 'init', info: initInfo(line) };
+      }
+      if (subtype === 'thinking_tokens') {
+        return { ...base, ...common, kind: 'thinking', info: thinkingInfo(line) };
+      }
+      if (subtype === 'hook_started' || subtype === 'hook_progress' || subtype === 'hook_response') {
+        return { ...base, ...common, kind: 'hook', info: hookInfo(line) };
       }
       return { ...base, ...common, kind: 'other' };
 
     case 'assistant':
-    case 'user':
       // ここだけ会話ログと同じ形。entries.mjs の道具をそのまま当てられる
       return { ...base, ...common, kind: type, entry: line };
+
+    case 'user':
+      // `user` にだけ `tool_result_meta` が付く（実測）。
+      // **`entry` と別に持つ。** entries.mjs の道具は会話ログ用で、
+      // 会話ログ側にこのキーは無いので `toolResults` は見てくれない
+      return { ...base, ...common, kind: type, entry: line, info: { nonExecution: nonExecutionOf(line) } };
 
     case 'result':
       return { ...base, ...common, kind: 'result', info: resultInfo(line) };
 
+    case 'control_request': {
+      const req = line.request && typeof line.request === 'object' && !Array.isArray(line.request)
+        ? line.request
+        : {};
+      const requestId = str(line.request_id ?? line.requestId);
+      // 宛先が読めない要求には答えようが無い。**ここだけは `other` へ落としてよい**
+      if (!requestId) return { ...base, ...common, kind: 'other' };
+
+      // subtype は行の直下ではなく `request` の下にある。common の null を上書きする
+      const sub = str(req.subtype);
+      if (sub === 'can_use_tool') {
+        return { ...base, ...common, subtype: sub, kind: 'permission', info: permissionInfo(requestId, req) };
+      }
+      // 知らない subtype も拾う。**答えないと向こうが永久に待つ**ので `other` にできない
+      return { ...base, ...common, subtype: sub, kind: 'control', info: { requestId, subtype: sub } };
+    }
+
+    case 'control_response': {
+      const res = line.response && typeof line.response === 'object' && !Array.isArray(line.response)
+        ? line.response
+        : {};
+      return { ...base, ...common, subtype: str(res.subtype), kind: 'control-result', info: controlResultInfo(res) };
+    }
+
+    case 'rate_limit_event':
+      return { ...base, ...common, kind: 'rate-limit', info: rateLimitInfo(line) };
+
     default:
-      // 実測では `rate_limit_event`（トップレベルの type。`rate_limit_info` を持つ）がここへ落ちた。
-      // control_request / control_response のような、いま扱わないものも同じ扱い。
-      // 生の type を残してあるので、扱う気になったときに読み直せる
+      // 知らない type。生の type を残してあるので、扱う気になったときに読み直せる
       return { ...base, ...common, kind: 'other' };
   }
 }
@@ -319,6 +622,95 @@ export function encodeUserLine(text) {
     type: 'user',
     message: { role: 'user', content: [{ type: 'text', text }] },
   };
+  return `${JSON.stringify(line)}\n`;
+}
+
+/**
+ * 許可要求への答えを1行組む。
+ *
+ * **`deny` のときは `updatedInput` も `updatedPermissions` も載せない。**
+ * 混ざった形を向こうの検証がどう扱うか分からず、こちらのバグが
+ * 「たまに通る」形で残る。載せないと決めておけば、そこは疑わなくてよくなる。
+ *
+ * `request_id` は**引数で受ける。** ここで採番すると乱数が要り、この層の「純関数だけ」が崩れる。
+ *
+ * @param {string} requestId 来た要求の `request_id`
+ * @param {object} decision `{behavior:'allow'|'deny', message?, updatedInput?, updatedPermissions?}`
+ * @returns {string} 末尾に改行を含む1行
+ * @throws {TypeError} 宛先が無い・behavior が語彙外のとき
+ */
+export function encodePermissionResponse(requestId, decision) {
+  const id = str(requestId);
+  if (!id) throw new TypeError('答える相手（request_id）がありません');
+  if (!decision || typeof decision !== 'object') throw new TypeError('答えの形が違います');
+
+  const behavior = decision.behavior;
+  if (behavior !== 'allow' && behavior !== 'deny') {
+    throw new TypeError('答えは allow か deny だけです');
+  }
+
+  const response = { behavior };
+  if (behavior === 'deny') {
+    // 理由は空でもよい（止めたいときに文章を考えさせない）。空なら決まり文句を入れる
+    const message = typeof decision.message === 'string' ? decision.message.trim() : '';
+    response.message = message || '画面から断りました';
+  } else {
+    // 省くと元の入力がそのまま使われる（実測）。**替えるときだけ載せる**
+    if (decision.updatedInput && typeof decision.updatedInput === 'object'
+      && !Array.isArray(decision.updatedInput)) {
+      response.updatedInput = decision.updatedInput;
+    }
+    if (Array.isArray(decision.updatedPermissions) && decision.updatedPermissions.length > 0) {
+      response.updatedPermissions = decision.updatedPermissions;
+    }
+  }
+
+  const line = { type: 'control_response', response: { subtype: 'success', request_id: id, response } };
+  return `${JSON.stringify(line)}\n`;
+}
+
+/**
+ * 扱えない `control_request` を断る1行を組む。
+ *
+ * **未知の subtype にもこれを返す。** 返さないとその子は永久に待つ。
+ * 「未知の形で落ちない」を、control 系では「未知の形で詰まらない」まで広げるための道具。
+ *
+ * @param {string} requestId 来た要求の `request_id`
+ * @param {string} [message] 理由
+ * @returns {string} 末尾に改行を含む1行
+ * @throws {TypeError} 宛先が無いとき
+ */
+export function encodeControlError(requestId, message) {
+  const id = str(requestId);
+  if (!id) throw new TypeError('答える相手（request_id）がありません');
+  const text = typeof message === 'string' && message.trim()
+    ? message.trim()
+    : 'この画面では扱えない要求です';
+  const line = { type: 'control_response', response: { subtype: 'error', request_id: id, error: text } };
+  return `${JSON.stringify(line)}\n`;
+}
+
+/**
+ * こちらから撃つ `control_request` を1行組む。
+ *
+ * 子を殺さずに効くもの（実測または実バイナリで確認）:
+ * `set_permission_mode` / `set_model` / `set_max_thinking_tokens` / `interrupt` / `end_session`。
+ *
+ * **`subtype` を最後に置く。** `params` に同じキーが紛れても上書きされない形にしておく。
+ *
+ * @param {string} requestId こちらで採番した ID。**こだまと本物の応答を見分ける鍵になる**
+ * @param {string} subtype 何を頼むか
+ * @param {object} [params] 中身
+ * @returns {string} 末尾に改行を含む1行
+ * @throws {TypeError} ID か subtype が無いとき
+ */
+export function encodeControlRequest(requestId, subtype, params) {
+  const id = str(requestId);
+  if (!id) throw new TypeError('要求の request_id がありません');
+  const sub = str(subtype);
+  if (!sub) throw new TypeError('要求の subtype がありません');
+  const extra = params && typeof params === 'object' && !Array.isArray(params) ? params : {};
+  const line = { type: 'control_request', request_id: id, request: { ...extra, subtype: sub } };
   return `${JSON.stringify(line)}\n`;
 }
 

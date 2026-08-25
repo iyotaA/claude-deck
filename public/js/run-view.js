@@ -26,7 +26,10 @@
  */
 import { el, dur, stamp, shortModel, fact } from './util.js';
 import { panel, SEC } from './panel.js';
-import { runFor, eventsOf, droppedOf, runsMissed, EVENTS_PER_RUN, EFFORT_LABELS } from './runs.js';
+import {
+  runFor, eventsOf, droppedOf, runsMissed, EVENTS_PER_RUN, EFFORT_LABELS,
+  MODEL_FREE, modelOptions, modelPick, modelValue,
+} from './runs.js';
 import { bodyText } from './timeline/index.js';
 
 /** 地の文の頭出し。これを超えたら <details> に畳む（時系列と同じ作法）。 */
@@ -42,8 +45,20 @@ const EVENT_LABELS = {
   echo: 'あなた',
   result: '1往復の終わり',
   note: '記録',
+  hook: 'フック',
   other: 'その他',
   broken: '読めなかった行',
+};
+
+/**
+ * 「実行されなかった理由」の名前。
+ *
+ * 実測で出たのは `permission-rule` の1種類だけ（自分が `control_response` で断ったとき）。
+ * **ここに無い語はそのまま出す。** 版が上がって新しい語が来た日に、
+ * 知らない語を黙って捨てると「エラーになった」としか見えなくなる。
+ */
+const NON_EXEC_LABELS = {
+  'permission-rule': 'あなたが断ったので実行されていません',
 };
 
 /**
@@ -76,11 +91,18 @@ function bodyOf(ev) {
     }
 
     case 'tool-result': {
+      const out = [];
+      // **断ったものはエラーの赤で出さない。** こちらが断った結果は `is_error:true` で返るので
+      // （実測。`stream.mjs` の `nonExecutionOf` を見ること）、印を見ずに色を付けると
+      // 「自分で止めた」と「向こうが壊れた」が画面で同じ顔になる
+      if (ev.nonExecution) out.push(el('div', 'run-skip', NON_EXEC_LABELS[ev.nonExecution] ?? `実行されませんでした（${ev.nonExecution}）`));
+
       const line = el('div', 'run-out');
-      if (ev.isError) line.classList.add('is-error');
+      if (ev.isError && !ev.nonExecution) line.classList.add('is-error');
       // 中身が空でも「返ってきた」ことは伝える（黙って空行にしない）
       line.textContent = ev.text || (ev.isError ? '（エラー。中身なし）' : '（中身なし）');
-      return [line];
+      out.push(line);
+      return out;
     }
 
     case 'init': {
@@ -100,6 +122,20 @@ function bodyOf(ev) {
 
     case 'broken':
       return [el('div', 'run-out is-error', ev.sample ? `読めなかった行: ${ev.sample}` : '読めなかった行')];
+
+    case 'hook': {
+      const line = el('div', 'run-tool');
+      line.append(el('span', 'run-tool-name', ev.name ?? ev.event ?? '(名前なし)'));
+      // ok が null なのは「成功か分からなかった」。そのときは何も言わない（成功と書かない）
+      if (ev.ok === false) {
+        const code = typeof ev.exitCode === 'number' ? `失敗（code ${ev.exitCode}）` : '失敗';
+        line.append(el('span', 'run-tool-detail is-error', code));
+      }
+      const out = [line];
+      // フックの出力は拾っていない（数KBあるため）。stderr だけは出す。壊れたときの唯一の手がかり
+      if (ev.stderr) out.push(el('div', 'run-out is-error', ev.stderr));
+      return out;
+    }
 
     case 'other':
       return [el('div', 'run-other', [ev.type, ev.subtype].filter(Boolean).join(' / ') || '(型なし)')];
@@ -121,10 +157,13 @@ function resultBody(ev) {
   fact(dl, 'このターンの往復', ev.numTurns);
   // total_cost_usd のほうは累積（実測 0.803025 → 0.843727）。同じ行に並んでいるので混ぜやすい。
   //
-  // ただし**累積するのは同じ子のあいだだけ。**「モデルなどを替えて続ける」は子を起こし直すので、
+  // ただし**累積するのは同じ子のあいだだけ。**「権限モード・モデルを替える」の建て直し側は子を起こし直すので、
   // そこで起点に戻る（実測 0.401036 → 切り替え後の最初の result で 0.130617）。
   // だから「ここまで」とは書かない。切り替えを挟んだぶんは、並んだ result を足したものが合計になる
   fact(dl, 'この起動ぶんの費用', typeof ev.costUSD === 'number' ? `$${ev.costUSD.toFixed(4)}` : null);
+  // そのターンで考えた量。台帳が刻みを畳んだもの（速報には1件も並ばない）。
+  // 0 は「考えなかった」で不明ではないので、そのまま出す
+  fact(dl, '考えた量', typeof ev.thinkingTokens === 'number' ? `${ev.thinkingTokens.toLocaleString()} トークン` : null);
   fact(dl, '止まった理由', ev.terminalReason);
   // 断ったものが無いときは行ごと出さない。0 を隠すのは「取れなかった」ではなく
   // 「起きなかった」ので、0 と不明を分ける原則には触れない
@@ -169,6 +208,12 @@ function factsOf(row) {
   // 0 が正常終了。fact が落とすのは null / undefined / 空文字だけなので、0 はそのまま出る
   // （util.js の tokens() と違って `if (!n)` ではない。ここは 0 と不明が別物として出る）
   fact(dl, '終了コード', row.exitCode);
+  // **枠の使用率はここに出さない。** アカウント共通の値なので、実行ごとに並べると
+  // 同じ数がいくつも出るうえ「この実行が使った枠」だと読める。上のバーに1つだけ出す
+  // （list.js の renderRate）。行に載せているのは、届く道が実行の stdout しか無いため。
+  // CLI が stderr へ吐いた直近の1行。普段は無いので欄ごと出ない。
+  // 出ているときは、たいていこちら側の配線が間違っている合図
+  fact(dl, 'CLI の警告', row.lastStderr);
   fact(dl, '理由', row.reason);
   return dl;
 }
@@ -277,6 +322,41 @@ export function render() {
 const RUN_OVER = new Set(['stopped', 'failed', 'done']);
 
 /**
+ * 子プロセスがもういない状態。**終わったもの ＋ 予算切れ。**
+ *
+ * 予算切れは終端ではない（続きから起こし直せる）が、子は死んでいる。
+ * だから撃つ（`/mode`）ことはできず、建て直す（`/switch`）しかない。
+ * サーバー側の `isChildDone` と同じ線で、あちらと同じく `RUN_OVER` とは分けてある。
+ */
+const RUN_NO_CHILD = new Set([...RUN_OVER, 'budget']);
+
+/**
+ * 割り込める状態。**「子が生きている」より狭い。**
+ *
+ * `waiting`（あなたの番）には割り込む先の作業が無いし、`needs-permission` は
+ * 答えれば進むので、割り込むより答えるほうが正しい。`stalled` を入れてあるのは、
+ * あれが「2分出力が無い」だけで走ってはいるから（圧縮の最中がここに入る）。
+ */
+const RUN_WORKING = new Set(['running', 'stalled']);
+
+/**
+ * 割り込みが撃てることを CLI が名乗る印。`src/run/ledger.mjs` の `INTERRUPT_CAP` と同じ語。
+ *
+ * **画面は名乗ったときだけ札を出す。** サーバーは名乗りが無い（null）ときも撃たせるが、
+ * あれは「不明を不可と読まない」ための逃げ道で、こちらは押せる顔をした押せないボタンを
+ * 出さないほうを採る。名乗る版なら init が来た時点で出るので、待つのは一瞬。
+ */
+const INTERRUPT_CAP = 'interrupt_receipt_v1';
+
+/**
+ * 子を殺さずに替えられる項目。サーバーの `LIVE_FIELDS` と同じ並び。
+ *
+ * **思考量と上限はここに無い。** 思考量は `--effort` の語とあちらが欲しいトークン数の
+ * 対応が測れておらず、上限は argv でしか渡せない。どちらも建て直しが要る。
+ */
+const LIVE_KEYS = new Set(['permissionMode', 'model']);
+
+/**
  * 見出しに出す状態の札。
  *
  * 一覧のカードと同じ `.state`（点 ＋ 太字 ＋ 状態色）を借りる。**見た目を新しく作らない。**
@@ -321,7 +401,7 @@ const FOCUS_MEMO_MS = 400;
 /**
  * 切り替えの選択肢。**1回だけ引く。**
  *
- * 取れなければ切り替えの節を出さないだけで、送る・止めるはそのまま動く。
+ * 取れなければ替える札を出さないだけで、送る・止めるはそのまま動く。
  * 引き直さないのは「窓口ごと無いと分かったら一度で諦める」の作法
  * （更新の前後で、画面だけ新しくサーバーが古いことがある）。
  */
@@ -332,15 +412,22 @@ let optionsAsked = false;
  * 操作の器。**module-level に1つだけ持って使い回す。**
  *
  * 詳細ペインは detailKeyOf() が動くと丸ごと作り直されるが、
- * document から外れても <textarea> の value と <details> の開閉は消えない。
+ * document から外れても <textarea> の value は消えない。
  * だから作り直しのたびに同じ節点を append し直すだけにしてある。
  *
+ * **節点は2つとも詳細ペインの外にいる。** `bar` は index.html の中央下の器へ、
+ * `dlg` は document.body へ直接付ける。作り直しに巻き込まれる道がそもそも無い。
+ *
  * @type {null | {
- *   wrap: HTMLElement, prompt: HTMLTextAreaElement, send: HTMLButtonElement,
- *   stop: HTMLButtonElement, msg: HTMLElement, det: HTMLElement,
- *   swModel: HTMLInputElement, swEffort: HTMLSelectElement, swMode: HTMLSelectElement,
- *   apply: HTMLButtonElement, runId: string|null, busy: boolean, over: boolean,
- *   stopArmed: boolean, stopTimer: number|null, lastRow: object|null
+ *   bar: HTMLElement, prompt: HTMLTextAreaElement, send: HTMLButtonElement,
+ *   brk: HTMLButtonElement, stop: HTMLButtonElement, msg: HTMLElement,
+ *   head: HTMLElement, now: HTMLButtonElement,
+ *   nowMode: HTMLElement, nowModel: HTMLElement, nowNote: HTMLElement, slash: HTMLSelectElement,
+ *   dlg: HTMLDialogElement, swModelPick: HTMLSelectElement, swModel: HTMLInputElement,
+ *   swEffort: HTMLSelectElement, swMode: HTMLSelectElement, swBudget: HTMLInputElement,
+ *   apply: HTMLButtonElement, swHow: HTMLElement, swPending: HTMLElement, swMsg: HTMLElement,
+ *   runId: string|null, busy: boolean, over: boolean,
+ *   stopArmed: boolean, stopTimer: number|null, lastRow: object|null, slashKey: string|null
  * }}
  */
 let ops = null;
@@ -373,20 +460,33 @@ function fillSelect(sel, items) {
  * @param {HTMLElement} grid 入れ先
  * @param {string} id 入力の id。ラベルと結ぶ
  * @param {string} text ラベル
- * @param {HTMLElement} control 入力
+ * @param {HTMLElement} control 入力。器（複数の入力をまとめた span）でもよい
  * @param {string} hint 右に置く説明
+ * @param {string} [forId] 器を渡すとき、ラベルと結ぶ中の入力の id
  */
-function gridRow(grid, id, text, control, hint) {
+function gridRow(grid, id, text, control, hint, forId = '') {
   const lb = el('label', 'settings-label', text);
-  lb.htmlFor = id;
-  control.id = id;
+  if (forId) {
+    lb.htmlFor = forId;
+  } else {
+    control.id = id;
+    lb.htmlFor = id;
+  }
   grid.append(lb, control, el('p', 'settings-hint', hint));
 }
 
-/** 下に一言出す。空文字で消える。 */
+/**
+ * 一言出す。空文字で消える。
+ *
+ * **入力欄の下とモーダルの中の両方へ書く。** 替えるのはモーダルの中で押すが、
+ * うまくいったらモーダルは閉じるので、結果は入力欄の下に残っていないと読めない。
+ * 分けて書き分けると、どちらへ出すかの判断が呼ぶ側それぞれに増える。
+ */
 function say(text, tone = '') {
-  ops.msg.textContent = text;
-  ops.msg.dataset.tone = text ? tone : '';
+  for (const node of [ops.msg, ops.swMsg]) {
+    node.textContent = text;
+    node.dataset.tone = text ? tone : '';
+  }
 }
 
 /** ボタンの入切をまとめて当てる。 */
@@ -395,6 +495,75 @@ function applyEnabled() {
   ops.send.disabled = off;
   ops.stop.disabled = off;
   ops.apply.disabled = off;
+  // 終わっている実行は替えようが無い。押せる顔のまま断るより、押せなくしておく
+  ops.now.disabled = off;
+
+  // 割り込みは「名乗っている」かつ「いま走っている」ときだけ。
+  // 出す・出さないを行ごとに決めるので、状態は `lastRow` から読む
+  const row = ops.lastRow;
+  const named = Array.isArray(row?.capabilities) && row.capabilities.includes(INTERRUPT_CAP);
+  ops.brk.hidden = !named;
+  ops.brk.disabled = off || !RUN_WORKING.has(row?.state) || row?.interrupting === true;
+  ops.brk.textContent = row?.interrupting === true ? '割り込んでいます…' : '割り込む';
+
+  // スラッシュコマンドの札。**向こうが名前を寄こしたときだけ出す。**
+  // こちらで表を書くと、版で増えた語が出せず、消えた語を出し続けることになる
+  fillSlash(Array.isArray(row?.slashCommands) ? row.slashCommands : []);
+  ops.slash.disabled = off;
+  syncHead();
+}
+
+/**
+ * 札の段そのものを出し入れする。
+ *
+ * 中が2つとも隠れているときに段を残すと、**余白だけが入力欄の上に残る**
+ * （`[hidden]` は中の札を消すが、段の `margin` までは消せない）。
+ * 出し入れの元が2箇所（`applyEnabled` と `fillSwitch`）にあるので、判断はここ1箇所に置く。
+ */
+function syncHead() {
+  ops.head.hidden = ops.now.hidden && ops.slash.hidden;
+}
+
+/**
+ * スラッシュコマンドの選択肢を入れ直す。**中身が変わったときだけ。**
+ *
+ * 毎フレーム組み直すと、開いたまま選んでいる最中に閉じてしまう。
+ * 中身は `system/init` で入ってそれきり動かないので、まるごと繋いだ文字列で比べれば足りる。
+ *
+ * @param {string[]} cmds 送れるコマンド名（先頭の `/` は付いていない）
+ */
+function fillSlash(cmds) {
+  ops.slash.hidden = cmds.length === 0;
+  const key = cmds.join(' ');
+  if (ops.slashKey === key) return;
+  ops.slashKey = key;
+  fillSelect(ops.slash, [
+    { value: '', label: '/ コマンド' },
+    ...cmds.map((c) => ({ value: c, label: `/${c}` })),
+  ]);
+}
+
+/**
+ * 選んだコマンドを入力欄の**頭**に入れる。**送らない。**
+ *
+ * 頭に入れるのは、スラッシュコマンドが行の先頭でしか効かないため（実測 2.1.245。
+ * `/context` を user 行として送ると `system/init` が流れ直し、`result` は `num_turns:0`）。
+ * 途中へ挿すと、ただの本文として Claude に読まれて終わる。
+ *
+ * **押しただけで送らないのは、取り返しの付かないものが混ざっているから**
+ * （`/compact` は会話を畳む・`/clear` は消す）。何が起きるかを読んでから、自分で送る。
+ *
+ * @param {string} name コマンド名（`/` 抜き）
+ */
+function insertSlash(name) {
+  if (!name) return;
+  const head = `/${name} `;
+  const rest = ops.prompt.value;
+  ops.prompt.value = head + rest;
+  ops.prompt.focus();
+  // 引数を続けて打てるように、入れた文の**すぐ後ろ**へ caret を置く
+  ops.prompt.setSelectionRange(head.length, head.length);
+  say(`${head.trim()} を入れました。中身を確かめてから送ってください`);
 }
 
 /**
@@ -421,7 +590,7 @@ function collectSwitch() {
   const out = {};
 
   // 空欄は「外す（CLI の既定へ戻す）」の指定。だから空でもキーを送る
-  const model = ops.swModel.value.trim();
+  const model = modelValue(ops.swModelPick.value, ops.swModel.value);
   if (model !== (row.model ?? '')) out.model = model;
 
   const effort = ops.swEffort.value;
@@ -449,21 +618,111 @@ function switchedText(data) {
 }
 
 /**
+ * 押されたときにどちらの窓口へ行くかを決める。**判断は画面がやる。**
+ *
+ * - 子が生きていて、替えるのが権限モードとモデルだけ → `/mode`（指示文なしで即時）
+ * - それ以外 → `/switch`（指示文つきで建て直し）
+ *
+ * サーバーの `/switch` に「権限モードだけなら撃つだけで済ませる」近道を作らないのは、
+ * 呼ぶ側から見て**「指示文が要るときと要らないときがある窓口」**になり、
+ * 判断が窓口の中に隠れるから。隠すならこちら側に置く。
+ *
+ * @returns {Promise<void>}
+ */
+async function applySwitch() {
+  if (ops.busy || ops.over) return;
+
+  // <input type="number"> は数として読めない中身のとき value が空になる。
+  // 空は「上限なし」の指定なので、そのまま通すと打ち間違いが黙って上限を外す。
+  // **どちらへ行くかを決める前に見る。** 壊れた数のまま `collectSwitch()` を読むと、
+  // 「上限を外す」が混ざった中身で道を選ぶことになる
+  if (ops.swBudget.validity?.badInput) {
+    say('予算は数で書いてください', 'bad');
+    return;
+  }
+
+  const patch = collectSwitch();
+  if (!patch) {
+    say('替えるところがありません', 'bad');
+    return;
+  }
+
+  // 空の `model` は「外して CLI の既定へ戻す」の指定。撃つ道では表せない
+  // （`set_model` に空は渡せない）ので、こちらも建て直しへ回す
+  const live = !RUN_NO_CHILD.has(ops.lastRow?.state)
+    && Object.entries(patch).every(([k, v]) => LIVE_KEYS.has(k) && typeof v === 'string' && v !== '');
+
+  // 建て直すほうは指示文が要る。足りなければ post() が言う
+  const ok = live ? await postMode(patch) : await post('switch');
+
+  // **うまくいったときだけ閉じる。** 断られたときに閉じると、理由が
+  // 入力欄の下に1行残るだけになり、直す場所（開いていた欄）から目が離れる
+  if (ok && ops.dlg.open) ops.dlg.close();
+}
+
+/**
+ * 子を殺さずに替える。
+ *
+ * **202 しか返らない。** 撃っただけで効いたかは分からないので、ここでは
+ * 「送った」までしか言わない。替わったかどうかは行（`row.switching` が消え、
+ * `row.permissionMode` が変わる）と速報の1行で分かる。
+ *
+ * @param {object} patch 替えるもの（`{permissionMode?, model?}`）
+ * @returns {Promise<boolean>} 送れたか（モーダルを閉じてよいか）
+ */
+async function postMode(patch) {
+  const runId = ops.runId;
+  if (!runId) return false;
+
+  setBusy(true);
+  say('替えています…');
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/mode`, {
+      method: 'POST',
+      // 付け忘れると書き込み口の門番に断られる
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    const data = await res.json().catch(() => null);
+
+    // 返ってくるまでに別の実行へ移っていることがある。
+    // そのまま書くと、**他人の実行の**メッセージ欄を書き換えることになる
+    if (ops.runId !== runId) return false;
+
+    if (!res.ok || !data?.ok) {
+      say(data?.reason ?? `替えられませんでした（HTTP ${res.status}）`, 'bad');
+      return false;
+    }
+    say('替えを送りました', 'good');
+    return true;
+  } catch (err) {
+    if (ops.runId === runId) say(`替えられませんでした（${err.message}）`, 'bad');
+    return false;
+  } finally {
+    if (ops.runId === runId) setBusy(false);
+  }
+}
+
+/**
  * 送る／替える。どちらも指示文が要るので、窓口と本文だけ変える。
  *
  * @param {'input'|'switch'} kind
+ * @returns {Promise<boolean>} 送れたか（モーダルを閉じてよいか）
  */
 async function post(kind) {
-  if (ops.busy || ops.over) return;
+  if (ops.busy || ops.over) return false;
 
   const runId = ops.runId;
-  if (!runId) return;
+  if (!runId) return false;
 
   const text = ops.prompt.value.trim();
   if (!text) {
-    say('指示を書いてください', 'bad');
+    // 建て直しは入力欄の文を使う。**モーダルの中からは見えない**ので、
+    // 何が足りないかを言うだけでなく、閉じてそこへ焦点を移す
+    say('指示を書いてください（入力欄に、続きの指示を1行）', 'bad');
+    if (ops.dlg.open) ops.dlg.close();
     ops.prompt.focus();
-    return;
+    return false;
   }
 
   const body = { prompt: text };
@@ -472,12 +731,12 @@ async function post(kind) {
     // 空は「上限なし」の指定なので、そのまま通すと打ち間違いが黙って上限を外す
     if (ops.swBudget.validity?.badInput) {
       say('予算は数で書いてください', 'bad');
-      return;
+      return false;
     }
     const patch = collectSwitch();
     if (!patch) {
       say('替えるところがありません', 'bad');
-      return;
+      return false;
     }
     Object.assign(body, patch);
   }
@@ -495,18 +754,58 @@ async function post(kind) {
 
     // 返ってくるまでに別の実行へ移っていることがある。
     // そのまま書くと、**他人の実行の**メッセージ欄と入力欄を書き換えることになる
-    if (ops.runId !== runId) return;
+    if (ops.runId !== runId) return false;
 
     if (!res.ok || !data?.ok) {
       say(data?.reason ?? `送れませんでした（HTTP ${res.status}）`, 'bad');
-      return;
+      return false;
     }
 
     // 送っているあいだに書き足していたら消さない。消すのは送ったぶんが残っているときだけ
     if (ops.prompt.value.trim() === text) ops.prompt.value = '';
     say(kind === 'switch' ? switchedText(data) : '送りました', 'good');
+    return true;
   } catch (err) {
     if (ops.runId === runId) say(`送れませんでした（${err.message}）`, 'bad');
+    return false;
+  } finally {
+    if (ops.runId === runId) setBusy(false);
+  }
+}
+
+/**
+ * 割り込む（CLI の Esc に当たる）。
+ *
+ * **2段押しにしない。** 止めるのと違って取り返しが付く（子は生きていて、
+ * そのまま続きを打てる）。確認を挟むと、いちばん急いでいる場面で1回ぶん遅れる。
+ *
+ * **控えている指示を消すか（`cancelQueued`）は送らない。** 窓口は受けるが、
+ * 画面には控えの本数を出す道がまだ無いので、選ばせても何を消すのか分からないまま押すことになる。
+ */
+async function doInterrupt() {
+  const runId = ops.runId;
+  if (!runId || ops.busy || ops.over) return;
+
+  setBusy(true);
+  say('割り込んでいます…');
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/interrupt`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    const data = await res.json().catch(() => null);
+    // 返ってくるまでに別の実行へ移っていることがある（`post()` と同じ作法）
+    if (ops.runId !== runId) return;
+
+    if (!res.ok || !data?.ok) {
+      say(data?.reason ?? `割り込めませんでした（HTTP ${res.status}）`, 'bad');
+      return;
+    }
+    // 202。**「割り込みました」と言い切らない。** 届いたかは返事が来るまで分からない
+    say('割り込みを送りました。返事を待っています…');
+  } catch (err) {
+    if (ops.runId === runId) say(`割り込めませんでした（${err.message}）`, 'bad');
   } finally {
     if (ops.runId === runId) setBusy(false);
   }
@@ -578,13 +877,42 @@ function onStop() {
 /**
  * 器を1回だけ組む。以降はこの節点を append し直して使う。
  *
- * 器は2つに割ってある。毎回使うもの（入力欄・送る・止める）は中央下の composer へ、
- * ときどき使うもの（替えて続ける）はパネルへ。
- * composer 側は詳細ペインの外に置かれるので作り直されず、打っている途中でも消えない。
+ * 器は2つ。**どちらも詳細ペインの外にある。**
+ *
+ * - 中央下の入力欄（`bar`）… 送る・止めると、いまの権限モードの札
+ * - 替えるモーダル（`dlg`）… `document.body` に1枚だけ置く
+ *
+ * 替えるほうを実行パネルの中の `<details>` から出したのは、**見つからなかったから。**
+ * 走っているあいだ速報が伸び続けるので、替える口は画面の下へ流れていき、
+ * いちばん替えたい場面（いま動いている最中）に限って、下までスクロールしないと出てこなかった。
+ * いまは打つ場所のすぐ上に「いま plan mode」と出ていて、そこを押すと開く。
+ *
+ * モーダルの器を `index.html` に置かないのは、中身がこの実行の行で決まるからで、
+ * 空の器だけ HTML に置いても、結局ここが全部組み直すことになる
+ * （層7 のモーダル2枚は中身も固定なので、あちらは HTML に器がある）。
  */
 function buildOps() {
   // ── 中央下の入力欄
   const bar = el('div', 'composer-in');
+
+  // いまの権限モードとモデル。**押すと替えるモーダルが開く。**
+  // CLI が入力欄のそばにモードを出しているのと同じ考えで、
+  // 「いまどれで走っているか」と「替えられる」を1つの札で兼ねる
+  const now = el('button', 'composer-now');
+  now.type = 'button';
+  // 語彙（権限モードの一覧）を引くまでは出さない。出すと、押しても空の窓が開く
+  now.hidden = true;
+  now.addEventListener('click', openSwitch);
+  const nowMode = el('span', 'composer-now-mode');
+  const nowModel = el('span', 'composer-now-model');
+  const nowNote = el('span', 'composer-now-note');
+  now.append(
+    el('span', 'composer-now-lead', 'いま'),
+    nowMode,
+    el('span', 'composer-now-sep', '/'),
+    nowModel,
+    nowNote,
+  );
 
   const prompt = el('textarea', 'run-prompt');
   prompt.id = 'run-ops-prompt';
@@ -600,9 +928,30 @@ function buildOps() {
     post('input');
   });
 
+  // スラッシュコマンドの札。**入力の助けなのでボタンの並びには入れない。**
+  // 送る・割り込む・止めるは押した瞬間に何かが起きるが、これは欄に文字が入るだけで、
+  // 同じ列に並べると「押したら走る」ものに見える
+  const slash = el('select', 'composer-slash');
+  slash.hidden = true;
+  slash.setAttribute('aria-label', 'スラッシュコマンドを入れる');
+  slash.addEventListener('change', () => {
+    const name = slash.value;
+    // 選び直せるように、入れたら見出しへ戻す。
+    // 戻さないと、同じコマンドを2回入れたいときに change が起きない
+    slash.value = '';
+    insertSlash(name);
+  });
+
   const send = el('button', 'btn is-primary', '送る');
   send.type = 'button';
   send.addEventListener('click', () => post('input'));
+
+  // 止めるの手前に置く。**並びで軽重を示す。**
+  // 会話ごと消える「止める」がいちばん端で、その1つ内側が取り消せる「割り込む」
+  const brk = el('button', 'btn', '割り込む');
+  brk.type = 'button';
+  brk.hidden = true;
+  brk.addEventListener('click', doInterrupt);
 
   const stop = el('button', 'btn', '止める');
   stop.type = 'button';
@@ -612,63 +961,192 @@ function buildOps() {
   msg.setAttribute('role', 'status');
 
   const btns = el('div', 'composer-btns');
-  btns.append(send, stop);
+  btns.append(send, brk, stop);
 
   const line = el('div', 'composer-row');
   line.append(prompt, btns);
 
-  bar.append(line, msg);
+  // 札は横に並べる。どちらも「打つ前に見る／触る」もので、ボタンの列とは役目が違う。
+  // 名前が `headRow` なのは、下のモーダルが `head`（settings-head）を使っているため
+  const headRow = el('div', 'composer-head');
+  headRow.hidden = true;
+  headRow.append(now, slash);
 
-  // ── 替えて続ける。パネル側に残して畳んでおく（普段は使わないので手元に置かない）
-  const wrap = el('div', 'run-ops');
-  // 選択肢を引けるまで器ごと出さない。中身が無いのに上の線だけ残ると意味のない区切りに見える
-  wrap.hidden = true;
+  bar.append(headRow, line, msg);
 
-  const det = el('details', 'run-switch');
-  det.append(el('summary', null, 'モデルなどを替えて続ける'));
+  // ── 替えるモーダル。中の見た目は設定モーダルのクラスをそのまま借りる
+  const dlg = el('dialog', 'runsw');
+  dlg.setAttribute('aria-label', '権限モード・モデルを替える');
 
-  const grid = el('div', 'settings-grid');
+  const x = el('button', 'settings-x', '×');
+  x.type = 'button';
+  x.setAttribute('aria-label', '閉じる');
+  x.addEventListener('click', () => dlg.close());
+
+  const head = el('div', 'settings-head');
+  head.append(el('h2', null, '権限モード・モデルを替える'), x);
+
+  const grid = el('div', 'settings-sec settings-grid');
+
+  // 権限モードをいちばん上に置く。この窓でいちばん替えたいものがこれで、
+  // 押し間違いの被害も大きい（plan のつもりで書き換えが走る）
+  const swMode = el('select', 'settings-select');
+  gridRow(grid, 'run-sw-mode', '権限モード', swMode, 'いまの子のまま、次のターンから替わる');
+
+  // 候補は「このマシンで実際に使われたモデル」。無いものは「自分で入力」から渡す
+  const swModelPick = el('select', 'settings-select');
+  swModelPick.id = 'run-sw-model-pick';
+  swModelPick.addEventListener('change', noteModel);
 
   const swModel = el('input', 'settings-text');
   swModel.type = 'text';
+  swModel.hidden = true;
   swModel.spellcheck = false;
-  gridRow(grid, 'run-sw-model', 'モデル', swModel, '空にすると CLI の既定へ戻る');
+  swModel.autocomplete = 'off';
+  swModel.placeholder = 'モデル名をそのまま書く';
+  swModel.setAttribute('aria-label', 'モデル名を自分で入力');
+
+  const swModelRow = el('span', 'settings-row');
+  swModelRow.append(swModelPick, swModel);
+  gridRow(
+    grid, 'run-sw-model', 'モデル', swModelRow,
+    '使ったことのあるものを並べています。指定しないと CLI の既定へ戻る',
+    swModelPick.id,
+  );
 
   const swEffort = el('select', 'settings-select');
-  gridRow(grid, 'run-sw-effort', '思考量', swEffort, '深いほど時間と費用が増える');
-
-  const swMode = el('select', 'settings-select');
-  gridRow(grid, 'run-sw-mode', '権限モード', swMode, 'ここで選んだ内容で走る。途中で許可は求めない');
+  gridRow(grid, 'run-sw-effort', '思考量', swEffort, '替えると起こし直しになる（指示文が要る）');
 
   // 予算切れから抜ける道はここだけ（そのまま送ると同じ上限で回り直す）
   const swBudget = el('input', 'settings-num');
+  swBudget.id = 'run-sw-budget';
   swBudget.type = 'number';
   swBudget.step = '0.01';
-  gridRow(grid, 'run-sw-budget', '上限', swBudget, '空にすると上限なし。上限は起こし直すたびに数え直す');
 
-  const apply = el('button', 'btn', 'この内容で続ける');
+  // 単位を添える。無いと、この欄だけ何の数を書くのか分からない（起こすフォームと同じ扱い）
+  const swBudgetRow = el('span', 'settings-row');
+  swBudgetRow.append(swBudget, el('span', 'settings-unit', 'USD'));
+  gridRow(
+    grid, 'run-sw-budget', '上限', swBudgetRow,
+    '空にすると上限なし。起こし直すたびに数え直す',
+    swBudget.id,
+  );
+
+  // 押したときに何が起きるかは、子が生きているかで変わる。**ボタンの文字は動かさない。**
+  // 手を伸ばしている最中に押すものの名前が変わるほうが危ない
+  const swHow = el('p', 'settings-hint');
+
+  // 撃ったが返事待ちのぶん。**消すのは `say()` ではなく行**（`row.switching`）。
+  // 画面が自分で消すと、失敗していたのに消えた＝替わったように見える
+  const swPending = el('p', 'settings-msg');
+  swPending.setAttribute('role', 'status');
+
+  // グリッドとは段を分ける。地続きにすると、いちばん下の欄（上限）の
+  // 説明がそのまま続いているように読める
+  const note = el('div', 'settings-sec');
+  note.append(swHow, swPending);
+
+  const body = el('div', 'settings-body');
+  body.append(grid, note);
+
+  const apply = el('button', 'btn is-primary', 'この内容にする');
   apply.type = 'button';
-  apply.addEventListener('click', () => post('switch'));
+  apply.addEventListener('click', applySwitch);
 
-  const swFoot = el('div', 'run-ops-foot');
-  swFoot.append(apply, el('p', 'settings-hint', 'いまの子をいったん止めて、同じ会話を続きから起こし直す'));
+  const swMsg = el('p', 'settings-msg');
+  swMsg.setAttribute('role', 'status');
 
-  const swBody = el('div', 'run-switch-body');
-  swBody.append(grid, swFoot);
-  det.append(swBody);
+  const foot = el('div', 'settings-foot');
+  foot.append(swMsg, apply);
 
-  wrap.append(det);
+  dlg.append(head, body, foot);
+
+  // 背面を押したら閉じる。dialog 自身に余白を持たせていないので、
+  // ここへ来るのは背面を押したときだけになる（run.css の padding: 0）
+  dlg.addEventListener('click', (ev) => {
+    if (ev.target === dlg) dlg.close();
+  });
+
+  // <form> で囲っていないので Enter は自分で拾う（起こすフォームと同じ作法）。
+  // ここに複数行の欄は無いので、素直に「押した＝この内容にする」でよい
+  dlg.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' || !ev.target.matches('input, select')) return;
+    ev.preventDefault();
+    applySwitch();
+  });
+
+  // **詳細ペインの外へ出す。** 中に置くと作り直しのたびに開いたまま消える
+  document.body.append(dlg);
 
   ops = {
-    bar, wrap, prompt, send, stop, msg, det, swModel, swEffort, swMode, swBudget, apply,
+    bar, prompt, send, brk, stop, msg,
+    head: headRow, now, nowMode, nowModel, nowNote, slash,
+    dlg, swModelPick, swModel, swEffort, swMode, swBudget, apply, swHow, swPending, swMsg,
     runId: null, busy: false, over: false, stopArmed: false, stopTimer: null, lastRow: null,
+    slashKey: null,
   };
   return ops;
 }
 
+/**
+ * 「自分で入力」のときだけ入力欄を出す。
+ *
+ * 起こすフォーム（層7）にも同じものがあるが、あちらを import すると層の向きが逆になる。
+ * 判断のほう（値をどう割るか・どう組むか）は `runs.js` の純関数に寄せてあるので、
+ * ここに残るのは出し入れだけ。
+ */
+function noteModel() {
+  const free = ops.swModelPick.value === MODEL_FREE;
+  const was = ops.swModel.hidden;
+  ops.swModel.hidden = !free;
+  if (free && was) ops.swModel.focus();
+  // 候補へ戻したら書きかけを捨てる。残すと、見えない欄の中身が送られる
+  if (!free) ops.swModel.value = '';
+}
+
+/**
+ * 替えるモーダルを開く。
+ *
+ * **開くたびにいまの値を写す。** 開いているあいだ syncOps() は欄を触らないので、
+ * 前に開いたときの選びかけがそのまま残っていることがある。
+ */
+function openSwitch() {
+  if (!ops || ops.over || ops.dlg.open) return;
+  if (ops.lastRow) prefillSwitch(ops.lastRow);
+  // 前回の結果は消す。押す前から「替えました」が出ていると、押したかどうかが分からない
+  say('');
+  ops.dlg.showModal();
+}
+
+/**
+ * 札に出す権限モードの短い名。
+ *
+ * ラベルは `plan mode（読むだけ・書き換えない）` のように括弧つきで来る。
+ * **札では括弧を落とす。** 入力欄の上に置く1行なので、丸ごと出すと折り返して
+ * 打つ場所が下へずれる。詳しい説明は開いた窓の <select> のほうに出ている。
+ *
+ * 語彙が引けていないときは値をそのまま出す。**「不明」とは書かない**
+ * （値そのものは行に載っているので、分からないのは日本語の名前だけ）。
+ *
+ * @param {object} row 台帳の行
+ * @returns {string}
+ */
+function modeText(row) {
+  const value = row.permissionMode ?? '';
+  if (!value) return '既定の権限';
+  const hit = (runOptions?.modes ?? []).find((m) => m.value === value);
+  const label = hit?.label ?? value;
+  return label.split('（')[0].trim() || value;
+}
+
 /** いまの指定を切り替えの欄へ写す。 */
 function prefillSwitch(row) {
-  ops.swModel.value = row.model ?? '';
+  // 候補に無い名前のときは「自分で入力」側へ倒れる（runs.js の modelPick）。
+  // 倒さないと <select> が空になり、**指定してあるのに指定なしに見える**
+  const pick = modelPick(row.model ?? '', runOptions?.models);
+  ops.swModelPick.value = pick.sel;
+  ops.swModel.value = pick.free;
+  ops.swModel.hidden = pick.sel !== MODEL_FREE;
   ops.swEffort.value = row.effort ?? '';
   // 知らない値だと <select> が空になる。そのときは選び直してもらう
   if (row.permissionMode) ops.swMode.value = row.permissionMode;
@@ -695,6 +1173,8 @@ function fillSwitch() {
   const modes = (runOptions.modes ?? []).map((m) => ({ value: m.value, label: m.label }));
   fillSelect(ops.swMode, modes);
 
+  fillSelect(ops.swModelPick, modelOptions(runOptions.models));
+
   fillSelect(ops.swEffort, [
     { value: '', label: '指定しない（CLI の既定）' },
     ...(runOptions.efforts ?? []).map((v) => ({ value: v, label: EFFORT_LABELS[v] ?? v })),
@@ -704,9 +1184,9 @@ function fillSwitch() {
   if (Number.isFinite(b.min)) ops.swBudget.min = String(b.min);
   if (Number.isFinite(b.max)) ops.swBudget.max = String(b.max);
 
-  ops.det.hidden = modes.length === 0;
-  // 中身が無いなら器ごと隠す（上の線だけが残ると意味のない区切りに見える）
-  ops.wrap.hidden = ops.det.hidden;
+  // 語彙ごと取れなかったなら替えようが無い。札を出さない（押しても空の窓が開くだけ）
+  ops.now.hidden = modes.length === 0;
+  syncHead();
   if (ops.lastRow) prefillSwitch(ops.lastRow);
 }
 
@@ -730,7 +1210,7 @@ async function loadOptions() {
 }
 
 /**
- * 器をいまの実行に合わせる。節点は2つ（composer と パネル）あるので ops をそのまま返す。
+ * 器をいまの実行に合わせる。呼ぶ側が bar を欲しがるので ops をそのまま返す。
  *
  * 同じ描き直しの中で2回呼ばれても害は無い（2回目は runId が一致するので何も起きない）。
  *
@@ -748,8 +1228,13 @@ function syncOps(row) {
     focusMemo = null;
     disarmStop();
     say('');
+    // モーダルは詳細ペインの外なので、黙っていると開いたまま残る。
+    // 前の実行の値が入った窓で押すと、**いまの実行にその値が当たる**
+    if (ops.dlg.open) ops.dlg.close();
   }
 
+  // **`applyEnabled()` より先に入れる。** 割り込みの札は行の `capabilities` と
+  // `interrupting` を見て出し入れするので、古い行のまま当てると1フレーム遅れる
   ops.lastRow = row;
   ops.over = RUN_OVER.has(row.state);
   applyEnabled();
@@ -761,11 +1246,35 @@ function syncOps(row) {
     ops.prompt.placeholder = '続きを書いて送る（Ctrl+Enter でも送れる）';
   }
 
+  // 入力欄の上の札。**いまどれで走っているかを、打つ場所のすぐ上に出す。**
+  // 替えられること自体が分かりにくかったので、状態の表示と入り口を1つにしてある
+  ops.nowMode.textContent = modeText(row);
+  ops.nowModel.textContent = shortModel(row.model) ?? '既定のモデル';
+
+  // 押したときに何が起きるかは、子が生きているかで変わる。**行を見て毎回書き直す。**
+  // 走っている最中に予算が切れると建て直しへ変わるので、固定文にできない
+  ops.swHow.textContent = RUN_NO_CHILD.has(row.state)
+    ? 'いまの子をいったん止めて、同じ会話を続きから起こし直す（指示文が要る）'
+    : '権限モードとモデルは、いまの子のまま替わる。思考量と上限は起こし直しになる（指示文が要る）';
+
+  // 撃ったが返事待ちのぶん。**消すのは行のほう。**
+  // 受理・拒否・時間切れのどれでもサーバー側で消えるので、ここで消し忘れる道が無い
+  const waiting = (row.switching ?? []).map((c) => SWITCH_LABELS[c.field] ?? c.field);
+  ops.swPending.textContent = waiting.length > 0
+    ? `${waiting.join('・')}を替えています。返事を待っています…`
+    : '';
+
+  // 返事待ちは札のほうにも出す。モーダルを閉じたあとに見えるのはこちらだけ。
+  // 終わっている実行は押せない（applyEnabled）ので、そのときは状態の表示だけにする
+  // （押せない札に「替える」と書くと嘘になる）
+  ops.nowNote.textContent = waiting.length > 0 ? '替えています…' : (ops.over ? '' : '替える');
+  ops.now.classList.toggle('is-switching', waiting.length > 0);
+
   // 人が開いて書き換えているあいだは上書きしない。
   // 状態が変わるたびに選び直されると、押す直前に値が入れ替わる
-  if (!ops.det.open) prefillSwitch(row);
+  if (!ops.dlg.open) prefillSwitch(row);
 
-  // 中身は1回だけ引く。取れなければ切り替えの節は畳んだまま出さない
+  // 中身は1回だけ引く。取れなければ替える札を出さない（押しても空の窓が開くだけ）
   loadOptions();
 
   return ops;
@@ -780,10 +1289,10 @@ function syncOps(row) {
 function saveFocus() {
   focusMemo = null;
   const node = document.activeElement;
-  // 器が2つに割れているので両方見る。composer 側は作り直されないが、
-  // ここで控えても restoreFocus() が「人が先に触っていたら奪わない」で降りるので害は無い
+  // 見るのは入力欄の側だけでよい。モーダルは document.body に置いてあって
+  // 作り直されないので、開いたまま焦点が飛ぶことがない
   if (!ops || !node) return;
-  if (!ops.bar.contains(node) && !ops.wrap.contains(node)) return;
+  if (!ops.bar.contains(node)) return;
 
   focusMemo = {
     runId: ops.runId,
@@ -830,7 +1339,11 @@ function restoreFocus() {
  */
 export function composerFor(sessionId) {
   const row = runFor(sessionId);
-  if (!row) return null;
+  if (!row) {
+    // 実行でないセッションへ移った。入力欄ごと消えるので、開いていた窓も畳む
+    if (ops?.dlg.open) ops.dlg.close();
+    return null;
+  }
   return syncOps(row).bar;
 }
 
@@ -859,8 +1372,8 @@ export function runPanel(sessionId) {
   const log = el('div', 'run-log');
   p.body.append(log);
 
-  // 替えて続ける。送る・止めるは中央下の composer 側にある（composerFor）
-  p.body.append(syncOps(row).wrap);
+  // 操作は全部 composer 側にある（composerFor）。ここでは行に合わせるだけ呼ぶ
+  syncOps(row);
 
   attach({ log, drop, runId: row.runId });
   render();

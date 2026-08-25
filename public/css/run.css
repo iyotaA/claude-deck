@@ -180,6 +180,22 @@
 
 .run-out.is-error { color: var(--hot); }
 
+/* フックが失敗したときの但し書き。`.run-tool-detail` の色だけ上書きする */
+.run-tool-detail.is-error { color: var(--hot); }
+
+/* 「実行されませんでした」の印。
+   **`.run-out.is-error` の赤にしない。** こちらが断った結果も向こうからは is_error で返るので
+   （実測）、同じ赤にすると「自分で止めた」と「向こうが壊れた」が見分けられなくなる。
+   注意を引く必要はなく、隣のエラー本文が赤で出ていないことを説明できればよい */
+.run-skip {
+  font-size: .74rem;
+  color: var(--fg-faint);
+  border-left: 2px solid var(--border-strong);
+  padding-left: .4rem;
+  margin-bottom: .15rem;
+  overflow-wrap: anywhere;
+}
+
 .run-note {
   font-size: .78rem;
   color: var(--fg-muted);
@@ -281,20 +297,43 @@
 
 /* 選び直しの3列は設定モーダルの .settings-grid を借りているが、
    あちらの「狭いときは縦に積む」は @media（窓の幅）で判定している。
-   モーダルの幅は窓に付いて動くのでそれで合っていたが、
-   ここの幅は窓でなく deck の列で決まる。実測で、窓は広いまま
-   右のインスペクタを開いただけで説明の列が潰れ、文字が縦１列になった。
+   **判定したいのは器の幅なのに、見ているのは窓の幅。**
+   器の幅が窓に付いて動かない場所では、この判定は一度も効かない。
 
-   幅を当てにするのをやめて、ここでは常にラベル＋入力の2列にして
-   説明を次の行へ回す。詳細ペインはもともと狭いので、
-   3列が入る幅があるという前提そのものがここでは成り立たない */
-.run-ops .settings-grid {
+   下の2つがどちらもそれに当たる。実測で2回とも説明の列が潰れた。
+
+   - .run-ops … 幅は窓でなく deck の列で決まる。窓は広いまま
+     右のインスペクタを開いただけで潰れ、文字が縦1列になった
+   - .runsw … 幅は min(34rem, …) なので、窓を広げても 34rem で止まる。
+     権限モードの選択肢（accept edits（ファイル変更は自動・コマンドは確認））が
+     真ん中の列を 309px 取り、説明の列が 64px ＝ 日本語4文字ぶんになった
+
+   幅を当てにするのをやめて、どちらも常にラベル＋入力の2列にして
+   説明を次の行へ回す。**3列が入る幅があるという前提そのものが、
+   ここでは成り立たない。**
+
+   設定モーダル（.settings）と起こすフォーム（.runform）の幅も窓には付いて
+   動かないが、あちらのグリッドに入っているのは短い入力だけなので潰れていない
+   （.runform は長い権限モードだけをグリッドの外へ出してある）。
+   **長い選択肢の <select> をグリッドへ入れるときは、ここを思い出すこと。** */
+.run-ops .settings-grid,
+.runsw .settings-grid {
   grid-template-columns: minmax(0, auto) minmax(0, 1fr);
 }
 
-.run-ops .settings-grid .settings-hint {
+.run-ops .settings-grid .settings-hint,
+.runsw .settings-grid .settings-hint {
   grid-column: 1 / -1;
   margin-bottom: .35rem;
+}
+
+/* 器（.settings-row）に入れた選ぶ欄は中身なりの幅で止まるので、
+   直に置いた欄（権限モード・思考量）だけが伸びて段差に見える。
+   **伸ばすのは <select> だけ。** 数を書く欄まで伸ばすと、桁数の見当が付かなくなる */
+.run-ops .settings-grid .settings-row > .settings-select,
+.runsw .settings-grid .settings-row > .settings-select {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* 起こすフォームの本文欄と同じ見た目。あちらのクラスをそのまま借りると
@@ -329,24 +368,36 @@
   color: var(--hot);
 }
 
-/* 替えて続ける。普段は畳んでおく。
-   display を書かないので、hidden はブラウザ既定のまま効く
-   （.run-drop のように display を持たせると [hidden] に勝ってしまう） */
-.run-switch { margin-top: .6rem; }
+/* ------------------------------------------- 替える窓（run-view.js が組む） */
 
-.run-switch > summary {
-  cursor: pointer;
-  font-size: .78rem;
-  color: var(--fg-muted);
+/* .runform と同じ作り方。**器の4つ（本体・::backdrop・[open]・幅）だけ自前で持ち**、
+   中身のクラス（.settings-head / -body / -foot / -grid / -label / -row / -hint /
+   -select / -text / -num / -msg / -x）は設定モーダルのものをそのまま借りている。
+
+   幅は起こすフォーム（44rem）より狭くてよい。長い本文欄が無く、選ぶ欄が4つだけ。
+
+   **ただしグリッドの列の取り方だけは、借りたままだと潰れる。**
+   上の .run-ops と同じ2列へ寄せてあり、指定は向こうの節にまとめてある
+   （同じ理由で潰れる器が2つあるので、診断を2箇所に書き分けない） */
+.runsw {
+  /* 余白を dialog 自身に持たせない。持たせると、その余白を押したときに
+     背面を押したのと同じに見えて閉じる（run-view.js の ev.target === dlg がこれ前提） */
+  padding: 0;
+  width: min(34rem, calc(100vw - 2rem));
+  max-height: min(44rem, calc(100vh - 3rem));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--shadow);
 }
 
-.run-switch > summary:hover { color: var(--fg); }
+.runsw::backdrop { background: rgb(0 0 0 / 45%); }
 
-/* 開いた中身。左の線1本で、上の操作と地続きでないことを示す */
-.run-switch-body {
-  margin-top: .5rem;
-  padding-left: .6rem;
-  border-left: 2px solid var(--border);
+/* 頭と足を留めて、中身だけを縦に流す */
+.runsw[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 /* ------------------------------------------- 中央下の入力欄 */
@@ -362,6 +413,95 @@
 }
 
 .composer-in { min-width: 0; }
+
+/* 入力欄の上の段。いまの様子（札）とスラッシュコマンドを横に並べる。
+   どちらも「打つ前に見る／触る」もので、送る・止めるの列とは役目が違う。
+   狭くなれば折り返して縦に積む */
+.composer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem;
+  margin: 0 0 .45rem;
+}
+
+.composer-head[hidden] { display: none; }
+
+/* いま何で走っているかの札。**押すと「替える窓」が開く。**
+   替えられること自体が分かりにくいという指摘を受けて、状態の表示と入り口を1つにした。
+   実行パネルの中に置いていた頃は、速報が伸びるたびに下へ流れて見つからなかった。
+
+   **枠を持たせて押せる顔にする。** ただの文字にすると、また見つからない。
+   display を宣言するので [hidden] を必ず添える（display:flex は hidden 属性に勝つ） */
+.composer-now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .3rem;
+  padding: .22rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: .76rem;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.composer-now[hidden] { display: none; }
+
+.composer-now:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.composer-now:focus-visible { border-color: var(--accent); }
+
+/* 終わっている実行。押せないことを見た目でも出す */
+.composer-now:disabled {
+  opacity: .6;
+  cursor: default;
+}
+
+/* いま効いている値。ここだけ本文の色にして、札の中で最初に目へ入るようにする */
+.composer-now-mode,
+.composer-now-model { color: var(--fg); }
+
+/* 「替える」。**下線は引かない**（button なので、引くとリンクに見える）。色だけで示す */
+.composer-now-note { color: var(--accent); }
+
+/* 返事待ち。**新しい色は作らず** --warn を借りる */
+.composer-now.is-switching .composer-now-note { color: var(--warn); }
+
+/* スラッシュコマンドの札。**隣の札と同じ顔**にして、同じ段に居ることを見た目で示す。
+   `display` を宣言しないのは、宣言すると [hidden] を自分で打ち消してしまうから
+   （`.composer-now` に [hidden] の行が要るのはそちらが display:flex を持つため）。
+   `max-width` を置くのは、`/permissions` のような長い語で札が窓幅まで伸びるのを止めるため */
+.composer-slash {
+  max-width: 12rem;
+  padding: .22rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: .76rem;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.composer-slash:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.composer-slash:focus-visible { border-color: var(--accent); }
+
+.composer-slash:disabled {
+  opacity: .6;
+  cursor: default;
+}
 
 /* 入力欄が伸びて、ボタンは右。狭くなればボタンが下へ回る */
 .composer-row {

@@ -1,0 +1,114 @@
+/* 許可要求のカード（run-ask.js）。
+ *
+ * <link> の位置は run.css の直後・markdown.css の前。
+ * markdown.css より前に置くのは、カード内のプラン本文に対して
+ * あちらが持つ見出しの寸法（実測で決めてある）をうっかり上書きしないため。
+ *
+ * **新しい色は1つも作らない。** 乗るのは既存のクラスと変数だけ
+ * （.wait-tool / .settings-msg[data-tone] / .settings-hint / .btn / .btn.is-armed /
+ *  --border-strong / --hot / --bg-elev / --code-bg）。
+ */
+
+/* 要求が来ていることは**枠の太さで示し、面を色で塗らない。**
+   塗ると、同じパネルに複数並んだときに画面がその色だけになる */
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  padding: .6rem .7rem;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--hot);
+  border-radius: 0 8px 8px 0;
+  background: var(--bg-elev);
+}
+
+.ask[hidden] { display: none; }
+
+/* 2件目以降。上と地続きに見えないよう間を空ける */
+.ask + .ask { margin-top: .35rem; }
+
+/* ツール名。パネル直下の .wait-tool より少し引き締める */
+.ask > .wait-tool { font-size: .84rem; }
+
+/* 引数・コマンドの本文。詳細ペインの pre と同じ扱い */
+.ask > pre {
+  margin: 0;
+  padding: .5rem .6rem;
+  border-radius: 6px;
+  background: var(--code-bg);
+  font-size: .78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 16rem;
+  overflow: auto;
+}
+
+/* 断る理由。空でも送れるので、目立たせない */
+.ask-why {
+  font-size: .78rem;
+}
+
+/* ボタンの並び。狭ければ折り返す（.run-ops-foot と同じ作法） */
+.ask-btns {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+}
+
+.ask-btns[hidden] { display: none; }
+
+/* 送信中。押せないことを見た目でも示す。
+   pointer-events を切るのは disabled の取りこぼし対策（二重送信の壁の2枚目） */
+.ask.is-sending {
+  opacity: .7;
+  pointer-events: none;
+}
+
+/* ------------------------------------------- 選択式の質問（run-ask.js の questionForm） */
+
+/* 読む側（詳細ペインの「判断したこと」）と同じ .decision / .decision-q / .choices に乗せる。
+   **同じ語彙を2つ作らない。** li の中を <label><input>… に替えるだけで、
+   余白と字送りは detail.css が持っているものがそのまま効く */
+
+/* 質問の見出し（AskUserQuestion の header）。質問文より小さく、上に置く */
+.ask-head {
+  font-size: .74rem;
+  color: var(--fg-muted);
+}
+
+/* 選択肢1つ。箱と文を横に並べ、**文のどこを押しても選べる**ようにする。
+   小さい丸を狙わせない */
+.ask-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: .45rem;
+  cursor: pointer;
+}
+
+/* 箱だけ少し下げて、1行目の文字の高さに合わせる */
+.ask-pick > input {
+  margin: .25rem 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.ask-pick-text { min-width: 0; }
+
+/* 選んだもの。**面は塗らず、左の帯の色だけ変える。**
+   塗ると、選択肢が多いときにカードがその色だけになる */
+.ask .choices li.is-picked { border-left-color: var(--accent); }
+
+/* 「その他」に書く欄。選ぶまでは畳んでおく。
+   display を宣言したので [hidden] を必ず添える（display:block は hidden 属性に勝つ） */
+.ask-free {
+  display: block;
+  width: 100%;
+  margin-top: .35rem;
+  line-height: 1.6;
+  /* 横は伸ばさせない（li の幅が崩れる）。縦だけ本人に任せる */
+  resize: vertical;
+}
+
+.ask-free[hidden] { display: none; }

@@ -12,6 +12,7 @@
 import { el } from './util.js';
 import { mdView } from './md-view.js';
 import { panel, SEC } from './panel.js';
+import { askBlock } from './run-ask.js';
 
 /**
  * 待ちの種類ごとの、見出しと「何をすれば進むのか」。
@@ -78,6 +79,12 @@ function pendingQuestion(a) {
  * @returns {HTMLElement|null} 待っていなければ null
  */
 export function waitingBlock(row, d) {
+  // 許可要求が来ているときは、待ちの中身も操作もあちらが持つ。
+  // **この画面から起こした実行のときしか返らない**ので、ターミナル側のセッションは
+  // 1行も新しいコードを通らない（`runFor()` が null を返す）
+  const ask = askBlock(row);
+  if (ask) return ask;
+
   const guide = WAIT_GUIDE[row.state];
   if (!guide) return null;
 

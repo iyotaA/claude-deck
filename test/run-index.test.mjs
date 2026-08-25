@@ -12,7 +12,9 @@ import assert from 'node:assert/strict';
 
 import { createRunner } from '../src/run/index.mjs';
 import { createRunLedger } from '../src/run/ledger.mjs';
-import { fakeChild, sAssistant, sResult, sysInit } from './helpers.mjs';
+import {
+  fakeChild, sAssistant, sControlResponse, sPermission, sQuestion, sResult, sysInit,
+} from './helpers.mjs';
 
 const T = 1_000_000;
 const BIN = 'C:\\fake\\claude.exe';
@@ -834,4 +836,476 @@ test('rows と stats は台帳をそのまま見せる', () => {
     assert.equal(key in row, false, `${key} を rows() に載せてはいけない`);
   }
   assert.equal(h.runner.stats().active, 1);
+});
+
+/*
+ * 許可要求（段1）。
+ *
+ * ここで見るのは**手の動かし方**だけ。どういうときに許可待ちになるかは
+ * `run-ledger.test.mjs` が見ている。
+ */
+
+test('許可要求が来ても stdin へ何も書かない', async () => {
+  // **安全の番人。** 自動で allow したら、読み取り専用で起こした意味が消える。
+  // ここが通らなくなったら、それは機能追加ではなく事故
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child); // 起こしたときの指示文を捨てる
+
+  feed(child, sPermission({ sessionId: res.row.sessionId, requestId: 'p1' }));
+  await settle();
+
+  assert.equal(await stdinText(child), '');
+  assert.equal(h.runner.get(res.runId).state, 'needs-permission');
+  assert.equal(h.runner.get(res.runId).asks.length, 1);
+});
+
+test('答えると control_response が1行だけ書かれる', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, sPermission({ sessionId: res.row.sessionId, requestId: 'p1' }));
+  await settle();
+
+  const sent = h.runner.answer(res.runId, 'p1', { behavior: 'allow' });
+  assert.equal(sent.ok, true);
+  assert.equal(sent.status, 202);
+
+  const lines = (await stdinText(child)).trim().split('\n');
+  assert.equal(lines.length, 1);
+  const line = JSON.parse(lines[0]);
+  assert.equal(line.type, 'control_response');
+  assert.equal(line.response.subtype, 'success');
+  assert.equal(line.response.request_id, 'p1', '番号が一致しないと相手は待ち続ける');
+  assert.deepEqual(line.response.response, { behavior: 'allow' });
+  assert.equal(h.runner.get(res.runId).state, 'running');
+});
+
+test('選んだ札は updatedInput に組み直して送る', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, sQuestion(
+    [{ question: 'どっちで進める？', options: [{ label: 'いますぐ' }, { label: 'あとで' }] }],
+    { sessionId: res.row.sessionId, requestId: 'p1' },
+  ));
+  await settle();
+
+  const sent = h.runner.answer(res.runId, 'p1', { behavior: 'allow', choices: { 0: 'あとで' } });
+  assert.equal(sent.ok, true);
+
+  const line = JSON.parse((await stdinText(child)).trim());
+  assert.deepEqual(line.response.response.updatedInput.answers, { 'どっちで進める？': 'あとで' });
+});
+
+test('選び方が足りないと 400。理由は台帳のものを出す', async () => {
+  // どの質問が足りないかは原文を見ないと言えないので、`index` の既定文には倒さない
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, sQuestion(
+    [{ question: 'どっちで進める？', options: [{ label: 'いますぐ' }] }],
+    { sessionId: res.row.sessionId, requestId: 'p1' },
+  ));
+  await settle();
+
+  const sent = h.runner.answer(res.runId, 'p1', { behavior: 'allow', choices: {} });
+  assert.equal(sent.ok, false);
+  assert.equal(sent.status, 400);
+  assert.match(sent.reason, /答えていない質問/);
+  // 1行も書かない。押し直せるよう要求は残る
+  assert.equal(await stdinText(child), '');
+  assert.equal(h.runner.get(res.runId).asks.length, 1);
+});
+
+test('時間切れの tick でも断りが書かれる', async () => {
+  // `commit` が tick の経路も通ること。ここを emit のままにすると、
+  // 自動で断ったつもりが1行も届かず、その子は永久に待つ
+  const h = harness({ ledger: createRunLedger({ permissionTimeoutMs: 1000 }) });
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, sPermission({ sessionId: res.row.sessionId, requestId: 'p1' }));
+  await settle();
+
+  h.setNow(T + 5000);
+  assert.deepEqual(h.runner.tick(), [res.runId]);
+
+  const line = JSON.parse((await stdinText(child)).trim());
+  assert.equal(line.response.response.behavior, 'deny');
+  assert.equal(line.response.request_id, 'p1');
+  assert.equal(h.runner.get(res.runId).state, 'waiting');
+});
+
+test('扱えない要求にはエラーの行を返す', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, { type: 'control_request', request_id: 'z9', request: { subtype: 'なにこれ' } });
+  await settle();
+
+  const line = JSON.parse((await stdinText(child)).trim());
+  assert.equal(line.response.subtype, 'error');
+  assert.equal(line.response.request_id, 'z9');
+  assert.equal(h.runner.get(res.runId).state, 'running');
+});
+
+test('子が閉じたあとに答えても書かず 409', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+
+  feed(child, sPermission({ sessionId: res.row.sessionId, requestId: 'p1' }));
+  await settle();
+  child.close(0);
+  await settle();
+
+  const sent = h.runner.answer(res.runId, 'p1', { behavior: 'allow' });
+  assert.equal(sent.ok, false);
+  assert.equal(sent.status, 409);
+});
+
+test('断る番号', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  feed(child, sPermission({ sessionId: res.row.sessionId, requestId: 'p1' }));
+  await settle();
+
+  assert.equal(h.runner.answer('しらない', 'p1', { behavior: 'allow' }).status, 404);
+  assert.equal(h.runner.answer(res.runId, '  ', { behavior: 'allow' }).status, 400);
+  assert.equal(h.runner.answer(res.runId, 'p1', { behavior: 'たぶん' }).status, 400);
+  // run は在るが要求が無い。2つのタブで同時に押したときに片方へ出す
+  assert.equal(h.runner.answer(res.runId, 'よその番号', { behavior: 'allow' }).status, 409);
+  assert.equal(h.runner.answer(res.runId, 'p1', { behavior: 'allow', then: 'ぜんぶ' }).status, 400);
+});
+
+test('許可のあとに権限モードを撃つ。その順で書かれる', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, sPermission({
+    sessionId: res.row.sessionId, requestId: 'p1', toolName: 'ExitPlanMode', input: { plan: '# やる' },
+  }));
+  await settle();
+
+  h.runner.answer(res.runId, 'p1', { behavior: 'allow', then: 'auto' });
+  const lines = (await stdinText(child)).trim().split('\n').map((s) => JSON.parse(s));
+
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].type, 'control_response', 'allow が先。先にモードを替えると足元が変わる');
+  assert.equal(lines[1].type, 'control_request');
+  assert.equal(lines[1].request.subtype, 'set_permission_mode');
+  assert.equal(lines[1].request.mode, 'auto');
+  // 番号は殻が採番する。台帳には randomUUID を持たせない
+  assert.ok(lines[1].request_id.startsWith('req_'));
+});
+
+test('受理されたら起動指定の権限モードも替わる', async () => {
+  // **落とし穴の番人。** 忘れると建て直しで plan に戻り、
+  // 画面には auto と出ているのに書けない、という一番気づきにくい形になる
+  const h = harness();
+  const res = h.start();
+  const sid = res.row.sessionId;
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, sPermission({
+    sessionId: sid, requestId: 'p1', toolName: 'ExitPlanMode', input: { plan: '# やる' },
+  }));
+  await settle();
+  h.runner.answer(res.runId, 'p1', { behavior: 'allow', then: 'auto' });
+
+  const shot = JSON.parse((await stdinText(child)).trim().split('\n')[1]);
+  feed(child, sControlResponse(shot.request_id, { sessionId: sid }));
+  await settle();
+  assert.equal(h.runner.get(res.runId).permissionMode, 'auto');
+
+  // 1往復で閉じたあと続きを打つと、新しい子は替えたあとのモードで立つ
+  feed(child, sResult({ sessionId: sid }));
+  await settle();
+  child.close(0);
+  await settle();
+  h.runner.input(res.runId, '続けて');
+
+  const args = h.calls[1].args;
+  assert.equal(args[args.indexOf('--permission-mode') + 1], 'auto');
+});
+
+test('受理されなければ起動指定も替えない', async () => {
+  const h = harness();
+  const res = h.start();
+  const sid = res.row.sessionId;
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, sPermission({ sessionId: sid, requestId: 'p1' }));
+  await settle();
+  h.runner.answer(res.runId, 'p1', { behavior: 'allow', then: 'auto' });
+
+  const shot = JSON.parse((await stdinText(child)).trim().split('\n')[1]);
+  feed(child, sControlResponse(shot.request_id, { sessionId: sid, ok: false, error: 'だめ' }));
+  await settle();
+
+  assert.equal(h.runner.get(res.runId).permissionMode, 'plan');
+});
+
+test('畳んだあとに要求が残らない', async () => {
+  const h = harness();
+  const res = h.start();
+  feed(h.children[0], sPermission({ sessionId: res.row.sessionId, requestId: 'p1' }));
+  await settle();
+  assert.equal(h.runner.get(res.runId).asks.length, 1);
+
+  await h.runner.shutdown();
+  const row = h.runner.get(res.runId);
+  assert.deepEqual(row.asks, []);
+  assert.equal(row.state, 'stopped');
+});
+
+/*
+ * 子を殺さずに替える（setLive）
+ */
+
+test('替えたいぶんだけ control_request を書く。指示文は要らない', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  const out = h.runner.setLive(res.runId, { permissionMode: 'acceptEdits', model: 'claude-sonnet-5' });
+  assert.equal(out.status, 202, '受理されたかはまだ分からない。撃っただけ');
+
+  const lines = (await stdinText(child)).trim().split('\n').map((t) => JSON.parse(t));
+  assert.equal(lines.length, 2, 'user 行は1つも混ざらない');
+  assert.deepEqual(lines.map((l) => l.request.subtype), ['set_permission_mode', 'set_model']);
+  assert.equal(lines[0].request.mode, 'acceptEdits');
+  assert.equal(lines[1].request.model, 'claude-sonnet-5');
+  // 番号は殻が採番する。2本が同じ番号だと、返ってきた答えをどちらにも当てられる
+  assert.notEqual(lines[0].request_id, lines[1].request_id);
+  assert.ok(lines.every((l) => l.request_id.startsWith('req_')));
+});
+
+test('受理されるまで替わらない。子の建て直しも起きない', async () => {
+  const h = harness();
+  const res = h.start();
+  const sid = res.row.sessionId;
+  const child = h.children[0];
+  await stdinText(child);
+
+  h.runner.setLive(res.runId, { permissionMode: 'acceptEdits' });
+  assert.equal(h.runner.get(res.runId).permissionMode, 'plan');
+  assert.equal(h.calls.length, 1, '殺していない');
+  assert.equal(h.children[0].pid, 1000);
+
+  const shot = JSON.parse((await stdinText(child)).trim());
+  feed(child, sControlResponse(shot.request_id, { sessionId: sid }));
+  await settle();
+  assert.equal(h.runner.get(res.runId).permissionMode, 'acceptEdits');
+  assert.equal(h.calls.length, 1, '受理されたあとも建て直していない');
+});
+
+test('受理されたら起動指定のモデルも替わる', async () => {
+  // 権限モードと同じ落とし穴。忘れると建て直しで古いモデルへ戻る
+  const h = harness();
+  const res = h.start(req({ model: 'claude-opus-5' }));
+  const sid = res.row.sessionId;
+  const child = h.children[0];
+  await stdinText(child);
+
+  h.runner.setLive(res.runId, { model: 'claude-sonnet-5' });
+  const shot = JSON.parse((await stdinText(child)).trim());
+  feed(child, sControlResponse(shot.request_id, { sessionId: sid }));
+  await settle();
+
+  feed(child, sResult({ sessionId: sid }));
+  await settle();
+  child.close(0);
+  await settle();
+  h.runner.input(res.runId, '続けて');
+
+  const args = h.calls[1].args;
+  assert.equal(args[args.indexOf('--model') + 1], 'claude-sonnet-5');
+});
+
+test('替えられなかったら起動指定も替えない', async () => {
+  const h = harness();
+  const res = h.start();
+  const sid = res.row.sessionId;
+  const child = h.children[0];
+  await stdinText(child);
+
+  h.runner.setLive(res.runId, { permissionMode: 'auto' });
+  const shot = JSON.parse((await stdinText(child)).trim());
+  feed(child, sControlResponse(shot.request_id, { sessionId: sid, ok: false, error: 'だめ' }));
+  await settle();
+  assert.equal(h.runner.get(res.runId).permissionMode, 'plan');
+});
+
+test('替えるときの断る番号', async () => {
+  const h = harness();
+  const res = h.start();
+  await stdinText(h.children[0]);
+
+  assert.equal(h.runner.setLive('しらない', { permissionMode: 'auto' }).status, 404);
+  assert.equal(h.runner.setLive(res.runId, {}).status, 400);
+  assert.equal(h.runner.setLive(res.runId, { permissionMode: 'yolo' }).status, 400);
+  assert.equal(h.runner.setLive(res.runId, { model: '--help' }).status, 400);
+  // 既定では環境変数で許していない
+  assert.equal(h.runner.setLive(res.runId, { permissionMode: 'bypassPermissions' }).status, 400);
+  assert.equal(h.runner.setLive(res.runId, { permissionMode: 'plan' }).status, 400, 'いまと同じ');
+});
+
+test('子が閉じたあとは替えずに 409。建て直すほうへ案内する', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, sResult({ sessionId: res.row.sessionId }));
+  await settle();
+  child.close(0);
+  await settle();
+
+  const out = h.runner.setLive(res.runId, { permissionMode: 'auto' });
+  assert.equal(out.status, 409);
+  assert.ok(out.reason.includes('替えて続ける'));
+});
+
+/*
+ * 割り込み（interrupt）
+ */
+
+/** 名乗りを届けてから走らせる。割り込みの札はこれが来て初めて出る。 */
+async function interruptible(h, res) {
+  const child = h.children[0];
+  feed(child, sysInit({
+    sessionId: res.row.sessionId,
+    capabilities: ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1'],
+  }));
+  await stdinText(child);
+  return child;
+}
+
+test('割り込みは control_request を1本書く。子は殺さない', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = await interruptible(h, res);
+
+  const out = h.runner.interrupt(res.runId, {});
+  assert.equal(out.status, 202, '届いたかはまだ分からない。撃っただけ');
+
+  const line = JSON.parse((await stdinText(child)).trim());
+  assert.equal(line.type, 'control_request');
+  assert.equal(line.request.subtype, 'interrupt');
+  assert.ok(line.request_id.startsWith('req_'));
+  assert.equal(h.stops.length, 0, '止めていない');
+  assert.equal(h.runner.get(res.runId).state, 'running', '走ったまま');
+});
+
+test('控えの取り消しを頼んだときだけ cancel_queued が乗る', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = await interruptible(h, res);
+
+  h.runner.interrupt(res.runId, { cancelQueued: true });
+  const line = JSON.parse((await stdinText(child)).trim());
+  assert.equal(line.request.cancel_queued, true);
+});
+
+test('返事が来ると印が消える', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = await interruptible(h, res);
+
+  h.runner.interrupt(res.runId, {});
+  assert.equal(h.runner.get(res.runId).interrupting, true);
+
+  const shot = JSON.parse((await stdinText(child)).trim());
+  feed(child, sControlResponse(shot.request_id, { sessionId: res.row.sessionId }));
+  await settle();
+  assert.equal(h.runner.get(res.runId).interrupting, false);
+});
+
+test('名乗りが行に出る。割り込みの断る番号', async () => {
+  const h = harness();
+  const res = h.start();
+  await stdinText(h.children[0]);
+
+  // init が来る前は「不明」。ここで空配列にすると画面が札を出せなくなる
+  assert.equal(h.runner.get(res.runId).capabilities, null);
+  assert.equal(h.runner.interrupt('しらない', {}).status, 404);
+
+  await interruptible(h, res);
+  assert.deepEqual(h.runner.get(res.runId).capabilities,
+    ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1']);
+
+  assert.equal(h.runner.interrupt(res.runId, {}).status, 202);
+  assert.equal(h.runner.interrupt(res.runId, {}).status, 409, '二重には撃たない');
+});
+
+test('子が閉じたあとは割り込まずに 409。建て直しへは案内しない', async () => {
+  // 終わったターンに割り込む意味は無い。`/switch` を勧めると別のことをさせることになる
+  const h = harness();
+  const res = h.start();
+  const child = await interruptible(h, res);
+
+  feed(child, sResult({ sessionId: res.row.sessionId }));
+  await settle();
+  child.close(0);
+  await settle();
+
+  const out = h.runner.interrupt(res.runId, {});
+  assert.equal(out.status, 409);
+  assert.ok(!out.reason.includes('替えて続ける'));
+});
+
+test('正常終了でも標準エラーは残る', async () => {
+  // `Malformed updatedPermissions` のようなこちらの配線の間違いは、
+  // 終了コード 0 のまま stderr にだけ出る。理由には使えないが、見えないと直せない
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+
+  child.stderr.write('Warning: Malformed updatedPermissions\n');
+  await settle();
+
+  assert.equal(h.runner.get(res.runId).lastStderr, 'Warning: Malformed updatedPermissions');
+
+  feed(child, sResult({ sessionId: res.row.sessionId }));
+  await settle();
+  child.close(0);
+  await settle();
+
+  const row = h.runner.get(res.runId);
+  assert.equal(row.state, 'waiting', '警告があっても失敗にしない');
+  assert.equal(row.reason, null);
+  assert.ok(row.lastStderr.includes('Malformed'));
+});
+
+test('長すぎて捨てた行は数え、増えたら1行積む', async () => {
+  // 4MB 超の許可要求が捨てられると、こちらは要求が来たことを知らないまま向こうが待ち続ける。
+  // 段4より前は `splitter.dropped` を誰も読んでいなかった
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+
+  child.stdout.write(`${'x'.repeat(5 * 1024 * 1024)}\n`);
+  await settle();
+
+  assert.equal(h.runner.get(res.runId).counts.droppedLines, 1);
+  const notes = h.runner.events().events.filter((e) => e.kind === 'note');
+  assert.ok(notes.some((e) => e.text.includes('長すぎる行')), notes.map((e) => e.text).join(' / '));
 });

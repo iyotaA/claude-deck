@@ -20,7 +20,7 @@
  */
 import { el, fact } from './util.js';
 import { panel, SEC } from './panel.js';
-import { runFor, EFFORT_LABELS } from './runs.js';
+import { runFor, EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
 
 /** これに入っていれば、その run はもう終わっている（`run-view.js` と同じ語彙）。 */
 const RUN_OVER = new Set(['stopped', 'failed', 'done']);
@@ -89,6 +89,8 @@ function applyOptions() {
   if (!o) return;
   if (ui.filled) { noteMode(); return; }
   ui.filled = true;
+  fillSelect(ui.modelPick, modelOptions(o.models));
+  noteModel();
   fillSelect(ui.effort, [
     { value: '', label: '指定しない（CLI の既定）' },
     ...(o.efforts ?? []).map((v) => ({ value: v, label: EFFORT_LABELS[v] ?? v })),
@@ -101,6 +103,20 @@ function applyOptions() {
   if (Number.isFinite(b.default)) ui.budget.value = String(b.default);
   if (Number.isFinite(o.promptMax)) ui.prompt.maxLength = o.promptMax;
   noteMode();
+}
+
+/**
+ * 「自分で入力」のときだけ入力欄を出す。
+ *
+ * 判断（値をどう組むか）は `runs.js` の純関数にあるので、ここは出し入れだけ。
+ */
+function noteModel() {
+  const free = ui.modelPick.value === MODEL_FREE;
+  const was = ui.model.hidden;
+  ui.model.hidden = !free;
+  if (free && was) ui.model.focus();
+  // 候補へ戻したら書きかけを捨てる。残すと、見えない欄の中身が送られる
+  if (!free) ui.model.value = '';
 }
 
 /** 危ないモードを選んだときだけ但し書きを出す。 */
@@ -125,13 +141,18 @@ function fillSelect(sel, items) {
  * @param {HTMLElement} grid 入れ先
  * @param {string} id 入力の id。ラベルと結ぶ
  * @param {string} text ラベル
- * @param {HTMLElement} control 入力そのもの
+ * @param {HTMLElement} control 入力。器（複数の入力をまとめた span）でもよい
  * @param {string} hint 下に出す一言
+ * @param {string} [forId] 器を渡すとき、ラベルと結ぶ中の入力の id
  */
-function gridRow(grid, id, text, control, hint) {
+function gridRow(grid, id, text, control, hint, forId = '') {
   const lb = el('label', 'settings-label', text);
-  lb.htmlFor = id;
-  control.id = id;
+  if (forId) {
+    lb.htmlFor = forId;
+  } else {
+    control.id = id;
+    lb.htmlFor = id;
+  }
   grid.append(lb, control, el('p', 'settings-hint', hint));
 }
 
@@ -186,26 +207,37 @@ function buildUi() {
   const msg = el('p', 'settings-msg');
   msg.setAttribute('role', 'status');
 
-  // 許可を求めないことだけは手元にも書く。**パネルの説明を読んでいなくても押せる**ので、
+  // 確認がどこへ出るかだけは手元にも書く。**パネルの説明を読んでいなくても押せる**ので、
   // いちばん外せない1行をここへ置く（残りの説明はパネル側）
-  bar.append(line, el('p', 'settings-hint', '途中で許可は求めません'), msg);
+  bar.append(line, el('p', 'settings-hint', '確認はこの画面に出ます'), msg);
 
   // ── 状況の説明と、モデルなどの指定。パネル側に残す
   const wrap = el('div', 'run-ops');
 
   wrap.append(el('p', 'run-note',
     'ターミナル側はもう動いていません。同じセッションのまま、この画面から続きを起こせます。'));
-  wrap.append(el('p', 'run-note',
-    'ここから起こしたセッションは、途中であなたに許可を求めません。'));
 
   const grid = el('div', 'settings-grid');
+
+  // 候補は「このマシンで実際に使われたモデル」。名前を覚えていなくても選べる。
+  // そこに無いものは「自分で入力」から渡す（新しいモデルが出た初日のため）
+  const modelPickEl = el('select', 'settings-select');
+  modelPickEl.id = 'run-resume-model-pick';
+  modelPickEl.addEventListener('change', noteModel);
+
   const model = el('input', 'settings-text');
   model.type = 'text';
+  model.hidden = true;
   model.spellcheck = false;
   model.autocomplete = 'off';
-  model.placeholder = '空欄なら CLI の既定';
-  gridRow(grid, 'run-resume-model', 'モデル', model,
-    '空欄のままなら CLI の既定で起こします。元のモデルは引き継ぎません');
+  model.placeholder = 'モデル名をそのまま書く';
+  model.setAttribute('aria-label', 'モデル名を自分で入力');
+
+  const modelRow = el('span', 'settings-row');
+  modelRow.append(modelPickEl, model);
+  gridRow(grid, 'run-resume-model', 'モデル', modelRow,
+    '指定しないと CLI の既定で起こします。元のモデルは引き継ぎません',
+    modelPickEl.id);
   const effort = el('select', 'settings-select');
   gridRow(grid, 'run-resume-effort', '思考量', effort, '深いほど時間とトークンを使います');
   const mode = el('select', 'settings-select');
@@ -224,7 +256,7 @@ function buildUi() {
   wrap.append(grid, danger);
 
   return {
-    bar, wrap, prompt, grid, model, effort, mode, budget, danger, go, msg,
+    bar, wrap, prompt, grid, modelPick: modelPickEl, model, effort, mode, budget, danger, go, msg,
     sessionId: null, cwd: null, busy: false, filled: false,
   };
 }
@@ -257,7 +289,7 @@ function collect(prompt) {
   const body = { resume: true, sessionId: ui.sessionId, cwd: ui.cwd, prompt };
   // 選択肢を引けていないときは欄ごと隠しているので、何も足さずサーバーの既定に任せる
   if (!ui.grid.hidden) {
-    const model = ui.model.value.trim();
+    const model = modelValue(ui.modelPick.value, ui.model.value);
     if (model) body.model = model;
     if (ui.effort.value) body.effort = ui.effort.value;
     if (ui.mode.value) body.permissionMode = ui.mode.value;

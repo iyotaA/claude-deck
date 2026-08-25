@@ -6,6 +6,7 @@
 import { el, since, stamp, tokens, agentTag } from './util.js';
 import { dom, store, STATE_COLOR, QUIET_MODES, SUMMARY_ORDER } from './store.js';
 import { idleOf, headOf, visibleRows } from './rows.js';
+import { newestRateLimit, rateView } from './runs.js';
 import { setListOpen } from './drawer.js';
 import { select } from './session.js';
 
@@ -138,6 +139,58 @@ export function renderSummary() {
   }
 }
 
+/* ── 枠の使用率（上のバーに1つだけ） ───────────────────────────── */
+
+/** 同じ文字なら組み直さない。1秒ごとに呼ばれるので、印で止める（fillSlash と同じ作法） */
+let rateKey = null;
+
+/**
+ * 枠の使用率を上のバーに出す。
+ *
+ * **アカウント共通の値なので、画面に1つだけ。** セッションごとの詳細には出さない。
+ * 同じ数がいくつも並ぶうえ、「この実行が使った枠」だと読めてしまうため。
+ *
+ * 出どころは実行の stdout に流れる `rate_limit_event` だけで、
+ * 会話ログにも `~/.claude` の下にも無い（実測 2.1.245）。
+ * だから**この画面から起こした実行が1本も無ければ何も出ない。**
+ * ターミナルで動かしているだけの人には、今までどおり1ドットも変わらない。
+ */
+export function renderRate() {
+  // 何を出すかを決めるのは runs.js の純関数。ここは組み立てるだけ
+  const v = rateView(newestRateLimit(), Date.now());
+
+  if (v === null) {
+    rateKey = null;
+    dom.rate.hidden = true;
+    dom.rate.replaceChildren();
+    return;
+  }
+
+  const key = [v.fiveHour, v.sevenDay, v.age, v.hot].join('|');
+  if (rateKey === key) return;
+  rateKey = key;
+
+  const chip = el('span', 'chip');
+  if (v.hot) chip.classList.add('is-hot');
+  chip.append(document.createTextNode('枠'));
+  // 「5h:42%」と繋ぐ。空白だと 5h と 42% がどちらも `.chip` の gap と同じ幅で離れて、
+  // どの数がどの枠のものか目で組み直すことになる。コロンで結んで1語に見せる
+  if (v.fiveHour !== null) chip.append(el('strong', null, `5h:${v.fiveHour}`));
+  if (v.sevenDay !== null) chip.append(el('strong', null, `7d:${v.sevenDay}`));
+  if (v.age) chip.append(el('span', 'rate-age', v.age));
+
+  const note = [`測ったのは ${stamp(v.at)}`];
+  if (v.resetsAt !== null) {
+    note.push(v.gone
+      ? '5時間枠は空いたはず（新しい数はまだ届いていません）'
+      : `5時間枠が空くのは ${stamp(v.resetsAt)}`);
+  }
+  chip.title = note.join(' / ');
+
+  dom.rate.replaceChildren(chip);
+  dom.rate.hidden = false;
+}
+
 /**
  * 経過時間の表示だけを進める。作り直さないのでスクロール位置が動かない。
  *
@@ -145,6 +198,10 @@ export function renderSummary() {
  * 見る場所を広げれば1秒ごとの更新がそのまま効く
  */
 export function refreshTimes() {
+  // 枠の使用率も時間で見え方が変わる（但し書きが増える・空く時刻を跨ぐ）。
+  // 印で止めてあるので、変わらないうちは組み直さない
+  renderRate();
+
   const byId = new Map(store.rows.map((r) => [r.sessionId, r]));
   const cards = [...dom.list.querySelectorAll('.card'), ...dom.board.querySelectorAll('.card')];
   for (const node of cards) {

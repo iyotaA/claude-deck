@@ -8,8 +8,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { classifyStreamLine } from '../src/parse/stream.mjs';
-import { toRunEvents, TEXT_MAX, TOOL_RESULT_MAX } from '../src/run/event.mjs';
-import { sysInit, sAssistant, sUser, sResult, S_ID } from './helpers.mjs';
+import { askKindOf, toRunEvents, TEXT_MAX, TOOL_RESULT_MAX } from '../src/run/event.mjs';
+import {
+  sysInit, sAssistant, sUser, sResult, sPermission, sQuestion, sControlResponse, S_ID,
+} from './helpers.mjs';
 
 /** 行を1本畳む。テストの見通しのため、JSON 化と分類をここでまとめる。 */
 function fold(line) {
@@ -82,8 +84,8 @@ test('ツール結果は1件ずつ、短い要約にして持つ', () => {
     ],
   }));
   assert.deepEqual(evs, [
-    { kind: 'tool-result', id: 't1', isError: false, text: 'ok' },
-    { kind: 'tool-result', id: 't2', isError: true, text: 'だめ' },
+    { kind: 'tool-result', id: 't1', isError: false, nonExecution: null, text: 'ok' },
+    { kind: 'tool-result', id: 't2', isError: true, nonExecution: null, text: 'だめ' },
   ]);
 });
 
@@ -138,13 +140,15 @@ test('読めなかった行は broken として見本だけ残す', () => {
 });
 
 test('知らない type は捨てずに名前だけ残す', () => {
-  const evs = fold({ type: 'rate_limit_event', session_id: S_ID, rate_limit_info: {} });
-  assert.deepEqual(evs, [{ kind: 'other', type: 'rate_limit_event', subtype: null }]);
+  // **実在の type を例に使わない。** 拾う気になった日にテストが落ちる。
+  // 実際 `rate_limit_event` がここに居て、段4で拾った瞬間に落ちた
+  const evs = fold({ type: 'not_a_real_type', session_id: S_ID });
+  assert.deepEqual(evs, [{ kind: 'other', type: 'not_a_real_type', subtype: null }]);
 });
 
-test('system の init 以外も other になる', () => {
-  const evs = fold({ type: 'system', subtype: 'hook_started', session_id: S_ID });
-  assert.deepEqual(evs, [{ kind: 'other', type: 'system', subtype: 'hook_started' }]);
+test('system の知らない subtype は other になる', () => {
+  const evs = fold({ type: 'system', subtype: 'compact_boundary', session_id: S_ID });
+  assert.deepEqual(evs, [{ kind: 'other', type: 'system', subtype: 'compact_boundary' }]);
 });
 
 test('サブエージェントの行には全種類に同じ形で印が付く', () => {
@@ -184,4 +188,131 @@ test('何を渡しても落ちない', () => {
   assert.deepEqual(toRunEvents('文字列'), []);
   assert.deepEqual(toRunEvents(42), []);
   assert.equal(toRunEvents({}).length, 1);
+});
+
+/*
+ * 許可要求（段1で足したぶん）
+ */
+
+test('聞かれ方は3つに分かれる', () => {
+  assert.equal(askKindOf('ExitPlanMode'), 'plan');
+  assert.equal(askKindOf('AskUserQuestion'), 'question');
+  assert.equal(askKindOf('Bash'), 'tool');
+  assert.equal(askKindOf(null), 'tool', '名前が読めなくても道具として扱う');
+});
+
+test('許可要求は permission 1件に畳む', () => {
+  const [ev, ...rest] = fold(sPermission({
+    requestId: 'p3', toolName: 'Bash', input: { command: 'npm test' },
+  }));
+  assert.equal(rest.length, 0);
+  assert.equal(ev.kind, 'permission');
+  assert.equal(ev.requestId, 'p3');
+  assert.equal(ev.ask, 'tool');
+  assert.equal(ev.tool, 'Bash');
+  assert.equal(ev.detail, 'npm test');
+});
+
+test('原文の input は出来事に載せない（Write の content が数MBになる）', () => {
+  // ここが「大きい行を持ち回らない」の番人。
+  // 原文が要るのは答えるときだけで、それを持つのは台帳の pending のほう
+  const content = 'x'.repeat(500_000);
+  const [ev] = fold(sPermission({ toolName: 'Write', input: { file_path: 'C:\work\a.txt', content } }));
+  assert.equal('input' in ev, false);
+  assert.equal(ev.detail, 'C:\work\a.txt');
+  assert.ok(JSON.stringify(ev).length < 1000, '出来事1件が原文を抱えていない');
+});
+
+test('選択肢で聞かれたら1問目だけを出す', () => {
+  const [ev] = fold(sQuestion([
+    { question: 'どっちで進める？', options: [{ label: 'あ' }, { label: 'い' }] },
+    { question: '2問目', options: [] },
+  ]));
+  assert.equal(ev.ask, 'question');
+  assert.equal(ev.detail, 'どっちで進める？');
+  assert.equal('input' in ev, false, '選択肢の原文も台帳が持つ');
+});
+
+test('プラン承認は本文を1行に畳んで切る', () => {
+  const plan = `# やること\n\n- ${'あ'.repeat(1000)}`;
+  const [ev] = fold(sPermission({ toolName: 'ExitPlanMode', input: { plan } }));
+  assert.equal(ev.ask, 'plan');
+  assert.equal(ev.detail.includes('\n'), false, '1行に畳む');
+  assert.ok(ev.detail.length < 500, '長いプランをそのまま持たない');
+});
+
+test('材料が無ければ CLI が付けてきた説明に落ちる', () => {
+  // 知らないツール（MCP など）で input から何も拾えないとき。**空文字に丸めない**
+  const [ev] = fold(sPermission({
+    toolName: 'mcp__something__send', input: {}, description: 'よそのサービスへ送ります',
+  }));
+  assert.equal(ev.detail, 'よそのサービスへ送ります');
+});
+
+test('それも無ければ null。空文字で埋めない', () => {
+  const [ev] = fold(sPermission({ toolName: 'mcp__something__send', input: {} }));
+  assert.equal(ev.detail, null);
+});
+
+test('配線のための行は出来事にしない', () => {
+  // 人が読むものではない。何が起きたか（断った・モードが変わった）は台帳が note で積む
+  assert.deepEqual(fold({ type: 'control_request', request_id: 'z1', request: { subtype: 'なにこれ' } }), []);
+  assert.deepEqual(fold(sControlResponse('r1', { response: { mode: 'auto' } })), []);
+  assert.deepEqual(fold(sControlResponse('r2', { ok: false, error: 'だめ' })), []);
+});
+
+/*
+ * 数えるものは並べない（thinking / rate-limit）と、フックと、断られた結果
+ */
+
+test('考えた量と枠の使用率は出来事にしない', () => {
+  // 1往復で8件流れる（実測）。並べると本文が押し流される。畳んで行に載せるのは台帳の仕事
+  assert.deepEqual(fold({
+    type: 'system', subtype: 'thinking_tokens', session_id: S_ID, estimated_tokens: 700,
+  }), []);
+  assert.deepEqual(fold({
+    type: 'rate_limit_event', session_id: S_ID,
+    rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.06 } } },
+  }), []);
+});
+
+test('フックは終わった1件だけを出す', () => {
+  const line = (subtype) => ({
+    type: 'system', subtype, session_id: S_ID,
+    hook_name: 'format', hook_event: 'PostToolUse', outcome: 'success', exit_code: 0,
+  });
+  assert.deepEqual(fold(line('hook_started')), []);
+  assert.deepEqual(fold(line('hook_progress')), []);
+  assert.deepEqual(fold(line('hook_response')), [{
+    kind: 'hook', name: 'format', event: 'PostToolUse', ok: true, exitCode: 0, stderr: null,
+  }]);
+});
+
+test('outcome が無ければ終了コードで成否を読む', () => {
+  const [ev] = fold({
+    type: 'system', subtype: 'hook_response', session_id: S_ID,
+    hook_name: 'lint', exit_code: 2, stderr: 'だめ',
+  });
+  assert.equal(ev.ok, false);
+  assert.equal(ev.stderr, 'だめ');
+});
+
+test('どちらも無ければ成功と決めつけない', () => {
+  const [ev] = fold({ type: 'system', subtype: 'hook_response', session_id: S_ID, hook_name: 'x' });
+  assert.equal(ev.ok, null);
+  assert.equal(ev.exitCode, null);
+});
+
+test('断られたツール結果には印が付く', () => {
+  // `isError` とは別に持つ。画面が「あなたが断った」と「ツールが失敗した」を書き分ける
+  const evs = fold(sUser({
+    results: [
+      { id: 't1', text: 'Error: 断りました', isError: true },
+      { id: 't2', text: 'ok' },
+    ],
+    tool_result_meta: [{ id: 't1', non_execution_kind: 'permission-rule' }],
+  }));
+  assert.equal(evs[0].nonExecution, 'permission-rule');
+  assert.equal(evs[0].isError, true, '印が付いても is_error は書き換えない');
+  assert.equal(evs[1].nonExecution, null, '印が無いほうは null。空文字に丸めない');
 });

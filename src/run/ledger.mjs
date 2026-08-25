@@ -21,12 +21,37 @@
  * ```
  * starting → running → waiting（result が来た＝あなたの番）
  *                   ↘ stalled（STALL_MS 沈黙）
+ *                   ↘ needs-permission（許可を聞かれた＝答えるまで1行も進まない）
  * running/waiting/stalled → stopping → stopped
  *                         → failed / done
  * ```
  *
  * `stopping` はプランに無いが足してある。`stopClaude` は最大5秒かかるので、
  * そのあいだ `running` と言うのも `stopped` と言うのも嘘になる。
+ *
+ * ## 許可待ちを `waiting` に寄せない
+ *
+ * `waiting` は「1行送れば進む」状態で、`markInput()` がそれを前提に `running` へ戻す。
+ * 許可待ちの run に user 行を送っても CLI は `control_response` を待ち続けるので、
+ * 寄せると「送ったのに動かない」が起きる——**直したばかりのバグと同じ壊れ方の再生産になる。**
+ *
+ * `needs-permission` は `isRunOver` にも `isChildDone` にも**入れない。**
+ * 子は生きて待っている。畳むと答える先が消える。
+ * `tick()` の無音判定の射程も広げない（許可待ちの無音は正常）。代わりに
+ * `PERMISSION_TIMEOUT_MS` で測り、過ぎたら**自動で断る。**
+ *
+ * 質問もプラン承認もツール許可も、状態はこの1つ。**3つに割らない。**
+ * 遷移の組み合わせが3倍になって、得られるのは札の文言だけになる。
+ * 違いは `pending.kind`（`'plan'|'question'|'tool'`）に持たせ、画面がそれで見出しを変える。
+ *
+ * ## 行は組まない。意図だけ積む
+ *
+ * NDJSON を組むのは `parse/stream.mjs`、stdin へ書くのは `run/index.mjs`。
+ * こちらは送るべき意図を `outbox` へ積み、`takeOutbox()` で渡すだけにする。
+ * **「判断は台帳、手を動かすのは殻」の向きをここでも崩さない。**
+ *
+ * だから `apply()` や `tick()` の戻り値は今までどおり「積んだ速報の配列」のまま。
+ * `{events, outbox}` のような形に変えると、呼ぶ側と既存のテストが総崩れになる。
  *
  * ## 「1ターンで閉じる世界」に最初から備える
  *
@@ -55,8 +80,8 @@
  */
 import { sameSessionId } from '../parse/stream.mjs';
 import { ballOf } from '../parse/state.mjs';
-import { oneLine } from '../shared/text.mjs';
-import { toRunEvents } from './event.mjs';
+import { clip, oneLine } from '../shared/text.mjs';
+import { askKindOf, toRunEvents } from './event.mjs';
 
 /**
  * 同時に動かせる本数。
@@ -89,6 +114,113 @@ export const HISTORY_MAX = 20;
 /** 理由の文字列の上限。一覧に載る値なので短く保つ。 */
 const REASON_MAX = 200;
 
+/**
+ * 1本の run が同時に抱えられる未応答の要求の数。
+ *
+ * 並列のツール呼び出しで複数まとめて来ることがあるので1本では足りない。
+ * 超えたぶんは**その場で断る。** 放っておくと向こうが待ち続けて詰まる。
+ */
+export const PENDING_MAX = 8;
+
+/**
+ * 許可の答えを待つ上限。過ぎたら自動で断る。
+ *
+ * **ブラウザを閉じた・席を外したときの唯一の逃げ道なので消さない。**
+ * 無いと、答えられないまま待つ子が残り、画面には「許可待ち」と出続ける。
+ *
+ * 10分にしてあるのは `STALL_MS`（2分）より十分長く、
+ * `notify/` の返信待ち通知（2分）で Slack に気づいて戻ってこられる長さだから。
+ */
+export const PERMISSION_TIMEOUT_MS = 600000;
+
+/**
+ * 子を殺さずに替えられるもの。**キーは run と spec の項目名、`subtype` は要求の名前。**
+ *
+ * 3つの表（subtype・パラメタ名・日本語）に割らずに1つへまとめてある。
+ * 割ると項目を1つ足すときに直す場所が3箇所になり、必ずどれかが漏れる。
+ *
+ * `params` のキーが項目名と揃っていないのは向こうの都合（実測。
+ * `set_permission_mode` は `{mode}`、`set_model` は `{model}`）。だから `key` を持つ。
+ *
+ * **思考量（`set_max_thinking_tokens`）は入れていない。** 要求そのものは受け付けるが、
+ * 画面が持っているのは `--effort` の語（`low`〜`max`）で、あちらが欲しいのはトークン数。
+ * 対応表が `claude.exe` から読み取れず、当てずっぽうの数を撃つと
+ * **黙って意図しない思考量で走る**（誤りが画面のどこにも出ない）。測れるまで入れない。
+ */
+export const LIVE_FIELDS = Object.freeze({
+  permissionMode: { subtype: 'set_permission_mode', key: 'mode', label: '権限モード' },
+  model: { subtype: 'set_model', key: 'model', label: 'モデル' },
+});
+
+/**
+ * 割り込みが撃てることを CLI が名乗る印。
+ *
+ * `system/init` の `capabilities` に載る（実測 2.1.245 で
+ * `['interrupt_receipt_v1','interrupt_cancel_queued_v1','msg_lifecycle_v1']`）。
+ *
+ * **名乗っていない（配列に無い）ときだけ断る。名乗り自体が無い（null）ときは撃たせる。**
+ * 「不明」を「無い」と読むと、名乗る前の版で使えるはずの割り込みを永久に断ることになる。
+ * 撃って通じなければ 10 秒の `liveAckTimeoutMs` が拾うので、詰まったままにはならない。
+ */
+export const INTERRUPT_CAP = 'interrupt_receipt_v1';
+
+/** 控えている指示ごと取り消せることを名乗る印。名乗っていなければ頼まれても断る。 */
+export const CANCEL_QUEUED_CAP = 'interrupt_cancel_queued_v1';
+
+/**
+ * 行に載せるスラッシュコマンドの上限。
+ *
+ * 実測 2.1.245 で 62 個（引き算のあとで 60）。**3倍の余地を取ってある。**
+ * 上限を置くのは、この一覧が `rows()` に載る＝走っている本数ぶん SSE のフレームへ入るため。
+ * 版が上がって桁が変わった日に、気づかないまま毎フレームが太るのを止める。
+ */
+export const SLASH_MAX = 200;
+
+/**
+ * 「替えました」の答えを待つ上限。過ぎたら控えを捨てる。
+ *
+ * **過ぎても状態は変えない。** 撃ったのに返事が無いなら、いまどちらで走っているかは
+ * こちらには分からない。片方に倒して表示すると、それは推測を事実として出したことになる。
+ *
+ * 10秒なのは、これが「人を待つ時間」ではなく「相手のプロセスが1行返す時間」だから。
+ * 無いと、版が上がって応答を返さなくなった日に画面が永久に「切り替え中」で固まる。
+ */
+export const LIVE_ACK_TIMEOUT_MS = 10000;
+
+/** 要求カードに載せる本文の上限。プランの全文がここに入る。 */
+export const ASK_BODY_MAX = 8000;
+
+/** 本文の中の値1つぶんの上限。これが無いと `Write` の `content` だけで枠を使い切る。 */
+const ASK_VALUE_MAX = 3000;
+
+/** 質問文の上限。`askBody`（文字列に畳む側）と `askQuestions`（機械が読む側）で同じ値を使う。 */
+const ASK_Q_MAX = 200;
+
+/** 選択肢の札の上限。質問の見出し（`header`）にも同じ長さを使う。 */
+const ASK_LABEL_MAX = 120;
+
+/** 選択肢の説明の上限。 */
+const ASK_DESC_MAX = 200;
+
+/**
+ * 行に載せる質問と選択肢の件数の上限。
+ *
+ * 実測では質問2件・選択肢3件が普通だが、上限が無いと
+ * 向こうが何件返してきても行が太る。**画面が描ける量で切る。**
+ */
+const ASK_QUESTIONS_MAX = 8;
+
+/** 同上、1問あたりの選択肢の件数。 */
+const ASK_OPTIONS_MAX = 12;
+
+/**
+ * 選んだ答え1つぶんの上限。
+ *
+ * **超えたら切らずに断る。** 切ると、人が書いた自由記述が黙って途中で終わった形で
+ * Claude へ渡ることになる。長い指示は `/input` で送るほうが正しい。
+ */
+const ASK_ANSWER_MAX = 2000;
+
 /** 状態の日本語。画面側に日本語を持たせないため、ここから配る（`STATE_LABELS` と同じ考え方）。 */
 export const RUN_STATE_LABELS = Object.freeze({
   starting: '起動中',
@@ -96,6 +228,9 @@ export const RUN_STATE_LABELS = Object.freeze({
   waiting: 'あなたの番',
   // 見たのは「出力が来ていない」だけ。「応答なし」と書くと、圧縮中の正常な run を故障として報告することになる
   stalled: '無音',
+  // **終端ではないし、子も生きている。** 答えるまで1行も進まないだけ。
+  // だから下の OVER にも `isChildDone` にも入れない（入れると答える先がその瞬間に消える）
+  'needs-permission': '許可待ち',
   // **終端ではない。** 自分で置いた上限に当たっただけで、上げれば同じ会話の続きが打てる。
   // だから下の OVER には入れない（入れると `entry.spec` が捨てられ、続ける道がその瞬間に消える）
   budget: '予算切れ',
@@ -166,6 +301,267 @@ export function quietFor(ms) {
 }
 
 /**
+ * JSON にできないものが来ても落ちない `JSON.stringify`。
+ *
+ * 読んでいるのは Claude Code の内部データなので、想定した形が来るとは限らない。
+ *
+ * @param {*} v 何か
+ * @returns {string|null} 文字にできなければ null
+ */
+function safeJson(v) {
+  try {
+    const s = JSON.stringify(v);
+    return typeof s === 'string' ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 要求カードに出す本文を組む。
+ *
+ * 段としてはここで**文字列1本に畳む。** 選択肢を機械が読む形は後で足す。
+ * 畳まずに置くと、`Write` の `content`（数MBになりうる）が行に載って、
+ * 一覧の押し出しのたびに JSON へ焼かれることになる。
+ *
+ * @param {string|null} toolName ツール名
+ * @param {object|null} input CLI が渡してきた引数の原文
+ * @returns {string|null} 出すものが無ければ null
+ */
+function askBody(toolName, input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+
+  // プランは本文そのものが読みたいもの。Markdown のまま渡す（画面が mdView で描く）
+  if (toolName === 'ExitPlanMode') return clip(input.plan, ASK_BODY_MAX);
+
+  if (toolName === 'AskUserQuestion') {
+    const lines = [];
+    for (const q of Array.isArray(input.questions) ? input.questions : []) {
+      const head = oneLine(q?.question, ASK_Q_MAX);
+      if (head) lines.push(head);
+      for (const o of Array.isArray(q?.options) ? q.options : []) {
+        const label = oneLine(o?.label, ASK_LABEL_MAX);
+        if (!label) continue;
+        const desc = oneLine(o?.description, ASK_DESC_MAX);
+        lines.push(desc ? `  - ${label} — ${desc}` : `  - ${label}`);
+      }
+    }
+    if (lines.length > 0) return clip(lines.join('\n'), ASK_BODY_MAX);
+    // 読めなければ下の「キー: 値」へ落とす。**null で返さない。**
+    // 版が変わって形が違ったときに、何を訊かれているのか一切見えなくなる
+  }
+
+  // 知らないツールは引数を「キー: 値」で並べる。
+  // **1つの値に枠を使い切らせない。** `content` が先頭に来ると `file_path` が見えなくなる
+  const parts = [];
+  for (const [k, v] of Object.entries(input)) {
+    const val = clip(typeof v === 'string' ? v : safeJson(v), ASK_VALUE_MAX);
+    if (val) parts.push(`${k}: ${val}`);
+  }
+  return parts.length > 0 ? clip(parts.join('\n\n'), ASK_BODY_MAX) : null;
+}
+
+/**
+ * 質問を、画面が選択肢として組み直せる形にする。
+ *
+ * `askBody` が文字列1本に畳むのに対し、こちらは**機械が読む形**を返す。
+ * 画面がラジオとチェックボックスを組むのに要る。
+ * 両方を行に載せると同じ中身を2回持つことになるので、
+ * **これが組めたときは `body` を持たない**（`takeAsk` がそう分ける）。
+ *
+ * ## 鍵は質問文ではなく番号
+ *
+ * 答えは `{番号: 選んだ札}` で受け取る。質問文を鍵にしない理由は2つ。
+ *
+ * - ここで質問文を `ASK_Q_MAX` で**切っている。** 切った文字列を鍵にすると、
+ *   200字を超える質問では画面が送ってきた鍵が原文と一致せず、
+ *   何を選んでも「答えていない質問があります」で永久に詰まる
+ * - 同じ質問文が2件来たときに鍵が潰れる
+ *
+ * 番号は `input.questions` の添字そのもの。**質問文が空のものを落とすと添字がずれる**ので、
+ * 落とした後の並び順ではなく元の添字を `key` として持ち回る。
+ *
+ * @param {object|null} input `AskUserQuestion` への引数の原文
+ * @returns {Array<object>|null} 組めなければ null
+ */
+function askQuestions(input) {
+  const src = Array.isArray(input?.questions) ? input.questions : [];
+  const out = [];
+
+  for (let i = 0; i < src.length && i < ASK_QUESTIONS_MAX; i += 1) {
+    const q = src[i];
+    // 質問文が空のものは落とす。答えの辞書はこれを鍵にするので、
+    // 鍵にできないものを載せると、画面で選べても答えが組めない
+    const question = oneLine(q?.question, ASK_Q_MAX);
+    if (!question) continue;
+
+    const options = [];
+    const opts = Array.isArray(q?.options) ? q.options : [];
+    for (let j = 0; j < opts.length && j < ASK_OPTIONS_MAX; j += 1) {
+      const label = oneLine(opts[j]?.label, ASK_LABEL_MAX);
+      if (!label) continue;
+      // 説明は無いことがある。null のまま持つ（空文字に丸めない）
+      options.push({ label, description: oneLine(opts[j]?.description, ASK_DESC_MAX) });
+    }
+
+    out.push({
+      key: i,
+      question,
+      header: oneLine(q?.header, ASK_LABEL_MAX),
+      multiSelect: q?.multiSelect === true,
+      options,
+    });
+  }
+
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * 選んだ札を、重複を落とした並びにする。
+ *
+ * 文字列でも配列でも受ける。**文字列は分割しない**（札そのものに `', '` が
+ * 入っていると壊れる）。読む側の `normalizeAnswer`（`parse/digest/answers.mjs`）と
+ * 同じ吸収を、逆向きにやっている。
+ *
+ * @param {unknown} raw 画面から来た値
+ * @returns {Array<string>} 空なら空配列
+ */
+function pickLabels(raw) {
+  const list = Array.isArray(raw) ? raw : [raw];
+  const out = [];
+  for (const v of list) {
+    const s = typeof v === 'string' ? v.trim() : '';
+    // 同じ札が2回来ても1回にする
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
+/**
+ * 選んだ内容から、`AskUserQuestion` に返す `updatedInput` を組む。
+ *
+ * **台帳の外へ export しているのはテストのため。** 質問と選択肢の対応の検証が
+ * いちばん間違えやすく、状態機械を動かさずに全分岐を通したい。
+ *
+ * 複数選択は `', '` 連結の文字列に倒す。読む側（`parse/digest/answers.mjs`）に
+ * 「実測3本すべて `', '` 連結の文字列で、配列は0件」という記録があるので、
+ * **書く側もそれに合わせる。** 形を2つにすると、自分で書いたログを自分で読めなくなる。
+ *
+ * ## 札が選択肢に無くても断らない
+ *
+ * 画面には「その他（自分で書く）」がある。読む側も
+ * `freeText`（どの選択肢にも合わなかった答え）を一人前の値として扱っている。
+ * だから**選択肢との照合はしない。** ここで弾くと自由記述の道が塞がる。
+ *
+ * @param {object} pending 未応答の要求1件（`input` と `questions` を持つ）
+ * @param {unknown} choices 画面から来た `{番号: 札 | [札…]}`
+ * @returns {{ok:boolean, reason?:string, updatedInput?:object}}
+ */
+export function buildQuestionInput(pending, choices) {
+  const input = pending?.input;
+  const src = Array.isArray(input?.questions) ? input.questions : null;
+  if (!src || src.length === 0) return { ok: false, reason: 'この要求は選択肢では答えられません' };
+  if (!choices || typeof choices !== 'object' || Array.isArray(choices)) {
+    return { ok: false, reason: '選んだ内容が読めません' };
+  }
+
+  const asked = Array.isArray(pending.questions) ? pending.questions : [];
+  if (asked.length === 0) return { ok: false, reason: 'この要求は選択肢では答えられません' };
+
+  const answers = {};
+  for (const q of asked) {
+    // 辞書の鍵は**原文の質問文。** 画面へ出したものは切ってあるので使えない
+    const orig = src[q.key];
+    const key = typeof orig?.question === 'string' ? orig.question : '';
+    if (!key) return { ok: false, reason: '質問文が読めないものが混ざっています' };
+
+    const picked = pickLabels(choices[q.key]);
+    if (picked.length === 0) {
+      return { ok: false, reason: `答えていない質問があります（${oneLine(q.question, 60)}）` };
+    }
+    if (!q.multiSelect && picked.length > 1) {
+      return { ok: false, reason: `1つだけ選ぶ質問です（${oneLine(q.question, 60)}）` };
+    }
+
+    const value = picked.join(', ');
+    if (value.length > ASK_ANSWER_MAX) {
+      return {
+        ok: false,
+        reason: `答えが長すぎます（${ASK_ANSWER_MAX} 文字まで。長いものは指示として送ってください）`,
+      };
+    }
+    answers[key] = value;
+  }
+
+  // 知らないキーは足さない。**原文をそのまま広げる**ので、
+  // `questions` 以外の項目が増えた版でも落とさずに返せる
+  return { ok: true, updatedInput: { ...input, answers } };
+}
+
+/**
+ * 「今後も許可」で撃つモードを、CLI が付けてきた助言から拾う。
+ *
+ * 実測（2026-08-25・claude 2.1.243）で `Write` の要求に付いてきた形はこれ。
+ *
+ * ```json
+ * [{"type":"setMode","mode":"acceptEdits","destination":"session"}]
+ * ```
+ *
+ * **`destination` が `session` のものだけ拾う。** 設定ファイルへ書く行き先が来た日に
+ * そのまま通すと、`~/.claude` 配下へ書き込まない約束を破ることになる。
+ * 助言が無いツールもある（`ExitPlanMode` には付かなかった）ので、
+ * 取れなければ null。**0 と不明を分けるのと同じで、無いものを既定値で埋めない。**
+ *
+ * @param {*} suggestions `permission_suggestions` の中身
+ * @returns {string|null} 撃つモード。無ければ null
+ */
+function suggestModeOf(suggestions) {
+  if (!Array.isArray(suggestions)) return null;
+  for (const s of suggestions) {
+    if (s?.type !== 'setMode' || s?.destination !== 'session') continue;
+    if (typeof s.mode === 'string' && s.mode) return s.mode;
+  }
+  return null;
+}
+
+/**
+ * 何を聞かれているのかを、速報の文に使う語にする。
+ *
+ * @param {string} kind `askKindOf` の戻り
+ * @param {string|null} tool ツール名
+ * @returns {string} 「プラン」「質問」「Bash」
+ */
+function askWhat(kind, tool) {
+  if (kind === 'plan') return 'プラン';
+  if (kind === 'question') return '質問';
+  return tool ?? 'ツール';
+}
+
+/**
+ * 未応答の要求を、一覧の行に載せる形にする。
+ *
+ * **`input`（原文）を落とす。** 行は押し出しのたびに JSON へ焼かれるので、
+ * 質問の原文まで載せると毎回そのぶんを文字列化することになる。
+ * 原文が要るのは答えを組むときだけで、それは台帳の中で済む。
+ *
+ * @param {object} p pending の1件
+ * @returns {object} 画面へ出す形
+ */
+function askRow(p) {
+  return {
+    id: p.id,
+    kind: p.kind,
+    tool: p.tool,
+    detail: p.detail,
+    // `body` と `questions` は**どちらか片方だけ入る。** 同じ中身を2回載せない
+    body: p.body,
+    questions: p.questions,
+    suggestMode: p.suggestMode,
+    at: p.at,
+  };
+}
+
+/**
  * 台帳を1つ作る。
  *
  * @param {object} [opts] 上限のたぐい。テストから数値で確かめられるように全部外から渡せる
@@ -174,6 +570,9 @@ export function quietFor(ms) {
  * @param {number} [opts.stallMs] 沈黙とみなすまで
  * @param {number} [opts.eventMax] 速報を貯める件数
  * @param {number} [opts.historyMax] 終わった run を残す件数
+ * @param {number} [opts.pendingMax] 同時に抱えられる未応答の要求の数
+ * @param {number} [opts.permissionTimeoutMs] 許可の答えを待つ上限
+ * @param {number} [opts.slashMax] 行に載せるスラッシュコマンドの上限
  * @returns {object} 台帳
  */
 export function createRunLedger({
@@ -182,16 +581,38 @@ export function createRunLedger({
   stallMs = STALL_MS,
   eventMax = EVENT_MAX,
   historyMax = HISTORY_MAX,
+  pendingMax = PENDING_MAX,
+  permissionTimeoutMs = PERMISSION_TIMEOUT_MS,
+  liveAckTimeoutMs = LIVE_ACK_TIMEOUT_MS,
+  slashMax = SLASH_MAX,
 } = {}) {
   /** @type {Map<string, object>} runId → run */
   const runs = new Map();
   /** @type {Array<object>} 速報のリングバッファ。**run ごとではなく1本**にしてある */
   const ring = [];
+  /**
+   * @type {Array<object>} 送るべき意図。**行（NDJSON）にはしない。**
+   *
+   * 積むのは3種類。
+   * `{runId, kind:'permission-response', requestId, decision}`
+   * `{runId, kind:'control-error', requestId, message}`
+   * `{runId, kind:'control-request', requestId, subtype, params}`
+   */
+  const outbox = [];
 
   let runSeq = 0;
   let seq = 0;
   let dropped = 0;
   let lastStartAt = null;
+
+  /**
+   * @type {object|null} 直近の枠の使用率。`{fiveHour, sevenDay, resetsAt, at}`
+   *
+   * **run ではなく台帳が1つだけ持つ。** アカウント共通の値なので、
+   * どの実行から届いたかに意味が無い。
+   * こうしておくと、その実行が `HISTORY_MAX` を超えて押し出されても数は残る。
+   */
+  let latestRate = null;
 
   /**
    * 速報を1件積む。
@@ -249,6 +670,312 @@ export function createRunLedger({
   }
 
   /**
+   * 断る意図を1件積む。
+   *
+   * @param {object} run 対象の run
+   * @param {string} requestId どの要求へ
+   * @param {string} message 理由
+   * @returns {void}
+   */
+  function queueDeny(run, requestId, message) {
+    outbox.push({
+      runId: run.runId,
+      kind: 'permission-response',
+      requestId,
+      decision: { behavior: 'deny', message },
+    });
+  }
+
+  /**
+   * 抱えている未応答の要求を捨てる。
+   *
+   * **`outbox` には積まない。** 子がいない（もしくは畳むと決めた）ので書く先が無い。
+   * 積むと `takeOutbox()` がそれを拾って、閉じた stdin へ書きに行くことになる。
+   *
+   * @param {object} run 対象の run
+   * @returns {void}
+   */
+  function clearPending(run) {
+    run.pending.clear();
+    run.livePending.clear();
+  }
+
+  /**
+   * 未応答の要求を1件受け取る。
+   *
+   * 速報は積まない（`toRunEvents` が `permission` を1件積んでいるので二重になる）。
+   * ここで積むのは、断ったときのように**そうしないと見えないこと**だけ。
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `classifyStreamLine` が読んだ `can_use_tool` の中身
+   * @param {string|null} detail 1行の要約（`toRunEvents` が組んだものを使い回す）
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報
+   */
+  function takeAsk(run, info, detail, now) {
+    const id = typeof info.requestId === 'string' ? info.requestId : '';
+    // 宛先が読めないものには答えようが無い（`stream.mjs` が既に弾いているが、ここでも見る）
+    if (!id) return [];
+    // 同じ id が二度来ても上書きしない。上書きすると `at` が動いて時間切れが延びる
+    if (run.pending.has(id)) return [];
+
+    // 畳むと決めたあとに届いたぶん。答える意味が無いので**その場で断る。**
+    // 放っておくと向こうは待ち続け、こちらは pending を抱えたまま終端へ行く
+    if (run.state === 'stopping' || run.state === 'switching') {
+      queueDeny(run, id, 'この実行を止めることにしたので断りました');
+      return [];
+    }
+
+    if (run.pending.size >= pendingMax) {
+      queueDeny(run, id, `いちどに答えられるのは ${pendingMax} 件までです`);
+      return [pushNote(run, `許可要求が ${pendingMax} 件を超えたので断りました`, now)];
+    }
+
+    const input = info.input && typeof info.input === 'object' && !Array.isArray(info.input)
+      ? info.input
+      : null;
+    const kind = askKindOf(info.toolName ?? null);
+    // 選択肢の形に組めたときは、文字列に畳んだ本文を持たない。
+    // 画面はこちらを見て選択肢を組む。組めなかったとき（原文の形が違う版など）は
+    // `body` に落ちて、段1と同じ「本文＋断る」のカードになる
+    const questions = kind === 'question' ? askQuestions(input) : null;
+    run.pending.set(id, {
+      id,
+      kind,
+      tool: info.toolName ?? null,
+      detail,
+      body: questions ? null : askBody(info.toolName ?? null, input),
+      questions,
+      suggestMode: suggestModeOf(info.suggestions),
+      // **原文を持つのは質問のときだけ。** `allow` は `updatedInput` を省略でき、
+      // 省略すれば CLI が元の入力をそのまま使う。だから `Write` や `Bash` の原文は要らない。
+      // 持つと `content` の数MBがそのまま台帳に居座る
+      input: kind === 'question' ? input : null,
+      at: now,
+    });
+    run.state = 'needs-permission';
+    return [];
+  }
+
+  /**
+   * 扱えない `control_request` に、エラーで答える。
+   *
+   * **黙って捨ててはいけない。** 向こうは応答が来るまで永久に待つ。
+   * 「未知の形で落ちない」を、ここでは「未知の形で詰まらない」まで広げている。
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `{requestId, subtype}`
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報
+   */
+  function refuseControl(run, info, now) {
+    const id = typeof info.requestId === 'string' ? info.requestId : '';
+    if (!id) return [];
+    const sub = info.subtype || '不明';
+    outbox.push({
+      runId: run.runId,
+      kind: 'control-error',
+      requestId: id,
+      message: `この画面では ${sub} を扱えません`,
+    });
+    return [pushNote(run, `扱えない要求（${sub}）を断りました`, now)];
+  }
+
+  /**
+   * こちらが撃った要求の答えを反映する。
+   *
+   * **自分が返した `control_response` も stdout にそのまま echo で戻ってくる**（実測 2026-08-25）。
+   * ただし向こうの `request_id` は `pending` にしか入らず、こちらが採番した id は
+   * `livePending` にしか入らない。だから**採番した id と一致するかどうかだけ**で、
+   * 自分のこだまと本物の応答を分けられる。合わないものは黙って捨てる。
+   *
+   * 受理を待ってから書き換えるのは、このアプリが全域で守っている「0 と不明を分ける」の一環。
+   * **「plan のつもりが acceptEdits で走っている」は最も高くつく誤表示。**
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `{requestId, ok, error, response}`
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報
+   */
+  function takeControlResult(run, info, now) {
+    const id = typeof info.requestId === 'string' ? info.requestId : '';
+    const p = id ? run.livePending.get(id) : null;
+    if (!p) return [];
+    run.livePending.delete(id);
+    if (p.kind === 'interrupt') return takeInterruptResult(run, info, now);
+    const f = LIVE_FIELDS[p.field];
+    if (!info.ok) {
+      return [pushNote(run, `${f.label}を ${p.value} に替えられませんでした（${info.error ?? '理由不明'}）`, now)];
+    }
+    run[p.field] = p.value;
+    // `kind` を増やさず `note` に `applied` を1つ添えてある。
+    // 新しい kind を作ると画面の `bodyOf` が既定の枝に落ちて**中身の無い行**が出るし、
+    // 殻（`index.mjs`）が `entry.spec` を同期するのに要るのはこの2語だけ
+    return [pushEvent(run, {
+      kind: 'note',
+      text: `${f.label}を ${p.value} にしました`,
+      applied: { field: p.field, value: p.value },
+    }, now)];
+  }
+
+  /**
+   * 割り込みの答えを読む。**状態は変えない。**
+   *
+   * 割り込みが通ってもそのターンが早く畳まれるだけで、run としては走ったまま。
+   * ここで終端へ倒すと、まだ流れている行を `apply()` が「子のいない run のもの」として捨てる。
+   * 止めるのは `/stop` の仕事で、これは別のこと。
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `{requestId, ok, error, response}`
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報
+   */
+  function takeInterruptResult(run, info, now) {
+    if (!info.ok) {
+      return [pushNote(run, `割り込めませんでした（${info.error ?? '理由不明'}）`, now)];
+    }
+    // 応答に控えの残り数が入ることがある（`still_queued`）。**数でなければ言わない**
+    const left = typeof info.response?.still_queued === 'number' ? info.response.still_queued : null;
+    return [pushNote(run, left === null
+      ? '割り込みました'
+      : `割り込みました（控えが ${left} 件残っています）`, now)];
+  }
+
+  /**
+   * 起動の行から、向こうが名乗った機能と、使えるスラッシュコマンドを控える。**速報は積まない。**
+   *
+   * `init` は1本のあいだに何度も流れる（ターンごと・スラッシュコマンドでも）。
+   * **配列で来たときだけ書く。** 読めない行で null に潰すと、一度は名乗っていた機能が
+   * 「名乗っていない」に化けて、割り込みの札が画面から消える。
+   *
+   * スラッシュコマンドは `slash_commands` から `terminal_slash_commands` を引いた残り。
+   * 引くほうは**対話版の画面でしか働かない**もの（実測 2.1.245 で `['doctor','color']`）で、
+   * こちらから送っても何も起きない。**引き算をここでするのは、これが判断だから。**
+   * `parse/` は行を読むだけにしてあり、どれが使えるかを決めるのは台帳の側。
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `initInfo` の戻り
+   * @returns {void}
+   */
+  function takeInit(run, info) {
+    if (Array.isArray(info?.capabilities)) run.capabilities = info.capabilities;
+    if (Array.isArray(info?.slashCommands)) {
+      const skip = new Set(info.terminalSlashCommands ?? []);
+      run.slashCommands = info.slashCommands.filter((c) => !skip.has(c)).slice(0, slashMax);
+    }
+  }
+
+  /**
+   * 考えた量を畳む。**速報は積まない。**
+   *
+   * `estimated_tokens` はそのターンの累計で、1往復に何度も刻んで届く（実測で8件）。
+   * だから**最新の値でただ上書きする。** ターンが替われば向こうが小さい数から数え直すので、
+   * こちらで「ターンが替わったか」を判断する必要が無い（判断を持たない＝ずれない）。
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `thinkingInfo` の戻り
+   * @returns {void}
+   */
+  function takeThinking(run, info) {
+    // 取れなかったときに 0 で潰さない。前の値をそのまま残す
+    if (typeof info.tokens !== 'number') return;
+    run.thinking = info.tokens;
+  }
+
+  /**
+   * 枠の使用率を畳む。**速報は積まない。**
+   *
+   * **どちらの枠も読めなかった行では上書きしない。**
+   * 版が上がって `unifiedWindows` の形が変わった日に、
+   * 一度は取れていた値が null で潰れて「取れていない」に見えるのを防ぐ。
+   *
+   * **run には持たせない。台帳に1つだけ置く。**
+   * これはアカウント共通の値で、どの実行から届いたかに意味が無い。
+   * run ごとに持つと画面に同じ数がいくつも並び、「この実行が使った枠」と読める。
+   * 行に載って来るのは、届く道が実行の stdout しか無いという**出どころの都合**。
+   *
+   * **測った時刻（`at`）を一緒に持つ。**
+   * 走っているものが無ければ数は古びていく。何分前の数かを言えないと、
+   * 古い数を今の数の顔で出すことになる（0 と不明を分ける）。
+   *
+   * @param {object} info `rateLimitInfo` の戻り
+   * @param {number} now いまの時刻（ms）
+   * @returns {void}
+   */
+  function takeRateLimit(info, now) {
+    if (typeof info.fiveHour !== 'number' && typeof info.sevenDay !== 'number') return;
+    latestRate = {
+      fiveHour: info.fiveHour ?? null,
+      sevenDay: info.sevenDay ?? null,
+      resetsAt: info.resetsAt ?? null,
+      at: now,
+    };
+  }
+
+  /**
+   * 返事の無いまま時間切れになった「替えました」の控えを捨てる。
+   *
+   * **状態は変えない。** 撃ったのに返事が無いなら、いまどちらで走っているかは分からない。
+   * 古いほうに据え置くのも新しいほうへ倒すのも、どちらも推測を事実として出すことになる。
+   * だから言うのは「分からない」だけにする（`stalled` が「応答なし」と診断しないのと同じ）。
+   *
+   * @param {object} run 対象の run
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報。時間切れが無ければ空
+   */
+  function sweepLive(run, now) {
+    if (run.livePending.size === 0) return [];
+    const out = [];
+    for (const [id, p] of [...run.livePending]) {
+      // 時計が巻き戻ったとき（負）に捨てないよう、この向きで書く
+      if (!(now - p.at >= liveAckTimeoutMs)) continue;
+      run.livePending.delete(id);
+      if (p.kind === 'interrupt') {
+        // ここでも「届かなかった」と診断しない。**返事が無かったことだけ**を言う
+        out.push(pushNote(run, '割り込みに返事がありませんでした。届いたかどうかは分かりません', now));
+        continue;
+      }
+      const label = LIVE_FIELDS[p.field].label;
+      out.push(pushNote(run, `${label}の切り替えに返事がありませんでした。いまの${label}は分かりません`, now));
+    }
+    return out;
+  }
+
+  /**
+   * 答えの無いまま時間切れになった要求を断る。
+   *
+   * 落とす先は `waiting`（あなたの番）。`running` に戻すと、Claude が代わりの手を
+   * 探して詰まったときに `stalled` まで2分かかる。**人が何か言わないと前に進まない**ので、
+   * 待たせている側として並べるほうが正しい。
+   *
+   * 言うのは測ったことだけ（`stalled` と同じ扱い）。「応答なし」と診断しない。
+   *
+   * @param {object} run 対象の run
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報。時間切れが無ければ空
+   */
+  function sweepAsks(run, now) {
+    if (run.pending.size === 0 || isChildDone(run.state)) return [];
+    const out = [];
+    for (const [id, p] of [...run.pending]) {
+      const quiet = now - p.at;
+      // 時計が巻き戻ったとき（負）や数でないときに断らないよう、この向きで書く
+      if (!(quiet >= permissionTimeoutMs)) continue;
+      run.pending.delete(id);
+      queueDeny(run, id, `${quietFor(quiet)}答えが無かったので断りました`);
+      out.push(pushNote(run, `${askWhat(p.kind, p.tool)}に${quietFor(quiet)}答えが無かったので断りました`, now));
+    }
+    if (out.length > 0 && run.pending.size === 0 && run.state === 'needs-permission') {
+      run.state = 'waiting';
+      // 沈黙の時計を戻す。戻さないと、待っていたぶんがそのまま無音として数えられて、
+      // 次の `tick` で即 `stalled` に落ちる
+      run.lastLineAt = now;
+      run.reason = '許可の答えが無かったので断りました。続けるなら指示を送ってください';
+    }
+    return out;
+  }
+
+  /**
    * 終わった run が増えすぎないように古いものから落とす。
    *
    * 落とした run の速報はリングに残るが、そのうち押し出されるので放っておく。
@@ -289,6 +1016,34 @@ export function createRunLedger({
       // 毎秒動かない（切り替えたときだけ変わる）ので粗い行に載せてよい。
       // 実行パネルの「替えて続ける」が `rows()` 側しか見ないため、ここに無いと欄を埋められない
       budgetUsd: run.budgetUsd,
+      // 未応答の要求。**速報（リング）ではなく行に載せる。**
+      // リングは画面側で400件を超えたぶんが捨てられるので、1ターンで数百行来た日に
+      // 要求そのものが消えて二度と答えられなくなる。行は毎回まるごと入れ替わるので、
+      // 答えて消えたことも取りこぼしも次のフレームで自己修復する。
+      // 中身は要求が来た時と消えた時にしか変わらない＝毎秒 push にはならない
+      asks: [...run.pending.values()].map(askRow),
+      // 撃ったが返事待ちの切り替え。**行に載せるのは `asks` と同じ理由。**
+      // 別のタブで替えた最中にもう一方が二重に撃つのを止められるし、
+      // 押した窓を閉じても「切り替え中」が残る。`at` を載せないのは毎秒の差分判定のため
+      switching: [...run.livePending.values()]
+        .filter((p) => p.kind === 'live')
+        .map((p) => ({ field: p.field, value: p.value })),
+      // 撃ったが返事待ちの割り込み。二重に撃たせないために行へ載せる。
+      // 真偽1つで足りるのは、控えるのは同時に1本だけと `interrupt()` が決めているため
+      interrupting: [...run.livePending.values()].some((p) => p.kind === 'interrupt'),
+      // CLI が名乗った機能。**null は「名乗らなかった」で、空配列（何も無い）とは別。**
+      // 画面はこれを見て割り込みの札を出すかどうかを決める。init で入るだけなので毎秒動かない
+      capabilities: run.capabilities,
+      // 送れるスラッシュコマンド。**`get()` ではなく行に載せる。**
+      // 使うのは入力欄の隣の札で、あれが見ているのは `rows()` の行だけ
+      // （`runFor(sessionId)` が引くのがそちら）。`get()` に置くと画面から届かない。
+      // 60 語で 700 バイトほどあるが、init のときしか変わらないので差分判定で止まる
+      slashCommands: run.slashCommands,
+
+      // CLI が stderr へ吐いた直近の1行。**速報の並びには混ぜない**（本文が読めなくなる）が、
+      // 見出しには出す。`get()` にしか出さないと、画面が `/api/runs/:id` を
+      // 引いていない以上どこにも現れない。普段は null なので欄ごと出ない
+      lastStderr: run.lastStderr,
     };
   }
 
@@ -352,7 +1107,31 @@ export function createRunLedger({
         costUSD: null,
         stopRequested: false,
         switchRequested: false,
-        counts: { lines: 0, broken: 0, events: 0 },
+        /** @type {Map<string, object>} requestId → 未応答の要求 */
+        pending: new Map(),
+        /** @type {object|null} こちらが撃った `set_permission_mode` の控え。受理されるまで持つ */
+        // 撃った要求の控え。`Map<requestId, {kind, ..., at}>`。
+        // **受理されるまで持つ**（受理を待たずに書き換えないため）。
+        //
+        // `kind` は `'live'`（値の入れ替え。`field` と `value` を持つ）か
+        // `'interrupt'`（割り込み。替える項目が無いので持たない）。
+        // **割り込みを `LIVE_FIELDS` に足さない。** あれは「項目→subtype→パラメタ名」の表で、
+        // 足すと `LIVE_FIELDS[p.field]` が undefined になり、答えを読む側がその場で落ちる。
+        // 器を分けずに印を1つ持たせたのは、後始末が `livePending.clear()` の1箇所で済むため
+        livePending: new Map(),
+        /** @type {string[]|null} CLI が名乗った機能。**無ければ null**（空配列に丸めない） */
+        capabilities: null,
+        /** @type {string[]|null} 送れるスラッシュコマンド。**無ければ null**（空配列に丸めない） */
+        slashCommands: null,
+        /** @type {number|null} そのターンで考えた量（累計）。畳んだ結果だけを持つ */
+        thinking: null,
+        /** @type {object|null} 直近の枠の使用率。`{fiveHour, sevenDay, resetsAt, at}` */
+
+        /** @type {string|null} 子が stderr へ吐いた直近の1行。失敗していなくても持つ */
+        lastStderr: null,
+        // `droppedLines` は**長すぎて捨てた行の数**。殻（`run/index.mjs`）から入れてもらう。
+        // 台帳は行を読むだけで、捨てる判断は `createLineSplitter` がしているため
+        counts: { lines: 0, broken: 0, events: 0, droppedLines: 0 },
       });
       lastStartAt = now;
       prune();
@@ -383,6 +1162,77 @@ export function createRunLedger({
         clearStateReason(run);
         run.state = 'running';
       }
+      return true;
+    },
+
+    /**
+     * 長すぎて捨てた行の数を記録する。
+     *
+     * ## なぜこれだけ殻から入れてもらうか
+     *
+     * 捨てる判断をしているのは `createLineSplitter`（`os/claude.mjs`）で、台帳は
+     * **捨てられた行を見ることすらできない。** だから数だけ受け取る。
+     *
+     * ## なぜ要るか
+     *
+     * 段1で逃げ道を10通り塞いだあと、**唯一残っているデッドロックの経路**がこれ。
+     * 4MB を超える `control_request`（巨大な `Write` の許可要求など）が届くと、
+     * 行がまるごと捨てられる。こちらは要求が来たことを知らないので誰も答えず、
+     * 向こうは答えを待ち続ける。既存の `stalled`（2分）が状態としては拾うが、
+     * **画面には「反応がありません」としか出ない**ので原因にたどり着けない。
+     *
+     * 段4より前は `splitter.dropped` を誰も読んでいなかった。
+     *
+     * ## 数えるだけでは足りない
+     *
+     * `counts` は `get()`（`/api/runs/:id`）にしか出ず、画面はそこを引いていない。
+     * **数えたものが誰の目にも触れなければ診断にならない**ので、増えたときは速報に1行積む。
+     * めったに起きないこと（実測では一度も起きていない）なので、
+     * 「標準エラーは速報に混ぜない」の理由（本文が読めなくなる）はここには当たらない。
+     *
+     * @param {string} runId 対象
+     * @param {number} n これまでに捨てた行の**累計**（差分ではない）
+     * @param {number} now 時刻
+     * @returns {Array<object>} 積んだ速報。増えていなければ空
+     */
+    noteDropped(runId, n, now) {
+      const run = runs.get(runId);
+      if (!run || typeof n !== 'number' || !Number.isFinite(n) || n < 0) return [];
+
+      const total = Math.floor(n);
+      const before = run.counts.droppedLines;
+      // 累計をそのまま入れる。**足し込まない。**
+      // 殻は `splitter.dropped` を毎回そのまま渡してくるので、足すと二重に数える
+      run.counts.droppedLines = total;
+      if (total <= before) return [];
+
+      return [pushNote(
+        run,
+        `長すぎる行を ${total - before} 件捨てました（累計 ${total} 件）。`
+        + '答えるべき要求が混ざっていた場合、返事が来ないまま止まります',
+        now,
+      )];
+    },
+
+    /**
+     * 子が stderr へ吐いた直近の1行を記録する。
+     *
+     * **失敗していなくても持つ。** これまでは `fail()` のときにしか使っていなかったが、
+     * `Malformed updatedPermissions` のような**こちらの配線の間違い**は
+     * 終了コード 0 のまま stderr にだけ出る。捨てていると自分のミスに気づけない。
+     *
+     * 詳細（`get()`）にだけ出す。行に載せると差分判定をすり抜ける値が増える。
+     *
+     * @param {string} runId 対象
+     * @param {string|null} text 1行に畳んだもの（畳むのは殻の仕事）
+     * @returns {boolean} 記録できたか
+     */
+    noteStderr(runId, text) {
+      const run = runs.get(runId);
+      if (!run) return false;
+      // 空で上書きしない。前に出た警告を消してしまう
+      if (typeof text !== 'string' || !text) return false;
+      run.lastStderr = text;
       return true;
     },
 
@@ -425,12 +1275,45 @@ export function createRunLedger({
         return pushed;
       }
 
+      // 届いた要求をまず捌く。**`result` の処理より前。**
+      // 1行に両方は載らないので順序に実害は無いが、読み順をこちらへ寄せておく
+      if (classified?.kind === 'permission') {
+        // 1行の要約は `toRunEvents` が `describeTool` で組んだものを使い回す。
+        // ここで組み直すと**同じ判断が2箇所**になり、片方だけ直る日が来る
+        const ev = pushed.find((e) => e.kind === 'permission');
+        pushed.push(...takeAsk(run, classified.info ?? {}, ev?.detail ?? null, now));
+      } else if (classified?.kind === 'control') {
+        pushed.push(...refuseControl(run, classified.info ?? {}, now));
+      } else if (classified?.kind === 'control-result') {
+        pushed.push(...takeControlResult(run, classified.info ?? {}, now));
+      } else if (classified?.kind === 'init') {
+        // 速報は `toRunEvents` が既に組んでいる。ここで拾うのは行に載せる名乗りだけ
+        takeInit(run, classified.info ?? {});
+      } else if (classified?.kind === 'thinking') {
+        // 速報は積まない。行に載せるだけ（`toRunEvents` も空を返している）
+        takeThinking(run, classified.info ?? {});
+      } else if (classified?.kind === 'rate-limit') {
+        takeRateLimit(classified.info ?? {}, now);
+      }
+
       for (const ev of pushed) {
         if (ev.kind !== 'result') continue;
 
         // `num_turns` は累積ではない（実測。2往復目も 1 に戻る）ので、こちらで数える
         run.turns += 1;
         if (typeof ev.costUSD === 'number') run.costUSD = ev.costUSD;
+
+        // そのターンで考えた量を、終わりの1件にだけ載せて畳む。
+        //
+        // **行（`toRow`）には載せない。** 行は状態が変わったときにしか描き直されないので、
+        // 8件刻みで動く値を置くと古い数が残り続ける（0 と不明を分けるのと同じ理由で、
+        // 古い値を今の値の顔で出さない）。ここなら並んだ位置がそのターンの終わりに固定される。
+        //
+        // 積んだ記録そのものを書き換えている。`pushEvent` はリングに入れた実体を返すので、
+        // ここでの代入はリングにも SSE にも同じものが乗る。**畳む材料（累計）を知っているのは
+        // 台帳だけ**で、`toRunEvents` は1行しか見ないので組めない
+        ev.thinkingTokens = run.thinking;
+        run.thinking = null;
 
         if (ev.terminalReason === 'budget_exhausted') {
           // 実測で**プロセスは死なない**ので、子は殻の側（`reapIfDone`）が畳む。
@@ -485,6 +1368,252 @@ export function createRunLedger({
     },
 
     /**
+     * 許可要求に答える。
+     *
+     * 断る理由の切り分けはここでやり、**HTTP のどの番号にするかは殻（`run/index.mjs`）が決める。**
+     * 台帳が番号を知ると、窓口を1つ足すたびにこちらも直すことになる。
+     *
+     * `decision.then` は「答えたあと権限モードも替える」ぶん。
+     * **語彙の検証はここではしない**（`spec.mjs` が持っている）。受け取るのは検証済みの1語と、
+     * 殻が採番した `thenRequestId`。採番をここでやると `randomUUID` が要って、
+     * 「時刻すら外から受ける純関数の器」という作りが崩れる。
+     *
+     * `decision.choices` は選択肢で答えるぶん（`{番号: 札 | [札…]}`）。
+     * **原文を持っているのは台帳だけ**なので、`updatedInput` を組むのもここでやる。
+     *
+     * @param {string} runId 対象
+     * @param {string} requestId どの要求への答えか
+     * @param {object} decision `{behavior, message?, choices?, updatedPermissions?, then?, thenRequestId?}`
+     * @param {number} now 時刻
+     * @returns {{ok:boolean, code?:string, reason?:string, events:Array<object>}}
+     *          `code` は `no-run` / `over` / `no-request` / `answered` / `bad` / `bad-choices`。
+     *          `bad-choices` のときだけ `reason` に何が足りないかが入る
+     */
+    answer(runId, requestId, decision, now) {
+      const run = runs.get(runId);
+      if (!run) return { ok: false, code: 'no-run', events: [] };
+      // 子がいなければ書く先が無い。予算切れもここに入る（`isRunOver` ではなく `isChildDone`）
+      if (isChildDone(run.state)) return { ok: false, code: 'over', events: [] };
+
+      const id = typeof requestId === 'string' ? requestId : '';
+      if (!id) return { ok: false, code: 'no-request', events: [] };
+      const p = run.pending.get(id);
+      // **run が無いのではなく、その要求がもう無い。** 2つのタブから同時に押したときに
+      // 片方が「別の窓で答えられました」と言えるように、run 不明とは分けて返す
+      if (!p) return { ok: false, code: 'answered', events: [] };
+
+      const behavior = decision?.behavior;
+      if (behavior !== 'allow' && behavior !== 'deny') return { ok: false, code: 'bad', events: [] };
+
+      // **台帳を触る前に組む。** 選び方が足りなくて断るときに pending を消していると、
+      // 押し直す先が消えたまま「答えていない質問があります」だけが残る
+      let updatedInput = null;
+      if (behavior === 'allow' && decision.choices !== undefined && decision.choices !== null) {
+        // 選択肢で答えられるのは質問だけ。ツールの引数を画面から差し替える道は作らない
+        if (p.kind !== 'question') return { ok: false, code: 'bad', events: [] };
+        const built = buildQuestionInput(p, decision.choices);
+        if (!built.ok) return { ok: false, code: 'bad-choices', reason: built.reason, events: [] };
+        updatedInput = built.updatedInput;
+      }
+
+      run.pending.delete(id);
+      // 沈黙の時計を戻す。戻さないと、待たせたぶんがそのまま無音として数えられて、
+      // 答えた直後に `stalled` へ落ちる
+      run.lastLineAt = now;
+
+      // 知っているキーだけ通す。画面から来た余計なキーをそのまま CLI へ渡さない。
+      // `deny` のときに `updatedInput` を落とすといった**形の規則は `stream.mjs` の
+      // エンコーダが持っている**ので、こちらでは絞るだけにして二重に書かない
+      const out = { behavior };
+      const msg = oneLine(decision.message, REASON_MAX);
+      if (msg) out.message = msg;
+      // **画面から来た `updatedInput` を素通しさせない。** 組むのは質問の答えのときだけで、
+      // その中身も上の `buildQuestionInput` が原文から作ったもの。
+      // 素通しにすると、カードに出した Bash のコマンドと実際に走るコマンドを
+      // 別にできてしまう＝**人が承認したものと違うものが動く。**
+      if (updatedInput) out.updatedInput = updatedInput;
+      if (Array.isArray(decision.updatedPermissions) && decision.updatedPermissions.length > 0) {
+        out.updatedPermissions = decision.updatedPermissions;
+      }
+      outbox.push({ runId, kind: 'permission-response', requestId: id, decision: out });
+
+      const what = askWhat(p.kind, p.tool);
+      // **選んだ札を残す。** 「そのセッションで自分が何を判断したか」を出すのが
+      // このアプリの目的の半分で、速報の側にもそれが1行あると追いやすい
+      const chose = updatedInput
+        ? oneLine(Object.values(updatedInput.answers).join(' / '), REASON_MAX)
+        : null;
+      const events = [pushNote(run, behavior === 'allow'
+        ? (chose ? `質問に答えました（${chose}）` : `${what}を許可しました`)
+        : `${what}を断りました${msg ? `（${msg}）` : ''}`, now)];
+
+      // **許可を積んだ後に撃つ。** モード変更を先にすると、CLI が plan の検査を
+      // 通している最中に足元が変わる。順序に意味を持たせない場面が多いこのやり取りで、
+      // ここだけは順序に意味がある。
+      // 断ったときに撃たないのは、プランを差し戻したのにモードだけ抜けるのを防ぐため
+      if (behavior === 'allow' && typeof decision.then === 'string' && decision.then
+        && typeof decision.thenRequestId === 'string' && decision.thenRequestId) {
+        run.livePending.set(decision.thenRequestId, {
+          kind: 'live', field: 'permissionMode', value: decision.then, at: now,
+        });
+        outbox.push({
+          runId,
+          kind: 'control-request',
+          requestId: decision.thenRequestId,
+          subtype: LIVE_FIELDS.permissionMode.subtype,
+          params: { [LIVE_FIELDS.permissionMode.key]: decision.then },
+        });
+        events.push(pushNote(run, `権限モードを ${decision.then} に替えています`, now));
+      }
+
+      // 全部答えたら動き出す。**1件でも残っていれば許可待ちのまま。**
+      // 並列のツール呼び出しでは複数まとめて来るので、1件答えただけでは進まない
+      if (run.pending.size === 0 && run.state === 'needs-permission') run.state = 'running';
+      return { ok: true, events };
+    },
+
+    /**
+     * 子を殺さずに設定を替える。**撃つだけ。** 効いたかどうかは `takeControlResult` が決める。
+     *
+     * 断る理由の切り分けはここでやり、**HTTP のどの番号にするかは殻（`run/index.mjs`）が決める。**
+     * `answer()` と同じ作法。
+     *
+     * **値の語彙は検証しない**（`spec.mjs` の `checkPermissionMode` / `checkModel` が持っている）。
+     * 受け取るのは検証済みの値と、殻が採番した `requestId`。採番をここでやると `randomUUID` が
+     * 要って、「時刻すら外から受ける純関数の器」という作りが崩れる。
+     *
+     * **台帳を触る前に全部確かめる。** 途中で断ると、1つ目だけ撃たれて2つ目が撃たれない
+     * 半端な状態になる（呼んだ側からは「400 だった」としか見えないのに、片方は替わっている）。
+     *
+     * @param {string} runId 対象
+     * @param {Array<{field:string, value:string, requestId:string}>} wants 替えたいもの
+     * @param {number} now 時刻
+     * @returns {{ok:boolean, code?:string, reason?:string, events:Array<object>}}
+     *          `code` は `no-run` / `over` / `no-child` / `bad` / `same` / `switching`
+     */
+    setLive(runId, wants, now) {
+      const run = runs.get(runId);
+      if (!run) return { ok: false, code: 'no-run', events: [] };
+      if (isRunOver(run.state)) return { ok: false, code: 'over', events: [] };
+      // 予算切れなど、終端ではないが子がいないもの。こちらは建て直す（`/switch`）しかない
+      if (isChildDone(run.state)) return { ok: false, code: 'no-child', events: [] };
+
+      const list = Array.isArray(wants) ? wants : [];
+      if (list.length === 0) return { ok: false, code: 'bad', events: [] };
+
+      const seen = new Set();
+      for (const w of list) {
+        const f = LIVE_FIELDS[w?.field];
+        if (!f || typeof w.value !== 'string' || !w.value
+          || typeof w.requestId !== 'string' || !w.requestId) {
+          return { ok: false, code: 'bad', events: [] };
+        }
+        // 同じ項目を2つ並べられると、後から来た答えがどちらのものか分からなくなる
+        if (seen.has(w.field)) return { ok: false, code: 'bad', events: [] };
+        seen.add(w.field);
+        if (run[w.field] === w.value) {
+          return { ok: false, code: 'same', reason: `${f.label}はいまと同じです`, events: [] };
+        }
+        for (const p of run.livePending.values()) {
+          if (p.field !== w.field) continue;
+          // 二重に撃つと、返ってきた答えのどちらが後なのか決められない。
+          // 10秒（`liveAckTimeoutMs`）で控えが落ちるので、詰まったままにはならない
+          return { ok: false, code: 'switching', reason: `${f.label}はいま切り替え中です`, events: [] };
+        }
+      }
+
+      const events = [];
+      for (const w of list) {
+        const f = LIVE_FIELDS[w.field];
+        run.livePending.set(w.requestId, { kind: 'live', field: w.field, value: w.value, at: now });
+        outbox.push({
+          runId,
+          kind: 'control-request',
+          requestId: w.requestId,
+          subtype: f.subtype,
+          params: { [f.key]: w.value },
+        });
+        events.push(pushNote(run, `${f.label}を ${w.value} に替えています`, now));
+      }
+      return { ok: true, events };
+    },
+
+    /**
+     * いま走っているターンへ割り込む（CLI の Esc に当たる）。
+     *
+     * **止めるのとは別のこと。** `/stop` は子ごと落として run を終わらせる。
+     * こちらは子を生かしたまま「いまやっていることをやめて」と言うだけで、
+     * そのあと続きを打てる。今までは前者しか無かったので、
+     * 長い作業を1つ取り消したいだけでも会話ごと捨てるしかなかった。
+     *
+     * **名乗り（`capabilities`）が無いときは撃たせる。**
+     * 「不明」を「使えない」と読むと、名乗る前の版で永久に断ることになる。
+     * 通じなければ `sweepLive` が 10 秒で控えを落とし「返事がありませんでした」と言う。
+     *
+     * 逆に `cancelQueued` は**名乗っていなければ断る。** 頼まれたことを黙って落とすと、
+     * 「控えも消えたはず」と思い込んだまま続きが流れることになる。
+     *
+     * @param {string} runId 対象
+     * @param {string} requestId 殻が採番した id
+     * @param {{cancelQueued?:boolean}} opts 控えている指示ごと取り消すか
+     * @param {number} now 時刻
+     * @returns {{ok:boolean, code?:string, reason?:string, events:Array<object>}}
+     *          `code` は `no-run` / `over` / `no-child` / `bad` / `unsupported` /
+     *          `no-cancel` / `interrupting`
+     */
+    interrupt(runId, requestId, opts, now) {
+      const run = runs.get(runId);
+      if (!run) return { ok: false, code: 'no-run', events: [] };
+      if (isRunOver(run.state)) return { ok: false, code: 'over', events: [] };
+      if (isChildDone(run.state)) return { ok: false, code: 'no-child', events: [] };
+      if (typeof requestId !== 'string' || !requestId) {
+        return { ok: false, code: 'bad', events: [] };
+      }
+
+      const caps = run.capabilities;
+      if (Array.isArray(caps) && !caps.includes(INTERRUPT_CAP)) {
+        return { ok: false, code: 'unsupported', events: [] };
+      }
+      const cancelQueued = opts?.cancelQueued === true;
+      if (cancelQueued && Array.isArray(caps) && !caps.includes(CANCEL_QUEUED_CAP)) {
+        return { ok: false, code: 'no-cancel', events: [] };
+      }
+
+      for (const p of run.livePending.values()) {
+        // 二重に撃つと、返ってきた `still_queued` がどちらのものか決められない
+        if (p.kind === 'interrupt') return { ok: false, code: 'interrupting', events: [] };
+      }
+
+      run.livePending.set(requestId, { kind: 'interrupt', at: now });
+      outbox.push({
+        runId,
+        kind: 'control-request',
+        requestId,
+        subtype: 'interrupt',
+        // **頼まれていないキーを付けない。** 未知のキーを向こうがどう扱うかは読めない
+        params: cancelQueued ? { cancel_queued: true } : {},
+      });
+      return {
+        ok: true,
+        events: [pushNote(run, cancelQueued
+          ? '割り込んでいます（控えている指示も取り消します）'
+          : '割り込んでいます', now)],
+      };
+    },
+
+    /**
+     * 送るべき意図を取り出す。**取り出したら空にする。**
+     *
+     * 二重に渡すと同じ許可要求へ2回答えることになり、向こうがどう転ぶか分からない。
+     * 行に組んで stdin へ書くのは `run/index.mjs` の `commit()` の仕事。
+     *
+     * @returns {Array<object>} 積んであったぶん。無ければ空
+     */
+    takeOutbox() {
+      return outbox.length === 0 ? [] : outbox.splice(0, outbox.length);
+    },
+
+    /**
      * 停止を頼まれたことを記録する。
      *
      * `stopClaude` は stdin を閉じてから最大5秒かけて木ごと落とす。
@@ -497,6 +1626,8 @@ export function createRunLedger({
     markStopping(runId, now) {
       const run = runs.get(runId);
       if (!run || isRunOver(run.state)) return [];
+      // 畳むと決めたので、抱えている要求に答える意味は無い
+      clearPending(run);
       // 落とさないと、実行パネルの「理由」の行が「止まった理由」として読まれる
       clearStateReason(run);
       run.stopRequested = true;
@@ -524,6 +1655,8 @@ export function createRunLedger({
     markSwitching(runId, spec, now) {
       const run = runs.get(runId);
       if (!run || isRunOver(run.state)) return [];
+      // 建て直すので、いまの子への要求は消える。答えても行き先が無い
+      clearPending(run);
 
       // 外したときは「指定なし」と書く。空欄にすると、外したのか元からなのか読めない
       const parts = [];
@@ -569,6 +1702,7 @@ export function createRunLedger({
     fail(runId, reason, now) {
       const run = runs.get(runId);
       if (!run || isRunOver(run.state)) return [];
+      clearPending(run);
       run.state = 'failed';
       run.reason = oneLine(reason, REASON_MAX) ?? '失敗しました';
       run.pid = null;
@@ -589,6 +1723,9 @@ export function createRunLedger({
     onExit(runId, info, now) {
       const run = runs.get(runId);
       if (!run) return [];
+      // **`isRunOver` の判定より前。** 既に終端でも、抱えたままにする理由が無い。
+      // `outbox` には積まない（子がいないので書く先が無い）
+      clearPending(run);
 
       const code = typeof info?.code === 'number' ? info.code : null;
       const signal = typeof info?.signal === 'string' ? info.signal : null;
@@ -651,6 +1788,23 @@ export function createRunLedger({
       const changed = [];
       const events = [];
       for (const run of runs.values()) {
+        // **無音の判定より前で、状態の絞り込みの外。**
+        // 許可待ちは `running` でも `starting` でもないので、中に入れると一度も測られない
+        const swept = sweepAsks(run, now);
+        if (swept.length > 0) {
+          events.push(...swept);
+          changed.push(run.runId);
+        }
+
+        // 「替えました」の返事の時間切れ。**状態（`state`）は変えないが、行は変わる。**
+        // `switching` が空に戻るので `changed` に入れる。入れないと画面が「切り替え中」のまま残る
+        const settled = sweepLive(run, now);
+        if (settled.length > 0) {
+          events.push(...settled);
+          changed.push(run.runId);
+        }
+
+        // 許可待ちの無音は正常なので射程を広げない。あちらは上の時間切れが見ている
         if (run.state !== 'running' && run.state !== 'starting') continue;
         if (now - (run.lastLineAt ?? run.startedAt) < stallMs) continue;
         // 言うのは測ったことだけ。圧縮中は2分以上ふつうに無音になる（実測121秒）ので、
@@ -722,6 +1876,31 @@ export function createRunLedger({
     },
 
     /**
+     * 直近の枠の使用率。**行ではなく、ここから1つだけ出す。**
+     *
+     * @returns {object|null} `{fiveHour, sevenDay, resetsAt, at}`
+     */
+    rateLimit() {
+      return latestRate;
+    },
+
+    /**
+     * 立ち上がりに、紙から読んだ枠の使用率を置く。
+     *
+     * **すでに測ったものがあれば触らない。** 紙は必ず過去のもので、
+     * 走っている実行から届いた数のほうが新しい。順番の前後で古い数に
+     * 戻ることが無いよう、上書きの向きをここで1回だけ決めておく。
+     *
+     * @param {object|null} rl `run/rate.mjs` の `loadRate()` の戻り
+     * @returns {void}
+     */
+    seedRate(rl) {
+      if (latestRate !== null) return;
+      if (!rl || typeof rl.at !== 'number') return;
+      latestRate = rl;
+    },
+
+    /**
      * 台帳ぜんたいの様子。`/api/health` に出す。
      *
      * @returns {{active:number, total:number, seq:number, dropped:number}}
@@ -757,6 +1936,8 @@ const RUN_TO_LIST_STATE = Object.freeze({
   switching: 'running',
   waiting: 'awaiting-reply',
   stalled: 'awaiting-reply',
+  // 許可待ちも「あなたの番」の位置。押さないと1行も進まないので、いちばん人を待たせている
+  'needs-permission': 'awaiting-reply',
   // 予算切れも「あなたの番」の位置。上げて続けるか止めるかを決めるのは人なので、
   // 待たせているものとして同じ高さに並べる
   budget: 'awaiting-reply',

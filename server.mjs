@@ -28,7 +28,7 @@ import { createRunner } from './src/run/index.mjs';
 import { mergeRuns } from './src/run/ledger.mjs';
 import {
   allowedModes, runDirsFromEnv, BYPASS_MODE, DEFAULT_PERMISSION_MODE, PERMISSION_MODE_LABELS,
-  EFFORTS, DEFAULT_BUDGET_USD, BUDGET_MIN_USD, BUDGET_MAX_USD, PROMPT_MAX,
+  EFFORTS, DEFAULT_BUDGET_USD, BUDGET_MIN_USD, BUDGET_MAX_USD, PROMPT_MAX, checkModel,
 } from './src/run/spec.mjs';
 import { loadUpdateState, parseUpdateState } from './src/update/state.mjs';
 import { loadStartupState, parseStartupState } from './src/startup/state.mjs';
@@ -54,6 +54,18 @@ const BODY_MAX = 8 * 1024;
  * 最悪 192KB。他の項目を足してここに収まる。
  */
 const RUN_BODY_MAX = 256 * 1024;
+/**
+ * 許可要求に答える窓口だけの上限。
+ *
+ * 選んだ札のほとんどは短いが、質問の「その他（自分で書く）」は
+ * 台帳が1問 2000 文字まで受ける（`ASK_ANSWER_MAX`）。上限の質問8件（`PENDING_MAX` ではなく
+ * `ASK_QUESTIONS_MAX`）が全部それだと、日本語（UTF-8 で1文字3バイト）で 48KB になる。
+ *
+ * **`BODY_MAX`（8KB）のままにしない。** 足りないと、断りが「HTTP 400」としか出ず、
+ * 書いた本人には何が起きたか分からない。**`RUN_BODY_MAX`（256KB）にも寄せない。**
+ * ここへ来るのは選んだ札だけで、指示文は来ない。
+ */
+const ANSWER_BODY_MAX = 64 * 1024;
 
 /**
  * 実際に listen できたポート。
@@ -602,10 +614,15 @@ function runBroadcast(event, data) {
  */
 function pushRunRows(force = false) {
   const rows = runner.rows();
-  const serialized = JSON.stringify(rows);
+  const rate = runner.rateLimit();
+  // **枠も差分に入れる。** `at`（測った時刻）が動くたびに配ることになるが、
+  // これは意図。配らないと画面の「N分前」が実際より古く出る
+  // （一覧の `idleMs` を差分から外してあるのとは逆の判断。あちらは毎秒動くうえ
+  // 出しているのが経過時間そのものではないので、外して困らない）
+  const serialized = JSON.stringify([rows, rate]);
   if (!force && serialized === lastRunRows) return;
   lastRunRows = serialized;
-  runBroadcast('runs', { rows, stats: runner.stats() });
+  runBroadcast('runs', { rows, stats: runner.stats(), rate });
 }
 
 // 購読は**サーバーに1本**だけ。窓は runClients を出入りするだけにしてある。
@@ -635,6 +652,43 @@ function allowedRunDirs() {
     if (typeof row?.cwd === 'string' && row.cwd) dirs.add(row.cwd);
   }
   return [...dirs];
+}
+
+/**
+ * モデルの候補の上限。増えても選ぶのが大変になるだけなので、ここで切る。
+ */
+const MODEL_CHOICE_MAX = 12;
+
+/**
+ * モデルの候補。
+ *
+ * **一覧に出ているモデルだけを返す**（＝このマシンで実際に使われたもの）。
+ * `allowedRunDirs()` が cwd に対してやっているのと同じで、こちらで一覧を書き起こさない。
+ * 手で書いた表は版が上がるたびに古くなるが、使った記録のほうは勝手に新しくなる。
+ * 材料は一覧の行がもともと持っている `model`（会話ログの末尾から取れている）なので、
+ * ここで新しく読むものは1つも無い。
+ *
+ * **これは許可リストではない。** `spec.mjs` の `checkModel()` は今までどおり形しか見ないし、
+ * 画面にも自由入力の口を残してある。閉じた表にすると、新しいモデルが出た初日に
+ * 画面からは選べない（＝古い表のほうが正しく見える）状態ができる。
+ *
+ * **`checkModel()` を通らない名前は落とす。** 会話ログには `claude-opus-5[1m]` のような
+ * 角括弧付きが出る（実測）が、あれは `MODEL_RE` を通らず `--model` に渡すと 400 になる。
+ * 押した瞬間に断られる札を並べないため、**判断は増やさず同じ関数に通す**
+ * （ここで別の正規表現を書くと、緩めたときに片方だけ古くなる）。
+ *
+ * 並びは名前順にする。使った回数の順にすると、作業しているあいだに並びが動いて
+ * 押す場所が毎回変わる（`allowedRunDirs()` を並べ直しているのと同じ理由）。
+ *
+ * @returns {string[]} モデル名
+ */
+function recentModels() {
+  const names = new Set();
+  for (const row of lastPayload?.rows ?? []) {
+    const hit = checkModel(row?.model);
+    if (hit.ok) names.add(hit.model);
+  }
+  return [...names].sort((a, b) => a.localeCompare(b)).slice(0, MODEL_CHOICE_MAX);
 }
 
 /**
@@ -707,6 +761,107 @@ async function handleRunInput(req, res, runId) {
   }
 
   const r = runner.input(runId, body?.prompt ?? body?.text);
+  pushRunRows();
+  if (!r.ok) {
+    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
+    return;
+  }
+  sendJson(res, r.status, { ok: true, run: r.row });
+}
+
+/**
+ * 許可要求に答える。
+ *
+ * **本文の上限は `ANSWER_BODY_MAX`（64KB）。`RUN_BODY_MAX` を渡さない。**
+ * 来るのは `requestId` と選んだ札だけで、質問の全文はサーバーが原文を持っている。
+ * 長い指示を書きたいときは `/input` で送る。
+ *
+ * 断る番号は `run/index.mjs` が決める（理由の文字列で振り分けない）。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ * @param {string} runId 実行の識別子
+ */
+async function handleRunAnswer(req, res, runId) {
+  let body;
+  try {
+    body = await readJsonBody(req, ANSWER_BODY_MAX);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    return;
+  }
+
+  const r = runner.answer(runId, body?.requestId, body);
+  // 答えると許可待ちが消えるので、一覧の行も変わる
+  pushRunRows();
+  if (!r.ok) {
+    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
+    return;
+  }
+  sendJson(res, r.status, { ok: true, run: r.row });
+}
+
+/**
+ * 子を殺さずに権限モード・モデルを替える。
+ *
+ * **本文の上限は既定の `BODY_MAX`（8KB）。** 来るのは語が1〜2つだけで、指示文は来ない。
+ * `/switch` と違って**指示文を要求しない**のがこの窓口の値打ちなので、
+ * ここで長い本文を受ける口を開けると住み分けが崩れる。
+ *
+ * **202 を返す。** 撃っただけで、効いたかどうかは `control_response` が返るまで分からない。
+ * 行の `switching` に載るので、画面はそれが消えるのを待つ。
+ *
+ * 断る番号は `run/index.mjs` が決める（理由の文字列で振り分けない）。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ * @param {string} runId 実行の識別子
+ */
+async function handleRunMode(req, res, runId) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    return;
+  }
+
+  const r = runner.setLive(runId, body);
+  // 撃った時点で行の `switching` が変わる。押した窓以外にも「切り替え中」を出す
+  pushRunRows();
+  if (!r.ok) {
+    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
+    return;
+  }
+  sendJson(res, r.status, { ok: true, run: r.row });
+}
+
+/**
+ * いま走っているターンへ割り込む（CLI の Esc に当たる）。
+ *
+ * **`/stop` と分ける。** あちらは子ごと落として会話を終わらせる。
+ * こちらは子を生かしたまま今の作業だけをやめさせる。
+ * 取り返しの付き方が違うものを同じ窓口にすると、押し間違いが会話ごと消すことになる。
+ *
+ * **本文の上限は既定の `BODY_MAX`（8KB）。** 来るのは真偽が1つだけ。
+ *
+ * **202 を返す。** 撃っただけで届いたかは分からない（`/mode` と同じ）。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ * @param {string} runId 実行の識別子
+ */
+async function handleRunInterrupt(req, res, runId) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    return;
+  }
+
+  const r = runner.interrupt(runId, body);
+  // 撃った時点で行の `interrupting` が変わる。押した窓以外にも「割り込み中」を出す
   pushRunRows();
   if (!r.ok) {
     sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
@@ -798,6 +953,10 @@ function handleRunStream(req, res, from) {
     res.write(`event: runs\ndata: ${JSON.stringify({
       rows: runner.rows(),
       stats: runner.stats(),
+      // 枠の使用率。**行ではなく封筒に載せる**（アカウント共通の値のため）。
+      // つないだ最初のフレームにも入れる。ここを抜くと、実行が1本も
+      // 走っていない画面で次の押し出しまで枠が出ない
+      rate: runner.rateLimit(),
       from: back.from,
       nextSeq: back.nextSeq,
       missed: back.missed,
@@ -872,10 +1031,14 @@ function handleWrite(req, res, pathname, url) {
   }
   // 完全一致（/api/runs）より後ろに置く。こちらのほうが具体的だが、
   // 上は同じ文字列との一致なので取り違えは起きない
-  const runPost = pathname.match(/^\/api\/runs\/([\w-]{1,64})\/(input|stop|switch)$/);
+  const runPost = pathname.match(
+    /^\/api\/runs\/([\w-]{1,64})\/(input|stop|switch|answer|mode|interrupt)$/);
   if (runPost) {
     if (runPost[2] === 'input') handleRunInput(req, res, runPost[1]);
     else if (runPost[2] === 'switch') handleRunSwitch(req, res, runPost[1]);
+    else if (runPost[2] === 'answer') handleRunAnswer(req, res, runPost[1]);
+    else if (runPost[2] === 'mode') handleRunMode(req, res, runPost[1]);
+    else if (runPost[2] === 'interrupt') handleRunInterrupt(req, res, runPost[1]);
     else handleRunStop(res, runPost[1]);
     return;
   }
@@ -1032,7 +1195,7 @@ const server = http.createServer((req, res) => {
 
   // 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている
   if (pathname === '/api/runs') {
-    sendJson(res, 200, { rows: runner.rows(), stats: runner.stats() });
+    sendJson(res, 200, { rows: runner.rows(), stats: runner.stats(), rate: runner.rateLimit() });
     return;
   }
 
@@ -1055,9 +1218,6 @@ const server = http.createServer((req, res) => {
   // `/api/runs/options` にも当たるので、順番を入れ替えると
   // 「そんな実行はありません」と 404 を返すようになる。
   //
-  // **モデルの候補は返さない。** spec.mjs が許可リストを持たない方針なので、
-  // ここで一覧を作ると同じ古さを別の場所に増やすことになる。画面は自由入力にして
-  // 「空欄なら CLI の既定」と書く。
   if (pathname === '/api/runs/options') {
     sendJson(res, 200, {
       // 並べ直してから返す。allowedRunDirs() は Set の挿入順なので、
@@ -1072,6 +1232,9 @@ const server = http.createServer((req, res) => {
         danger: value === BYPASS_MODE,
       })),
       defaultMode: DEFAULT_PERMISSION_MODE,
+      // **選ぶための材料であって、許可リストではない。** 中身は実際に使われたモデルで、
+      // ここに無い名前も画面の自由入力から渡せる（recentModels の説明を見ること）
+      models: recentModels(),
       efforts: EFFORTS,
       budget: { default: DEFAULT_BUDGET_USD, min: BUDGET_MIN_USD, max: BUDGET_MAX_USD },
       promptMax: PROMPT_MAX,

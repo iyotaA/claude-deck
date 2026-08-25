@@ -45,6 +45,41 @@ export const TEXT_MAX = 2000;
 export const TOOL_RESULT_MAX = 200;
 
 /**
+ * 何を聞かれているのかを3つに分ける。
+ *
+ * **状態は分けない**（許可待ちはどれも `needs-permission` の1つ）。
+ * 遷移の組み合わせを3倍にして得られるのが札の文言だけになるため、
+ * 違いはこの値に持たせて、画面が見出しと押しボタンを変える。
+ *
+ * 台帳（`ledger.mjs`）もこの関数を使う。**判断を2箇所に書かない。**
+ *
+ * @param {string|null} toolName ツール名
+ * @returns {'plan'|'question'|'tool'}
+ */
+export function askKindOf(toolName) {
+  if (toolName === 'ExitPlanMode') return 'plan';
+  if (toolName === 'AskUserQuestion') return 'question';
+  return 'tool';
+}
+
+/**
+ * フックが成功したかを1つの値にする。
+ *
+ * `outcome` を先に見て、無ければ終了コードに落ちる。
+ * **どちらも取れなければ `null`。** 成功と決めつけない（0 と不明を分ける）。
+ * 実測では `outcome:'success'` と `exit_code:0` が両方載っていたが、
+ * 版が上がって片方が消えても読めるようにしてある。
+ *
+ * @param {object} info `hookInfo` の戻り
+ * @returns {boolean|null} 分からなければ null
+ */
+function hookOk(info) {
+  if (info.outcome) return info.outcome === 'success';
+  if (info.exitCode === null || info.exitCode === undefined) return null;
+  return info.exitCode === 0;
+}
+
+/**
  * stream-json の1行を、0個以上の出来事に変える。
  *
  * `seq` / `at` / `runId` は付けない。**それは台帳の仕事。**
@@ -60,8 +95,37 @@ export const TOOL_RESULT_MAX = 200;
  * | `tool-result` | `id` `isError` `text` | その結果が返った |
  * | `echo` | `text` `replay` | 自分が送った行の戻り（`--replay-user-messages`） |
  * | `result` | `isError` `terminalReason` ほか | 1往復の終わり |
- * | `other` | `type` `subtype` | フック系など、いま扱わないもの |
+ * | `permission` | `requestId` `ask` `tool` `detail` | 許可を求められた |
+ * | `hook` | `name` `event` `ok` `exitCode` `stderr` | フックが1本終わった |
+ * | `other` | `type` `subtype` | まだ扱っていないもの |
  * | `broken` | `sample` | JSON として読めなかった |
+ *
+ * `control` と `control-result` からは**出来事を作らない。**
+ * あれは人が読むものではなく、答えるための配線。
+ * 何が起きたか（断った・モードが変わった）は台帳が `note` で1行積む。
+ *
+ * ## 数えるものは並べない（`thinking` と `rate-limit`）
+ *
+ * この2つも**出来事にしない。** 理由は control 系と違って「読めない」ではなく「多すぎる」。
+ *
+ * - `thinking` は1往復で8件流れる（実測。累計 50→700 と刻んでくる）
+ * - `rate-limit` は API を叩くたびに流れる
+ *
+ * どちらも**最新の1つだけが意味を持つ値**で、途中経過を時系列に並べても読む人の役に立たない。
+ * 段4より前はこれが `other` に落ちていて、1ターンごとに
+ * 「その他 system / thinking_tokens」が8行並んで本文を押し流していた。
+ * 畳んで run の行に載せるのは台帳の仕事（`ledger.mjs` の `run.thinking` / `run.rateLimit`）。
+ *
+ * `hook` だけは出来事にする。**ただし終わった1件（`hook_response`）だけ。**
+ * 始まりと途中経過（`hook_started` / `hook_progress`）は畳んで捨てる。
+ * 「どのフックが走ってどうなったか」は1行あれば足りる。
+ *
+ * ## 許可要求から `input` の原文を出さない
+ *
+ * `classifyStreamLine` は `input` を**切らずに**渡してくる（`AskUserQuestion` に答えるとき
+ * `updatedInput` を組むのに原文が要るため）。だがそれを速報に載せると、
+ * `Write` の `content` が数MBのままリング1000件に載る。
+ * ここで載せるのは `describeTool` が返す1行だけにする。**原文は台帳が持つ。**
  *
  * サブエージェント（Task）の出力には `sub: true` を添える。
  * 親の発言と混ざって並ぶと、どちらが本流か分からなくなるため。
@@ -119,11 +183,20 @@ export function toRunEvents(classified) {
 
       const results = toolResults(classified.entry);
       if (results.length) {
+        // 「実行されなかった」印。**`is_error` と別に持つ。**
+        // 断ったときのツール結果は普通のエラーとまったく同じ顔で返ってくるので（実測）、
+        // これが無いと画面で「あなたが断った」と「ツールが失敗した」を区別できない
+        const marks = new Map(
+          (classified.info?.nonExecution ?? []).map((m) => [m.id, m.kind]),
+        );
         for (const r of results) {
+          const id = typeof r.id === 'string' ? r.id : null;
           push({
             kind: 'tool-result',
-            id: typeof r.id === 'string' ? r.id : null,
+            id,
             isError: r.isError === true,
+            // 印が無いときは null。**空文字に丸めない**（0 と不明を分けるのと同じ）
+            nonExecution: (id !== null ? marks.get(id) : undefined) ?? null,
             // 全文は持たない。何が返ったかが分かればよく、読み返すなら正本がある
             text: oneLine(r.text, TOOL_RESULT_MAX),
           });
@@ -149,6 +222,46 @@ export function toRunEvents(classified) {
         text: info.text ?? null,
         errors: info.errors ?? null,
         denials: info.denials ?? null,
+      });
+      break;
+    }
+
+    case 'permission': {
+      const info = classified.info ?? {};
+      push({
+        kind: 'permission',
+        requestId: info.requestId ?? null,
+        ask: askKindOf(info.toolName ?? null),
+        tool: info.toolName ?? null,
+        // **原文は載せない。** describeTool は必ず1行に畳んでから返す。
+        // 知らないツールで材料が無かったときだけ、CLI が付けてきた説明に落ちる
+        detail: describeTool(info.toolName, info.input) ?? oneLine(info.description, TOOL_RESULT_MAX),
+      });
+      break;
+    }
+
+    case 'control':
+    case 'control-result':
+    case 'thinking':
+    case 'rate-limit':
+      // 出来事にしない（この関数の説明を参照）
+      break;
+
+    case 'hook': {
+      const info = classified.info ?? {};
+      // 終わった1件だけを出す。始まりと途中経過は畳んで捨てる。
+      // **`subtype` で見る。** info 側に「どの段階か」を持たせると、
+      // 同じことを2箇所に書くことになる
+      if (classified.subtype !== 'hook_response') break;
+      push({
+        kind: 'hook',
+        name: info.name ?? null,
+        event: info.event ?? null,
+        // `outcome` が無い版でも `exit_code` から読めるようにする。
+        // どちらも取れなければ null のまま（成功と決めつけない）
+        ok: hookOk(info),
+        exitCode: info.exitCode ?? null,
+        stderr: info.stderr ?? null,
       });
       break;
     }

@@ -13,7 +13,7 @@ import {
   PERMISSION_MODES, BYPASS_MODE, DEFAULT_PERMISSION_MODE, PERMISSION_MODE_LABELS,
   EFFORTS, DEFAULT_BUDGET_USD, BUDGET_MIN_USD, BUDGET_MAX_USD, PROMPT_MAX,
   allowedModes, isSessionId, newSessionId, runDirsFromEnv, resolveCwd, buildRunSpec,
-  mergeSwitch,
+  mergeSwitch, checkPermissionMode, checkModel,
 } from '../src/run/spec.mjs';
 
 /** テストで使う固定の ID。実物と同じ形にしておく（isSessionId を通ること自体が確認になる）。 */
@@ -48,7 +48,8 @@ function reject(input, ctx = {}) {
  */
 
 test('既定では bypass が選択肢に入らない', () => {
-  assert.deepEqual(allowedModes({}), ['plan', 'acceptEdits', 'auto']);
+  // 危なくない順。画面の選択肢もこの順で出る
+  assert.deepEqual(allowedModes({}), ['plan', 'manual', 'acceptEdits', 'auto']);
   assert.equal(allowedModes({}).includes(BYPASS_MODE), false);
 });
 
@@ -65,10 +66,16 @@ test('0 や false では bypass は出ない', () => {
   }
 });
 
-test('manual は語彙に入っていない', () => {
-  // 非対話で許可要求が来たときの返し方が未確認。答えられないまま固まる形を作らない
-  assert.equal(PERMISSION_MODES.includes('manual'), false);
-  assert.equal(allowedModes({ CLAUDE_DECK_RUN_ALLOW_BYPASS: '1' }).includes('manual'), false);
+test('manual は語彙に入っている', () => {
+  // 返し方（`can_use_tool` を受けて `control_response` を返す）が段1で通ったので出せる。
+  // 全ツールで聞いてくる可能性があるが、`PENDING_MAX` と時間切れが安全弁として効く
+  assert.equal(PERMISSION_MODES.includes('manual'), true);
+  assert.equal(spec({ permissionMode: 'manual' }).permissionMode, 'manual');
+});
+
+test('manual を選んでも既定にはならない', () => {
+  // 既定が「毎回確認する」になると、放っておいたセッションが全部止まる
+  assert.notEqual(DEFAULT_PERMISSION_MODE, 'manual');
 });
 
 test('既定は plan（読むだけ）', () => {
@@ -96,7 +103,9 @@ test('bypass は env 無しだと弾かれ、理由が分かれている', () =>
 });
 
 test('知らない権限モードは弾く', () => {
-  for (const m of ['manual', 'dontAsk', 'yolo', 'PLAN']) {
+  // `dontAsk` は bypassPermissions との違いが実測できていないので出さない。
+  // `PLAN` を弾くのは、大文字小文字を吸収すると「効いたつもり」の綴りが増えるため
+  for (const m of ['dontAsk', 'yolo', 'PLAN', 'default']) {
     reject({ permissionMode: m });
   }
 });
@@ -393,6 +402,8 @@ test('いちばん素の argv', () => {
     '--output-format', 'stream-json',
     '--replay-user-messages',
     '--permission-mode', 'plan',
+    // **モードの直後に必ず付く。** 外すと許可要求がホストへ届かず、CLI が拒否に倒す
+    '--permission-prompt-tool', 'stdio',
     // 予算を指定していないので --max-budget-usd は入らない
     '--session-id', ID,
   ]);
@@ -409,6 +420,7 @@ test('全部指定した argv', () => {
     '--output-format', 'stream-json',
     '--replay-user-messages',
     '--permission-mode', 'acceptEdits',
+    '--permission-prompt-tool', 'stdio',
     '--max-budget-usd', '2',
     '--session-id', ID,
     '--model', 'claude-opus-5',
@@ -425,6 +437,7 @@ test('続きの argv', () => {
     '--output-format', 'stream-json',
     '--replay-user-messages',
     '--permission-mode', 'plan',
+    '--permission-prompt-tool', 'stdio',
     '--max-budget-usd', '5',
     '--resume', ID,
     '--model', 'opus',
@@ -640,4 +653,38 @@ test('切り替えた spec をそのまま buildRunSpec へ通せる', () => {
   assert.equal(built.spec.args.includes('--verbose'), true);
   // 外したものはフラグごと消える（空文字で渡すと commander がフラグとして読む）
   assert.equal(built.spec.args.includes('--effort'), false);
+});
+
+/*
+ * 途中で替えるときと共有する検証（checkPermissionMode / checkModel）
+ */
+
+test('権限モードの検証は起こすときと途中で替えるときで同じもの', () => {
+  // 2箇所に書くと、語彙を足した日に片方が古くなる
+  for (const m of allowedModes({})) {
+    assert.deepEqual(checkPermissionMode(m, {}), { ok: true, mode: m }, m);
+  }
+  assert.equal(checkPermissionMode('yolo', {}).ok, false);
+  assert.equal(checkPermissionMode('  ', {}).ok, false);
+  assert.equal(checkPermissionMode(null, {}).ok, false);
+});
+
+test('bypass は理由を出し分ける。「不正」と「許していない」は別の話', () => {
+  const off = checkPermissionMode(BYPASS_MODE, {});
+  assert.equal(off.ok, false);
+  assert.ok(off.reason.includes('環境変数'), '直し方が分かる言い方にする');
+  assert.equal(checkPermissionMode(BYPASS_MODE, { CLAUDE_DECK_RUN_ALLOW_BYPASS: '1' }).ok, true);
+});
+
+test('空を既定へ倒すのは起こすときだけ。途中で替えるときは倒さない', () => {
+  // 押し間違いで空が来たときに `plan` と読むと、走っている子が黙って読み取り専用に落ちる
+  assert.equal(spec({ permissionMode: '' }).permissionMode, DEFAULT_PERMISSION_MODE);
+  assert.equal(checkPermissionMode('', {}).ok, false);
+});
+
+test('モデルの検証もひとつ。旗に見えるものは通さない', () => {
+  assert.deepEqual(checkModel('claude-sonnet-5'), { ok: true, model: 'claude-sonnet-5' });
+  for (const bad of ['', '   ', '--help', '-x', 'a'.repeat(200), 'モデル', 'a b']) {
+    assert.equal(checkModel(bad).ok, false, JSON.stringify(bad));
+  }
 });

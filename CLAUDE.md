@@ -96,7 +96,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） `usage`（数値） `stream`（実行中の行） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） `usage`（数値） |
 | `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） |
-| `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） |
+| `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） `rate`（枠の使用率を紙に1枚） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
 | `src/startup/` | ランチャが書いた自動起動の紙を読む | `state` |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） `appdata`（書き込み先） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `env`（止めるスイッチの読み方） |
@@ -137,7 +137,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - `notify/index.mjs:createNotifier`
 - `update/state.mjs:loadUpdateState`
 - `startup/state.mjs:loadStartupState`
-- `run/index.mjs:createRunner`（`server.mjs` が触る唯一の口。12個の関数を返す）
+- `run/index.mjs:createRunner`（`server.mjs` が触る唯一の口。16個の関数を返す）
 - `run/spec.mjs:buildRunSpec`（起動指定を検証して argv まで組む）
 - `os/focus.mjs:focusTerminal`
 - `os/claude.mjs:probeClaude` / `claudeInfo`（探すのと、結果を読むのを分けてある）
@@ -150,8 +150,8 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 | 場所 | 役割 | 中身 |
 |---|---|---|
-| `public/css/` | 見た目 | 14枚。`<link>` の並びがそのまま重ね順になる |
-| `public/js/` | 画面の組み立て | 29枚 ＋ `timeline/` 7枚 |
+| `public/css/` | 見た目 | 15枚。`<link>` の並びがそのまま重ね順になる |
+| `public/js/` | 画面の組み立て | 31枚 ＋ `timeline/` 7枚 |
 
 こちらも import は一方向。層の一覧と、循環を切っている4箇所は「画面側」に書いてある。
 
@@ -242,8 +242,8 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/usage` | 数値の横断集計。`limit` `days` `model`。上限60件で切り詰め、切ったことを `scanLimited` で返す |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
-| `GET /api/runs` | 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている |
-| `GET /api/runs/options` | 起こすフォームの選択肢。cwd の候補・権限モード・思考量・予算の範囲・CLI の様子・いまの本数 |
+| `GET /api/runs` | 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている。枠の使用率（`rate`）は行ではなく**封筒に1つ**（アカウント共通の値なので） |
+| `GET /api/runs/options` | 起こすフォームの選択肢。cwd の候補・権限モード・**モデルの候補**・思考量・予算の範囲・CLI の様子・いまの本数 |
 | `GET /api/runs/events?from=<seq>` | 取りこぼしの穴埋め。SSE が切れているあいだの速報を拾う |
 | `GET /api/runs/stream?from=<seq>` | **実行専用の SSE。**`/api/stream` には相乗りさせない |
 | `GET /api/runs/:id` | 1本ぶんの全部入り。粗い `rows()` と違って `counts` や `costUSD` も入る |
@@ -253,7 +253,10 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
 | `POST /api/runs` | セッションを1本起こす。202 を返し、以降は速報で追う |
 | `POST /api/runs/:id/input` | 走っている（または待っている）ものへ1行送る |
+| `POST /api/runs/:id/answer` | 許可要求に答える。許可・拒否と、続けて撃つ権限モードと、選択式の質問へ選んだ札（`choices`）。**質問用の窓口を分けない**（実体は同じ `can_use_tool` の1本の道） |
 | `POST /api/runs/:id/stop` | 止める。3段階。もう終わっているものへの連打は 200 |
+| `POST /api/runs/:id/interrupt` | いま走っている手を止める（CLI の Esc 相当）。**会話は生きたまま**。202。`cancelQueued` で積んである指示も落とせる |
+| `POST /api/runs/:id/mode` | **子を殺さずに**権限モード・モデルを替える。202（受理はまだ分からない）。指示文は要らない |
 | `POST /api/runs/:id/switch` | モデル・思考量・権限モードを替えて `--resume` で続ける。202 |
 | `POST /api/settings/notify` | 保存して即反映。応答は GET と同じ形 |
 | `POST /api/settings/notify/test` | テスト送信を1通。3秒のクールダウン付き |
@@ -300,6 +303,14 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 緩めた覚えのない口まで緩む。長い指示文を受ける3本（`POST /api/runs` と
 `POST /api/runs/:id/input` と `POST /api/runs/:id/switch`）だけに `RUN_BODY_MAX`（256KB）を渡す。
 切り替えにも指示文が要る（空 stdin では `system/init` すら出ない。実測）ので、同じ上限に乗せてある。
+
+`POST /api/runs/:id/answer` はその中間で `ANSWER_BODY_MAX`（64KB）。
+来るのは選んだ札だけだが、質問の「その他（自分で書く）」は1問 2000 文字まで受けるので、
+8件ぶんが日本語なら 48KB になる。8KB のままだと断りが「HTTP 400」としか出ない。
+
+`POST /api/runs/:id/mode` は**既定の 8KB のまま**。
+来るのは語が2つだけで、**指示文を要求しないことがこの窓口の値打ち**なので、
+ここで長い本文を受ける口を開けると `/switch` との住み分けが崩れる。
 
 ルーティングは**完全一致を正規表現より手前に置く**。
 `/api/runs/events` と `/api/runs/stream` は `/^\/api\/runs\/([\w-]{1,64})$/` にも当たるので、

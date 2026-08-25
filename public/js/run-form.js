@@ -17,7 +17,7 @@
  * 詳細へ移るかどうかは押した人に決めてもらう。
  */
 import { el } from './util.js';
-import { EFFORT_LABELS } from './runs.js';
+import { EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
 import { dom } from './store.js';
 import { select } from './session.js';
 
@@ -69,6 +69,21 @@ function setBusy(on) {
 }
 
 /** 選んだモードが危ないものなら、赤い但し書きを見せる */
+/**
+ * 「自分で入力」のときだけ入力欄を出す。
+ *
+ * 畳んだままにしておくのは、普段は候補から選ぶだけで済むから。
+ * 出したときは焦点も移す（選んだのに、どこへ書くのか分からない状態を作らない）。
+ */
+function noteModel() {
+  const free = dom.runModelPick.value === MODEL_FREE;
+  const was = dom.runModel.hidden;
+  dom.runModel.hidden = !free;
+  if (free && was) dom.runModel.focus();
+  // 候補へ戻したら書きかけを捨てる。残すと、見えない欄の中身が送られる
+  if (!free) dom.runModel.value = '';
+}
+
 function noteMode() {
   dom.runNote.hidden = dom.runMode.selectedOptions[0]?.dataset.danger !== '1';
 }
@@ -101,6 +116,10 @@ function fillOptions(o) {
     value: m.value, label: m.label, danger: m.danger,
   })));
   if (o.defaultMode) dom.runMode.value = o.defaultMode;
+
+  // 候補は「実際に使われたモデル」だけ。選び直すたびに自由入力の出し入れをする
+  fillSelect(dom.runModelPick, modelOptions(o.models));
+  noteModel();
 
   fillSelect(dom.runEffort, [
     { value: '', label: '指定しない（CLI の既定）' },
@@ -142,7 +161,7 @@ async function loadOptions() {
 function collect(prompt) {
   const body = { cwd: dom.runCwd.value, prompt, permissionMode: dom.runMode.value };
 
-  const model = dom.runModel.value.trim();
+  const model = modelValue(dom.runModelPick.value, dom.runModel.value);
   if (model) body.model = model;
 
   const effort = dom.runEffort.value;
@@ -236,6 +255,7 @@ export function initRunForm() {
   dom.runformStart.addEventListener('click', start);
   dom.runformShow.addEventListener('click', show);
   dom.runMode.addEventListener('change', noteMode);
+  dom.runModelPick.addEventListener('change', noteModel);
 
   // <form> で囲っていないので Enter は自分で拾う。
   // **本文欄だけは別扱い。** あそこの Enter は改行で、実行は Ctrl+Enter。
