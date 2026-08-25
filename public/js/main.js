@@ -56,7 +56,7 @@ import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
 import * as RunView from './run-view.js';
 import { renderDetailIfNeeded, initInspector } from './detail.js';
-import { renderList } from './list.js';
+import { renderList, renderRate } from './list.js';
 import { initTabs } from './archive.js';
 import { showUsage, initUsageTab } from './usage-tab.js';
 import { initBoard, setMode } from './board.js';
@@ -162,6 +162,9 @@ subscribeRuns((kind) => {
     RunView.render();
     return;
   }
+  // 枠の使用率は行に載って届く。**一覧の tick 任せにしない。**
+  // あちらが切れているあいだ（?nolive=1 や再接続待ち）に数だけ凍る
+  renderRate();
   renderDetailIfNeeded();
 });
 

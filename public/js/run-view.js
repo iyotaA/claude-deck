@@ -208,37 +208,14 @@ function factsOf(row) {
   // 0 が正常終了。fact が落とすのは null / undefined / 空文字だけなので、0 はそのまま出る
   // （util.js の tokens() と違って `if (!n)` ではない。ここは 0 と不明が別物として出る）
   fact(dl, '終了コード', row.exitCode);
-  // 枠の使用率（CLI の `/usage` と同じもの）。API を叩くたびに届くが、
-  // 値そのものはめったに動かないので、ここが描き直されるまで古いままでも実害が無い
-  fact(dl, '枠の使用率', rateText(row.rateLimit));
+  // **枠の使用率はここに出さない。** アカウント共通の値なので、実行ごとに並べると
+  // 同じ数がいくつも出るうえ「この実行が使った枠」だと読める。上のバーに1つだけ出す
+  // （list.js の renderRate）。行に載せているのは、届く道が実行の stdout しか無いため。
   // CLI が stderr へ吐いた直近の1行。普段は無いので欄ごと出ない。
   // 出ているときは、たいていこちら側の配線が間違っている合図
   fact(dl, 'CLI の警告', row.lastStderr);
   fact(dl, '理由', row.reason);
   return dl;
-}
-
-/**
- * 枠の使用率を1行にする。
- *
- * `utilization` は 0〜1 の割合で届く（実測 0.06 / 0.69）。百分率にするのはここ。
- * **どちらも取れていなければ行ごと出さない**（`fact` が null を落とす）。
- *
- * @param {object|null|undefined} rl `{fiveHour, sevenDay, resetsAt}`
- * @returns {string|null}
- */
-function rateText(rl) {
-  if (!rl) return null;
-  const pct = (v) => (typeof v === 'number' ? `${Math.round(v * 100)}%` : null);
-  const parts = [];
-  const h5 = pct(rl.fiveHour);
-  const d7 = pct(rl.sevenDay);
-  if (h5) parts.push(`5時間枠 ${h5}`);
-  if (d7) parts.push(`7日枠 ${d7}`);
-  if (parts.length === 0) return null;
-  // resetsAt は**秒**の unix 時刻（実測）。ミリ秒として渡すと 1970 年になる
-  if (typeof rl.resetsAt === 'number') parts.push(`次に空くのは ${stamp(rl.resetsAt * 1000).slice(5)}`);
-  return parts.join(' / ');
 }
 
 /* ── 描く先を預かる。外から中の状態を触らせない ───────────────── */

@@ -297,6 +297,90 @@ export function runFor(sessionId) {
   return runId ? (rows.get(runId) ?? null) : null;
 }
 
+/**
+ * いちばん新しい枠の使用率。
+ *
+ * **アカウント共通の値なので、どの実行から届いたかは意味を持たない。**
+ * 台帳に載っている行のうち、いちばん後に測ったものを1つ返す。
+ *
+ * 出どころは `rate_limit_event` で、**この画面から起こした実行の stdout にしか流れない**
+ * （会話ログにも `~/.claude` の下にも無い。実測 2.1.245）。
+ * だから起こした実行が1本も無ければ null で、ターミナルで動かしているだけの人には出ない。
+ *
+ * @returns {{fiveHour: ?number, sevenDay: ?number, resetsAt: ?number, at: number}|null}
+ */
+export function newestRateLimit() {
+  let best = null;
+  for (const row of rows.values()) {
+    const rl = row.rateLimit;
+    if (!rl || typeof rl.at !== 'number') continue;
+    if (best === null || rl.at > best.at) best = rl;
+  }
+  return best;
+}
+
+/**
+ * 何分より古い観測に「いつ測ったか」を添えるか。
+ *
+ * 走っているものが無ければ数は古びていくが、**古いこと自体は異常ではない。**
+ * 5分は「さっき測った」と言い切れる幅で、これを超えたぶんだけ但し書きを出す。
+ */
+export const RATE_STALE_MS = 5 * 60_000;
+
+/** この割合を超えたら目に入るようにする。色は `.chip.is-hot` の使い回しで、新しい色は作らない */
+export const RATE_HOT = 0.9;
+
+/**
+ * 枠の使用率を、出す形まで決める。**DOM を触らない純関数。**
+ *
+ * 判断がここに要るのは3つ。
+ *
+ * - `resetsAt` を過ぎた5時間枠は**落とす。** 空いているのに古い数を今の数の顔で出さない
+ *   （新しい数は次の `rate_limit_event` が来るまで分からないので、そこは黙る）
+ * - 5分より古い観測には「いつ測ったか」を添える
+ * - 0 は `0%` として出す。**読めなかった（不明）とは別物**
+ *
+ * @param {object|null|undefined} rl `newestRateLimit()` の戻り
+ * @param {number} now いまの時刻（ms）
+ * @returns {{fiveHour: ?string, sevenDay: ?string, age: ?string, hot: boolean,
+ *            gone: boolean, at: number, resetsAt: ?number}|null} 出すものが無ければ null
+ */
+export function rateView(rl, now) {
+  // resetsAt は**秒**の unix 時刻（実測）。ミリ秒として比べると必ず過去になる
+  const resetsAt = typeof rl?.resetsAt === 'number' ? rl.resetsAt * 1000 : null;
+  const gone = resetsAt !== null && now >= resetsAt;
+  const five = gone ? null : rl?.fiveHour;
+  const seven = rl?.sevenDay;
+  const fiveHour = pct(five);
+  const sevenDay = pct(seven);
+  if (fiveHour === null && sevenDay === null) return null;
+
+  const elapsed = now - rl.at;
+  return {
+    fiveHour,
+    sevenDay,
+    age: elapsed >= RATE_STALE_MS ? ageText(elapsed) : null,
+    hot: [five, seven].some((v) => typeof v === 'number' && v >= RATE_HOT),
+    gone,
+    at: rl.at,
+    resetsAt,
+  };
+}
+
+/** 0〜1 の割合を百分率に。読めなければ null（**0 は 0% として出す**） */
+function pct(v) {
+  return typeof v === 'number' ? `${Math.round(v * 100)}%` : null;
+}
+
+/** 「いつ測ったか」。**分より細かくしない**（毎秒呼ばれるので、印が毎秒変わると止められない） */
+function ageText(ms) {
+  const m = Math.floor(ms / 60_000);
+  if (m < 60) return `${m}分前`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}時間前`;
+  return `${Math.floor(h / 24)}日前`;
+}
+
 /** 実行1本ぶんの出来事。無ければ空配列。 */
 export function eventsOf(runId) {
   return runId ? (events.get(runId) ?? []) : [];

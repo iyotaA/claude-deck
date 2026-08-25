@@ -1670,7 +1670,21 @@ test('考えた量が読めない行では前の値を潰さない', () => {
 test('枠の使用率は行に出る。速報は積まない', () => {
   const { led, id } = started();
   assert.deepEqual(feed(led, id, sRate(0.06, 0.69), T + 10), []);
-  assert.deepEqual(led.rows()[0].rateLimit, { fiveHour: 0.06, sevenDay: 0.69, resetsAt: 1787667000 });
+  assert.deepEqual(led.rows()[0].rateLimit, {
+    fiveHour: 0.06,
+    sevenDay: 0.69,
+    resetsAt: 1787667000,
+    at: T + 10,
+  });
+});
+
+test('枠の使用率は測った時刻を持つ', () => {
+  // 上のバーに1つだけ出す値なので、走っているものが無ければ古びていく。
+  // 何分前の数かを言えないと、古い数を今の数の顔で出すことになる
+  const { led, id } = started();
+  feed(led, id, sRate(0.06, 0.69), T + 10);
+  feed(led, id, sRate(0.11, 0.70), T + 5000);
+  assert.equal(led.rows()[0].rateLimit.at, T + 5000);
 });
 
 test('どちらの枠も読めない行では上書きしない', () => {

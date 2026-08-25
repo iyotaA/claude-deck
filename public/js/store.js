@@ -129,6 +129,8 @@ export const dom = {
   list: document.getElementById('list'),
   listCount: document.getElementById('list-count'),
   summary: document.getElementById('summary'),
+  // 枠の使用率（上のバー）。list.js の renderRate() だけが書く
+  rate: document.getElementById('rate'),
   detail: document.getElementById('detail'),
   // 中央下の入力欄の器。詳細ペインの外に置いてあるので replaceChildren() で消えない
   composer: document.getElementById('composer'),

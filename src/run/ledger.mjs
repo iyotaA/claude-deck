@@ -891,16 +891,23 @@ export function createRunLedger({
    * 版が上がって `unifiedWindows` の形が変わった日に、
    * 一度は取れていた値が null で潰れて「取れていない」に見えるのを防ぐ。
    *
+   * **測った時刻（`at`）を一緒に持つ。**
+   * この値はアカウント共通なので画面は上のバーに1つだけ出すが、
+   * 出どころは実行1本の stdout しか無い。走っているものが無ければ数は古びていく。
+   * 何分前の数かを言えないと、古い数を今の数の顔で出すことになる（0 と不明を分ける）。
+   *
    * @param {object} run 対象の run
    * @param {object} info `rateLimitInfo` の戻り
+   * @param {number} now いまの時刻（ms）
    * @returns {void}
    */
-  function takeRateLimit(run, info) {
+  function takeRateLimit(run, info, now) {
     if (typeof info.fiveHour !== 'number' && typeof info.sevenDay !== 'number') return;
     run.rateLimit = {
       fiveHour: info.fiveHour ?? null,
       sevenDay: info.sevenDay ?? null,
       resetsAt: info.resetsAt ?? null,
+      at: now,
     };
   }
 
@@ -1020,8 +1027,11 @@ export function createRunLedger({
       // （`runFor(sessionId)` が引くのがそちら）。`get()` に置くと画面から届かない。
       // 60 語で 700 バイトほどあるが、init のときしか変わらないので差分判定で止まる
       slashCommands: run.slashCommands,
-      // 枠の使用率。CLI の `/usage` と同じもので、画面にはこれまで出る道が無かった。
-      // API を叩くたびに流れるが、値そのものはめったに動かないので差分判定で止まる
+      // 枠の使用率。CLI の `/usage` と同じもの。**アカウント共通の値**なので、
+      // 画面はここに載った行のうちいちばん新しいものを拾って上のバーに1つだけ出す。
+      // 行に載せるのは、出どころが実行1本の stdout しか無いため（会話ログにも
+      // `~/.claude` の下にも無い。実測）。API を叩くたびに流れるが、
+      // 値そのものはめったに動かないので差分判定で止まる
       rateLimit: run.rateLimit,
       // CLI が stderr へ吐いた直近の1行。**速報の並びには混ぜない**（本文が読めなくなる）が、
       // 見出しには出す。`get()` にしか出さないと、画面が `/api/runs/:id` を
@@ -1108,7 +1118,7 @@ export function createRunLedger({
         slashCommands: null,
         /** @type {number|null} そのターンで考えた量（累計）。畳んだ結果だけを持つ */
         thinking: null,
-        /** @type {object|null} 直近の枠の使用率。`{fiveHour, sevenDay, resetsAt}` */
+        /** @type {object|null} 直近の枠の使用率。`{fiveHour, sevenDay, resetsAt, at}` */
         rateLimit: null,
         /** @type {string|null} 子が stderr へ吐いた直近の1行。失敗していなくても持つ */
         lastStderr: null,
@@ -1276,7 +1286,7 @@ export function createRunLedger({
         // 速報は積まない。行に載せるだけ（`toRunEvents` も空を返している）
         takeThinking(run, classified.info ?? {});
       } else if (classified?.kind === 'rate-limit') {
-        takeRateLimit(run, classified.info ?? {});
+        takeRateLimit(run, classified.info ?? {}, now);
       }
 
       for (const ev of pushed) {

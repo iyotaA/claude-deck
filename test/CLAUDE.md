@@ -51,6 +51,7 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `update-state.test.mjs` | 更新の紙の読み方。stale の判定と、無い紙を異常にしないこと |
 | `startup-state.test.mjs` | 自動起動の紙の読み方。紙が無いことを「動いていない」と読まないこと |
 | `md.test.mjs` | Markdown のパーサ。記法を読めることと、途中で切れた入力で壊れないこと。頭出しが中途半端な単位で終わらないこと。チェックリストの印を、印でないもの（`- [2] …`）と分けること |
+| `runs.test.mjs` | 上のバーに出す枠の使用率の判断（`rateView`）。0 と不明の分け方・`resetsAt` を過ぎた枠を落とすこと・`resetsAt` を**秒**として読むこと |
 
 `digest.test.mjs` が呼ぶのは `buildDigest` だけ。
 `parse/digest/` の4枚はその中から呼ばれるので、入口経由で見ていることになる。
@@ -68,8 +69,10 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 読み取り層（`read/`）と画面側にはテストが無い。
 そこは実物で確かめる。
 
-例外は `public/js/md.js`（Markdown のパーサ）だけ。あれは DOM を1つも触らない純関数なので、
-`.js` のまま Node から import できる（`package.json` が `type:module`）。
+例外は2枚。`public/js/md.js`（Markdown のパーサ）と `public/js/runs.js` の `rateView()`。
+どちらも DOM を1つも触らない純関数なので、`.js` のまま Node から import できる
+（`package.json` が `type:module`）。`runs.js` は `EventSource` を関数の中でしか呼ばないので、
+読み込むだけなら何も起きない。
 **画面側のファイルでも、判断だけを切り出せばテストに乗る**という前例にしてある。
 
 - ロジック側 … `node cli.mjs` を叩いて一覧が崩れないか見る

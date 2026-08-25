@@ -46,6 +46,10 @@
       <button class="tab" id="mode-usage" type="button" aria-pressed="false">数値</button>
     </div>
     <div class="summary" id="summary"></div>
+    <!-- 枠の使用率。アカウント共通の値なので**画面に1つだけ**。
+         .summary とは別の器にする。あちらは renderSummary() が replaceChildren() で
+         毎回まるごと入れ替えるので、混ぜると出どころの違う2つが同じ器を取り合う -->
+    <div class="rate" id="rate" role="status" hidden></div>
     <div class="topbar-actions">
       <!-- いまの版。触ると更新の確認の結果が出る。
            渡された側が自分の版を確かめられる場所が、画面にはここしか無い -->

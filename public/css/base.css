@@ -225,6 +225,22 @@ body {
 .chip.is-hot { border-color: var(--hot); color: var(--hot); }
 .chip.is-hot strong { color: var(--hot); }
 
+/* 枠の使用率。アカウント共通の値なので画面に1つだけ出す。
+   中身は .chip の使い回しで、ここは置き場所だけを決める。
+   display を宣言したので [hidden] を必ず添える（flex は hidden 属性に勝つ） */
+.rate {
+  display: flex;
+  align-items: center;
+}
+
+.rate[hidden] { display: none; }
+
+/* 「いつ測ったか」。数そのものではないので、字を落として添え物に見せる */
+.rate-age {
+  font-size: .72rem;
+  color: var(--fg-muted);
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
