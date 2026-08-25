@@ -793,7 +793,7 @@ function buildOps() {
   const head = el('div', 'settings-head');
   head.append(el('h2', null, '権限モード・モデルを替える'), x);
 
-  const grid = el('div', 'settings-grid');
+  const grid = el('div', 'settings-sec settings-grid');
 
   // 権限モードをいちばん上に置く。この窓でいちばん替えたいものがこれで、
   // 押し間違いの被害も大きい（plan のつもりで書き換えが走る）
@@ -826,9 +826,18 @@ function buildOps() {
 
   // 予算切れから抜ける道はここだけ（そのまま送ると同じ上限で回り直す）
   const swBudget = el('input', 'settings-num');
+  swBudget.id = 'run-sw-budget';
   swBudget.type = 'number';
   swBudget.step = '0.01';
-  gridRow(grid, 'run-sw-budget', '上限', swBudget, '空にすると上限なし。起こし直すたびに数え直す');
+
+  // 単位を添える。無いと、この欄だけ何の数を書くのか分からない（起こすフォームと同じ扱い）
+  const swBudgetRow = el('span', 'settings-row');
+  swBudgetRow.append(swBudget, el('span', 'settings-unit', 'USD'));
+  gridRow(
+    grid, 'run-sw-budget', '上限', swBudgetRow,
+    '空にすると上限なし。起こし直すたびに数え直す',
+    swBudget.id,
+  );
 
   // 押したときに何が起きるかは、子が生きているかで変わる。**ボタンの文字は動かさない。**
   // 手を伸ばしている最中に押すものの名前が変わるほうが危ない
@@ -839,8 +848,13 @@ function buildOps() {
   const swPending = el('p', 'settings-msg');
   swPending.setAttribute('role', 'status');
 
+  // グリッドとは段を分ける。地続きにすると、いちばん下の欄（上限）の
+  // 説明がそのまま続いているように読める
+  const note = el('div', 'settings-sec');
+  note.append(swHow, swPending);
+
   const body = el('div', 'settings-body');
-  body.append(grid, swHow, swPending);
+  body.append(grid, note);
 
   const apply = el('button', 'btn is-primary', 'この内容にする');
   apply.type = 'button';
