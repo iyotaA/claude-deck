@@ -150,8 +150,8 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 
 | 場所 | 役割 | 中身 |
 |---|---|---|
-| `public/css/` | 見た目 | 14枚。`<link>` の並びがそのまま重ね順になる |
-| `public/js/` | 画面の組み立て | 29枚 ＋ `timeline/` 7枚 |
+| `public/css/` | 見た目 | 15枚。`<link>` の並びがそのまま重ね順になる |
+| `public/js/` | 画面の組み立て | 31枚 ＋ `timeline/` 7枚 |
 
 こちらも import は一方向。層の一覧と、循環を切っている4箇所は「画面側」に書いてある。
 
@@ -255,6 +255,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `POST /api/runs/:id/input` | 走っている（または待っている）ものへ1行送る |
 | `POST /api/runs/:id/answer` | 許可要求に答える。許可・拒否と、続けて撃つ権限モードと、選択式の質問へ選んだ札（`choices`）。**質問用の窓口を分けない**（実体は同じ `can_use_tool` の1本の道） |
 | `POST /api/runs/:id/stop` | 止める。3段階。もう終わっているものへの連打は 200 |
+| `POST /api/runs/:id/interrupt` | いま走っている手を止める（CLI の Esc 相当）。**会話は生きたまま**。202。`cancelQueued` で積んである指示も落とせる |
 | `POST /api/runs/:id/mode` | **子を殺さずに**権限モード・モデルを替える。202（受理はまだ分からない）。指示文は要らない |
 | `POST /api/runs/:id/switch` | モデル・思考量・権限モードを替えて `--resume` で続ける。202 |
 | `POST /api/settings/notify` | 保存して即反映。応答は GET と同じ形 |
