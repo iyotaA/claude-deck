@@ -47,7 +47,7 @@ export function rowOf(sessionId) {
  * 上書きする項目を配列で名前付けするのは、プロパティの並び順に判断を埋めないため。
  */
 export const LIVE_FIELDS = [
-  'state', 'stateLabel', 'ball', 'idleMs', 'lastActivityAt',
+  'state', 'stateLabel', 'ball', 'blocking', 'idleMs', 'lastActivityAt',
   'waitingFor', 'stateReason', 'stateConfident', 'statusRaw', 'alive', 'pid', 'run',
 ];
 

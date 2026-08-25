@@ -11,6 +11,8 @@ import {
   ballOf,
   STATE_LABELS,
   STATE_RANK,
+  STATE_BLOCKING,
+  isBlocking,
   QUIET_MS,
   APPROVAL_MS,
 } from '../src/parse/state.mjs';
@@ -281,10 +283,11 @@ test('Skill の結果待ちは スキル名と引数を出す', () => {
   assert.deepEqual(s.waitingFor, { id: 't1', tool: 'Skill', detail: 'pr-review (1234)' });
 });
 
-test('返しうる状態はすべてラベルと並び順を持っている', () => {
+test('返しうる状態はすべてラベルと並び順と急ぎの区別を持っている', () => {
   for (const kind of Object.keys(STATE_LABELS)) {
     assert.equal(typeof STATE_LABELS[kind], 'string', `${kind} のラベルが無い`);
     assert.equal(typeof STATE_RANK[kind], 'number', `${kind} の並び順が無い`);
+    assert.equal(typeof STATE_BLOCKING[kind], 'boolean', `${kind} の blocking が無い`);
   }
 });
 
@@ -296,6 +299,30 @@ test('ボールの持ち主の割り当て', () => {
   assert.equal(ballOf('needs-plan-approval'), 'master');
   assert.equal(ballOf('needs-approval'), 'master');
   assert.equal(ballOf('awaiting-reply'), 'master');
+});
+
+test('答えないと進まないのはどれか', () => {
+  assert.equal(isBlocking('needs-answer'), true);
+  assert.equal(isBlocking('needs-plan-approval'), true);
+  assert.equal(isBlocking('needs-approval'), true);
+  assert.equal(isBlocking('running'), false);
+  assert.equal(isBlocking('ended'), false);
+  assert.equal(isBlocking('unknown'), false);
+});
+
+test('ボールの所在と「進まないか」は別の問い', () => {
+  // 返信待ちは確かにあなたのコートにある（ball）が、黙っていても Claude は困らない（blocking）。
+  // ここが同じ答えになったら、どちらかの軸が要らなくなったということ
+  assert.equal(ballOf('awaiting-reply'), 'master');
+  assert.equal(isBlocking('awaiting-reply'), false);
+});
+
+test('知らない状態は急かさない側に倒す', () => {
+  // 断定できないものを赤にしない。未知の status が来る前提のアプリなので、
+  // 表に無い語が出たときの倒し方をここで固定しておく
+  assert.equal(isBlocking('まだ知らない状態'), false);
+  assert.equal(isBlocking(undefined), false);
+  assert.equal(isBlocking(null), false);
 });
 
 // --- 通知が使う2つの手がかり ---

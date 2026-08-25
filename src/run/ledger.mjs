@@ -79,7 +79,7 @@
  * **同じ判断を2箇所に置かない**ため。
  */
 import { sameSessionId } from '../parse/stream.mjs';
-import { ballOf } from '../parse/state.mjs';
+import { ballOf, isBlocking } from '../parse/state.mjs';
 import { clip, oneLine } from '../shared/text.mjs';
 import { askKindOf, toRunEvents } from './event.mjs';
 
@@ -1972,6 +1972,9 @@ function overlay(row, run) {
     // 上の写しは並び順と色のためだけのもの
     stateLabel: run.stateLabel,
     ball: ballOf(state),
+    // `state` を上書きするので、blocking も一緒に写す。片方だけだと1行の中で
+    // `state:'needs-approval'` と `blocking:false` が矛盾し、`needsYou` が数え落とす
+    blocking: isBlocking(state),
     // 台帳が正なので、ログの末尾から読んだ「待っているツール」は伏せる。
     // 残すと、実際には次の手へ進んでいるのに古い dangling が出続ける
     waitingFor: null,
@@ -2024,6 +2027,7 @@ function synthRow(run, now) {
     state,
     stateLabel: run.stateLabel,
     ball: ballOf(state),
+    blocking: isBlocking(state),
     // **ここだけは動いてよい。** `refresh()` の差分判定が除外している2つなので、
     // 毎秒変わっても押し出しは起きない（それ以外の値は動かさない）
     idleMs: Number.isFinite(now) && startedAt !== null ? Math.max(0, now - startedAt) : null,

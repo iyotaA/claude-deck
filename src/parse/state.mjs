@@ -67,6 +67,33 @@ export function ballOf(kind) {
   return 'master';
 }
 
+/**
+ * その状態のあいだ、あなたが答えないと1行も進まないか。
+ *
+ * `ballOf`（誰のコートにボールがあるか）とは**別の問い**。
+ * 返信待ちは確かにあなたのコートだが、黙っていて困るのは自分だけで、
+ * Claude は「終わって待っている」だけ。赤で急かす対象を
+ * 「押さないと1行も進まない」ものだけに絞るために、軸を2本に分けてある。
+ *
+ * `STATE_RANK <= 1` で数える案は採らない。並び順という数字に2つ目の意味を載せることになり、
+ * `sortRows` の `?? 9` のせいで**未知の状態が事故で「非ブロッキング」に落ちる**。
+ */
+export const STATE_BLOCKING = {
+  running: false,
+  'needs-answer': true,
+  'needs-plan-approval': true,
+  'needs-approval': true,
+  // 返信待ちは急かさない。Claude は応答を返し終えていて、放置しても壊れるものが無い
+  'awaiting-reply': false,
+  ended: false,
+  unknown: false,
+};
+
+/** 未知の状態は false（＝急かさない）に倒す。断定できないものを赤にしない。 */
+export function isBlocking(kind) {
+  return STATE_BLOCKING[kind] === true;
+}
+
 /** 未解決のまま残った tool_use を探す。 */
 function findDangling(entries) {
   const resolved = new Set();

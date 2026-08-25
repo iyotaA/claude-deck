@@ -9,6 +9,12 @@
 一覧と詳細で同じ項目（`name` や `project` など）は `view/shape.mjs` が組む。
 以前は両方が別々に組んでいて、片方だけにフォールバックが付いている状態になっていた。
 
+`summarizeRows()` の `needsYou` は `row.blocking === true` だけを数える。
+**`ball === 'master'` で数えない**（返信待ちが混ざって、上のバーの数が
+「いま手を止めている件数」ではなくなる）。判断は `parse/state.mjs` の `isBlocking` が持ち、
+ここは配るだけ。`=== true` で見るのは、台帳側（`run/ledger.mjs`）が項目を足し忘れた将来でも
+`undefined` を「数えない」に倒して落ちないため。唯一の消費者は上のバーと `cli.mjs`。
+
 **数値（`view/usage.mjs`）の設計は `src/parse/CLAUDE.md` にある。**
 集計そのものは `parse/usage.mjs` にあり、両方を1枚にまとめてあるため。
 

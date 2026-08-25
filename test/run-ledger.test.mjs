@@ -789,6 +789,7 @@ function listRow(overrides = {}) {
     state: 'awaiting-reply',
     stateLabel: '返信待ち',
     ball: 'master',
+    blocking: false,
     alive: false,
     pid: null,
     idleMs: 5000,
