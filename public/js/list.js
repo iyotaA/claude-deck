@@ -173,8 +173,10 @@ export function renderRate() {
   const chip = el('span', 'chip');
   if (v.hot) chip.classList.add('is-hot');
   chip.append(document.createTextNode('枠'));
-  if (v.fiveHour !== null) chip.append(el('strong', null, `5h ${v.fiveHour}`));
-  if (v.sevenDay !== null) chip.append(el('strong', null, `7d ${v.sevenDay}`));
+  // 「5h:42%」と繋ぐ。空白だと 5h と 42% がどちらも `.chip` の gap と同じ幅で離れて、
+  // どの数がどの枠のものか目で組み直すことになる。コロンで結んで1語に見せる
+  if (v.fiveHour !== null) chip.append(el('strong', null, `5h:${v.fiveHour}`));
+  if (v.sevenDay !== null) chip.append(el('strong', null, `7d:${v.sevenDay}`));
   if (v.age) chip.append(el('span', 'rate-age', v.age));
 
   const note = [`測ったのは ${stamp(v.at)}`];
