@@ -253,7 +253,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
 | `POST /api/runs` | セッションを1本起こす。202 を返し、以降は速報で追う |
 | `POST /api/runs/:id/input` | 走っている（または待っている）ものへ1行送る |
-| `POST /api/runs/:id/answer` | 許可要求に答える。許可・拒否と、続けて撃つ権限モード。**質問用の窓口を分けない**（実体は同じ `can_use_tool` の1本の道） |
+| `POST /api/runs/:id/answer` | 許可要求に答える。許可・拒否と、続けて撃つ権限モードと、選択式の質問へ選んだ札（`choices`）。**質問用の窓口を分けない**（実体は同じ `can_use_tool` の1本の道） |
 | `POST /api/runs/:id/stop` | 止める。3段階。もう終わっているものへの連打は 200 |
 | `POST /api/runs/:id/switch` | モデル・思考量・権限モードを替えて `--resume` で続ける。202 |
 | `POST /api/settings/notify` | 保存して即反映。応答は GET と同じ形 |
@@ -301,6 +301,10 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 緩めた覚えのない口まで緩む。長い指示文を受ける3本（`POST /api/runs` と
 `POST /api/runs/:id/input` と `POST /api/runs/:id/switch`）だけに `RUN_BODY_MAX`（256KB）を渡す。
 切り替えにも指示文が要る（空 stdin では `system/init` すら出ない。実測）ので、同じ上限に乗せてある。
+
+`POST /api/runs/:id/answer` はその中間で `ANSWER_BODY_MAX`（64KB）。
+来るのは選んだ札だけだが、質問の「その他（自分で書く）」は1問 2000 文字まで受けるので、
+8件ぶんが日本語なら 48KB になる。8KB のままだと断りが「HTTP 400」としか出ない。
 
 ルーティングは**完全一致を正規表現より手前に置く**。
 `/api/runs/events` と `/api/runs/stream` は `/^\/api\/runs\/([\w-]{1,64})$/` にも当たるので、

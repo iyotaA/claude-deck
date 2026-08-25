@@ -65,3 +65,50 @@
   opacity: .7;
   pointer-events: none;
 }
+
+/* ------------------------------------------- 選択式の質問（run-ask.js の questionForm） */
+
+/* 読む側（詳細ペインの「判断したこと」）と同じ .decision / .decision-q / .choices に乗せる。
+   **同じ語彙を2つ作らない。** li の中を <label><input>… に替えるだけで、
+   余白と字送りは detail.css が持っているものがそのまま効く */
+
+/* 質問の見出し（AskUserQuestion の header）。質問文より小さく、上に置く */
+.ask-head {
+  font-size: .74rem;
+  color: var(--fg-muted);
+}
+
+/* 選択肢1つ。箱と文を横に並べ、**文のどこを押しても選べる**ようにする。
+   小さい丸を狙わせない */
+.ask-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: .45rem;
+  cursor: pointer;
+}
+
+/* 箱だけ少し下げて、1行目の文字の高さに合わせる */
+.ask-pick > input {
+  margin: .25rem 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.ask-pick-text { min-width: 0; }
+
+/* 選んだもの。**面は塗らず、左の帯の色だけ変える。**
+   塗ると、選択肢が多いときにカードがその色だけになる */
+.ask .choices li.is-picked { border-left-color: var(--accent); }
+
+/* 「その他」に書く欄。選ぶまでは畳んでおく。
+   display を宣言したので [hidden] を必ず添える（display:block は hidden 属性に勝つ） */
+.ask-free {
+  display: block;
+  width: 100%;
+  margin-top: .35rem;
+  line-height: 1.6;
+  /* 横は伸ばさせない（li の幅が崩れる）。縦だけ本人に任せる */
+  resize: vertical;
+}
+
+.ask-free[hidden] { display: none; }

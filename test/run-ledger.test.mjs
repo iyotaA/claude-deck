@@ -11,6 +11,7 @@ import { classifyStreamLine } from '../src/parse/stream.mjs';
 import {
   createRunLedger, isChildDone, isRunOver, mergeRuns, quietFor,
   RUN_STATE_LABELS, RUN_MAX, STALL_MS, ASK_BODY_MAX, PENDING_MAX, PERMISSION_TIMEOUT_MS,
+  buildQuestionInput,
 } from '../src/run/ledger.mjs';
 import {
   sysInit, sAssistant, sResult, sPermission, sQuestion, sControlResponse, S_ID,
@@ -1012,14 +1013,45 @@ test('プランの本文は Markdown のまま持つ', () => {
   assert.equal(led.rows()[0].asks[0].body, '# やること\n\n- 直す');
 });
 
-test('質問は選択肢まで畳んで持つ', () => {
+test('質問は選択肢を機械が読める形で持つ', () => {
   const { led, id } = started();
   feed(led, id, sQuestion([{
     question: 'どっちで進める？',
+    header: '進め方',
     options: [{ label: 'いますぐ', description: '雑でよい' }, { label: 'あとで' }],
   }]), T + 10);
 
-  assert.equal(led.rows()[0].asks[0].body, 'どっちで進める？\n  - いますぐ — 雑でよい\n  - あとで');
+  const ask = led.rows()[0].asks[0];
+  // **`body` と `questions` はどちらか片方だけ。** 同じ中身を2回載せない
+  assert.equal(ask.body, null);
+  assert.deepEqual(ask.questions, [{
+    key: 0,
+    question: 'どっちで進める？',
+    header: '進め方',
+    multiSelect: false,
+    // 説明が無いものは null のまま持つ（空文字に丸めない）
+    options: [
+      { label: 'いますぐ', description: '雑でよい' },
+      { label: 'あとで', description: null },
+    ],
+  }]);
+});
+
+test('質問でないものは questions を持たない', () => {
+  const { led, id } = started();
+  feed(led, id, sPermission({ toolName: 'Bash', input: { command: 'ls' } }), T + 10);
+  const ask = led.rows()[0].asks[0];
+  assert.equal(ask.questions, null);
+  assert.equal(typeof ask.body, 'string');
+});
+
+test('選択肢の形が読めない質問は本文に落ちる', () => {
+  // 版が上がって questions の形が変わっても、段1と同じ「本文＋断る」のカードにはなる
+  const { led, id } = started();
+  feed(led, id, sPermission({ toolName: 'AskUserQuestion', input: { prompt: 'どうする？' } }), T + 10);
+  const ask = led.rows()[0].asks[0];
+  assert.equal(ask.questions, null);
+  assert.equal(typeof ask.body, 'string');
 });
 
 test('答えたら消えて走り出す', () => {
@@ -1307,4 +1339,121 @@ test('許可待ちは一覧で「あなたの番」に並ぶ', () => {
   const { led, id } = asked();
   const [merged] = mergeRuns([listRow()], led.rows(), T + 2000);
   assert.equal(merged.state, 'awaiting-reply');
+});
+
+/* --------------------------------------------------- 質問に選択肢で答える（段2） */
+
+/** 台帳が持つ pending と同じ形を手で組む。`buildQuestionInput` だけを単体で試すため。 */
+function pending(questions, keys = null) {
+  return {
+    kind: 'question',
+    input: { questions, extra: '知らないキー' },
+    questions: (keys ?? questions.map((_, i) => i)).map((key) => ({
+      key,
+      question: questions[key].question,
+      header: null,
+      multiSelect: questions[key].multiSelect === true,
+      options: (questions[key].options ?? []).map((o) => ({ label: o.label, description: null })),
+    })),
+  };
+}
+
+const Q2 = [
+  { question: 'どっちで進める？', options: [{ label: 'いますぐ' }, { label: 'あとで' }] },
+  { question: '誰に見せる？', multiSelect: true, options: [{ label: '自分' }, { label: 'チーム' }] },
+];
+
+test('選んだ札から updatedInput を組む。鍵は原文の質問文', () => {
+  const res = buildQuestionInput(pending(Q2), { 0: 'いますぐ', 1: ['自分', 'チーム'] });
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.updatedInput.answers, {
+    'どっちで進める？': 'いますぐ',
+    // 実測で multiSelect の答えは「, 」連結の文字列だった（src/parse/digest/answers.mjs）。
+    // 読む側と同じ形で書く
+    '誰に見せる？': '自分, チーム',
+  });
+  // 知らないキーは足さない。**原文をそのまま広げる**ので、項目が増えた版でも落とさずに返せる
+  assert.equal(res.updatedInput.extra, '知らないキー');
+  assert.deepEqual(res.updatedInput.questions, Q2);
+});
+
+test('答えていない質問があれば断る', () => {
+  const res = buildQuestionInput(pending(Q2), { 0: 'いますぐ' });
+  assert.equal(res.ok, false);
+  assert.match(res.reason, /答えていない質問/);
+});
+
+test('1つだけ選ぶ質問に複数渡したら断る', () => {
+  const res = buildQuestionInput(pending(Q2), { 0: ['いますぐ', 'あとで'], 1: '自分' });
+  assert.equal(res.ok, false);
+  assert.match(res.reason, /1つだけ選ぶ/);
+});
+
+test('選択肢に無い言葉も通す（その他＝自分で書く）', () => {
+  // **照合しない。** 「その他（自分で書く）」を残すためで、
+  // 読む側（pickAnswers）も自由記述を一人前の答えとして扱っている
+  const res = buildQuestionInput(pending(Q2), { 0: '来週まとめて', 1: '自分' });
+  assert.equal(res.ok, true);
+  assert.equal(res.updatedInput.answers['どっちで進める？'], '来週まとめて');
+});
+
+test('長すぎる答えは切らずに断る', () => {
+  // 切ると、人が書いた自由記述が黙って途中で終わった形で Claude へ渡る
+  const res = buildQuestionInput(pending(Q2), { 0: 'あ'.repeat(2001), 1: '自分' });
+  assert.equal(res.ok, false);
+  assert.match(res.reason, /長すぎます/);
+});
+
+test('質問の形が無いものは選択肢で答えられない', () => {
+  assert.equal(buildQuestionInput({ kind: 'tool', input: { command: 'ls' } }, { 0: 'はい' }).ok, false);
+  assert.equal(buildQuestionInput(pending(Q2), null).ok, false);
+  assert.equal(buildQuestionInput(pending(Q2), ['いますぐ']).ok, false);
+});
+
+test('答えたら outbox に updatedInput が乗る', () => {
+  const { led, id } = started();
+  feed(led, id, sQuestion([Q2[0]]), T + 10);
+  const res = led.answer(id, 'p1', { behavior: 'allow', choices: { 0: 'あとで' } }, T + 20);
+  assert.equal(res.ok, true);
+  // **選んだ札を速報にも1行残す。** 「何を判断したか」を出すのがこのアプリの目的の半分
+  assert.match(res.events[0].text, /あとで/);
+
+  assert.deepEqual(led.takeOutbox(), [{
+    runId: id,
+    kind: 'permission-response',
+    requestId: 'p1',
+    decision: {
+      behavior: 'allow',
+      updatedInput: { questions: [Q2[0]], answers: { 'どっちで進める？': 'あとで' } },
+    },
+  }]);
+});
+
+test('画面から来た updatedInput は素通ししない', () => {
+  // 素通しにすると、カードに出したコマンドと実際に走るコマンドを別にできてしまう
+  const { led, id } = asked();
+  led.answer(id, 'p1', { behavior: 'allow', updatedInput: { command: 'rm -rf /' } }, T + 2000);
+  assert.deepEqual(led.takeOutbox(), [{
+    runId: id, kind: 'permission-response', requestId: 'p1', decision: { behavior: 'allow' },
+  }]);
+});
+
+test('選び方が足りないときは要求を消さない', () => {
+  // 消すと、押し直す先が消えたまま「答えていない質問があります」だけが残る
+  const { led, id } = started();
+  feed(led, id, sQuestion(Q2), T + 10);
+  const res = led.answer(id, 'p1', { behavior: 'allow', choices: { 0: 'いますぐ' } }, T + 20);
+  assert.equal(res.ok, false);
+  assert.equal(res.code, 'bad-choices');
+  assert.equal(led.rows()[0].asks.length, 1);
+  assert.equal(led.rows()[0].state, 'needs-permission');
+  assert.deepEqual(led.takeOutbox(), []);
+});
+
+test('質問でない要求に choices を付けたら断る', () => {
+  // ツールの引数を画面から差し替える道は作らない
+  const { led, id } = asked();
+  const res = led.answer(id, 'p1', { behavior: 'allow', choices: { 0: 'はい' } }, T + 2000);
+  assert.equal(res.ok, false);
+  assert.equal(res.code, 'bad');
 });

@@ -21,6 +21,14 @@
  * 1ターンで数百行来るので、そこに要求を載せると**要求そのものが消えて二度と答えられない。**
  * 行（`rows`）は毎フレーム総入れ替えなので、取りこぼしが次のフレームで自己修復する。
  *
+ * ## 送るのは「選んだ札」だけ
+ *
+ * 選択式の質問には `choices`（`{質問の番号: 札 | [札…]}`）を送る。
+ * **`updatedInput` は組まない。** ツールの引数を画面から差し替えられるようにすると、
+ * カードに出したコマンドと実際に走るコマンドを別にできてしまう。
+ * 鍵が質問文でなく番号なのは、台帳が質問文を 200 字で切って渡してくるから
+ * （切れた文字列を鍵にすると、長い質問が永久に答えられない）。
+ *
  * ## 消す権利はサーバーだけが持つ
  *
  * 押しても画面はカードを消さない。`row.asks` から消えるのを待つ。
@@ -146,10 +154,156 @@ function button(label, className, onClick) {
 }
 
 /**
+ * 質問の見出しを短く言う。足りないものを1行で伝えるときに使う。
+ *
+ * 質問文は台帳が 200 字まで載せてくるので、そのまま出すと
+ * 「〜を選んでください」の1行がカードより長くなる。
+ *
+ * @param {object} q 質問1件
+ * @returns {string}
+ */
+function qName(q) {
+  if (q.header) return q.header;
+  const t = q.question;
+  return t.length > 24 ? `${t.slice(0, 24)}…` : t;
+}
+
+/**
+ * 選択式の質問に答えるフォームを組んで、カードへ足す。
+ *
+ * **submit は全問まとめて1つ。** 質問ごとにボタンを置くと
+ * 「1問目だけ送った」という**サーバー側に存在しない状態**を画面が作れてしまう。
+ *
+ * **`<form>` で囲まない。** 囲むと `textarea` の Enter が送信になる。
+ * 「進める」を Enter で誤爆させるのが、この画面でいちばん危ない操作。
+ * 送信は Ctrl+Enter（`run-form.js` の判定と同じ作法）。
+ *
+ * @param {HTMLElement} card 差し込み先のカード
+ * @param {object} ctx `send()` に渡す文脈
+ * @param {Array<object>} questions 台帳が載せた質問（`{key, question, header, multiSelect, options}`）
+ * @param {Array<HTMLButtonElement>} btns ボタンの並び（呼び出し側が row へ入れる）
+ */
+function questionForm(card, ctx, questions, btns) {
+  const groups = [];
+
+  for (const q of questions) {
+    const wrap = el('div', 'decision');
+    // 見出しは質問より小さく出す。無いことがあるので、あるときだけ
+    if (q.header) wrap.append(el('div', 'ask-head', q.header));
+    wrap.append(el('div', 'decision-q', q.question));
+
+    const ul = el('ul', 'choices');
+    // 要求が入れ替わったとき、前のグループと name が衝突しないよう askId を混ぜる
+    const name = `ask-${ctx.askId}-${q.key}`;
+    const type = q.multiSelect ? 'checkbox' : 'radio';
+    const boxes = [];
+
+    const pick = (label, description) => {
+      const li = el('li');
+      const lab = el('label', 'ask-pick');
+      const box = el('input');
+      box.type = type;
+      box.name = name;
+      box.value = label;
+      const text = el('span', 'ask-pick-text');
+      text.append(el('span', 'label', label));
+      if (description) text.append(document.createTextNode(` — ${description}`));
+      lab.append(box, text);
+      li.append(lab);
+      ul.append(li);
+      boxes.push(box);
+      return { li, box };
+    };
+
+    for (const o of q.options ?? []) pick(o.label, o.description);
+
+    // **「その他（自分で書く）」を必ず足す。** 選択肢に無いことを言いたい場面は必ずあり、
+    // 無いと「断ってから言葉で伝える」しか道が残らない
+    const other = pick('その他（自分で書く）', null);
+    const free = el('textarea', 'settings-text ask-free');
+    free.rows = 2;
+    free.placeholder = 'ここに書く（Ctrl+Enter で答える）';
+    free.spellcheck = false;
+    free.hidden = true;
+    other.li.append(free);
+
+    wrap.append(ul);
+    card.append(wrap);
+    groups.push({ q, boxes, other: other.box, free });
+  }
+
+  const hint = el('p', 'settings-hint');
+  const submit = button('この内容で答える', 'is-armed', () => {
+    if (submit.disabled) return;
+    send(ctx, { behavior: 'allow', choices: read() });
+  });
+
+  /** 選んだ札を `{番号: 札 | [札…]}` に組む。鍵は**番号**（質問文は切ってあるので鍵にできない） */
+  const read = () => {
+    const out = {};
+    for (const g of groups) {
+      const vals = [];
+      for (const b of g.boxes) {
+        if (!b.checked) continue;
+        // 「その他」は箱の value ではなく、書いたものを送る
+        if (b === g.other) {
+          const t = g.free.value.trim();
+          if (t) vals.push(t);
+        } else {
+          vals.push(b.value);
+        }
+      }
+      out[g.q.key] = g.q.multiSelect ? vals : (vals[0] ?? '');
+    }
+    return out;
+  };
+
+  /**
+   * 送れない理由を1行で返す。無ければ null。
+   *
+   * **押してから断られるより、開いた時点で分かるほうがよい**（`run-form.js` の `blockReason()` と同じ作法）。
+   */
+  const blocked = () => {
+    for (const g of groups) {
+      if (!g.boxes.some((b) => b.checked)) return `「${qName(g.q)}」を選んでください`;
+      if (g.other.checked && !g.free.value.trim()) return `「${qName(g.q)}」の「その他」に書いてください`;
+    }
+    return null;
+  };
+
+  const refresh = () => {
+    for (const g of groups) {
+      // 「その他」を選んだときだけ書く欄を出す。畳んだままにすると、選んだのに書けない
+      g.free.hidden = !g.other.checked;
+      for (const b of g.boxes) b.closest('li')?.classList.toggle('is-picked', b.checked);
+    }
+    const why = blocked();
+    hint.textContent = why ?? '';
+    hint.hidden = why === null;
+    submit.disabled = why !== null;
+  };
+
+  // `input` は radio / checkbox でも textarea でも飛ぶ。`change` と両方は要らない
+  card.addEventListener('input', refresh);
+  card.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' || (!ev.ctrlKey && !ev.metaKey)) return;
+    // 断る理由を書いている最中の Ctrl+Enter で「答える」を撃たない。
+    // 断ろうとしている人が、押した覚えのない許可を出すことになる
+    if (ev.target.classList?.contains('ask-why')) return;
+    ev.preventDefault();
+    submit.click();
+  });
+
+  refresh();
+  btns.push(submit);
+  return hint;
+}
+
+/**
  * 要求1件のカード。
  *
  * @param {string} runId 実行の識別子
- * @param {object} ask 台帳の行が持つ要求（`{id, kind, tool, detail, body, suggestMode, at}`）
+ * @param {object} ask 台帳の行が持つ要求（`{id, kind, tool, detail, body, questions, suggestMode, at}`）
  * @returns {HTMLElement}
  */
 function askCard(runId, ask) {
@@ -158,12 +312,19 @@ function askCard(runId, ask) {
   msg.setAttribute('role', 'status');
   const btns = [];
   const ctx = { runId, askId: ask.id, card, msg, btns };
+  // 台帳が選択肢の形に組めたときだけ入る。組めなかった版では `body` に落ちてくるので、
+  // その場合は下の「言葉で伝える」カードになる（**未知の形で落ちない**）
+  const questions = ask.kind === 'question' && Array.isArray(ask.questions) && ask.questions.length > 0
+    ? ask.questions
+    : null;
 
   // ── 何を訊かれているか
   if (ask.kind === 'plan') {
     // プランは Markdown のまま来る。切らずに全部描く（承認するかを決める場所なので）。
     // 画面が埋まらないよう、高さの上限は markdown.css の `.is-wait .md` が持つ
     if (ask.body) card.append(mdView(ask.body));
+  } else if (questions) {
+    // 質問文も選択肢もフォームが出す。ここで `detail` を出すと1問目が二重に並ぶ
   } else {
     if (ask.tool) card.append(el('div', 'wait-tool', ask.tool));
     if (ask.detail) card.append(el('pre', null, ask.detail));
@@ -175,6 +336,8 @@ function askCard(runId, ask) {
 
   // ── どう答えるか
   const row = el('div', 'ask-btns');
+  // 送れない理由の1行（選択式のときだけ questionForm が返す）
+  let hint = null;
   const why = el('input', 'settings-text ask-why');
   why.type = 'text';
   // 空でも送れる。止めたいときに文章を考えさせない
@@ -193,11 +356,15 @@ function askCard(runId, ask) {
     }
     btns.push(button('No（プランを直す）', null,
       () => send(ctx, { behavior: 'deny', message: reason() })));
+  } else if (questions) {
+    hint = questionForm(card, ctx, questions, btns);
+    btns.push(button('断る', null,
+      () => send(ctx, { behavior: 'deny', message: reason() })));
   } else if (ask.kind === 'question') {
-    // 段1では選択肢を組み立てない（段2でやる）。**それでもカードは出す。**
+    // 選択肢の形に組めなかったとき（原文の形が違う版など）。**それでもカードは出す。**
     // 出さないと、10分の時間切れまで無言で止まったように見える
     card.append(el('p', 'settings-hint',
-      '選択肢を選んで答えるのは、まだこの画面からはできません。'
+      'この質問は選択肢の形が読めませんでした。'
       + '断ったうえで、下の入力欄から言葉で伝えてください。'));
     btns.push(button('断る', null,
       () => send(ctx, { behavior: 'deny', message: reason() })));
@@ -215,7 +382,9 @@ function askCard(runId, ask) {
   }
 
   row.append(...btns);
-  card.append(why, row, msg);
+  card.append(why);
+  if (hint) card.append(hint);
+  card.append(row, msg);
 
   // 直前に失敗したものだけ、作り直したあとも理由を出す
   if (lastFail?.askId === ask.id) {

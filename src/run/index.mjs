@@ -72,6 +72,9 @@ const ANSWER_DENY = Object.freeze({
   'no-request': { status: 400, reason: 'どの要求への答えか分かりません' },
   answered: { status: 409, reason: 'その要求はもう答えました（別の窓で答えられたかもしれません）' },
   bad: { status: 400, reason: '答え方が不正です' },
+  // **理由は台帳が持っている。** どの質問が足りないかは原文を見ないと言えないので、
+  // ここの文字列は使われず `res.reason` に差し替わる（読む人が迷わないよう既定も書いておく）
+  'bad-choices': { status: 400, reason: '選んだ内容では答えられません' },
 });
 
 /**
@@ -544,7 +547,9 @@ export function createRunner({
     const decision = {
       behavior,
       message: body?.message,
-      updatedInput: body?.updatedInput,
+      // 選んだ札だけを渡す。**`updatedInput` は受け取らない。**
+      // 素通しにすると、カードに出したものと実際に走るものを別にできてしまう
+      choices: body?.choices,
       updatedPermissions: body?.updatedPermissions,
     };
 
@@ -564,7 +569,8 @@ export function createRunner({
     const res = ledger.answer(runId, id, decision, at);
     if (!res.ok) {
       const deny = ANSWER_DENY[res.code] ?? { status: 500, reason: '答えを送れませんでした' };
-      return { ok: false, status: deny.status, reason: deny.reason };
+      // 台帳が理由を持っているときはそちらを出す（どの質問が足りないかは原文を見ないと言えない）
+      return { ok: false, status: deny.status, reason: res.reason ?? deny.reason };
     }
 
     // 書けたかどうかはここで初めて分かる。**書けていないのに 202 を返さない**

@@ -100,6 +100,12 @@ stdin を閉じると `close code=1`。だから予算切れは「終わった�
 
 受け取る値は `stdio` の1語だけ（実測 2.1.243。他の値は `unsupported` で弾かれる）。
 
+**`AskUserQuestion` の答えは `updatedInput.answers` に入れて返す。**
+鍵は**質問文そのもの**（`questions[i].question`）、値は選んだ札。
+multiSelect は実測3本すべて `", "` 連結の文字列だった（`src/parse/digest/answers.mjs`）ので、
+書く側もそれに倒してある。`updatedInput` は原文をそのまま広げて `answers` だけ足す
+（知らないキーが増えた版でも落とさずに返せる）。
+
 **`ExitPlanMode` を許可しただけでは plan から抜けない。** 対話版は内部で
 `{from:'plan', to:'auto', trigger:'exit_plan_mode'}` を撃っている。ヘッドレスでは誰も撃たないので、
 承認に続けて `set_permission_mode` を送るのはこちらの仕事（**allow が先**）。
@@ -385,13 +391,18 @@ Bash などを掴んだまま応じなかった子だけになる（実測でそ
 - **許可待ちを `waiting` に寄せない。** `waiting` は「1行送れば進む」状態で、`markInput()` がそれを前提に `running` へ戻す。許可待ちの子に user 行を送っても `control_response` を待ち続けるので、寄せると「送ったのに動かない」を再生産する
 - **`needs-permission` を `isChildDone` にも `isRunOver` にも入れない。** 子は生きて待っている。畳むと答えられなくなる
 - **pending が原文の `input` を持つのは `AskUserQuestion` のときだけ。** `allow` は `updatedInput` を省略でき、省略すれば CLI が元の入力を使う。他まで持つとリングに数MBが載る
+- **`updatedInput` を画面から素通ししない。** 組むのは質問の答え（`choices`）のときだけで、中身は `buildQuestionInput` が**台帳の持つ原文から**作る。素通しにすると、カードに出した Bash のコマンドと実際に走るコマンドを別にできてしまう＝**人が承認したものと違うものが動く**
+- **`choices` の鍵は番号（`askQuestions` が振る `key`）。** 質問文は表示のために `ASK_Q_MAX`（200字）で切ってあるので、鍵にすると長い質問が永久に答えられない。辞書の鍵に使う質問文は、答えを組むときに**原文から取り直す**
+- **選んだ札を選択肢と照合しない。** 「その他（自分で書く）」を残すため。読む側（`parse/digest/answers.mjs`）も自由記述を一人前の答えとして扱っている
+- **長すぎる答えは切らずに断る。** 切ると、人が書いた自由記述が黙って途中で終わった形で Claude へ渡る。長い指示は `/input` で送るほうが正しい
+- **選び方が足りないときに pending を消さない。** 検証は `run.pending.delete()` より**前**に済ませる。消してから断ると、押し直す先が消えたまま「答えていない質問があります」だけが残る
 - **時間切れ（`PERMISSION_TIMEOUT_MS` = 10分）を消さない。** ブラウザを閉じた・席を外したときの唯一の逃げ道。最悪でもフラグを付ける前と同じ「断って進む」に落ちる
 - **`ledger` に NDJSON の行を組ませない。** 意図を `outbox` に積み、行を組むのは `parse/stream.mjs`、書くのは `run/index.mjs`。「判断は台帳、手を動かすのは殻」の向きを混ぜない
 - **受理したら `entry.spec.permissionMode` も同期する。** 忘れると `restart()` / `switchRun()` が古いモードで建て直し、「替えたのに戻っていた」になる
 - **未応答の要求を速報イベントで配らない。** 画面側の `EVENTS_PER_RUN` は 400 で、1ターンで数百行来る。溢れると要求ごと消えて二度と答えられない。行（`rows()` の `asks`）に載せる
 - **実行の速報を `/api/stream` に相乗りさせない。** あちらは全タブが常時つないでいる一覧の経路で、1秒 tick と差分判定が付いている。1ターンで数百行出る速報を混ぜると、一覧の更新が実行の量に引きずられる。専用の `/api/runs/stream` に分ける
 - **`runner.subscribe()` を窓ごとに呼ばない。** サーバーが1回だけ購読して、開いている SSE 全部へ配る。窓ごとに購読すると閉じ忘れが listeners に静かに溜まる
-- **`readJsonBody` の上限を全体で上げない。** 長い指示文を受ける3本（`POST /api/runs` と `POST /api/runs/:id/input` と `POST /api/runs/:id/switch`）にだけ `RUN_BODY_MAX`（256KB）を引数で渡す。1本の定数を上げると、緩めた覚えのない口まで緩む
+- **`readJsonBody` の上限を全体で上げない。** 長い指示文を受ける3本（`POST /api/runs` と `POST /api/runs/:id/input` と `POST /api/runs/:id/switch`）にだけ `RUN_BODY_MAX`（256KB）を引数で渡す。1本の定数を上げると、緩めた覚えのない口まで緩む。`POST /api/runs/:id/answer` だけは中間の `ANSWER_BODY_MAX`（64KB）で、質問の「その他（自分で書く）」8件ぶん（1問 2000 文字 × 3バイト）が入る大きさにしてある
 - **`rows()` に毎秒動く値を入れない。** `refresh()` の差分判定が除外しているのは `idleMs` と `lastActivityAt` の2つだけ。受信行数やトークン数を混ぜると、内容が同じでも毎秒 push することになる。細かい値は `get()`（詳細ペイン用）の側に置く
 - **断る理由と HTTP の番号は `run/index.mjs` が決める。** 503（CLI を掴めていない）・400（指定が不正）・429（本数と間隔）・500（起こせなかった）の4種類。`server.mjs` 側で理由の文字列を見て振り分けると、言い回しを直しただけで番号が変わる
 - **`shutdown()` で `runner.shutdown()` を待たない。** 止め方の3段は最長5秒かかるが、`shutdown()` の hard exit は 500ms。待たせると Ctrl+C がすぐ効かなくなる。1段目の `stdin.end()` は同期で始まるので、行儀のよい相手はそれで畳まれる（実測 `code=0`）

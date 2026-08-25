@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { createRunner } from '../src/run/index.mjs';
 import { createRunLedger } from '../src/run/ledger.mjs';
 import {
-  fakeChild, sAssistant, sControlResponse, sPermission, sResult, sysInit,
+  fakeChild, sAssistant, sControlResponse, sPermission, sQuestion, sResult, sysInit,
 } from './helpers.mjs';
 
 const T = 1_000_000;
@@ -882,6 +882,47 @@ test('答えると control_response が1行だけ書かれる', async () => {
   assert.equal(line.response.request_id, 'p1', '番号が一致しないと相手は待ち続ける');
   assert.deepEqual(line.response.response, { behavior: 'allow' });
   assert.equal(h.runner.get(res.runId).state, 'running');
+});
+
+test('選んだ札は updatedInput に組み直して送る', async () => {
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, sQuestion(
+    [{ question: 'どっちで進める？', options: [{ label: 'いますぐ' }, { label: 'あとで' }] }],
+    { sessionId: res.row.sessionId, requestId: 'p1' },
+  ));
+  await settle();
+
+  const sent = h.runner.answer(res.runId, 'p1', { behavior: 'allow', choices: { 0: 'あとで' } });
+  assert.equal(sent.ok, true);
+
+  const line = JSON.parse((await stdinText(child)).trim());
+  assert.deepEqual(line.response.response.updatedInput.answers, { 'どっちで進める？': 'あとで' });
+});
+
+test('選び方が足りないと 400。理由は台帳のものを出す', async () => {
+  // どの質問が足りないかは原文を見ないと言えないので、`index` の既定文には倒さない
+  const h = harness();
+  const res = h.start();
+  const child = h.children[0];
+  await stdinText(child);
+
+  feed(child, sQuestion(
+    [{ question: 'どっちで進める？', options: [{ label: 'いますぐ' }] }],
+    { sessionId: res.row.sessionId, requestId: 'p1' },
+  ));
+  await settle();
+
+  const sent = h.runner.answer(res.runId, 'p1', { behavior: 'allow', choices: {} });
+  assert.equal(sent.ok, false);
+  assert.equal(sent.status, 400);
+  assert.match(sent.reason, /答えていない質問/);
+  // 1行も書かない。押し直せるよう要求は残る
+  assert.equal(await stdinText(child), '');
+  assert.equal(h.runner.get(res.runId).asks.length, 1);
 });
 
 test('時間切れの tick でも断りが書かれる', async () => {

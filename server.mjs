@@ -54,6 +54,18 @@ const BODY_MAX = 8 * 1024;
  * 最悪 192KB。他の項目を足してここに収まる。
  */
 const RUN_BODY_MAX = 256 * 1024;
+/**
+ * 許可要求に答える窓口だけの上限。
+ *
+ * 選んだ札のほとんどは短いが、質問の「その他（自分で書く）」は
+ * 台帳が1問 2000 文字まで受ける（`ASK_ANSWER_MAX`）。上限の質問8件（`PENDING_MAX` ではなく
+ * `ASK_QUESTIONS_MAX`）が全部それだと、日本語（UTF-8 で1文字3バイト）で 48KB になる。
+ *
+ * **`BODY_MAX`（8KB）のままにしない。** 足りないと、断りが「HTTP 400」としか出ず、
+ * 書いた本人には何が起きたか分からない。**`RUN_BODY_MAX`（256KB）にも寄せない。**
+ * ここへ来るのは選んだ札だけで、指示文は来ない。
+ */
+const ANSWER_BODY_MAX = 64 * 1024;
 
 /**
  * 実際に listen できたポート。
@@ -718,9 +730,9 @@ async function handleRunInput(req, res, runId) {
 /**
  * 許可要求に答える。
  *
- * **本文の上限は既定の `BODY_MAX`（8KB）。`RUN_BODY_MAX` を渡さない。**
- * 来るのは `requestId` と選んだラベルだけで、質問の全文はサーバーが原文を持っている。
- * 長い理由を書きたいときは `/input` で送る。
+ * **本文の上限は `ANSWER_BODY_MAX`（64KB）。`RUN_BODY_MAX` を渡さない。**
+ * 来るのは `requestId` と選んだ札だけで、質問の全文はサーバーが原文を持っている。
+ * 長い指示を書きたいときは `/input` で送る。
  *
  * 断る番号は `run/index.mjs` が決める（理由の文字列で振り分けない）。
  *
@@ -731,7 +743,7 @@ async function handleRunInput(req, res, runId) {
 async function handleRunAnswer(req, res, runId) {
   let body;
   try {
-    body = await readJsonBody(req);
+    body = await readJsonBody(req, ANSWER_BODY_MAX);
   } catch (err) {
     sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
     return;
