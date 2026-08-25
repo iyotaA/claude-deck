@@ -21,7 +21,7 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 
 | ファイル | 対象 |
 |---|---|
-| `state.test.mjs` | `deriveState` の分岐すべて（このアプリの心臓部）。`ball` と `blocking` が別の問いに答えていること |
+| `state.test.mjs` | `deriveState` の分岐すべて（このアプリの心臓部）。権限モードでの抑制・ツール別しきい値・`ball` と `blocking` が別の問いに答えていること |
 | `entries.test.mjs` | ログ1行から中身を取り出す小道具 |
 | `digest.test.mjs` | 詳細の時系列。回答の抽出と間引き |
 | `meta.test.mjs` | ログから拾う情報（`ai-title` などの実測した形） |

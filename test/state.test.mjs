@@ -15,6 +15,7 @@ import {
   isBlocking,
   QUIET_MS,
   APPROVAL_MS,
+  LONG_APPROVAL_MS,
 } from '../src/parse/state.mjs';
 import { T0, at, say, call, result, prompt, tail, reg } from './helpers.mjs';
 
@@ -164,14 +165,68 @@ test('結果待ちでも APPROVAL_MS 未満なら実行中（長く走る Bash �
 });
 
 test('busy のまま止まって承認待ちになった場合は自信なしにする', () => {
-  // status が busy だと「単に長いコマンド」の可能性が残るので断定しない
+  // status が busy だと「単に長いコマンド」の可能性が残るので断定しない。
+  // 主題は confident の規則なので、しきい値の短い側（Edit）で組んである
   const s = deriveState({
     registry: reg({ status: 'busy' }),
-    tail: tail([call('Bash', { command: 'npm run build' }, { id: 't1' })]),
+    tail: tail([call('Edit', { file_path: 'C:\work\a.mjs' }, { id: 't1' })]),
     now: nowAfter(APPROVAL_MS + 1000),
   });
   assert.equal(s.kind, 'needs-approval');
   assert.equal(s.confident, false);
+});
+
+/* ------------------------------------------------------ ツール別のしきい値 */
+//
+// 長さがツール自身では決まらないもの（外のコマンド・ネットワーク・別のエージェント）は
+// 60秒まで待つ。実測で短い側 3,608件の60秒超は0件なので、短いほうの判定は変わらない。
+
+test('長く走るツールは 15秒では承認待ちにしない', () => {
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('Bash', { command: 'npm run build' }, { id: 't1' })]),
+    now: nowAfter(APPROVAL_MS + 1000),
+  });
+  assert.equal(s.kind, 'running');
+});
+
+test('長く走るツールでも 60秒を超えたら承認待ち', () => {
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('Bash', { command: 'npm run build' }, { id: 't1' })]),
+    now: nowAfter(LONG_APPROVAL_MS),
+  });
+  assert.equal(s.kind, 'needs-approval');
+  assert.match(s.reason, /60 秒来ないまま停止/);
+});
+
+test('短いツールのしきい値は 15秒のまま', () => {
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('Read', { file_path: 'C:\work\a.mjs' }, { id: 't1' })]),
+    now: nowAfter(APPROVAL_MS),
+  });
+  assert.equal(s.kind, 'needs-approval');
+  assert.match(s.reason, /15 秒来ないまま停止/);
+});
+
+test('mcp__ で始まるツールは名前を知らなくても長い側', () => {
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('mcp__まだ知らないサーバ__なにか', {}, { id: 't1' })]),
+    now: nowAfter(APPROVAL_MS + 1000),
+  });
+  assert.equal(s.kind, 'running');
+});
+
+test('人待ち専用のツールはしきい値を待たずに確定する', () => {
+  // 長い側にも短い側にも属さない。1の段で抜けるので、しきい値の変更に影響されない
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('AskUserQuestion', {}, { id: 't1' })]),
+    now: nowAfter(1000),
+  });
+  assert.equal(s.kind, 'needs-answer');
 });
 
 /* ------------------------------------------------ 権限モードで承認待ちを抑える */
@@ -183,7 +238,7 @@ test('auto では、しきい値を超えても承認待ちにしない', () => 
   const s = deriveState({
     registry: reg({ status: 'thinking' }),
     tail: tail([call('Bash', { command: 'npm run build' }, { id: 't1' })]),
-    now: nowAfter(APPROVAL_MS + 1000),
+    now: nowAfter(LONG_APPROVAL_MS + 1000),
     permissionMode: 'auto',
   });
   assert.equal(s.kind, 'running');
@@ -253,7 +308,7 @@ test('抑えた理由に経過秒を入れない', () => {
     now: nowAfter(ms),
     permissionMode: 'auto',
   }).reason;
-  assert.equal(at(APPROVAL_MS + 1000), at(APPROVAL_MS + 90_000));
+  assert.equal(at(LONG_APPROVAL_MS + 1000), at(LONG_APPROVAL_MS + 90_000));
 });
 
 test('結果待ちなし ＋ 末尾が assistant の発言 ＋ 追記停止 → 返信待ち', () => {
@@ -458,7 +513,7 @@ test('しきい値だけが根拠の承認待ちには裏づけが付かない',
   const s = deriveState({
     registry: reg({ status: 'busy' }),
     tail: tail([call('Bash', { command: 'npm run build' })]),
-    now: nowAfter(APPROVAL_MS + 1000),
+    now: nowAfter(LONG_APPROVAL_MS + 1000),
   });
   assert.equal(s.kind, 'needs-approval');
   assert.equal(s.byStatus, false);

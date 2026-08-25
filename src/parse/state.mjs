@@ -21,12 +21,23 @@ import {
   uuidOf,
   isMainline,
 } from './entries.mjs';
-import { describeTool } from '../shared/tools.mjs';
+import { describeTool, isLongRunningTool } from '../shared/tools.mjs';
 
 /** 追記が止まったと見なすまで。 */
 export const QUIET_MS = 3000;
 /** ふつうのツールが dangling のとき、承認待ちと見なすまで。長く走るコマンドとの区別用。 */
 export const APPROVAL_MS = 15000;
+/**
+ * 長く走ってもおかしくないツール（`isLongRunningTool`）が dangling のとき、承認待ちと見なすまで。
+ *
+ * **60秒は短い側の実測上限の外側。** 上位10ログ・7,432往復のうち、
+ * 長くないツール 3,608件で60秒を超えたものは**0件**だった。
+ * だからここを伸ばしても、短いツールの判定は1つも変わらない。
+ *
+ * どのツールが長い側かは `shared/tools.mjs` が持つ（ツール名から分かることの置き場）。
+ * **秒数だけをこちらに置く**（2つのしきい値を2ファイルに割らないため）。
+ */
+export const LONG_APPROVAL_MS = 60000;
 
 /**
  * 登録簿の status のうち「動いている」を意味すると分かっている値。
@@ -241,7 +252,9 @@ export function deriveState({ registry, tail, now = Date.now(), permissionMode =
   }
 
   if (dangling) {
-    if (idleMs !== null && idleMs >= APPROVAL_MS) {
+    const waitMs = isLongRunningTool(dangling.name) ? LONG_APPROVAL_MS : APPROVAL_MS;
+
+    if (idleMs !== null && idleMs >= waitMs) {
       // auto 系のモードでは Claude が自分で許可して進むので、止まって見える根拠が
       // 「時間」しか無い。ここで承認待ちと決めない。
       //
@@ -268,7 +281,8 @@ export function deriveState({ registry, tail, now = Date.now(), permissionMode =
         kind: 'needs-approval',
         // status の値が未知だと断定しきれない。長く止まっている事実だけが根拠
         confident: !busy,
-        reason: `${dangling.name} の結果が来ないまま停止`,
+        // 秒数はしきい値の定数なので入れてよい（経過秒と違って毎秒動かない）
+        reason: `${dangling.name} の結果が ${waitMs / 1000} 秒来ないまま停止`,
       };
     }
     return { ...base, kind: 'running', confident: true, reason: `${dangling.name} を実行中` };

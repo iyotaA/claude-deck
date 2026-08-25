@@ -19,6 +19,46 @@ import { oneLine } from './text.mjs';
 export const MAX_DETAIL = 400;
 
 /**
+ * 長く走ってもおかしくないツール。
+ *
+ * 入れる基準は「**長さがツール自身では決まらないもの**」だけ。
+ * 外のコマンド・ネットワーク・別のエージェントに時間を握られているものが対象で、
+ * 「たまに遅い」を理由に足していくとリストが判定の役に立たなくなる。
+ *
+ * 実測（上位10ログ・7,432往復）。
+ *
+ * | 群 | n | ≥15s | ≥60s |
+ * |---|---|---|---|
+ * | ここに入っているもの | 3,798 | 258 | 59 |
+ * | 入っていないもの | 3,608 | 43 | **0** |
+ *
+ * 入れなかったもの。数字だけ残しておく（次に足す候補の順になる）。
+ *
+ *  - `Grep` … 596件中19件が15秒超・最大27秒。入れれば短い側の15秒超が 43 → 24 に減る
+ *  - `ToolSearch` … 最大8秒
+ *  - `Skill` … 最大1.8秒
+ *  - `TaskCreate` / `TaskUpdate` / `TaskStop` … p90 < 300ms。だから `Task*` を前置で拾わない
+ *
+ * `Monitor` は実測3件と薄いが、条件が満たされるまで待つ道具なので入れてある。
+ */
+export const LONG_RUNNING_TOOLS = new Set([
+  'Bash', 'PowerShell', 'Task', 'Agent', 'TaskOutput', 'WebSearch', 'WebFetch', 'Monitor',
+]);
+
+/**
+ * そのツールは長く走ってもおかしくないか。
+ *
+ * `mcp__` は前置で拾う。名前をこちらが知らないまま増えるうえ、
+ * 全部が別プロセスかネットワーク越しなので、個別に測る意味が無い。
+ *
+ * @param {string|null} name ツール名
+ */
+export function isLongRunningTool(name) {
+  if (typeof name !== 'string') return false;
+  return LONG_RUNNING_TOOLS.has(name) || name.startsWith('mcp__');
+}
+
+/**
  * @param {string} name ツール名
  * @param {object|null} input そのツールへの入力
  * @param {number} max 説明の最大の長さ
