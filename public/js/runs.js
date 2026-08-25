@@ -40,6 +40,67 @@ export const EFFORT_LABELS = {
   max: 'max（いちばん深い）',
 };
 
+/**
+ * モデルの欄で「自分で入力」を選んだときの札。
+ *
+ * **ここに置いてあるのは、起こすフォーム（層7）と実行パネル（層3）の両方が使うから。**
+ * EFFORT_LABELS と同じ理由で、どちらかに書くともう片方が同じものを持つことになる。
+ *
+ * `__` で始めてあるのは、モデル名とぶつからないようにするため
+ * （`checkModel()` が通す形は英数字と `.-_[]` なので、この札は名前として届かない）。
+ */
+export const MODEL_FREE = '__free__';
+
+/**
+ * モデルの <select> に並べるもの。
+ *
+ * 先頭は「指定しない」。**空欄＝CLI の既定**で、これは「外す」の指定でもある。
+ * 末尾は「自分で入力」。サーバーが返すのは**使ったことのあるモデルだけ**なので、
+ * 新しいモデルが出た初日はここからしか渡せない。
+ *
+ * @param {string[]} models サーバーが返した候補
+ * @returns {Array<{value: string, label: string}>}
+ */
+export function modelOptions(models) {
+  return [
+    { value: '', label: '指定しない（CLI の既定）' },
+    ...(models ?? []).map((v) => ({ value: v, label: v })),
+    { value: MODEL_FREE, label: '自分で入力' },
+  ];
+}
+
+/**
+ * いまの値を欄の2つ（<select> と自由入力）へ割る。
+ *
+ * 候補に無い名前のときは「自分で入力」側へ倒す。倒さないと <select> が空になって、
+ * **指定してあるのに指定なしに見える**（そのまま押すと黙って外れる）。
+ *
+ * @param {string} value いまのモデル名。空なら「指定しない」
+ * @param {string[]} models サーバーが返した候補
+ * @returns {{sel: string, free: string}} 欄に入れる値
+ */
+export function modelPick(value, models) {
+  const v = typeof value === 'string' ? value.trim() : '';
+  if (!v) return { sel: '', free: '' };
+  if ((models ?? []).includes(v)) return { sel: v, free: '' };
+  return { sel: MODEL_FREE, free: v };
+}
+
+/**
+ * 欄の2つから送る値を組む。
+ *
+ * 「自分で入力」を選んだまま空欄なら、指定なしと同じ（空文字）に倒す。
+ * 別の値にすると、押した人から見て**空欄で押したときだけ結果が違う**ことになる。
+ *
+ * @param {string} sel <select> の値
+ * @param {string} free 自由入力の値
+ * @returns {string} モデル名。空なら「指定しない」
+ */
+export function modelValue(sel, free) {
+  if (sel === MODEL_FREE) return typeof free === 'string' ? free.trim() : '';
+  return typeof sel === 'string' ? sel.trim() : '';
+}
+
 /** 切れたあと、つなぎ直すまでの待ち。 */
 const RECONNECT_MS = 3000;
 

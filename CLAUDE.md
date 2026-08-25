@@ -243,7 +243,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
 | `GET /api/runs` | 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている |
-| `GET /api/runs/options` | 起こすフォームの選択肢。cwd の候補・権限モード・思考量・予算の範囲・CLI の様子・いまの本数 |
+| `GET /api/runs/options` | 起こすフォームの選択肢。cwd の候補・権限モード・**モデルの候補**・思考量・予算の範囲・CLI の様子・いまの本数 |
 | `GET /api/runs/events?from=<seq>` | 取りこぼしの穴埋め。SSE が切れているあいだの速報を拾う |
 | `GET /api/runs/stream?from=<seq>` | **実行専用の SSE。**`/api/stream` には相乗りさせない |
 | `GET /api/runs/:id` | 1本ぶんの全部入り。粗い `rows()` と違って `counts` や `costUSD` も入る |

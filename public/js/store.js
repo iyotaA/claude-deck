@@ -203,6 +203,7 @@ export const dom = {
   runCwd: document.getElementById('run-cwd'),
   runPrompt: document.getElementById('run-prompt'),
   runMode: document.getElementById('run-mode'),
+  runModelPick: document.getElementById('run-model-pick'),
   runModel: document.getElementById('run-model'),
   runEffort: document.getElementById('run-effort'),
   runBudget: document.getElementById('run-budget'),

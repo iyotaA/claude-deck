@@ -329,24 +329,32 @@
   color: var(--hot);
 }
 
-/* 替えて続ける。普段は畳んでおく。
-   display を書かないので、hidden はブラウザ既定のまま効く
-   （.run-drop のように display を持たせると [hidden] に勝ってしまう） */
-.run-switch { margin-top: .6rem; }
+/* ------------------------------------------- 替える窓（run-view.js が組む） */
 
-.run-switch > summary {
-  cursor: pointer;
-  font-size: .78rem;
-  color: var(--fg-muted);
+/* .runform と同じ作り方。**器の4つ（本体・::backdrop・[open]・幅）だけ自前で持ち**、
+   中身のクラス（.settings-head / -body / -foot / -grid / -label / -row / -hint /
+   -select / -text / -num / -msg / -x）は設定モーダルのものをそのまま借りている。
+
+   幅は起こすフォーム（44rem）より狭くてよい。長い本文欄が無く、選ぶ欄が4つだけ */
+.runsw {
+  /* 余白を dialog 自身に持たせない。持たせると、その余白を押したときに
+     背面を押したのと同じに見えて閉じる（run-view.js の ev.target === dlg がこれ前提） */
+  padding: 0;
+  width: min(34rem, calc(100vw - 2rem));
+  max-height: min(44rem, calc(100vh - 3rem));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--shadow);
 }
 
-.run-switch > summary:hover { color: var(--fg); }
+.runsw::backdrop { background: rgb(0 0 0 / 45%); }
 
-/* 開いた中身。左の線1本で、上の操作と地続きでないことを示す */
-.run-switch-body {
-  margin-top: .5rem;
-  padding-left: .6rem;
-  border-left: 2px solid var(--border);
+/* 頭と足を留めて、中身だけを縦に流す */
+.runsw[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 /* ------------------------------------------- 中央下の入力欄 */
@@ -362,6 +370,54 @@
 }
 
 .composer-in { min-width: 0; }
+
+/* いま何で走っているかの札。**押すと「替える窓」が開く。**
+   替えられること自体が分かりにくいという指摘を受けて、状態の表示と入り口を1つにした。
+   実行パネルの中に置いていた頃は、速報が伸びるたびに下へ流れて見つからなかった。
+
+   **枠を持たせて押せる顔にする。** ただの文字にすると、また見つからない。
+   display を宣言するので [hidden] を必ず添える（display:flex は hidden 属性に勝つ） */
+.composer-now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .3rem;
+  margin: 0 0 .45rem;
+  padding: .22rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: .76rem;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.composer-now[hidden] { display: none; }
+
+.composer-now:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.composer-now:focus-visible { border-color: var(--accent); }
+
+/* 終わっている実行。押せないことを見た目でも出す */
+.composer-now:disabled {
+  opacity: .6;
+  cursor: default;
+}
+
+/* いま効いている値。ここだけ本文の色にして、札の中で最初に目へ入るようにする */
+.composer-now-mode,
+.composer-now-model { color: var(--fg); }
+
+/* 「替える」。**下線は引かない**（button なので、引くとリンクに見える）。色だけで示す */
+.composer-now-note { color: var(--accent); }
+
+/* 返事待ち。**新しい色は作らず** --warn を借りる */
+.composer-now.is-switching .composer-now-note { color: var(--warn); }
 
 /* 入力欄が伸びて、ボタンは右。狭くなればボタンが下へ回る */
 .composer-row {

@@ -314,12 +314,17 @@
     </section>
 
     <section class="settings-sec settings-grid">
-      <label class="settings-label" for="run-model">モデル</label>
+      <!-- 候補は「このマシンで実際に使われたモデル」。サーバーが一覧から拾って返す。
+           そこに無いものは「自分で入力」で渡せる（新しいモデルが出た初日のため）。
+           入力欄は選ばれるまで畳んでおく。配線は run-form.js -->
+      <label class="settings-label" for="run-model-pick">モデル</label>
       <span class="settings-row">
-        <input class="settings-text" id="run-model" type="text"
-               spellcheck="false" autocomplete="off" placeholder="空欄なら CLI の既定">
+        <select class="settings-select runform-wide" id="run-model-pick"></select>
+        <input class="settings-text" id="run-model" type="text" hidden
+               spellcheck="false" autocomplete="off" aria-label="モデル名を自分で入力"
+               placeholder="モデル名をそのまま書く">
       </span>
-      <p class="settings-hint">名前をそのまま渡します。使えるかどうかは CLI が決めます</p>
+      <p class="settings-hint">使ったことのあるものを並べています。使えるかどうかは CLI が決めます</p>
 
       <label class="settings-label" for="run-effort">思考量</label>
       <span class="settings-row">

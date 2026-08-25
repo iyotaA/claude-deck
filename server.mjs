@@ -28,7 +28,7 @@ import { createRunner } from './src/run/index.mjs';
 import { mergeRuns } from './src/run/ledger.mjs';
 import {
   allowedModes, runDirsFromEnv, BYPASS_MODE, DEFAULT_PERMISSION_MODE, PERMISSION_MODE_LABELS,
-  EFFORTS, DEFAULT_BUDGET_USD, BUDGET_MIN_USD, BUDGET_MAX_USD, PROMPT_MAX,
+  EFFORTS, DEFAULT_BUDGET_USD, BUDGET_MIN_USD, BUDGET_MAX_USD, PROMPT_MAX, checkModel,
 } from './src/run/spec.mjs';
 import { loadUpdateState, parseUpdateState } from './src/update/state.mjs';
 import { loadStartupState, parseStartupState } from './src/startup/state.mjs';
@@ -650,6 +650,43 @@ function allowedRunDirs() {
 }
 
 /**
+ * モデルの候補の上限。増えても選ぶのが大変になるだけなので、ここで切る。
+ */
+const MODEL_CHOICE_MAX = 12;
+
+/**
+ * モデルの候補。
+ *
+ * **一覧に出ているモデルだけを返す**（＝このマシンで実際に使われたもの）。
+ * `allowedRunDirs()` が cwd に対してやっているのと同じで、こちらで一覧を書き起こさない。
+ * 手で書いた表は版が上がるたびに古くなるが、使った記録のほうは勝手に新しくなる。
+ * 材料は一覧の行がもともと持っている `model`（会話ログの末尾から取れている）なので、
+ * ここで新しく読むものは1つも無い。
+ *
+ * **これは許可リストではない。** `spec.mjs` の `checkModel()` は今までどおり形しか見ないし、
+ * 画面にも自由入力の口を残してある。閉じた表にすると、新しいモデルが出た初日に
+ * 画面からは選べない（＝古い表のほうが正しく見える）状態ができる。
+ *
+ * **`checkModel()` を通らない名前は落とす。** 会話ログには `claude-opus-5[1m]` のような
+ * 角括弧付きが出る（実測）が、あれは `MODEL_RE` を通らず `--model` に渡すと 400 になる。
+ * 押した瞬間に断られる札を並べないため、**判断は増やさず同じ関数に通す**
+ * （ここで別の正規表現を書くと、緩めたときに片方だけ古くなる）。
+ *
+ * 並びは名前順にする。使った回数の順にすると、作業しているあいだに並びが動いて
+ * 押す場所が毎回変わる（`allowedRunDirs()` を並べ直しているのと同じ理由）。
+ *
+ * @returns {string[]} モデル名
+ */
+function recentModels() {
+  const names = new Set();
+  for (const row of lastPayload?.rows ?? []) {
+    const hit = checkModel(row?.model);
+    if (hit.ok) names.add(hit.model);
+  }
+  return [...names].sort((a, b) => a.localeCompare(b)).slice(0, MODEL_CHOICE_MAX);
+}
+
+/**
  * いま動いているセッションの ID。
  *
  * 続きを起こす（`--resume`）ときの門番の材料。同じセッションへ2本当てると
@@ -1136,9 +1173,6 @@ const server = http.createServer((req, res) => {
   // `/api/runs/options` にも当たるので、順番を入れ替えると
   // 「そんな実行はありません」と 404 を返すようになる。
   //
-  // **モデルの候補は返さない。** spec.mjs が許可リストを持たない方針なので、
-  // ここで一覧を作ると同じ古さを別の場所に増やすことになる。画面は自由入力にして
-  // 「空欄なら CLI の既定」と書く。
   if (pathname === '/api/runs/options') {
     sendJson(res, 200, {
       // 並べ直してから返す。allowedRunDirs() は Set の挿入順なので、
@@ -1153,6 +1187,9 @@ const server = http.createServer((req, res) => {
         danger: value === BYPASS_MODE,
       })),
       defaultMode: DEFAULT_PERMISSION_MODE,
+      // **選ぶための材料であって、許可リストではない。** 中身は実際に使われたモデルで、
+      // ここに無い名前も画面の自由入力から渡せる（recentModels の説明を見ること）
+      models: recentModels(),
       efforts: EFFORTS,
       budget: { default: DEFAULT_BUDGET_USD, min: BUDGET_MIN_USD, max: BUDGET_MAX_USD },
       promptMax: PROMPT_MAX,
