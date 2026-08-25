@@ -1667,10 +1667,13 @@ test('考えた量が読めない行では前の値を潰さない', () => {
   assert.equal(res.thinkingTokens, 700);
 });
 
-test('枠の使用率は行に出る。速報は積まない', () => {
+test('枠の使用率は台帳に1つ。行には出ない。速報も積まない', () => {
+  // アカウント共通の値なので、実行ごとに配ると同じ数がいくつも並び、
+  // 「この実行が使った枠」と読める。届く道が実行の stdout しか無いのは出どころの都合
   const { led, id } = started();
   assert.deepEqual(feed(led, id, sRate(0.06, 0.69), T + 10), []);
-  assert.deepEqual(led.rows()[0].rateLimit, {
+  assert.equal('rateLimit' in led.rows()[0], false, '行には載せない');
+  assert.deepEqual(led.rateLimit(), {
     fiveHour: 0.06,
     sevenDay: 0.69,
     resetsAt: 1787667000,
@@ -1684,7 +1687,7 @@ test('枠の使用率は測った時刻を持つ', () => {
   const { led, id } = started();
   feed(led, id, sRate(0.06, 0.69), T + 10);
   feed(led, id, sRate(0.11, 0.70), T + 5000);
-  assert.equal(led.rows()[0].rateLimit.at, T + 5000);
+  assert.equal(led.rateLimit().at, T + 5000);
 });
 
 test('どちらの枠も読めない行では上書きしない', () => {
@@ -1692,12 +1695,36 @@ test('どちらの枠も読めない行では上書きしない', () => {
   const { led, id } = started();
   feed(led, id, sRate(0.06, 0.69), T + 10);
   feed(led, id, { type: 'rate_limit_event', session_id: S_ID, rate_limit_info: {} }, T + 20);
-  assert.equal(led.rows()[0].rateLimit.fiveHour, 0.06);
+  assert.equal(led.rateLimit().fiveHour, 0.06);
 });
 
 test('枠の使用率は最初は「不明」。0 ではない', () => {
+  const { led } = started();
+  assert.equal(led.rateLimit(), null);
+});
+
+test('紙から拾った枠は、測った数があれば上書きしない', () => {
+  // 紙は必ず過去のもの。走っている実行から届いた数のほうが新しい。
+  // 読む順で古い数へ戻らないよう、向きを台帳側で1回だけ決めてある
   const { led, id } = started();
-  assert.equal(led.rows()[0].rateLimit, null);
+  feed(led, id, sRate(0.06, 0.69), T + 10);
+  led.seedRate({ fiveHour: 0.99, sevenDay: 0.99, resetsAt: null, at: T - 999_999 });
+  assert.equal(led.rateLimit().fiveHour, 0.06);
+});
+
+test('紙から拾った枠は、まだ何も測っていなければ入る', () => {
+  const { led } = started();
+  led.seedRate({ fiveHour: 0.42, sevenDay: 0.73, resetsAt: null, at: T - 999_999 });
+  assert.equal(led.rateLimit().fiveHour, 0.42);
+});
+
+test('測った時刻の無い紙は入れない', () => {
+  // 何分前の数か言えないなら、古い数を今の数の顔で出すことになる
+  const { led } = started();
+  led.seedRate({ fiveHour: 0.42, sevenDay: 0.73, resetsAt: null });
+  assert.equal(led.rateLimit(), null);
+  led.seedRate(null);
+  assert.equal(led.rateLimit(), null);
 });
 
 test('捨てた行が増えたときだけ1行積む', () => {

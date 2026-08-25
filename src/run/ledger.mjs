@@ -606,6 +606,15 @@ export function createRunLedger({
   let lastStartAt = null;
 
   /**
+   * @type {object|null} 直近の枠の使用率。`{fiveHour, sevenDay, resetsAt, at}`
+   *
+   * **run ではなく台帳が1つだけ持つ。** アカウント共通の値なので、
+   * どの実行から届いたかに意味が無い。
+   * こうしておくと、その実行が `HISTORY_MAX` を超えて押し出されても数は残る。
+   */
+  let latestRate = null;
+
+  /**
    * 速報を1件積む。
    *
    * `seq` を**全 run で1本**にしてあるのは、SSE の再開カーソルが1つで済むから。
@@ -891,19 +900,22 @@ export function createRunLedger({
    * 版が上がって `unifiedWindows` の形が変わった日に、
    * 一度は取れていた値が null で潰れて「取れていない」に見えるのを防ぐ。
    *
-   * **測った時刻（`at`）を一緒に持つ。**
-   * この値はアカウント共通なので画面は上のバーに1つだけ出すが、
-   * 出どころは実行1本の stdout しか無い。走っているものが無ければ数は古びていく。
-   * 何分前の数かを言えないと、古い数を今の数の顔で出すことになる（0 と不明を分ける）。
+   * **run には持たせない。台帳に1つだけ置く。**
+   * これはアカウント共通の値で、どの実行から届いたかに意味が無い。
+   * run ごとに持つと画面に同じ数がいくつも並び、「この実行が使った枠」と読める。
+   * 行に載って来るのは、届く道が実行の stdout しか無いという**出どころの都合**。
    *
-   * @param {object} run 対象の run
+   * **測った時刻（`at`）を一緒に持つ。**
+   * 走っているものが無ければ数は古びていく。何分前の数かを言えないと、
+   * 古い数を今の数の顔で出すことになる（0 と不明を分ける）。
+   *
    * @param {object} info `rateLimitInfo` の戻り
    * @param {number} now いまの時刻（ms）
    * @returns {void}
    */
-  function takeRateLimit(run, info, now) {
+  function takeRateLimit(info, now) {
     if (typeof info.fiveHour !== 'number' && typeof info.sevenDay !== 'number') return;
-    run.rateLimit = {
+    latestRate = {
       fiveHour: info.fiveHour ?? null,
       sevenDay: info.sevenDay ?? null,
       resetsAt: info.resetsAt ?? null,
@@ -1027,12 +1039,7 @@ export function createRunLedger({
       // （`runFor(sessionId)` が引くのがそちら）。`get()` に置くと画面から届かない。
       // 60 語で 700 バイトほどあるが、init のときしか変わらないので差分判定で止まる
       slashCommands: run.slashCommands,
-      // 枠の使用率。CLI の `/usage` と同じもの。**アカウント共通の値**なので、
-      // 画面はここに載った行のうちいちばん新しいものを拾って上のバーに1つだけ出す。
-      // 行に載せるのは、出どころが実行1本の stdout しか無いため（会話ログにも
-      // `~/.claude` の下にも無い。実測）。API を叩くたびに流れるが、
-      // 値そのものはめったに動かないので差分判定で止まる
-      rateLimit: run.rateLimit,
+
       // CLI が stderr へ吐いた直近の1行。**速報の並びには混ぜない**（本文が読めなくなる）が、
       // 見出しには出す。`get()` にしか出さないと、画面が `/api/runs/:id` を
       // 引いていない以上どこにも現れない。普段は null なので欄ごと出ない
@@ -1119,7 +1126,7 @@ export function createRunLedger({
         /** @type {number|null} そのターンで考えた量（累計）。畳んだ結果だけを持つ */
         thinking: null,
         /** @type {object|null} 直近の枠の使用率。`{fiveHour, sevenDay, resetsAt, at}` */
-        rateLimit: null,
+
         /** @type {string|null} 子が stderr へ吐いた直近の1行。失敗していなくても持つ */
         lastStderr: null,
         // `droppedLines` は**長すぎて捨てた行の数**。殻（`run/index.mjs`）から入れてもらう。
@@ -1286,7 +1293,7 @@ export function createRunLedger({
         // 速報は積まない。行に載せるだけ（`toRunEvents` も空を返している）
         takeThinking(run, classified.info ?? {});
       } else if (classified?.kind === 'rate-limit') {
-        takeRateLimit(run, classified.info ?? {}, now);
+        takeRateLimit(classified.info ?? {}, now);
       }
 
       for (const ev of pushed) {
@@ -1866,6 +1873,31 @@ export function createRunLedger({
       const run = runs.get(runId);
       if (!run || !isRunOver(run.state)) return false;
       return runs.delete(runId);
+    },
+
+    /**
+     * 直近の枠の使用率。**行ではなく、ここから1つだけ出す。**
+     *
+     * @returns {object|null} `{fiveHour, sevenDay, resetsAt, at}`
+     */
+    rateLimit() {
+      return latestRate;
+    },
+
+    /**
+     * 立ち上がりに、紙から読んだ枠の使用率を置く。
+     *
+     * **すでに測ったものがあれば触らない。** 紙は必ず過去のもので、
+     * 走っている実行から届いた数のほうが新しい。順番の前後で古い数に
+     * 戻ることが無いよう、上書きの向きをここで1回だけ決めておく。
+     *
+     * @param {object|null} rl `run/rate.mjs` の `loadRate()` の戻り
+     * @returns {void}
+     */
+    seedRate(rl) {
+      if (latestRate !== null) return;
+      if (!rl || typeof rl.at !== 'number') return;
+      latestRate = rl;
     },
 
     /**

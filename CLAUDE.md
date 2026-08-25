@@ -96,7 +96,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） `usage`（数値） `stream`（実行中の行） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） `usage`（数値） |
 | `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） |
-| `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） |
+| `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） `rate`（枠の使用率を紙に1枚） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
 | `src/startup/` | ランチャが書いた自動起動の紙を読む | `state` |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） `appdata`（書き込み先） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `env`（止めるスイッチの読み方） |
@@ -137,7 +137,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - `notify/index.mjs:createNotifier`
 - `update/state.mjs:loadUpdateState`
 - `startup/state.mjs:loadStartupState`
-- `run/index.mjs:createRunner`（`server.mjs` が触る唯一の口。14個の関数を返す）
+- `run/index.mjs:createRunner`（`server.mjs` が触る唯一の口。16個の関数を返す）
 - `run/spec.mjs:buildRunSpec`（起動指定を検証して argv まで組む）
 - `os/focus.mjs:focusTerminal`
 - `os/claude.mjs:probeClaude` / `claudeInfo`（探すのと、結果を読むのを分けてある）
@@ -242,7 +242,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/usage` | 数値の横断集計。`limit` `days` `model`。上限60件で切り詰め、切ったことを `scanLimited` で返す |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `days` |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
-| `GET /api/runs` | 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている |
+| `GET /api/runs` | 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている。枠の使用率（`rate`）は行ではなく**封筒に1つ**（アカウント共通の値なので） |
 | `GET /api/runs/options` | 起こすフォームの選択肢。cwd の候補・権限モード・**モデルの候補**・思考量・予算の範囲・CLI の様子・いまの本数 |
 | `GET /api/runs/events?from=<seq>` | 取りこぼしの穴埋め。SSE が切れているあいだの速報を拾う |
 | `GET /api/runs/stream?from=<seq>` | **実行専用の SSE。**`/api/stream` には相乗りさせない |

@@ -113,6 +113,11 @@ const events = new Map();
 /** @type {Map<string, number>} runId → 溢れて捨てた件数 */
 const dropped = new Map();
 
+/**
+ * @type {object|null} 直近の枠の使用率。**行ではなく封筒から来る**（アカウント共通の値）
+ */
+let rate = null;
+
 /** つなぎ直しのあいだにサーバー側で押し出された件数。累積で持つ */
 let missed = 0;
 /** 受け取った出来事の最大 seq。つなぎ直すときの起点になる */
@@ -256,9 +261,11 @@ function open() {
     } catch {
       return; // 壊れたフレームは黙って捨てる（未知の形で落ちない）
     }
-    const changed = applyRows(data.rows);
+    // 2つとも呼ぶ。`||` で繋ぐと短絡して、行が変わった回に枠が取り込まれない
+    const rowsChanged = applyRows(data.rows);
+    const rateChanged = takeRate(data.rate);
     if (Number.isFinite(data.missed) && data.missed > 0) missed += data.missed;
-    if (changed) emit('rows');
+    if (rowsChanged || rateChanged) emit('rows');
   });
 
   source.addEventListener('run', (ev) => {
@@ -298,25 +305,34 @@ export function runFor(sessionId) {
 }
 
 /**
- * いちばん新しい枠の使用率。
+ * 直近の枠の使用率。**行ではなくフレームの封筒から来る。**
  *
- * **アカウント共通の値なので、どの実行から届いたかは意味を持たない。**
- * 台帳に載っている行のうち、いちばん後に測ったものを1つ返す。
+ * アカウント共通の値なので、どの実行から届いたかは意味を持たない。
+ * サーバーが台帳から1つだけ取って `rate` に載せてくる。
  *
  * 出どころは `rate_limit_event` で、**この画面から起こした実行の stdout にしか流れない**
- * （会話ログにも `~/.claude` の下にも無い。実測 2.1.245）。
- * だから起こした実行が1本も無ければ null で、ターミナルで動かしているだけの人には出ない。
+ * （会話ログにも `~/.claude` の下にも無い。キーの形で総当たりして確認・2.1.245）。
+ * サーバー側が最後の1件を紙に落としているので、**一度でも起こしたことがあれば**
+ * 立ち上げ直しても出る。1本も起こしたことが無ければ null。
  *
  * @returns {{fiveHour: ?number, sevenDay: ?number, resetsAt: ?number, at: number}|null}
  */
 export function newestRateLimit() {
-  let best = null;
-  for (const row of rows.values()) {
-    const rl = row.rateLimit;
-    if (!rl || typeof rl.at !== 'number') continue;
-    if (best === null || rl.at > best.at) best = rl;
-  }
-  return best;
+  return rate;
+}
+
+/**
+ * 封筒から届いた枠を差し替える。
+ *
+ * @param {*} next フレームの `rate`
+ * @returns {boolean} 中身が変わったか
+ */
+function takeRate(next) {
+  const ok = next && typeof next.at === 'number' ? next : null;
+  // `at` だけを見れば足りる。同じ観測なら数も同じで、違う観測なら必ず時刻が違う
+  if ((rate?.at ?? null) === (ok?.at ?? null)) return false;
+  rate = ok;
+  return true;
 }
 
 /**

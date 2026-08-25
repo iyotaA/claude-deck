@@ -614,10 +614,15 @@ function runBroadcast(event, data) {
  */
 function pushRunRows(force = false) {
   const rows = runner.rows();
-  const serialized = JSON.stringify(rows);
+  const rate = runner.rateLimit();
+  // **枠も差分に入れる。** `at`（測った時刻）が動くたびに配ることになるが、
+  // これは意図。配らないと画面の「N分前」が実際より古く出る
+  // （一覧の `idleMs` を差分から外してあるのとは逆の判断。あちらは毎秒動くうえ
+  // 出しているのが経過時間そのものではないので、外して困らない）
+  const serialized = JSON.stringify([rows, rate]);
   if (!force && serialized === lastRunRows) return;
   lastRunRows = serialized;
-  runBroadcast('runs', { rows, stats: runner.stats() });
+  runBroadcast('runs', { rows, stats: runner.stats(), rate });
 }
 
 // 購読は**サーバーに1本**だけ。窓は runClients を出入りするだけにしてある。
@@ -948,6 +953,10 @@ function handleRunStream(req, res, from) {
     res.write(`event: runs\ndata: ${JSON.stringify({
       rows: runner.rows(),
       stats: runner.stats(),
+      // 枠の使用率。**行ではなく封筒に載せる**（アカウント共通の値のため）。
+      // つないだ最初のフレームにも入れる。ここを抜くと、実行が1本も
+      // 走っていない画面で次の押し出しまで枠が出ない
+      rate: runner.rateLimit(),
       from: back.from,
       nextSeq: back.nextSeq,
       missed: back.missed,
@@ -1186,7 +1195,7 @@ const server = http.createServer((req, res) => {
 
   // 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている
   if (pathname === '/api/runs') {
-    sendJson(res, 200, { rows: runner.rows(), stats: runner.stats() });
+    sendJson(res, 200, { rows: runner.rows(), stats: runner.stats(), rate: runner.rateLimit() });
     return;
   }
 

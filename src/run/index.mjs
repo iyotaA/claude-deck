@@ -50,6 +50,20 @@ import {
   PERMISSION_MODES, PROMPT_MAX, buildRunSpec, checkModel, checkPermissionMode, mergeSwitch,
 } from './spec.mjs';
 import { RUN_MAX, createRunLedger, isChildDone, isRunOver } from './ledger.mjs';
+import { loadRate, saveRate } from './rate.mjs';
+
+/**
+ * 枠の使用率を紙へ書き直す間隔。
+ *
+ * `rate_limit_event` は API を叩くたびに流れるので、毎回書くと
+ * 走っているあいだじゅう小さい書き込みが続く。かといって
+ * 「数が変わったときだけ」にはできない。使用率は少しずつ増えるので
+ * ほぼ毎回変わり、間引きにならないうえ、**`at`（測った時刻）が紙の上で
+ * 止まる**と、立ち上げ直したときに実際より古い「N分前」を出すことになる。
+ *
+ * だから時間で間引く。1分なら、画面が出す「N分前」の刻み（分）と釣り合う。
+ */
+const RATE_SAVE_MS = 60_000;
 
 /**
  * 標準エラーから拾う理由の上限。
@@ -147,6 +161,17 @@ export function createRunner({
 
   /** 速報の届け先。SSE がここに乗る */
   const listeners = new Set();
+
+  /** 最後に紙へ書いた時刻。0 にしてあるので**最初の1件はすぐ書く** */
+  let lastRateSaveAt = 0;
+  /** そのとき書いた観測の `at`。同じものを2度書かないための印 */
+  let lastRateSavedAt = null;
+
+  // 立ち上がりに、前回までの枠の使用率を紙から拾う。
+  // これが無いとサーバーを立て直すたびに数が消え、見るために毎回1本起こすことになる
+  // （この数は実行の stdout にしか流れないため）。
+  // **紙より走っている実行のほうが新しい**ので、上書きの向きは台帳側で決めている
+  ledger.seedRate(loadRate(env));
 
   /**
    * 速報を届ける。
@@ -266,8 +291,32 @@ export function createRunner({
 
     const all = extra.length > 0 ? [...list, ...extra] : list;
     syncLive(all);
+    saveRateIfDue();
     emit(all);
     return failed;
+  }
+
+  /**
+   * 枠の使用率を紙へ落とす。**間引く。**
+   *
+   * ここでやるのは、この層が唯一 I/O を持つ場所だから
+   * （判断は台帳、手を動かすのは殻）。
+   *
+   * **書けなくても何も言わない。** これは無くても本体が動く控えの紙で、
+   * 書けないことを理由に実行を止める筋合いが無い。
+   *
+   * @returns {void}
+   */
+  function saveRateIfDue() {
+    const rl = ledger.rateLimit();
+    if (!rl || rl.at === lastRateSavedAt) return;
+    const now = clock();
+    if (now - lastRateSaveAt < RATE_SAVE_MS) return;
+    lastRateSaveAt = now;
+    lastRateSavedAt = rl.at;
+    // **`env` を渡す。** 渡さないとテストが本物の appdata へ書きに行く
+    // （読むほうは `loadRate(env)` にしてあるので、片方だけ素通りする形になっていた）
+    saveRate(rl, env);
   }
 
   /**
@@ -943,5 +992,15 @@ export function createRunner({
      * @returns {object} 本数・通し番号・上限
      */
     stats: () => ({ ...ledger.stats(), max: RUN_MAX }),
+    /**
+     * 直近の枠の使用率。**行ではなく、ここから1つだけ出す。**
+     *
+     * アカウント共通の値なので、実行ごとに配ると同じ数がいくつも並び、
+     * 「この実行が使った枠」と読める。届く道が実行の stdout しか無いのは
+     * 出どころの都合であって、意味づけではない。
+     *
+     * @returns {object|null} `{fiveHour, sevenDay, resetsAt, at}`
+     */
+    rateLimit: () => ledger.rateLimit(),
   };
 }
