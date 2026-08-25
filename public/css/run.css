@@ -8,43 +8,6 @@
    多色を足すと tokens.css の二重定義（prefers-color-scheme 側と
    [data-theme="dark"] 側）を両方直す義務が生まれる。 */
 
-/* ------------------------------------------------------------ 器 */
-
-/* 流れてくるものを入れる箱。中だけがスクロールする。
-   高さを決めておかないと、1ターン数百行で詳細ペインが縦に伸び切って
-   下にある数値パネルへ辿り着けなくなる */
-.run-log {
-  margin-top: .6rem;
-  max-height: 26rem;
-  overflow-y: auto;
-  background: var(--bg-sunk);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0 .6rem;
-}
-
-.run-empty {
-  padding: 1.2rem 0;
-  text-align: center;
-  font-size: .8rem;
-  color: var(--fg-faint);
-}
-
-/* 落とした件数。黙って捨てないための行なので、枠を破線にして
-   「本文ではない断り書き」だと分かる形にする（時系列の .away と同じ作法） */
-.run-drop {
-  margin: .6rem 0 0;
-  padding: .25rem .45rem;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius);
-  font-size: .72rem;
-  color: var(--fg-muted);
-}
-
-/* display を1つでも書いた時点でブラウザ既定の [hidden] { display: none } に勝つので、
-   隠す指定を自分で持たせる */
-.run-drop[hidden] { display: none; }
-
 /* ------------------------------------------------------- 状態の札 */
 
 /* 見出しの札は一覧のカードと同じ `.state`（点 ＋ 太字 ＋ 状態色）を借りている。
@@ -76,125 +39,7 @@
   line-height: 1;
 }
 
-/* ---------------------------------------------------------- 出来事 */
-
-.run-ev {
-  padding: .45rem 0;
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: .25rem;
-  min-width: 0;
-}
-
-.run-log > .run-ev:first-child { border-top: 0; }
-
-/* サブエージェントの行は親の発言と混ざって並ぶ。
-   左に線を1本引いて字を落とし、どちらが本流か目で拾えるようにする */
-.run-ev.is-sub {
-  padding-left: .6rem;
-  border-left: 2px solid var(--border-strong);
-  color: var(--fg-muted);
-}
-
-.run-ev-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: .45rem;
-  font-size: .72rem;
-}
-
-.run-ev-at {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--fg-faint);
-  white-space: nowrap;
-}
-
-.run-ev-kind {
-  font-weight: 700;
-  letter-spacing: .02em;
-  color: var(--fg-muted);
-}
-
-.run-ev-sub {
-  padding: .05rem .3rem;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius);
-  font-size: .66rem;
-  color: var(--fg-faint);
-}
-
-/* 種類の色付けは名前の1語だけ。面は塗らない。
-   一覧の状態色（点と細いバー）と喧嘩しないための決まりをここでも守る */
-.run-ev[data-kind="text"] .run-ev-kind { color: var(--accent); }
-.run-ev[data-kind="echo"] .run-ev-kind { color: var(--accent); }
-.run-ev[data-kind="note"] .run-ev-kind { color: var(--warn); }
-.run-ev[data-kind="broken"] .run-ev-kind { color: var(--hot); }
-
-/* あなたが送った1行。時系列の prompt と同じ見た目にして、
-   同じものが場所によって違って見えないようにする */
-.run-ev[data-kind="echo"] .tl-text {
-  padding: .45rem .6rem;
-  border-left: 3px solid var(--accent);
-  background: var(--bg-elev);
-  border-radius: 0 6px 6px 0;
-}
-
-/* 1往復の終わりは区切りとして少し重くする */
-.run-ev[data-kind="result"] { border-top-color: var(--border-strong); }
-
-/* -------------------------------------------------------- 中身の形 */
-
-.run-tool {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: .45rem;
-  min-width: 0;
-}
-
-.run-tool-name {
-  font-family: var(--font-mono);
-  font-size: .78rem;
-  color: var(--accent);
-}
-
-.run-tool-detail {
-  font-family: var(--font-mono);
-  font-size: .74rem;
-  color: var(--fg-faint);
-  overflow-wrap: anywhere;
-}
-
-/* ツールの結果と、読めなかった行。原文をそのまま出すので詰めて小さく */
-.run-out {
-  font-family: var(--font-mono);
-  font-size: .74rem;
-  line-height: 1.5;
-  color: var(--fg-muted);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.run-out.is-error { color: var(--hot); }
-
-/* フックが失敗したときの但し書き。`.run-tool-detail` の色だけ上書きする */
-.run-tool-detail.is-error { color: var(--hot); }
-
-/* 「実行されませんでした」の印。
-   **`.run-out.is-error` の赤にしない。** こちらが断った結果も向こうからは is_error で返るので
-   （実測）、同じ赤にすると「自分で止めた」と「向こうが壊れた」が見分けられなくなる。
-   注意を引く必要はなく、隣のエラー本文が赤で出ていないことを説明できればよい */
-.run-skip {
-  font-size: .74rem;
-  color: var(--fg-faint);
-  border-left: 2px solid var(--border-strong);
-  padding-left: .4rem;
-  margin-bottom: .15rem;
-  overflow-wrap: anywhere;
-}
+/* ------------------------------------------------------- 但し書き */
 
 .run-note {
   font-size: .78rem;
@@ -205,17 +50,6 @@
 /* 危ないモードを選んだときの但し書き。起こすフォームの .runform-danger と同じ意味だが、
    あちらの名前を詳細ペイン側に持ち込むと、どちらの都合の指定か読めなくなる */
 .run-danger { color: var(--hot); }
-
-.run-other {
-  font-family: var(--font-mono);
-  font-size: .72rem;
-  color: var(--fg-faint);
-  overflow-wrap: anywhere;
-}
-
-/* 出来事の中の facts は detail.css の .facts をそのまま借りる。
-   ここでは字を一段落として、パネル頭の facts より軽く見せるだけにする */
-.run-ev .facts { font-size: .76rem; }
 
 /* ---------------------------------------------------- 起こすフォーム */
 
@@ -538,8 +372,6 @@
    @media で必ず囲む（メディアクエリは詳細度を足さないので、
    裸で書くと広い窓にもそのまま当たる） */
 @media (max-width: 860px) {
-  .run-log { max-height: 18rem; }
-
   /* 左右は縮めない。本体（.detail-scroll の 1.3rem）と行頭が揃わなくなる。
      縦だけ詰める（狭い画面では高さのほうが惜しい） */
   .composer { padding: .6rem 1.3rem .7rem; }

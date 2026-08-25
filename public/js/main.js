@@ -54,7 +54,6 @@ import { visibleRows } from './rows.js';
 import { initListDrawer } from './drawer.js';
 import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
-import * as RunView from './run-view.js';
 import { renderDetailIfNeeded, initInspector } from './detail.js';
 import { renderList, renderRate } from './list.js';
 import { initTabs } from './archive.js';
@@ -152,16 +151,12 @@ dom.reload.addEventListener('click', () => {
   fetchOnce();
 });
 
-// 実行の速報。kind で受け持ちを分ける。
-//   rows   … 台帳が動いた（現れた・状態が変わった・終わった）→ 詳細ペインを作り直す
-//   events … 速報が1件届いた → パネルの中へ追記するだけ
-// 速報は1ターンで数百行来るので、そこで作り直すと開いた <details> と
-// 入力中の caret が毎回消える。だから events では作り直さない
-subscribeRuns((kind) => {
-  if (kind === 'events') {
-    RunView.render();
-    return;
-  }
+// 実行の台帳が動いた（現れた・状態が変わった・終わった）ので詳細ペインを作り直す。
+//
+// **速報1件ごとには来ない。** 画面は速報を1件も持たないので、runs.js は
+// 中身を捨てて seq だけ進めている。1ターン数百行のたびに作り直すと、
+// 開いた <details> と入力中の caret が毎回消える
+subscribeRuns(() => {
   // 枠の使用率は行に載って届く。**一覧の tick 任せにしない。**
   // あちらが切れているあいだ（?nolive=1 や再接続待ち）に数だけ凍る
   renderRate();
