@@ -324,6 +324,57 @@ export function sResult({ sessionId = S_ID, subtype = 'success', isError, durati
 }
 
 /**
+ * 許可を求めてくる行（`control_request` ＋ `can_use_tool`）。
+ *
+ * **これが段1の主役。** ここに答えないと、その子は1行も進めずに待ち続ける。
+ *
+ * @param {object} [opts] requestId / toolName / input / suggestions ほか
+ * @returns {object} 1行ぶん
+ */
+export function sPermission({ sessionId = S_ID, requestId = 'p1', toolName = 'Bash',
+  input = { command: 'ls' }, suggestions, toolUseId = 'toolu_1', ...rest } = {}) {
+  const request = {
+    subtype: 'can_use_tool',
+    tool_name: toolName,
+    input,
+    tool_use_id: toolUseId,
+    ...rest,
+  };
+  if (suggestions) request.permission_suggestions = suggestions;
+  return { type: 'control_request', request_id: requestId, session_id: sessionId, request };
+}
+
+/**
+ * 選択肢で聞いてくる行（`AskUserQuestion`）。
+ *
+ * 答えるときに `updatedInput` を組む必要があるので、**原文をそのまま持ち回る**形になる。
+ * その原文が速報に載っていないことを見るテストで使う。
+ *
+ * @param {Array<object>} questions 質問の並び
+ * @param {object} [opts] `sPermission` へ渡すぶん
+ * @returns {object} 1行ぶん
+ */
+export function sQuestion(questions, opts = {}) {
+  return sPermission({ toolName: 'AskUserQuestion', input: { questions }, ...opts });
+}
+
+/**
+ * こちらが撃った要求への返事（`control_response`）。
+ *
+ * `request_id` が `response` の**中**に入る点が要求と違う。実物もこの形。
+ *
+ * @param {string} requestId どの要求への返事か
+ * @param {object} [opts] ok / error / response
+ * @returns {object} 1行ぶん
+ */
+export function sControlResponse(requestId, { ok = true, error, response } = {}) {
+  const body = { subtype: ok ? 'success' : 'error', request_id: requestId };
+  if (!ok) body.error = error ?? '断られました';
+  if (response !== undefined) body.response = response;
+  return { type: 'control_response', response: body };
+}
+
+/**
  * 行の並びを NDJSON の1本のテキストにする。
  *
  * 末尾にも改行を付ける。実物もそうなっていて、

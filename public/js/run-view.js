@@ -638,7 +638,7 @@ function buildOps() {
   gridRow(grid, 'run-sw-effort', '思考量', swEffort, '深いほど時間と費用が増える');
 
   const swMode = el('select', 'settings-select');
-  gridRow(grid, 'run-sw-mode', '権限モード', swMode, 'ここで選んだ内容で走る。途中で許可は求めない');
+  gridRow(grid, 'run-sw-mode', '権限モード', swMode, '次のターンからこの内容で走る');
 
   // 予算切れから抜ける道はここだけ（そのまま送ると同じ上限で回り直す）
   const swBudget = el('input', 'settings-num');

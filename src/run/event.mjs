@@ -45,6 +45,24 @@ export const TEXT_MAX = 2000;
 export const TOOL_RESULT_MAX = 200;
 
 /**
+ * 何を聞かれているのかを3つに分ける。
+ *
+ * **状態は分けない**（許可待ちはどれも `needs-permission` の1つ）。
+ * 遷移の組み合わせを3倍にして得られるのが札の文言だけになるため、
+ * 違いはこの値に持たせて、画面が見出しと押しボタンを変える。
+ *
+ * 台帳（`ledger.mjs`）もこの関数を使う。**判断を2箇所に書かない。**
+ *
+ * @param {string|null} toolName ツール名
+ * @returns {'plan'|'question'|'tool'}
+ */
+export function askKindOf(toolName) {
+  if (toolName === 'ExitPlanMode') return 'plan';
+  if (toolName === 'AskUserQuestion') return 'question';
+  return 'tool';
+}
+
+/**
  * stream-json の1行を、0個以上の出来事に変える。
  *
  * `seq` / `at` / `runId` は付けない。**それは台帳の仕事。**
@@ -60,8 +78,20 @@ export const TOOL_RESULT_MAX = 200;
  * | `tool-result` | `id` `isError` `text` | その結果が返った |
  * | `echo` | `text` `replay` | 自分が送った行の戻り（`--replay-user-messages`） |
  * | `result` | `isError` `terminalReason` ほか | 1往復の終わり |
+ * | `permission` | `requestId` `ask` `tool` `detail` | 許可を求められた |
  * | `other` | `type` `subtype` | フック系など、いま扱わないもの |
  * | `broken` | `sample` | JSON として読めなかった |
+ *
+ * `control` と `control-result` からは**出来事を作らない。**
+ * あれは人が読むものではなく、答えるための配線。
+ * 何が起きたか（断った・モードが変わった）は台帳が `note` で1行積む。
+ *
+ * ## 許可要求から `input` の原文を出さない
+ *
+ * `classifyStreamLine` は `input` を**切らずに**渡してくる（`AskUserQuestion` に答えるとき
+ * `updatedInput` を組むのに原文が要るため）。だがそれを速報に載せると、
+ * `Write` の `content` が数MBのままリング1000件に載る。
+ * ここで載せるのは `describeTool` が返す1行だけにする。**原文は台帳が持つ。**
  *
  * サブエージェント（Task）の出力には `sub: true` を添える。
  * 親の発言と混ざって並ぶと、どちらが本流か分からなくなるため。
@@ -152,6 +182,25 @@ export function toRunEvents(classified) {
       });
       break;
     }
+
+    case 'permission': {
+      const info = classified.info ?? {};
+      push({
+        kind: 'permission',
+        requestId: info.requestId ?? null,
+        ask: askKindOf(info.toolName ?? null),
+        tool: info.toolName ?? null,
+        // **原文は載せない。** describeTool は必ず1行に畳んでから返す。
+        // 知らないツールで材料が無かったときだけ、CLI が付けてきた説明に落ちる
+        detail: describeTool(info.toolName, info.input) ?? oneLine(info.description, TOOL_RESULT_MAX),
+      });
+      break;
+    }
+
+    case 'control':
+    case 'control-result':
+      // 出来事にしない（この関数の説明を参照）
+      break;
 
     case 'broken':
       push({ kind: 'broken', sample: classified.sample ?? null });

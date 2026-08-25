@@ -9,9 +9,18 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyStreamLine, encodeUserLine, sameSessionId } from '../src/parse/stream.mjs';
+import {
+  classifyStreamLine,
+  encodeControlError,
+  encodeControlRequest,
+  encodePermissionResponse,
+  encodeUserLine,
+  sameSessionId,
+} from '../src/parse/stream.mjs';
 import { contentBlocks, textOf, toolUses, toolResults } from '../src/parse/entries.mjs';
-import { S_ID, sysInit, sAssistant, sUser, sResult, sLines } from './helpers.mjs';
+import {
+  S_ID, sysInit, sAssistant, sUser, sResult, sLines, sPermission, sQuestion, sControlResponse,
+} from './helpers.mjs';
 
 /** オブジェクトを1行にして読ませる。実際の経路（文字列で届く）と同じにする。 */
 const read = (line) => classifyStreamLine(JSON.stringify(line));
@@ -179,10 +188,11 @@ test('system でも init でなければ other。subtype は残す', () => {
 });
 
 test('知らない type は other にするが、生の type は捨てない', () => {
-  // 許可を求めてくる行。v1 では扱わないが、扱う気になったときに読み直せるようにしておく
-  const got = read({ type: 'control_request', request_id: 'r1', session_id: S_ID });
+  // 上限に当たりかけていることを知らせる行（実測でここへ落ちた）。
+  // **例に control_request を使わない。** あれは許可の道になったので other へは落ちない
+  const got = read({ type: 'rate_limit_event', session_id: S_ID });
   assert.equal(got.kind, 'other');
-  assert.equal(got.type, 'control_request');
+  assert.equal(got.type, 'rate_limit_event');
   assert.equal(got.sessionId, S_ID);
 });
 
@@ -370,4 +380,137 @@ test('1往復ぶんの並びを順に読める', () => {
     .map((l) => classifyStreamLine(l).kind);
 
   assert.deepEqual(kinds, ['init', 'assistant', 'user', 'assistant', 'result']);
+});
+
+/*
+ * 許可を求められる（control_request）と、答える（control_response）
+ */
+
+test('can_use_tool は permission として読む', () => {
+  const got = read(sPermission({
+    requestId: 'p9', toolName: 'Bash', input: { command: 'npm test' }, toolUseId: 'toolu_7',
+  }));
+  assert.equal(got.kind, 'permission');
+  assert.equal(got.type, 'control_request');
+  assert.equal(got.subtype, 'can_use_tool');
+  assert.equal(got.sessionId, S_ID);
+  assert.equal(got.info.requestId, 'p9');
+  assert.equal(got.info.toolName, 'Bash');
+  assert.equal(got.info.toolUseId, 'toolu_7');
+  assert.deepEqual(got.info.input, { command: 'npm test' });
+  assert.deepEqual(got.info.suggestions, []);
+});
+
+test('input は切らずに渡す（updatedInput を組むのに原文が要る）', () => {
+  // 切るのはここから先（run/event.mjs）。この層で切ると、選択肢に答えられなくなる
+  const long = 'x'.repeat(50_000);
+  const got = read(sPermission({ toolName: 'Write', input: { file_path: 'a.txt', content: long } }));
+  assert.equal(got.info.input.content.length, 50_000);
+});
+
+test('選択肢で聞かれたぶんも同じ道を通る', () => {
+  const got = read(sQuestion([{ question: 'どっち？', options: [{ label: 'あ' }, { label: 'い' }] }]));
+  assert.equal(got.kind, 'permission');
+  assert.equal(got.info.toolName, 'AskUserQuestion');
+  assert.equal(got.info.input.questions[0].options.length, 2);
+});
+
+test('permission_suggestions はそのまま持つ', () => {
+  // 実測で入っていたのは destination:'session'。撃っても ~/.claude には触らない
+  const s = [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }];
+  const got = read(sPermission({ suggestions: s }));
+  assert.deepEqual(got.info.suggestions, s);
+});
+
+test('知らない subtype の control_request でも request_id は必ず取る', () => {
+  // **ここが一番大事。** 答えないとその子は永久に待つので、
+  // 「読めなかったから捨てる」を許さない
+  const got = read({ type: 'control_request', request_id: 'z9', request: { subtype: 'なにこれ' } });
+  assert.equal(got.kind, 'control');
+  assert.equal(got.subtype, 'なにこれ');
+  assert.equal(got.info.requestId, 'z9');
+});
+
+test('request_id が読めない control_request は other へ落とす', () => {
+  // 答えようが無いので、答える道に載せない
+  const got = read({ type: 'control_request', request: { subtype: 'can_use_tool', tool_name: 'Bash' } });
+  assert.equal(got.kind, 'other');
+  assert.equal(got.type, 'control_request');
+});
+
+test('control_response は control-result。request_id は response の中にある', () => {
+  const got = read(sControlResponse('req_1', { response: { mode: 'acceptEdits' } }));
+  assert.equal(got.kind, 'control-result');
+  assert.equal(got.info.requestId, 'req_1');
+  assert.equal(got.info.ok, true);
+  assert.deepEqual(got.info.response, { mode: 'acceptEdits' });
+});
+
+test('断られた control_response は ok が偽で理由が残る', () => {
+  const got = read(sControlResponse('req_2', { ok: false, error: '知らないモードです' }));
+  assert.equal(got.kind, 'control-result');
+  assert.equal(got.info.ok, false);
+  assert.equal(got.info.error, '知らないモードです');
+});
+
+test('allow は替えるときだけ updatedInput を載せる', () => {
+  const bare = JSON.parse(encodePermissionResponse('p1', { behavior: 'allow' }));
+  assert.equal(bare.type, 'control_response');
+  assert.equal(bare.response.subtype, 'success');
+  assert.equal(bare.response.request_id, 'p1');
+  assert.deepEqual(bare.response.response, { behavior: 'allow' });
+
+  const withInput = JSON.parse(encodePermissionResponse('p1', {
+    behavior: 'allow', updatedInput: { answers: ['あ'] },
+  }));
+  assert.deepEqual(withInput.response.response.updatedInput, { answers: ['あ'] });
+});
+
+test('deny のときは updatedInput も updatedPermissions も落とす', () => {
+  // 混ざった形は向こうの検証がどう転ぶか分からず、こちらのバグが「たまに通る」形で残る
+  const line = JSON.parse(encodePermissionResponse('p1', {
+    behavior: 'deny',
+    message: 'いまは要らない',
+    updatedInput: { command: 'rm -rf /' },
+    updatedPermissions: [{ type: 'setMode' }],
+  }));
+  assert.deepEqual(line.response.response, { behavior: 'deny', message: 'いまは要らない' });
+});
+
+test('deny の理由は空でもよい（止めたいときに文章を考えさせない）', () => {
+  const line = JSON.parse(encodePermissionResponse('p1', { behavior: 'deny', message: '  ' }));
+  assert.equal(typeof line.response.response.message, 'string');
+  assert.ok(line.response.response.message.length > 0);
+});
+
+test('答えの行は末尾に改行が付く', () => {
+  assert.ok(encodePermissionResponse('p1', { behavior: 'allow' }).endsWith('\n'));
+  assert.ok(encodeControlError('p1').endsWith('\n'));
+  assert.ok(encodeControlRequest('r1', 'interrupt').endsWith('\n'));
+});
+
+test('扱えない要求は subtype:error で断る', () => {
+  const line = JSON.parse(encodeControlError('z9', 'この画面では なにこれ を扱えません'));
+  assert.equal(line.response.subtype, 'error');
+  assert.equal(line.response.request_id, 'z9');
+  assert.equal(line.response.error, 'この画面では なにこれ を扱えません');
+});
+
+test('こちらから撃つ要求は params に subtype を上書きされない', () => {
+  const line = JSON.parse(encodeControlRequest('r1', 'set_permission_mode', {
+    mode: 'auto', subtype: 'end_session',
+  }));
+  assert.equal(line.type, 'control_request');
+  assert.equal(line.request_id, 'r1');
+  assert.equal(line.request.subtype, 'set_permission_mode');
+  assert.equal(line.request.mode, 'auto');
+});
+
+test('壊れた引数では組まずに投げる', () => {
+  assert.throws(() => encodePermissionResponse('', { behavior: 'allow' }), TypeError);
+  assert.throws(() => encodePermissionResponse('p1', null), TypeError);
+  assert.throws(() => encodePermissionResponse('p1', { behavior: 'maybe' }), TypeError);
+  assert.throws(() => encodeControlError(null), TypeError);
+  assert.throws(() => encodeControlRequest('r1', ''), TypeError);
+  assert.throws(() => encodeControlRequest('', 'interrupt'), TypeError);
 });

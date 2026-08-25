@@ -21,12 +21,37 @@
  * ```
  * starting → running → waiting（result が来た＝あなたの番）
  *                   ↘ stalled（STALL_MS 沈黙）
+ *                   ↘ needs-permission（許可を聞かれた＝答えるまで1行も進まない）
  * running/waiting/stalled → stopping → stopped
  *                         → failed / done
  * ```
  *
  * `stopping` はプランに無いが足してある。`stopClaude` は最大5秒かかるので、
  * そのあいだ `running` と言うのも `stopped` と言うのも嘘になる。
+ *
+ * ## 許可待ちを `waiting` に寄せない
+ *
+ * `waiting` は「1行送れば進む」状態で、`markInput()` がそれを前提に `running` へ戻す。
+ * 許可待ちの run に user 行を送っても CLI は `control_response` を待ち続けるので、
+ * 寄せると「送ったのに動かない」が起きる——**直したばかりのバグと同じ壊れ方の再生産になる。**
+ *
+ * `needs-permission` は `isRunOver` にも `isChildDone` にも**入れない。**
+ * 子は生きて待っている。畳むと答える先が消える。
+ * `tick()` の無音判定の射程も広げない（許可待ちの無音は正常）。代わりに
+ * `PERMISSION_TIMEOUT_MS` で測り、過ぎたら**自動で断る。**
+ *
+ * 質問もプラン承認もツール許可も、状態はこの1つ。**3つに割らない。**
+ * 遷移の組み合わせが3倍になって、得られるのは札の文言だけになる。
+ * 違いは `pending.kind`（`'plan'|'question'|'tool'`）に持たせ、画面がそれで見出しを変える。
+ *
+ * ## 行は組まない。意図だけ積む
+ *
+ * NDJSON を組むのは `parse/stream.mjs`、stdin へ書くのは `run/index.mjs`。
+ * こちらは送るべき意図を `outbox` へ積み、`takeOutbox()` で渡すだけにする。
+ * **「判断は台帳、手を動かすのは殻」の向きをここでも崩さない。**
+ *
+ * だから `apply()` や `tick()` の戻り値は今までどおり「積んだ速報の配列」のまま。
+ * `{events, outbox}` のような形に変えると、呼ぶ側と既存のテストが総崩れになる。
  *
  * ## 「1ターンで閉じる世界」に最初から備える
  *
@@ -55,8 +80,8 @@
  */
 import { sameSessionId } from '../parse/stream.mjs';
 import { ballOf } from '../parse/state.mjs';
-import { oneLine } from '../shared/text.mjs';
-import { toRunEvents } from './event.mjs';
+import { clip, oneLine } from '../shared/text.mjs';
+import { askKindOf, toRunEvents } from './event.mjs';
 
 /**
  * 同時に動かせる本数。
@@ -89,6 +114,31 @@ export const HISTORY_MAX = 20;
 /** 理由の文字列の上限。一覧に載る値なので短く保つ。 */
 const REASON_MAX = 200;
 
+/**
+ * 1本の run が同時に抱えられる未応答の要求の数。
+ *
+ * 並列のツール呼び出しで複数まとめて来ることがあるので1本では足りない。
+ * 超えたぶんは**その場で断る。** 放っておくと向こうが待ち続けて詰まる。
+ */
+export const PENDING_MAX = 8;
+
+/**
+ * 許可の答えを待つ上限。過ぎたら自動で断る。
+ *
+ * **ブラウザを閉じた・席を外したときの唯一の逃げ道なので消さない。**
+ * 無いと、答えられないまま待つ子が残り、画面には「許可待ち」と出続ける。
+ *
+ * 10分にしてあるのは `STALL_MS`（2分）より十分長く、
+ * `notify/` の返信待ち通知（2分）で Slack に気づいて戻ってこられる長さだから。
+ */
+export const PERMISSION_TIMEOUT_MS = 600000;
+
+/** 要求カードに載せる本文の上限。プランの全文がここに入る。 */
+export const ASK_BODY_MAX = 8000;
+
+/** 本文の中の値1つぶんの上限。これが無いと `Write` の `content` だけで枠を使い切る。 */
+const ASK_VALUE_MAX = 3000;
+
 /** 状態の日本語。画面側に日本語を持たせないため、ここから配る（`STATE_LABELS` と同じ考え方）。 */
 export const RUN_STATE_LABELS = Object.freeze({
   starting: '起動中',
@@ -96,6 +146,9 @@ export const RUN_STATE_LABELS = Object.freeze({
   waiting: 'あなたの番',
   // 見たのは「出力が来ていない」だけ。「応答なし」と書くと、圧縮中の正常な run を故障として報告することになる
   stalled: '無音',
+  // **終端ではないし、子も生きている。** 答えるまで1行も進まないだけ。
+  // だから下の OVER にも `isChildDone` にも入れない（入れると答える先がその瞬間に消える）
+  'needs-permission': '許可待ち',
   // **終端ではない。** 自分で置いた上限に当たっただけで、上げれば同じ会話の続きが打てる。
   // だから下の OVER には入れない（入れると `entry.spec` が捨てられ、続ける道がその瞬間に消える）
   budget: '予算切れ',
@@ -166,6 +219,126 @@ export function quietFor(ms) {
 }
 
 /**
+ * JSON にできないものが来ても落ちない `JSON.stringify`。
+ *
+ * 読んでいるのは Claude Code の内部データなので、想定した形が来るとは限らない。
+ *
+ * @param {*} v 何か
+ * @returns {string|null} 文字にできなければ null
+ */
+function safeJson(v) {
+  try {
+    const s = JSON.stringify(v);
+    return typeof s === 'string' ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 要求カードに出す本文を組む。
+ *
+ * 段としてはここで**文字列1本に畳む。** 選択肢を機械が読む形は後で足す。
+ * 畳まずに置くと、`Write` の `content`（数MBになりうる）が行に載って、
+ * 一覧の押し出しのたびに JSON へ焼かれることになる。
+ *
+ * @param {string|null} toolName ツール名
+ * @param {object|null} input CLI が渡してきた引数の原文
+ * @returns {string|null} 出すものが無ければ null
+ */
+function askBody(toolName, input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+
+  // プランは本文そのものが読みたいもの。Markdown のまま渡す（画面が mdView で描く）
+  if (toolName === 'ExitPlanMode') return clip(input.plan, ASK_BODY_MAX);
+
+  if (toolName === 'AskUserQuestion') {
+    const lines = [];
+    for (const q of Array.isArray(input.questions) ? input.questions : []) {
+      const head = oneLine(q?.question, 200);
+      if (head) lines.push(head);
+      for (const o of Array.isArray(q?.options) ? q.options : []) {
+        const label = oneLine(o?.label, 120);
+        if (!label) continue;
+        const desc = oneLine(o?.description, 200);
+        lines.push(desc ? `  - ${label} — ${desc}` : `  - ${label}`);
+      }
+    }
+    return lines.length > 0 ? clip(lines.join('\n'), ASK_BODY_MAX) : null;
+  }
+
+  // 知らないツールは引数を「キー: 値」で並べる。
+  // **1つの値に枠を使い切らせない。** `content` が先頭に来ると `file_path` が見えなくなる
+  const parts = [];
+  for (const [k, v] of Object.entries(input)) {
+    const val = clip(typeof v === 'string' ? v : safeJson(v), ASK_VALUE_MAX);
+    if (val) parts.push(`${k}: ${val}`);
+  }
+  return parts.length > 0 ? clip(parts.join('\n\n'), ASK_BODY_MAX) : null;
+}
+
+/**
+ * 「今後も許可」で撃つモードを、CLI が付けてきた助言から拾う。
+ *
+ * 実測（2026-08-25・claude 2.1.243）で `Write` の要求に付いてきた形はこれ。
+ *
+ * ```json
+ * [{"type":"setMode","mode":"acceptEdits","destination":"session"}]
+ * ```
+ *
+ * **`destination` が `session` のものだけ拾う。** 設定ファイルへ書く行き先が来た日に
+ * そのまま通すと、`~/.claude` 配下へ書き込まない約束を破ることになる。
+ * 助言が無いツールもある（`ExitPlanMode` には付かなかった）ので、
+ * 取れなければ null。**0 と不明を分けるのと同じで、無いものを既定値で埋めない。**
+ *
+ * @param {*} suggestions `permission_suggestions` の中身
+ * @returns {string|null} 撃つモード。無ければ null
+ */
+function suggestModeOf(suggestions) {
+  if (!Array.isArray(suggestions)) return null;
+  for (const s of suggestions) {
+    if (s?.type !== 'setMode' || s?.destination !== 'session') continue;
+    if (typeof s.mode === 'string' && s.mode) return s.mode;
+  }
+  return null;
+}
+
+/**
+ * 何を聞かれているのかを、速報の文に使う語にする。
+ *
+ * @param {string} kind `askKindOf` の戻り
+ * @param {string|null} tool ツール名
+ * @returns {string} 「プラン」「質問」「Bash」
+ */
+function askWhat(kind, tool) {
+  if (kind === 'plan') return 'プラン';
+  if (kind === 'question') return '質問';
+  return tool ?? 'ツール';
+}
+
+/**
+ * 未応答の要求を、一覧の行に載せる形にする。
+ *
+ * **`input`（原文）を落とす。** 行は押し出しのたびに JSON へ焼かれるので、
+ * 質問の原文まで載せると毎回そのぶんを文字列化することになる。
+ * 原文が要るのは答えを組むときだけで、それは台帳の中で済む。
+ *
+ * @param {object} p pending の1件
+ * @returns {object} 画面へ出す形
+ */
+function askRow(p) {
+  return {
+    id: p.id,
+    kind: p.kind,
+    tool: p.tool,
+    detail: p.detail,
+    body: p.body,
+    suggestMode: p.suggestMode,
+    at: p.at,
+  };
+}
+
+/**
  * 台帳を1つ作る。
  *
  * @param {object} [opts] 上限のたぐい。テストから数値で確かめられるように全部外から渡せる
@@ -174,6 +347,8 @@ export function quietFor(ms) {
  * @param {number} [opts.stallMs] 沈黙とみなすまで
  * @param {number} [opts.eventMax] 速報を貯める件数
  * @param {number} [opts.historyMax] 終わった run を残す件数
+ * @param {number} [opts.pendingMax] 同時に抱えられる未応答の要求の数
+ * @param {number} [opts.permissionTimeoutMs] 許可の答えを待つ上限
  * @returns {object} 台帳
  */
 export function createRunLedger({
@@ -182,11 +357,22 @@ export function createRunLedger({
   stallMs = STALL_MS,
   eventMax = EVENT_MAX,
   historyMax = HISTORY_MAX,
+  pendingMax = PENDING_MAX,
+  permissionTimeoutMs = PERMISSION_TIMEOUT_MS,
 } = {}) {
   /** @type {Map<string, object>} runId → run */
   const runs = new Map();
   /** @type {Array<object>} 速報のリングバッファ。**run ごとではなく1本**にしてある */
   const ring = [];
+  /**
+   * @type {Array<object>} 送るべき意図。**行（NDJSON）にはしない。**
+   *
+   * 積むのは3種類。
+   * `{runId, kind:'permission-response', requestId, decision}`
+   * `{runId, kind:'control-error', requestId, message}`
+   * `{runId, kind:'control-request', requestId, subtype, params}`
+   */
+  const outbox = [];
 
   let runSeq = 0;
   let seq = 0;
@@ -249,6 +435,177 @@ export function createRunLedger({
   }
 
   /**
+   * 断る意図を1件積む。
+   *
+   * @param {object} run 対象の run
+   * @param {string} requestId どの要求へ
+   * @param {string} message 理由
+   * @returns {void}
+   */
+  function queueDeny(run, requestId, message) {
+    outbox.push({
+      runId: run.runId,
+      kind: 'permission-response',
+      requestId,
+      decision: { behavior: 'deny', message },
+    });
+  }
+
+  /**
+   * 抱えている未応答の要求を捨てる。
+   *
+   * **`outbox` には積まない。** 子がいない（もしくは畳むと決めた）ので書く先が無い。
+   * 積むと `takeOutbox()` がそれを拾って、閉じた stdin へ書きに行くことになる。
+   *
+   * @param {object} run 対象の run
+   * @returns {void}
+   */
+  function clearPending(run) {
+    run.pending.clear();
+    run.modePending = null;
+  }
+
+  /**
+   * 未応答の要求を1件受け取る。
+   *
+   * 速報は積まない（`toRunEvents` が `permission` を1件積んでいるので二重になる）。
+   * ここで積むのは、断ったときのように**そうしないと見えないこと**だけ。
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `classifyStreamLine` が読んだ `can_use_tool` の中身
+   * @param {string|null} detail 1行の要約（`toRunEvents` が組んだものを使い回す）
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報
+   */
+  function takeAsk(run, info, detail, now) {
+    const id = typeof info.requestId === 'string' ? info.requestId : '';
+    // 宛先が読めないものには答えようが無い（`stream.mjs` が既に弾いているが、ここでも見る）
+    if (!id) return [];
+    // 同じ id が二度来ても上書きしない。上書きすると `at` が動いて時間切れが延びる
+    if (run.pending.has(id)) return [];
+
+    // 畳むと決めたあとに届いたぶん。答える意味が無いので**その場で断る。**
+    // 放っておくと向こうは待ち続け、こちらは pending を抱えたまま終端へ行く
+    if (run.state === 'stopping' || run.state === 'switching') {
+      queueDeny(run, id, 'この実行を止めることにしたので断りました');
+      return [];
+    }
+
+    if (run.pending.size >= pendingMax) {
+      queueDeny(run, id, `いちどに答えられるのは ${pendingMax} 件までです`);
+      return [pushNote(run, `許可要求が ${pendingMax} 件を超えたので断りました`, now)];
+    }
+
+    const input = info.input && typeof info.input === 'object' && !Array.isArray(info.input)
+      ? info.input
+      : null;
+    const kind = askKindOf(info.toolName ?? null);
+    run.pending.set(id, {
+      id,
+      kind,
+      tool: info.toolName ?? null,
+      detail,
+      body: askBody(info.toolName ?? null, input),
+      suggestMode: suggestModeOf(info.suggestions),
+      // **原文を持つのは質問のときだけ。** `allow` は `updatedInput` を省略でき、
+      // 省略すれば CLI が元の入力をそのまま使う。だから `Write` や `Bash` の原文は要らない。
+      // 持つと `content` の数MBがそのまま台帳に居座る
+      input: kind === 'question' ? input : null,
+      at: now,
+    });
+    run.state = 'needs-permission';
+    return [];
+  }
+
+  /**
+   * 扱えない `control_request` に、エラーで答える。
+   *
+   * **黙って捨ててはいけない。** 向こうは応答が来るまで永久に待つ。
+   * 「未知の形で落ちない」を、ここでは「未知の形で詰まらない」まで広げている。
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `{requestId, subtype}`
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報
+   */
+  function refuseControl(run, info, now) {
+    const id = typeof info.requestId === 'string' ? info.requestId : '';
+    if (!id) return [];
+    const sub = info.subtype || '不明';
+    outbox.push({
+      runId: run.runId,
+      kind: 'control-error',
+      requestId: id,
+      message: `この画面では ${sub} を扱えません`,
+    });
+    return [pushNote(run, `扱えない要求（${sub}）を断りました`, now)];
+  }
+
+  /**
+   * こちらが撃った要求の答えを反映する。
+   *
+   * **自分が返した `control_response` も stdout にそのまま echo で戻ってくる**（実測 2026-08-25）。
+   * ただし向こうの `request_id` は `pending` にしか入らず、こちらが採番した id は
+   * `modePending` にしか入らない。だから**採番した id と一致するかどうかだけ**で、
+   * 自分のこだまと本物の応答を分けられる。合わないものは黙って捨てる。
+   *
+   * 受理を待ってから `permissionMode` を書き換えるのは、このアプリが全域で守っている
+   * 「0 と不明を分ける」の一環。**「plan のつもりが acceptEdits で走っている」は最も高くつく誤表示。**
+   *
+   * @param {object} run 対象の run
+   * @param {object} info `{requestId, ok, error, response}`
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報
+   */
+  function takeControlResult(run, info, now) {
+    const p = run.modePending;
+    if (!p || !info.requestId || info.requestId !== p.requestId) return [];
+    run.modePending = null;
+    if (!info.ok) {
+      return [pushNote(run, `権限モードを ${p.mode} に替えられませんでした（${info.error ?? '理由不明'}）`, now)];
+    }
+    run.permissionMode = p.mode;
+    // `kind` を増やさず `note` に `mode` を1つ添えてある。
+    // 新しい kind を作ると画面の `bodyOf` が既定の枝に落ちて**中身の無い行**が出るし、
+    // 殻（`index.mjs`）が `entry.spec.permissionMode` を同期するのに要るのはこの1語だけ
+    return [pushEvent(run, { kind: 'note', text: `権限モードを ${p.mode} にしました`, mode: p.mode }, now)];
+  }
+
+  /**
+   * 答えの無いまま時間切れになった要求を断る。
+   *
+   * 落とす先は `waiting`（あなたの番）。`running` に戻すと、Claude が代わりの手を
+   * 探して詰まったときに `stalled` まで2分かかる。**人が何か言わないと前に進まない**ので、
+   * 待たせている側として並べるほうが正しい。
+   *
+   * 言うのは測ったことだけ（`stalled` と同じ扱い）。「応答なし」と診断しない。
+   *
+   * @param {object} run 対象の run
+   * @param {number} now 時刻
+   * @returns {Array<object>} 積んだ速報。時間切れが無ければ空
+   */
+  function sweepAsks(run, now) {
+    if (run.pending.size === 0 || isChildDone(run.state)) return [];
+    const out = [];
+    for (const [id, p] of [...run.pending]) {
+      const quiet = now - p.at;
+      // 時計が巻き戻ったとき（負）や数でないときに断らないよう、この向きで書く
+      if (!(quiet >= permissionTimeoutMs)) continue;
+      run.pending.delete(id);
+      queueDeny(run, id, `${quietFor(quiet)}答えが無かったので断りました`);
+      out.push(pushNote(run, `${askWhat(p.kind, p.tool)}に${quietFor(quiet)}答えが無かったので断りました`, now));
+    }
+    if (out.length > 0 && run.pending.size === 0 && run.state === 'needs-permission') {
+      run.state = 'waiting';
+      // 沈黙の時計を戻す。戻さないと、待っていたぶんがそのまま無音として数えられて、
+      // 次の `tick` で即 `stalled` に落ちる
+      run.lastLineAt = now;
+      run.reason = '許可の答えが無かったので断りました。続けるなら指示を送ってください';
+    }
+    return out;
+  }
+
+  /**
    * 終わった run が増えすぎないように古いものから落とす。
    *
    * 落とした run の速報はリングに残るが、そのうち押し出されるので放っておく。
@@ -289,6 +646,12 @@ export function createRunLedger({
       // 毎秒動かない（切り替えたときだけ変わる）ので粗い行に載せてよい。
       // 実行パネルの「替えて続ける」が `rows()` 側しか見ないため、ここに無いと欄を埋められない
       budgetUsd: run.budgetUsd,
+      // 未応答の要求。**速報（リング）ではなく行に載せる。**
+      // リングは画面側で400件を超えたぶんが捨てられるので、1ターンで数百行来た日に
+      // 要求そのものが消えて二度と答えられなくなる。行は毎回まるごと入れ替わるので、
+      // 答えて消えたことも取りこぼしも次のフレームで自己修復する。
+      // 中身は要求が来た時と消えた時にしか変わらない＝毎秒 push にはならない
+      asks: [...run.pending.values()].map(askRow),
     };
   }
 
@@ -352,6 +715,10 @@ export function createRunLedger({
         costUSD: null,
         stopRequested: false,
         switchRequested: false,
+        /** @type {Map<string, object>} requestId → 未応答の要求 */
+        pending: new Map(),
+        /** @type {object|null} こちらが撃った `set_permission_mode` の控え。受理されるまで持つ */
+        modePending: null,
         counts: { lines: 0, broken: 0, events: 0 },
       });
       lastStartAt = now;
@@ -425,6 +792,19 @@ export function createRunLedger({
         return pushed;
       }
 
+      // 届いた要求をまず捌く。**`result` の処理より前。**
+      // 1行に両方は載らないので順序に実害は無いが、読み順をこちらへ寄せておく
+      if (classified?.kind === 'permission') {
+        // 1行の要約は `toRunEvents` が `describeTool` で組んだものを使い回す。
+        // ここで組み直すと**同じ判断が2箇所**になり、片方だけ直る日が来る
+        const ev = pushed.find((e) => e.kind === 'permission');
+        pushed.push(...takeAsk(run, classified.info ?? {}, ev?.detail ?? null, now));
+      } else if (classified?.kind === 'control') {
+        pushed.push(...refuseControl(run, classified.info ?? {}, now));
+      } else if (classified?.kind === 'control-result') {
+        pushed.push(...takeControlResult(run, classified.info ?? {}, now));
+      }
+
       for (const ev of pushed) {
         if (ev.kind !== 'result') continue;
 
@@ -485,6 +865,100 @@ export function createRunLedger({
     },
 
     /**
+     * 許可要求に答える。
+     *
+     * 断る理由の切り分けはここでやり、**HTTP のどの番号にするかは殻（`run/index.mjs`）が決める。**
+     * 台帳が番号を知ると、窓口を1つ足すたびにこちらも直すことになる。
+     *
+     * `decision.then` は「答えたあと権限モードも替える」ぶん。
+     * **語彙の検証はここではしない**（`spec.mjs` が持っている）。受け取るのは検証済みの1語と、
+     * 殻が採番した `thenRequestId`。採番をここでやると `randomUUID` が要って、
+     * 「時刻すら外から受ける純関数の器」という作りが崩れる。
+     *
+     * @param {string} runId 対象
+     * @param {string} requestId どの要求への答えか
+     * @param {object} decision `{behavior, message?, updatedInput?, updatedPermissions?, then?, thenRequestId?}`
+     * @param {number} now 時刻
+     * @returns {{ok:boolean, code?:string, events:Array<object>}}
+     *          `code` は `no-run` / `over` / `no-request` / `answered` / `bad`
+     */
+    answer(runId, requestId, decision, now) {
+      const run = runs.get(runId);
+      if (!run) return { ok: false, code: 'no-run', events: [] };
+      // 子がいなければ書く先が無い。予算切れもここに入る（`isRunOver` ではなく `isChildDone`）
+      if (isChildDone(run.state)) return { ok: false, code: 'over', events: [] };
+
+      const id = typeof requestId === 'string' ? requestId : '';
+      if (!id) return { ok: false, code: 'no-request', events: [] };
+      const p = run.pending.get(id);
+      // **run が無いのではなく、その要求がもう無い。** 2つのタブから同時に押したときに
+      // 片方が「別の窓で答えられました」と言えるように、run 不明とは分けて返す
+      if (!p) return { ok: false, code: 'answered', events: [] };
+
+      const behavior = decision?.behavior;
+      if (behavior !== 'allow' && behavior !== 'deny') return { ok: false, code: 'bad', events: [] };
+
+      run.pending.delete(id);
+      // 沈黙の時計を戻す。戻さないと、待たせたぶんがそのまま無音として数えられて、
+      // 答えた直後に `stalled` へ落ちる
+      run.lastLineAt = now;
+
+      // 知っているキーだけ通す。画面から来た余計なキーをそのまま CLI へ渡さない。
+      // `deny` のときに `updatedInput` を落とすといった**形の規則は `stream.mjs` の
+      // エンコーダが持っている**ので、こちらでは絞るだけにして二重に書かない
+      const out = { behavior };
+      const msg = oneLine(decision.message, REASON_MAX);
+      if (msg) out.message = msg;
+      if (decision.updatedInput && typeof decision.updatedInput === 'object'
+        && !Array.isArray(decision.updatedInput)) {
+        out.updatedInput = decision.updatedInput;
+      }
+      if (Array.isArray(decision.updatedPermissions) && decision.updatedPermissions.length > 0) {
+        out.updatedPermissions = decision.updatedPermissions;
+      }
+      outbox.push({ runId, kind: 'permission-response', requestId: id, decision: out });
+
+      const what = askWhat(p.kind, p.tool);
+      const events = [pushNote(run, behavior === 'allow'
+        ? `${what}を許可しました`
+        : `${what}を断りました${msg ? `（${msg}）` : ''}`, now)];
+
+      // **許可を積んだ後に撃つ。** モード変更を先にすると、CLI が plan の検査を
+      // 通している最中に足元が変わる。順序に意味を持たせない場面が多いこのやり取りで、
+      // ここだけは順序に意味がある。
+      // 断ったときに撃たないのは、プランを差し戻したのにモードだけ抜けるのを防ぐため
+      if (behavior === 'allow' && typeof decision.then === 'string' && decision.then
+        && typeof decision.thenRequestId === 'string' && decision.thenRequestId) {
+        run.modePending = { requestId: decision.thenRequestId, mode: decision.then, at: now };
+        outbox.push({
+          runId,
+          kind: 'control-request',
+          requestId: decision.thenRequestId,
+          subtype: 'set_permission_mode',
+          params: { mode: decision.then },
+        });
+        events.push(pushNote(run, `権限モードを ${decision.then} に替えています`, now));
+      }
+
+      // 全部答えたら動き出す。**1件でも残っていれば許可待ちのまま。**
+      // 並列のツール呼び出しでは複数まとめて来るので、1件答えただけでは進まない
+      if (run.pending.size === 0 && run.state === 'needs-permission') run.state = 'running';
+      return { ok: true, events };
+    },
+
+    /**
+     * 送るべき意図を取り出す。**取り出したら空にする。**
+     *
+     * 二重に渡すと同じ許可要求へ2回答えることになり、向こうがどう転ぶか分からない。
+     * 行に組んで stdin へ書くのは `run/index.mjs` の `commit()` の仕事。
+     *
+     * @returns {Array<object>} 積んであったぶん。無ければ空
+     */
+    takeOutbox() {
+      return outbox.length === 0 ? [] : outbox.splice(0, outbox.length);
+    },
+
+    /**
      * 停止を頼まれたことを記録する。
      *
      * `stopClaude` は stdin を閉じてから最大5秒かけて木ごと落とす。
@@ -497,6 +971,8 @@ export function createRunLedger({
     markStopping(runId, now) {
       const run = runs.get(runId);
       if (!run || isRunOver(run.state)) return [];
+      // 畳むと決めたので、抱えている要求に答える意味は無い
+      clearPending(run);
       // 落とさないと、実行パネルの「理由」の行が「止まった理由」として読まれる
       clearStateReason(run);
       run.stopRequested = true;
@@ -524,6 +1000,8 @@ export function createRunLedger({
     markSwitching(runId, spec, now) {
       const run = runs.get(runId);
       if (!run || isRunOver(run.state)) return [];
+      // 建て直すので、いまの子への要求は消える。答えても行き先が無い
+      clearPending(run);
 
       // 外したときは「指定なし」と書く。空欄にすると、外したのか元からなのか読めない
       const parts = [];
@@ -569,6 +1047,7 @@ export function createRunLedger({
     fail(runId, reason, now) {
       const run = runs.get(runId);
       if (!run || isRunOver(run.state)) return [];
+      clearPending(run);
       run.state = 'failed';
       run.reason = oneLine(reason, REASON_MAX) ?? '失敗しました';
       run.pid = null;
@@ -589,6 +1068,9 @@ export function createRunLedger({
     onExit(runId, info, now) {
       const run = runs.get(runId);
       if (!run) return [];
+      // **`isRunOver` の判定より前。** 既に終端でも、抱えたままにする理由が無い。
+      // `outbox` には積まない（子がいないので書く先が無い）
+      clearPending(run);
 
       const code = typeof info?.code === 'number' ? info.code : null;
       const signal = typeof info?.signal === 'string' ? info.signal : null;
@@ -651,6 +1133,15 @@ export function createRunLedger({
       const changed = [];
       const events = [];
       for (const run of runs.values()) {
+        // **無音の判定より前で、状態の絞り込みの外。**
+        // 許可待ちは `running` でも `starting` でもないので、中に入れると一度も測られない
+        const swept = sweepAsks(run, now);
+        if (swept.length > 0) {
+          events.push(...swept);
+          changed.push(run.runId);
+        }
+
+        // 許可待ちの無音は正常なので射程を広げない。あちらは上の時間切れが見ている
         if (run.state !== 'running' && run.state !== 'starting') continue;
         if (now - (run.lastLineAt ?? run.startedAt) < stallMs) continue;
         // 言うのは測ったことだけ。圧縮中は2分以上ふつうに無音になる（実測121秒）ので、
@@ -757,6 +1248,8 @@ const RUN_TO_LIST_STATE = Object.freeze({
   switching: 'running',
   waiting: 'awaiting-reply',
   stalled: 'awaiting-reply',
+  // 許可待ちも「あなたの番」の位置。押さないと1行も進まないので、いちばん人を待たせている
+  'needs-permission': 'awaiting-reply',
   // 予算切れも「あなたの番」の位置。上げて続けるか止めるかを決めるのは人なので、
   // 待たせているものとして同じ高さに並べる
   budget: 'awaiting-reply',

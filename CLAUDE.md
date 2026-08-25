@@ -137,7 +137,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 - `notify/index.mjs:createNotifier`
 - `update/state.mjs:loadUpdateState`
 - `startup/state.mjs:loadStartupState`
-- `run/index.mjs:createRunner`（`server.mjs` が触る唯一の口。12個の関数を返す）
+- `run/index.mjs:createRunner`（`server.mjs` が触る唯一の口。13個の関数を返す）
 - `run/spec.mjs:buildRunSpec`（起動指定を検証して argv まで組む）
 - `os/focus.mjs:focusTerminal`
 - `os/claude.mjs:probeClaude` / `claudeInfo`（探すのと、結果を読むのを分けてある）
@@ -253,6 +253,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
 | `POST /api/runs` | セッションを1本起こす。202 を返し、以降は速報で追う |
 | `POST /api/runs/:id/input` | 走っている（または待っている）ものへ1行送る |
+| `POST /api/runs/:id/answer` | 許可要求に答える。許可・拒否と、続けて撃つ権限モード。**質問用の窓口を分けない**（実体は同じ `can_use_tool` の1本の道） |
 | `POST /api/runs/:id/stop` | 止める。3段階。もう終わっているものへの連打は 200 |
 | `POST /api/runs/:id/switch` | モデル・思考量・権限モードを替えて `--resume` で続ける。202 |
 | `POST /api/settings/notify` | 保存して即反映。応答は GET と同じ形 |

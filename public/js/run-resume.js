@@ -186,17 +186,15 @@ function buildUi() {
   const msg = el('p', 'settings-msg');
   msg.setAttribute('role', 'status');
 
-  // 許可を求めないことだけは手元にも書く。**パネルの説明を読んでいなくても押せる**ので、
+  // 確認がどこへ出るかだけは手元にも書く。**パネルの説明を読んでいなくても押せる**ので、
   // いちばん外せない1行をここへ置く（残りの説明はパネル側）
-  bar.append(line, el('p', 'settings-hint', '途中で許可は求めません'), msg);
+  bar.append(line, el('p', 'settings-hint', '確認はこの画面に出ます'), msg);
 
   // ── 状況の説明と、モデルなどの指定。パネル側に残す
   const wrap = el('div', 'run-ops');
 
   wrap.append(el('p', 'run-note',
     'ターミナル側はもう動いていません。同じセッションのまま、この画面から続きを起こせます。'));
-  wrap.append(el('p', 'run-note',
-    'ここから起こしたセッションは、途中であなたに許可を求めません。'));
 
   const grid = el('div', 'settings-grid');
   const model = el('input', 'settings-text');

@@ -393,6 +393,8 @@ test('いちばん素の argv', () => {
     '--output-format', 'stream-json',
     '--replay-user-messages',
     '--permission-mode', 'plan',
+    // **モードの直後に必ず付く。** 外すと許可要求がホストへ届かず、CLI が拒否に倒す
+    '--permission-prompt-tool', 'stdio',
     // 予算を指定していないので --max-budget-usd は入らない
     '--session-id', ID,
   ]);
@@ -409,6 +411,7 @@ test('全部指定した argv', () => {
     '--output-format', 'stream-json',
     '--replay-user-messages',
     '--permission-mode', 'acceptEdits',
+    '--permission-prompt-tool', 'stdio',
     '--max-budget-usd', '2',
     '--session-id', ID,
     '--model', 'claude-opus-5',
@@ -425,6 +428,7 @@ test('続きの argv', () => {
     '--output-format', 'stream-json',
     '--replay-user-messages',
     '--permission-mode', 'plan',
+    '--permission-prompt-tool', 'stdio',
     '--max-budget-usd', '5',
     '--resume', ID,
     '--model', 'opus',

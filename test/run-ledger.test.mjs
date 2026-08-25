@@ -10,9 +10,11 @@ import assert from 'node:assert/strict';
 import { classifyStreamLine } from '../src/parse/stream.mjs';
 import {
   createRunLedger, isChildDone, isRunOver, mergeRuns, quietFor,
-  RUN_STATE_LABELS, RUN_MAX, STALL_MS,
+  RUN_STATE_LABELS, RUN_MAX, STALL_MS, ASK_BODY_MAX, PENDING_MAX, PERMISSION_TIMEOUT_MS,
 } from '../src/run/ledger.mjs';
-import { sysInit, sAssistant, sResult, S_ID } from './helpers.mjs';
+import {
+  sysInit, sAssistant, sResult, sPermission, sQuestion, sControlResponse, S_ID,
+} from './helpers.mjs';
 
 const T = 1_000_000;
 
@@ -48,8 +50,9 @@ function started(opts = {}) {
 test('isRunOver は終わった3つだけを真にする', () => {
   for (const s of ['stopped', 'failed', 'done']) assert.equal(isRunOver(s), true);
   // stopping と switching は終端ではない。**ここを真にすると切り替えが起こし直せなくなる**
-  // budget も同じ。真にすると `detach()` が `entry.spec` を捨て、上げて続ける道が消える
-  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping', 'switching', 'budget']) {
+  // budget も同じ。真にすると `detach()` が `entry.spec` を捨て、上げて続ける道が消える。
+  // needs-permission も偽。**子は生きて答えを待っている**ので、畳むと答えられなくなる
+  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping', 'switching', 'budget', 'needs-permission']) {
     assert.equal(isRunOver(s), false);
   }
 });
@@ -58,13 +61,14 @@ test('isChildDone は終わった3つ ＋ 予算切れ', () => {
   // 「もう動かない」（`isRunOver`）と「いま子がいない」（`isChildDone`）は別の話。
   // 混ぜると、予算切れが終端になるか、上限に当たった子が畳まれずに残るかのどちらかになる
   for (const s of ['stopped', 'failed', 'done', 'budget']) assert.equal(isChildDone(s), true);
-  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping', 'switching']) {
+  for (const s of ['starting', 'running', 'waiting', 'stalled', 'stopping', 'switching', 'needs-permission']) {
     assert.equal(isChildDone(s), false);
   }
 });
 
 test('状態の言い方は全部そろっている', () => {
-  for (const s of ['starting', 'running', 'waiting', 'stalled', 'budget', 'stopping', 'switching', 'stopped', 'failed', 'done']) {
+  for (const s of ['starting', 'running', 'waiting', 'stalled', 'budget', 'needs-permission',
+    'stopping', 'switching', 'stopped', 'failed', 'done']) {
     assert.equal(typeof RUN_STATE_LABELS[s], 'string');
   }
 });
@@ -943,4 +947,364 @@ test('台帳が空でも壊さない', () => {
   assert.equal(mergeRuns(rows, [], T), rows);
   assert.equal(mergeRuns(rows, null, T), rows);
   assert.deepEqual(mergeRuns(null, [], T), []);
+});
+
+/*
+ * 許可要求（段1）。
+ *
+ * ここが台帳の新しい分岐の全部。**答えられないまま止まったプロセスを残さない**ことが
+ * この節の目的なので、逃げ道（時間切れ・子の死・止めると決めたあと）を厚めに見る。
+ */
+
+/** 起こして、許可要求を1件受けたところまで。 */
+function asked(opts = {}) {
+  const { led, id } = started(opts);
+  feed(led, id, sPermission({ requestId: 'p1' }), T + 1000);
+  return { led, id };
+}
+
+test('要求が来たら許可待ちになる。ただし1件も送らない', () => {
+  const { led, id } = asked();
+
+  const [row] = led.rows();
+  assert.equal(row.state, 'needs-permission');
+  assert.equal(row.stateLabel, '許可待ち');
+  assert.equal(row.asks.length, 1);
+  assert.equal(row.asks[0].id, 'p1');
+  assert.equal(row.asks[0].kind, 'tool');
+  assert.equal(row.asks[0].tool, 'Bash');
+  assert.equal(row.asks[0].at, T + 1000);
+  assert.equal(row.asks[0].detail, 'ls');
+  // **自動で許可しないことの番人。** 人が答えるまで意図は1つも積まれない
+  assert.deepEqual(led.takeOutbox(), []);
+  assert.equal(led.get(id).counts.lines, 1, '行が届いたことは数える');
+});
+
+test('聞かれ方は3つに分かれて行に載る', () => {
+  const { led, id } = started();
+  feed(led, id, sPermission({ requestId: 'a', toolName: 'ExitPlanMode', input: { plan: '# やること' } }), T + 10);
+  feed(led, id, sQuestion([{ question: 'どっち？', options: [{ label: 'あ' }] }], { requestId: 'b' }), T + 20);
+  feed(led, id, sPermission({ requestId: 'c', toolName: 'Write', input: { file_path: 'a.txt' } }), T + 30);
+
+  // 状態は1つ（needs-permission）だけ。違いはここに持たせて、画面が見出しを変える
+  assert.deepEqual(led.rows()[0].asks.map((a) => a.kind), ['plan', 'question', 'tool']);
+  assert.equal(led.rows()[0].state, 'needs-permission');
+});
+
+test('行に載る要求は原文を持たない', () => {
+  const { led, id } = started();
+  const content = 'x'.repeat(200_000);
+  feed(led, id, sPermission({ toolName: 'Write', input: { file_path: 'a.txt', content } }), T + 10);
+
+  const [ask] = led.rows()[0].asks;
+  // 行は押し出しのたびに JSON へ焼かれる。原文を載せると毎回そのぶんを文字列化することになる
+  assert.equal('input' in ask, false);
+  // 読める形には畳んである（画面がそのまま出す）。1つの値に枠を使い切らせない
+  assert.ok(ask.body.includes('file_path: a.txt'));
+  assert.ok(ask.body.length < ASK_BODY_MAX + 100);
+  assert.ok(ask.body.endsWith('…（以下省略）'));
+});
+
+test('プランの本文は Markdown のまま持つ', () => {
+  const { led, id } = started();
+  feed(led, id, sPermission({ toolName: 'ExitPlanMode', input: { plan: '# やること\n\n- 直す' } }), T + 10);
+  // 画面が mdView で描くので、改行も見出しの記号もそのまま渡す
+  assert.equal(led.rows()[0].asks[0].body, '# やること\n\n- 直す');
+});
+
+test('質問は選択肢まで畳んで持つ', () => {
+  const { led, id } = started();
+  feed(led, id, sQuestion([{
+    question: 'どっちで進める？',
+    options: [{ label: 'いますぐ', description: '雑でよい' }, { label: 'あとで' }],
+  }]), T + 10);
+
+  assert.equal(led.rows()[0].asks[0].body, 'どっちで進める？\n  - いますぐ — 雑でよい\n  - あとで');
+});
+
+test('答えたら消えて走り出す', () => {
+  const { led, id } = asked();
+  const res = led.answer(id, 'p1', { behavior: 'allow' }, T + 2000);
+  assert.equal(res.ok, true);
+  assert.equal(res.events.length, 1);
+  assert.equal(res.events[0].kind, 'note');
+
+  const [row] = led.rows();
+  assert.equal(row.state, 'running');
+  assert.deepEqual(row.asks, []);
+
+  assert.deepEqual(led.takeOutbox(), [{
+    runId: id, kind: 'permission-response', requestId: 'p1', decision: { behavior: 'allow' },
+  }]);
+});
+
+test('1件でも残っていれば許可待ちのまま', () => {
+  // 並列のツール呼び出しではまとめて来る。1件答えただけで走り出したことにしない
+  const { led, id } = started();
+  feed(led, id, sPermission({ requestId: 'a' }), T + 10);
+  feed(led, id, sPermission({ requestId: 'b' }), T + 20);
+
+  led.answer(id, 'a', { behavior: 'allow' }, T + 30);
+  assert.equal(led.rows()[0].state, 'needs-permission');
+  led.answer(id, 'b', { behavior: 'allow' }, T + 40);
+  assert.equal(led.rows()[0].state, 'running');
+});
+
+test('答えたら沈黙の時計を戻す', () => {
+  // 戻さないと、待たせたぶんがそのまま無音として数えられて、答えた直後に stalled へ落ちる
+  const { led, id } = asked();
+  led.answer(id, 'p1', { behavior: 'allow' }, T + 10 * STALL_MS);
+  assert.deepEqual(led.tick(T + 10 * STALL_MS + 1000).changed, []);
+  assert.equal(led.rows()[0].state, 'running');
+});
+
+test('取り出したら空になる', () => {
+  // 二重に渡すと、同じ要求へ2回答えることになる。向こうがどう転ぶか分からない
+  const { led, id } = asked();
+  led.answer(id, 'p1', { behavior: 'allow' }, T + 2000);
+  assert.equal(led.takeOutbox().length, 1);
+  assert.deepEqual(led.takeOutbox(), [], '2回目は空');
+});
+
+test('同じ要求に2回答えたら断る（別の窓で答えられた）', () => {
+  // 2つのタブから同時に押したとき、片方に「別の窓で答えられました」と出すため
+  const { led, id } = asked();
+  assert.equal(led.answer(id, 'p1', { behavior: 'allow' }, T + 10).ok, true);
+  const again = led.answer(id, 'p1', { behavior: 'deny' }, T + 20);
+  assert.equal(again.ok, false);
+  assert.equal(again.code, 'answered');
+  assert.equal(led.takeOutbox().length, 1, '2通目は積まれない');
+});
+
+test('断り方の分かれ目', () => {
+  const { led, id } = asked();
+  assert.equal(led.answer('しらない', 'p1', { behavior: 'allow' }, T).code, 'no-run');
+  assert.equal(led.answer(id, '', { behavior: 'allow' }, T).code, 'no-request');
+  // 番号はあるが、その要求がもう無い。run 不明とは分けて返す（2つのタブで同時に押したとき）
+  assert.equal(led.answer(id, 'しらない', { behavior: 'allow' }, T).code, 'answered');
+  assert.equal(led.answer(id, 'p1', { behavior: 'たぶん' }, T).code, 'bad');
+  assert.equal(led.answer(id, 'p1', null, T).code, 'bad');
+});
+
+test('子がいなくなった run には答えられない', () => {
+  const { led, id } = asked();
+  led.onExit(id, { code: 0 }, T + 2000);
+  const res = led.answer(id, 'p1', { behavior: 'allow' }, T + 3000);
+  assert.equal(res.ok, false);
+  assert.equal(res.code, 'over');
+});
+
+test('子が死んだら要求ごと捨てる。書く先が無いので積まない', () => {
+  const { led, id } = asked();
+  led.onExit(id, { code: 1 }, T + 2000);
+  assert.deepEqual(led.rows()[0].asks, []);
+  assert.deepEqual(led.takeOutbox(), []);
+});
+
+test('起こせなかったときも要求を抱えたままにしない', () => {
+  const { led, id } = asked();
+  led.fail(id, '書き込みに失敗しました', T + 2000);
+  assert.deepEqual(led.rows()[0].asks, []);
+  assert.deepEqual(led.takeOutbox(), []);
+});
+
+test('止めると決めたあとに来た要求は、その場で断る', () => {
+  // 抱えると「止めたのに許可待ちが出ている」になる。答えても意味が無い
+  const { led, id } = started();
+  led.markStopping(id, T + 10);
+  feed(led, id, sPermission({ requestId: 'p1' }), T + 20);
+
+  assert.deepEqual(led.rows()[0].asks, []);
+  const [out] = led.takeOutbox();
+  assert.equal(out.kind, 'permission-response');
+  assert.equal(out.requestId, 'p1');
+  assert.equal(out.decision.behavior, 'deny');
+});
+
+test('抱えられる数を超えたら即座に断る', () => {
+  // 放っておくと詰まる。断れば CLI 側が次の手を探せる
+  const { led, id } = started();
+  for (let i = 0; i < PENDING_MAX + 2; i += 1) {
+    feed(led, id, sPermission({ requestId: `p${i}` }), T + 10 + i);
+  }
+  assert.equal(led.rows()[0].asks.length, PENDING_MAX);
+
+  const out = led.takeOutbox();
+  assert.equal(out.length, 2);
+  assert.ok(out.every((o) => o.decision.behavior === 'deny'));
+});
+
+test('抱えられる数の既定は 8', () => {
+  assert.equal(PENDING_MAX, 8);
+});
+
+test('同じ要求が二度来ても上書きしない', () => {
+  // 上書きすると at が動いて、時間切れの時計が伸び続ける
+  const { led, id } = started();
+  feed(led, id, sPermission({ requestId: 'p1' }), T + 10);
+  feed(led, id, sPermission({ requestId: 'p1' }), T + 5000);
+
+  assert.equal(led.rows()[0].asks.length, 1);
+  assert.equal(led.rows()[0].asks[0].at, T + 10);
+});
+
+test('答えが無いまま時間切れになったら断って、あなたの番へ落とす', () => {
+  const { led, id } = asked();
+  const late = T + 1000 + PERMISSION_TIMEOUT_MS + 1;
+  const { changed, events } = led.tick(late);
+
+  assert.deepEqual(changed, [id]);
+  assert.equal(led.rows()[0].state, 'waiting');
+  assert.deepEqual(led.rows()[0].asks, []);
+
+  const [out] = led.takeOutbox();
+  assert.equal(out.decision.behavior, 'deny');
+  assert.ok(out.decision.message.includes('答え'), `理由が測ったことになっていない: ${out.decision.message}`);
+  assert.ok(events.some((e) => e.kind === 'note'));
+});
+
+test('時間切れのあとすぐ無音に落とさない', () => {
+  // lastLineAt を戻さないと、待たせたぶんがそのまま無音として数えられる
+  const { led, id } = asked();
+  const late = T + 1000 + PERMISSION_TIMEOUT_MS + 1;
+  led.tick(late);
+  assert.deepEqual(led.tick(late + 1000).changed, []);
+  assert.equal(led.rows()[0].state, 'waiting');
+});
+
+test('時間切れは要求ごとに測る', () => {
+  const { led, id } = started();
+  feed(led, id, sPermission({ requestId: 'a' }), T + 1000);
+  feed(led, id, sPermission({ requestId: 'b' }), T + 1000 + PERMISSION_TIMEOUT_MS);
+
+  led.tick(T + 1000 + PERMISSION_TIMEOUT_MS + 1);
+  assert.deepEqual(led.rows()[0].asks.map((x) => x.id), ['b'], '新しいほうは残る');
+  assert.equal(led.rows()[0].state, 'needs-permission');
+});
+
+test('待つ長さの既定は10分', () => {
+  // STALL_MS（2分）より十分長く、Slack で気づいて戻ってこられる長さ
+  assert.equal(PERMISSION_TIMEOUT_MS, 600000);
+  assert.ok(PERMISSION_TIMEOUT_MS > STALL_MS);
+});
+
+test('許可待ちの無音は無音にしない', () => {
+  // 人を待っているだけなので正常。stalled にすると通知が鳴りっぱなしになる
+  const { led, id } = asked();
+  const { changed } = led.tick(T + 1000 + STALL_MS + 1);
+  assert.deepEqual(changed, []);
+  assert.equal(led.rows()[0].state, 'needs-permission');
+});
+
+test('扱えない要求にもエラーで答える', () => {
+  // 返さないとその子は永久に待つ。「未知の形で落ちない」を「詰まらない」まで広げる
+  const { led, id } = started();
+  feed(led, id, { type: 'control_request', request_id: 'z9', request: { subtype: 'なにこれ' } }, T + 10);
+
+  const [out] = led.takeOutbox();
+  assert.equal(out.kind, 'control-error');
+  assert.equal(out.requestId, 'z9');
+  assert.ok(out.message.includes('なにこれ'));
+  assert.equal(led.rows()[0].state, 'running', '状態は変えない');
+});
+
+test('宛先が読めない要求には手を出さない', () => {
+  // request_id が無ければ答えようが無い。stream.mjs が other へ落とす
+  const { led, id } = started();
+  feed(led, id, { type: 'control_request', request: { subtype: 'can_use_tool' } }, T + 10);
+  assert.deepEqual(led.takeOutbox(), []);
+  assert.deepEqual(led.rows()[0].asks, []);
+});
+
+test('許可のあとに権限モードを撃つ。この順でなければいけない', () => {
+  // 先にモードを替えると、CLI が plan の検査を通している最中に足元が変わる
+  const { led, id } = started();
+  feed(led, id, sPermission({ requestId: 'p1', toolName: 'ExitPlanMode', input: { plan: '# やる' } }), T + 10);
+  led.answer(id, 'p1', { behavior: 'allow', then: 'auto', thenRequestId: 'r1' }, T + 20);
+
+  const out = led.takeOutbox();
+  assert.deepEqual(out.map((o) => o.kind), ['permission-response', 'control-request']);
+  assert.equal(out[1].requestId, 'r1');
+  assert.equal(out[1].subtype, 'set_permission_mode');
+  assert.deepEqual(out[1].params, { mode: 'auto' });
+});
+
+test('断ったときはモードを替えない', () => {
+  const { led, id } = asked();
+  led.answer(id, 'p1', { behavior: 'deny', then: 'auto', thenRequestId: 'r1' }, T + 20);
+  assert.deepEqual(led.takeOutbox().map((o) => o.kind), ['permission-response']);
+});
+
+test('断る理由は載るが、長ければ切る', () => {
+  const { led, id } = asked();
+  led.answer(id, 'p1', { behavior: 'deny', message: 'あ'.repeat(1000) }, T + 20);
+  const [out] = led.takeOutbox();
+  assert.ok(out.decision.message.length <= 200);
+  assert.ok(out.decision.message.endsWith('…'));
+});
+
+test('知らないキーは通さない', () => {
+  // 混ざった形は向こうの検証がどう転ぶか分からず、こちらのバグが「たまに通る」形で残る
+  const { led, id } = asked();
+  led.answer(id, 'p1', { behavior: 'allow', すきなもの: 'プリン' }, T + 20);
+  assert.deepEqual(Object.keys(led.takeOutbox()[0].decision), ['behavior']);
+});
+
+test('受理されるまで権限モードを書き換えない', () => {
+  // 「plan のつもりが auto で走っている」は最も高くつく誤表示
+  const { led, id } = asked();
+  led.answer(id, 'p1', { behavior: 'allow', then: 'auto', thenRequestId: 'r1' }, T + 20);
+  assert.equal(led.rows()[0].permissionMode, 'plan', '撃った直後はまだ plan');
+
+  feed(led, id, sControlResponse('r1'), T + 30);
+  assert.equal(led.rows()[0].permissionMode, 'auto');
+});
+
+test('替えられなかったら書き換えず、そう言う', () => {
+  const { led, id } = asked();
+  led.answer(id, 'p1', { behavior: 'allow', then: 'auto', thenRequestId: 'r1' }, T + 20);
+  const events = feed(led, id, sControlResponse('r1', { ok: false, error: '知らないモードです' }), T + 30);
+
+  assert.equal(led.rows()[0].permissionMode, 'plan');
+  assert.ok(events.some((e) => e.kind === 'note'));
+});
+
+test('自分のこだまを受理と読まない', () => {
+  // 撃った番号と違うものは、こちらのモード変更の返事ではない
+  const { led, id } = asked();
+  led.answer(id, 'p1', { behavior: 'allow', then: 'auto', thenRequestId: 'r1' }, T + 20);
+  feed(led, id, sControlResponse('よその番号'), T + 30);
+  assert.equal(led.rows()[0].permissionMode, 'plan');
+});
+
+test('撃っていないのに来た応答は黙って捨てる', () => {
+  const { led, id } = started();
+  const events = feed(led, id, sControlResponse('r9'), T + 10);
+  assert.deepEqual(events.filter((e) => e.kind === 'note'), []);
+  assert.equal(led.rows()[0].permissionMode, 'plan');
+});
+
+test('「今後も許可」で撃つモードは、session 行きの助言だけ拾う', () => {
+  // ~/.claude へ書かせない。読み取り専用が前提のアプリなので、そこだけは絶対に触らない
+  const { led, id } = started();
+  feed(led, id, sPermission({
+    requestId: 'a',
+    suggestions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }],
+  }), T + 10);
+  feed(led, id, sPermission({
+    requestId: 'b',
+    suggestions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'userSettings' }],
+  }), T + 20);
+  feed(led, id, sPermission({ requestId: 'c', suggestions: [{ type: 'addRules', rules: [] }] }), T + 30);
+
+  const asks = led.rows()[0].asks;
+  assert.equal(asks[0].suggestMode, 'acceptEdits');
+  assert.equal(asks[1].suggestMode, null, 'ファイルに書く助言は拾わない');
+  assert.equal(asks[2].suggestMode, null, 'モードの話でなければ拾わない');
+});
+
+test('許可待ちは一覧で「あなたの番」に並ぶ', () => {
+  const { led, id } = asked();
+  const [merged] = mergeRuns([listRow()], led.rows(), T + 2000);
+  assert.equal(merged.state, 'awaiting-reply');
 });

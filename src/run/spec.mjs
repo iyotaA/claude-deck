@@ -13,7 +13,7 @@
  * だから外から来た値は、全部この1枚で受けてから先へ渡す。
  *
  * - cwd は**許可リストの配下だけ**。任意の文字列を受けない
- * - 権限モードは語彙で固定。`manual` は選ばせない（許可要求の返し方が未確認なため）
+ * - 権限モードは語彙で固定。`manual` はまだ画面に出さない（理由は PERMISSION_MODES のところ）
  * - `bypassPermissions` は環境変数が立っているときだけ語彙に入る
  * - **`-` で始まる値はどの項目でも弾く**。argv は配列で渡すので `shell` の穴は無いが、
  *   `--model` の値が `--dangerously-skip-permissions` だったら commander は
@@ -36,10 +36,16 @@ import { isSwitchOn } from '../shared/env.mjs';
 /**
  * 画面に出す権限モード。
  *
- * `manual` を入れない。非対話で許可要求が来たときの返し方（`control_response` の形と
- * `request_id` の対応付け）が確かめられていない。当てずっぽうで実装すると、
- * 要求に答えられないまま止まったプロセスが残り、画面には「実行中」と出続ける。
- * このアプリが最もやってはいけない壊れ方なので、分かるまで出さない。
+ * `manual` をまだ入れていない。**理由は「返し方が分からないから」ではない。**
+ * 実測（2026-08-25・claude 2.1.243）で `control_request` の受け方も `control_response` の
+ * 返し方も確かめ、`--permission-prompt-tool stdio` を付けて画面から答えられるようにした。
+ * 残っているのは語彙と見せ方の話だけなので、ラベルを英語主に揃えるときに一緒に足す。
+ *
+ * **argv の語彙と control の語彙は別物**（どちらも実測）。
+ * `--permission-mode manual` で起こしても `system/init` は `"default"` と名乗り、
+ * `set_permission_mode` の側は `manual` を受け付けて `default` に正規化する。
+ * 逆に argv 側には `default` が無い。読み替えが要るのは画面へ出すときだけなので、
+ * 使う場所ができるまで表は作らない（使われない読み替え表が一番古くなる）。
  */
 export const PERMISSION_MODES = Object.freeze(['plan', 'acceptEdits', 'auto']);
 
@@ -302,6 +308,13 @@ function buildArgs(spec) {
     // 「読まれたが応答が無い」を切り分けられる
     '--replay-user-messages',
     '--permission-mode', spec.permissionMode,
+    // 許可要求をこちらへ寄越させる（実測 2026-08-25・claude 2.1.243）。
+    // **受け取る値は `stdio` の1語だけ。** 実物の検証関数がそれ以外を unsupported で弾くので、
+    // 画面から選ばせずここに文字列で書く（`--verbose` と同じ扱い）。
+    //
+    // **外すと plan で起こしたセッションが Bash / Edit の手前で必ず止まる。**
+    // 許可要求がホストへ届かず CLI が拒否に倒すため。実際にそれで踏んだ
+    '--permission-prompt-tool', 'stdio',
   ];
 
   // 上限を指定したときだけ付ける。**付けなければ CLI 側も上限なしで走る。**

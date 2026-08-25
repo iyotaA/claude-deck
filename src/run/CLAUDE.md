@@ -84,19 +84,37 @@ stdin を閉じると `close code=1`。だから予算切れは「終わった�
 画面に出すのは測ったこと（`出力が2分止まっています。圧縮や長いコマンドの最中かもしれません`）だけで、
 原因は決めつけない。
 
-**`acceptEdits` は許可を求めない。断って先へ進む。**
-Bash を伴う指示を投げると `system/permission_denied` が流れ、そのツールの結果が
-`isError:true` ＋ `This command requires approval` になり、**止まらずに次の手へ移る**
-（`result` の `denials` に数が載る）。「この画面から起こすセッションは、途中であなたに許可を求めません」
-という UI の文言は、この実測どおりの意味になっている。
-`system/permission_denied` は下の一覧の9種類目で、`classifyStreamLine` が `other` に落として受かっている。
+**許可要求はホストへ届く。`--permission-prompt-tool stdio` を付けたときだけ。**
+
+**これは 0.7.1 までと挙動が変わった箇所。** 以前ここには
+「`acceptEdits` は許可を求めない。断って先へ進む」と書いてあり、当時はそのとおりだった。
+フラグが無いと CLI は許可要求をホストへ出さずに自動で拒否へ倒し、
+`system/permission_denied` が流れて、そのツールの結果が
+`isError:true` ＋ `This command requires approval` になり、**止まらずに次の手へ移っていた**
+（`result` の `denials` に数が載る）。
+
+フラグを付けた今は、同じ場面で `control_request` の `can_use_tool` が stdout へ流れ、
+**答えるまで子は待つ。** だから「途中で許可を求めない」という前提で書かれた文言は
+すべて嘘になっており、`public/index.html` と `public/js/run-resume.js` の3箇所を
+同じコミットで差し替えてある。
+
+受け取る値は `stdio` の1語だけ（実測 2.1.243。他の値は `unsupported` で弾かれる）。
+
+**`ExitPlanMode` を許可しただけでは plan から抜けない。** 対話版は内部で
+`{from:'plan', to:'auto', trigger:'exit_plan_mode'}` を撃っている。ヘッドレスでは誰も撃たないので、
+承認に続けて `set_permission_mode` を送るのはこちらの仕事（**allow が先**）。
 
 いま出ることを確かめた `type`（`system` は `subtype` まで）。
 
 ```
 system/hook_started  system/hook_progress  system/hook_response  system/permission_denied
 system/init          user                  assistant             rate_limit_event   result
+control_request      control_response
 ```
+
+`control_request` は `subtype` で行き先が分かれる。`can_use_tool` は人が答えるもの（`permission`）、
+それ以外は**答えないと相手が詰まる**ので `control` として拾い、エラーで返す。
+`control_response` はこちらが撃った要求（`set_permission_mode` など）の受理・拒否。
 
 `system/hook_response` は `result` の**後**に来ることもある（2ターン目の冒頭で観測）。
 順序に意味を持たせない。
@@ -145,9 +163,9 @@ CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.ex
 | `ledger.mjs` | いつ状態が変わるか。何を覚えて何を捨てるか | 無し（時刻も `now` で受ける） |
 | `index.mjs` | どの順で手を動かすか。断る理由と HTTP の番号 | `os/claude.mjs` 経由だけ |
 
-**`server.mjs` が触るのは `createRunner()` が返す12個の口だけ。**
-`start` / `input` / `stop` / `switch` / `tick` / `subscribe` / `shutdown` / `livePids` /
-`rows` / `get` / `events` / `stats`。
+**`server.mjs` が触るのは `createRunner()` が返す13個の口だけ。**
+`start` / `input` / `answer` / `stop` / `switch` / `tick` / `subscribe` / `shutdown` /
+`livePids` / `rows` / `get` / `events` / `stats`。
 
 **断る理由と HTTP の番号は `run/index.mjs` が決める。**
 理由は4種類ある（503 CLI を掴めていない / 400 指定が不正 / 429 本数と間隔 / 500 起こせなかった）。
@@ -362,7 +380,15 @@ Bash などを掴んだまま応じなかった子だけになる（実測でそ
 - **`CLAUDE_DECK_CLAUDE_BIN` が空振りしても次へ落ちない。** 理由を付けて止める。落とすと「指定したのに違うものが動いている」になる
 - **`child.stdout.setEncoding('utf8')` を必ず呼ぶ。** 素の Buffer を `toString()` するとチャンク境界で日本語が割れる。行に割るのは `createLineSplitter` の仕事で、**上限を超えた行は捨てて数える**（黙って捨てない）
 - **`bypassPermissions` を画面の語彙に入れない。** `CLAUDE_DECK_RUN_ALLOW_BYPASS` が立っているときだけ。ブラウザから押せる「許可を一切求めずに何でも実行する」ボタンは、このアプリが持ちうる最も危険なもの。`CLAUDE_DECK_NOTIFY_OFF` と同じ帯域外のスイッチにする
-- **`manual` を選ばせない。** 非対話で許可要求が来たときの返し方が確かめられていない。当てずっぽうで実装すると、要求に答えられないまま止まったプロセスが残り、画面には「実行中」と出続ける
+- **`--permission-prompt-tool stdio` を外さない。** 外すと許可要求がホストへ届かず、CLI が自動で拒否へ倒す。plan で起こしたセッションが Bash / Edit の手前で必ず失敗する（実測 2.1.243。受け取る値は `stdio` の1語だけ）
+- **受け取った `control_request` には必ず何かを返す。** 未知の `subtype` にも `subtype:'error'` を返す。返さないと**その子は永久に待つ。** ルートの「未知の形で落ちない」は、ここでは「未知の形で詰まらない」まで含む
+- **許可待ちを `waiting` に寄せない。** `waiting` は「1行送れば進む」状態で、`markInput()` がそれを前提に `running` へ戻す。許可待ちの子に user 行を送っても `control_response` を待ち続けるので、寄せると「送ったのに動かない」を再生産する
+- **`needs-permission` を `isChildDone` にも `isRunOver` にも入れない。** 子は生きて待っている。畳むと答えられなくなる
+- **pending が原文の `input` を持つのは `AskUserQuestion` のときだけ。** `allow` は `updatedInput` を省略でき、省略すれば CLI が元の入力を使う。他まで持つとリングに数MBが載る
+- **時間切れ（`PERMISSION_TIMEOUT_MS` = 10分）を消さない。** ブラウザを閉じた・席を外したときの唯一の逃げ道。最悪でもフラグを付ける前と同じ「断って進む」に落ちる
+- **`ledger` に NDJSON の行を組ませない。** 意図を `outbox` に積み、行を組むのは `parse/stream.mjs`、書くのは `run/index.mjs`。「判断は台帳、手を動かすのは殻」の向きを混ぜない
+- **受理したら `entry.spec.permissionMode` も同期する。** 忘れると `restart()` / `switchRun()` が古いモードで建て直し、「替えたのに戻っていた」になる
+- **未応答の要求を速報イベントで配らない。** 画面側の `EVENTS_PER_RUN` は 400 で、1ターンで数百行来る。溢れると要求ごと消えて二度と答えられない。行（`rows()` の `asks`）に載せる
 - **実行の速報を `/api/stream` に相乗りさせない。** あちらは全タブが常時つないでいる一覧の経路で、1秒 tick と差分判定が付いている。1ターンで数百行出る速報を混ぜると、一覧の更新が実行の量に引きずられる。専用の `/api/runs/stream` に分ける
 - **`runner.subscribe()` を窓ごとに呼ばない。** サーバーが1回だけ購読して、開いている SSE 全部へ配る。窓ごとに購読すると閉じ忘れが listeners に静かに溜まる
 - **`readJsonBody` の上限を全体で上げない。** 長い指示文を受ける3本（`POST /api/runs` と `POST /api/runs/:id/input` と `POST /api/runs/:id/switch`）にだけ `RUN_BODY_MAX`（256KB）を引数で渡す。1本の定数を上げると、緩めた覚えのない口まで緩む
