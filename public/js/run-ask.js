@@ -70,8 +70,11 @@ const BODY_LINES = 18;
 /**
  * 送信中の askId。
  *
- * **成功しても null に戻さない。** `runs` フレームで `row.asks` から消えて
- * カードごと消えるのを待つ。持たなければ、ずれない。
+ * **成功しても `send()` は null に戻さない。** `runs` フレームで `row.asks` から
+ * 消えるのを待つ。消す権利をサーバーだけが持てば「消えたのに答えられていない」が
+ * 構造的に起きない。持たなければ、ずれない。
+ *
+ * **戻す場所は `askBlock()` の1箇所だけ。**（失敗したときの `failed()` を除く）
  */
 let sending = null;
 /** @type {{askId: string, text: string}|null} 直近の失敗。1回だけ出す */
@@ -406,9 +409,15 @@ function askCard(runId, ask) {
 export function askBlock(row) {
   const run = runFor(row?.sessionId);
   if (!run) return null;
-  // 子が死んでいる。答え先が無い
-  if (RUN_OVER.has(run.state)) return null;
-  const asks = Array.isArray(run.asks) ? run.asks : [];
+  // 子が死んでいれば答え先が無い。要求が残っていても無いものとして扱う
+  const asks = RUN_OVER.has(run.state) || !Array.isArray(run.asks) ? [] : run.asks;
+
+  // **送信中の印を解くのはここだけ。** サーバーが要求を消したことを、行そのもので確かめる。
+  // これが無いと、答えたあとに次の要求が来ても印が前の id のまま残り、
+  // 続く `send()` が冒頭の即 return に食われて**押しても何も起きない**
+  // （実測。質問が続けて来ると「この内容で答える」が無反応になり、リロードで直った）。
+  if (sending && !asks.some((a) => a.id === sending)) sending = null;
+
   if (asks.length === 0) return null;
 
   // 見出しは1件目に合わせる。並列のツール呼び出しでは複数まとめて来るが、
