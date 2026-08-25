@@ -168,6 +168,15 @@ export const INTERRUPT_CAP = 'interrupt_receipt_v1';
 export const CANCEL_QUEUED_CAP = 'interrupt_cancel_queued_v1';
 
 /**
+ * 行に載せるスラッシュコマンドの上限。
+ *
+ * 実測 2.1.245 で 62 個（引き算のあとで 60）。**3倍の余地を取ってある。**
+ * 上限を置くのは、この一覧が `rows()` に載る＝走っている本数ぶん SSE のフレームへ入るため。
+ * 版が上がって桁が変わった日に、気づかないまま毎フレームが太るのを止める。
+ */
+export const SLASH_MAX = 200;
+
+/**
  * 「替えました」の答えを待つ上限。過ぎたら控えを捨てる。
  *
  * **過ぎても状態は変えない。** 撃ったのに返事が無いなら、いまどちらで走っているかは
@@ -563,6 +572,7 @@ function askRow(p) {
  * @param {number} [opts.historyMax] 終わった run を残す件数
  * @param {number} [opts.pendingMax] 同時に抱えられる未応答の要求の数
  * @param {number} [opts.permissionTimeoutMs] 許可の答えを待つ上限
+ * @param {number} [opts.slashMax] 行に載せるスラッシュコマンドの上限
  * @returns {object} 台帳
  */
 export function createRunLedger({
@@ -574,6 +584,7 @@ export function createRunLedger({
   pendingMax = PENDING_MAX,
   permissionTimeoutMs = PERMISSION_TIMEOUT_MS,
   liveAckTimeoutMs = LIVE_ACK_TIMEOUT_MS,
+  slashMax = SLASH_MAX,
 } = {}) {
   /** @type {Map<string, object>} runId → run */
   const runs = new Map();
@@ -833,11 +844,16 @@ export function createRunLedger({
    * @returns {Array<object>} 積んだ速報。時間切れが無ければ空
    */
   /**
-   * 起動の行から、向こうが名乗った機能を控える。**速報は積まない。**
+   * 起動の行から、向こうが名乗った機能と、使えるスラッシュコマンドを控える。**速報は積まない。**
    *
    * `init` は1本のあいだに何度も流れる（ターンごと・スラッシュコマンドでも）。
    * **配列で来たときだけ書く。** 読めない行で null に潰すと、一度は名乗っていた機能が
    * 「名乗っていない」に化けて、割り込みの札が画面から消える。
+   *
+   * スラッシュコマンドは `slash_commands` から `terminal_slash_commands` を引いた残り。
+   * 引くほうは**対話版の画面でしか働かない**もの（実測 2.1.245 で `['doctor','color']`）で、
+   * こちらから送っても何も起きない。**引き算をここでするのは、これが判断だから。**
+   * `parse/` は行を読むだけにしてあり、どれが使えるかを決めるのは台帳の側。
    *
    * @param {object} run 対象の run
    * @param {object} info `initInfo` の戻り
@@ -845,6 +861,10 @@ export function createRunLedger({
    */
   function takeInit(run, info) {
     if (Array.isArray(info?.capabilities)) run.capabilities = info.capabilities;
+    if (Array.isArray(info?.slashCommands)) {
+      const skip = new Set(info.terminalSlashCommands ?? []);
+      run.slashCommands = info.slashCommands.filter((c) => !skip.has(c)).slice(0, slashMax);
+    }
   }
 
   /**
@@ -995,6 +1015,11 @@ export function createRunLedger({
       // CLI が名乗った機能。**null は「名乗らなかった」で、空配列（何も無い）とは別。**
       // 画面はこれを見て割り込みの札を出すかどうかを決める。init で入るだけなので毎秒動かない
       capabilities: run.capabilities,
+      // 送れるスラッシュコマンド。**`get()` ではなく行に載せる。**
+      // 使うのは入力欄の隣の札で、あれが見ているのは `rows()` の行だけ
+      // （`runFor(sessionId)` が引くのがそちら）。`get()` に置くと画面から届かない。
+      // 60 語で 700 バイトほどあるが、init のときしか変わらないので差分判定で止まる
+      slashCommands: run.slashCommands,
       // 枠の使用率。CLI の `/usage` と同じもので、画面にはこれまで出る道が無かった。
       // API を叩くたびに流れるが、値そのものはめったに動かないので差分判定で止まる
       rateLimit: run.rateLimit,
@@ -1079,6 +1104,8 @@ export function createRunLedger({
         livePending: new Map(),
         /** @type {string[]|null} CLI が名乗った機能。**無ければ null**（空配列に丸めない） */
         capabilities: null,
+        /** @type {string[]|null} 送れるスラッシュコマンド。**無ければ null**（空配列に丸めない） */
+        slashCommands: null,
         /** @type {number|null} そのターンで考えた量（累計）。畳んだ結果だけを持つ */
         thinking: null,
         /** @type {object|null} 直近の枠の使用率。`{fiveHour, sevenDay, resetsAt}` */

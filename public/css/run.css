@@ -414,6 +414,19 @@
 
 .composer-in { min-width: 0; }
 
+/* 入力欄の上の段。いまの様子（札）とスラッシュコマンドを横に並べる。
+   どちらも「打つ前に見る／触る」もので、送る・止めるの列とは役目が違う。
+   狭くなれば折り返して縦に積む */
+.composer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem;
+  margin: 0 0 .45rem;
+}
+
+.composer-head[hidden] { display: none; }
+
 /* いま何で走っているかの札。**押すと「替える窓」が開く。**
    替えられること自体が分かりにくいという指摘を受けて、状態の表示と入り口を1つにした。
    実行パネルの中に置いていた頃は、速報が伸びるたびに下へ流れて見つからなかった。
@@ -425,7 +438,6 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: .3rem;
-  margin: 0 0 .45rem;
   padding: .22rem .55rem;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -461,6 +473,35 @@
 
 /* 返事待ち。**新しい色は作らず** --warn を借りる */
 .composer-now.is-switching .composer-now-note { color: var(--warn); }
+
+/* スラッシュコマンドの札。**隣の札と同じ顔**にして、同じ段に居ることを見た目で示す。
+   `display` を宣言しないのは、宣言すると [hidden] を自分で打ち消してしまうから
+   （`.composer-now` に [hidden] の行が要るのはそちらが display:flex を持つため）。
+   `max-width` を置くのは、`/permissions` のような長い語で札が窓幅まで伸びるのを止めるため */
+.composer-slash {
+  max-width: 12rem;
+  padding: .22rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: .76rem;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.composer-slash:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.composer-slash:focus-visible { border-color: var(--accent); }
+
+.composer-slash:disabled {
+  opacity: .6;
+  cursor: default;
+}
 
 /* 入力欄が伸びて、ボタンは右。狭くなればボタンが下へ回る */
 .composer-row {

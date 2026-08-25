@@ -444,12 +444,13 @@ let optionsAsked = false;
  * @type {null | {
  *   bar: HTMLElement, prompt: HTMLTextAreaElement, send: HTMLButtonElement,
  *   brk: HTMLButtonElement, stop: HTMLButtonElement, msg: HTMLElement,
- *   now: HTMLButtonElement, nowMode: HTMLElement, nowModel: HTMLElement, nowNote: HTMLElement,
+ *   head: HTMLElement, now: HTMLButtonElement,
+ *   nowMode: HTMLElement, nowModel: HTMLElement, nowNote: HTMLElement, slash: HTMLSelectElement,
  *   dlg: HTMLDialogElement, swModelPick: HTMLSelectElement, swModel: HTMLInputElement,
  *   swEffort: HTMLSelectElement, swMode: HTMLSelectElement, swBudget: HTMLInputElement,
  *   apply: HTMLButtonElement, swHow: HTMLElement, swPending: HTMLElement, swMsg: HTMLElement,
  *   runId: string|null, busy: boolean, over: boolean,
- *   stopArmed: boolean, stopTimer: number|null, lastRow: object|null
+ *   stopArmed: boolean, stopTimer: number|null, lastRow: object|null, slashKey: string|null
  * }}
  */
 let ops = null;
@@ -527,6 +528,65 @@ function applyEnabled() {
   ops.brk.hidden = !named;
   ops.brk.disabled = off || !RUN_WORKING.has(row?.state) || row?.interrupting === true;
   ops.brk.textContent = row?.interrupting === true ? '割り込んでいます…' : '割り込む';
+
+  // スラッシュコマンドの札。**向こうが名前を寄こしたときだけ出す。**
+  // こちらで表を書くと、版で増えた語が出せず、消えた語を出し続けることになる
+  fillSlash(Array.isArray(row?.slashCommands) ? row.slashCommands : []);
+  ops.slash.disabled = off;
+  syncHead();
+}
+
+/**
+ * 札の段そのものを出し入れする。
+ *
+ * 中が2つとも隠れているときに段を残すと、**余白だけが入力欄の上に残る**
+ * （`[hidden]` は中の札を消すが、段の `margin` までは消せない）。
+ * 出し入れの元が2箇所（`applyEnabled` と `fillSwitch`）にあるので、判断はここ1箇所に置く。
+ */
+function syncHead() {
+  ops.head.hidden = ops.now.hidden && ops.slash.hidden;
+}
+
+/**
+ * スラッシュコマンドの選択肢を入れ直す。**中身が変わったときだけ。**
+ *
+ * 毎フレーム組み直すと、開いたまま選んでいる最中に閉じてしまう。
+ * 中身は `system/init` で入ってそれきり動かないので、まるごと繋いだ文字列で比べれば足りる。
+ *
+ * @param {string[]} cmds 送れるコマンド名（先頭の `/` は付いていない）
+ */
+function fillSlash(cmds) {
+  ops.slash.hidden = cmds.length === 0;
+  const key = cmds.join(' ');
+  if (ops.slashKey === key) return;
+  ops.slashKey = key;
+  fillSelect(ops.slash, [
+    { value: '', label: '/ コマンド' },
+    ...cmds.map((c) => ({ value: c, label: `/${c}` })),
+  ]);
+}
+
+/**
+ * 選んだコマンドを入力欄の**頭**に入れる。**送らない。**
+ *
+ * 頭に入れるのは、スラッシュコマンドが行の先頭でしか効かないため（実測 2.1.245。
+ * `/context` を user 行として送ると `system/init` が流れ直し、`result` は `num_turns:0`）。
+ * 途中へ挿すと、ただの本文として Claude に読まれて終わる。
+ *
+ * **押しただけで送らないのは、取り返しの付かないものが混ざっているから**
+ * （`/compact` は会話を畳む・`/clear` は消す）。何が起きるかを読んでから、自分で送る。
+ *
+ * @param {string} name コマンド名（`/` 抜き）
+ */
+function insertSlash(name) {
+  if (!name) return;
+  const head = `/${name} `;
+  const rest = ops.prompt.value;
+  ops.prompt.value = head + rest;
+  ops.prompt.focus();
+  // 引数を続けて打てるように、入れた文の**すぐ後ろ**へ caret を置く
+  ops.prompt.setSelectionRange(head.length, head.length);
+  say(`${head.trim()} を入れました。中身を確かめてから送ってください`);
 }
 
 /**
@@ -891,6 +951,20 @@ function buildOps() {
     post('input');
   });
 
+  // スラッシュコマンドの札。**入力の助けなのでボタンの並びには入れない。**
+  // 送る・割り込む・止めるは押した瞬間に何かが起きるが、これは欄に文字が入るだけで、
+  // 同じ列に並べると「押したら走る」ものに見える
+  const slash = el('select', 'composer-slash');
+  slash.hidden = true;
+  slash.setAttribute('aria-label', 'スラッシュコマンドを入れる');
+  slash.addEventListener('change', () => {
+    const name = slash.value;
+    // 選び直せるように、入れたら見出しへ戻す。
+    // 戻さないと、同じコマンドを2回入れたいときに change が起きない
+    slash.value = '';
+    insertSlash(name);
+  });
+
   const send = el('button', 'btn is-primary', '送る');
   send.type = 'button';
   send.addEventListener('click', () => post('input'));
@@ -915,7 +989,13 @@ function buildOps() {
   const line = el('div', 'composer-row');
   line.append(prompt, btns);
 
-  bar.append(now, line, msg);
+  // 札は横に並べる。どちらも「打つ前に見る／触る」もので、ボタンの列とは役目が違う。
+  // 名前が `headRow` なのは、下のモーダルが `head`（settings-head）を使っているため
+  const headRow = el('div', 'composer-head');
+  headRow.hidden = true;
+  headRow.append(now, slash);
+
+  bar.append(headRow, line, msg);
 
   // ── 替えるモーダル。中の見た目は設定モーダルのクラスをそのまま借りる
   const dlg = el('dialog', 'runsw');
@@ -1023,9 +1103,10 @@ function buildOps() {
 
   ops = {
     bar, prompt, send, brk, stop, msg,
-    now, nowMode, nowModel, nowNote,
+    head: headRow, now, nowMode, nowModel, nowNote, slash,
     dlg, swModelPick, swModel, swEffort, swMode, swBudget, apply, swHow, swPending, swMsg,
     runId: null, busy: false, over: false, stopArmed: false, stopTimer: null, lastRow: null,
+    slashKey: null,
   };
   return ops;
 }
@@ -1128,6 +1209,7 @@ function fillSwitch() {
 
   // 語彙ごと取れなかったなら替えようが無い。札を出さない（押しても空の窓が開くだけ）
   ops.now.hidden = modes.length === 0;
+  syncHead();
   if (ops.lastRow) prefillSwitch(ops.lastRow);
 }
 

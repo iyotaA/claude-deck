@@ -165,16 +165,23 @@ function strList(v) {
  * - `capabilities` は向こうが名乗る機能の一覧。実測 2.1.245 で
  *   `['interrupt_receipt_v1','interrupt_cancel_queued_v1','msg_lifecycle_v1']`。
  *   割り込みを撃ってよいかを**手で表を書かずに**判定できる唯一の材料なので拾う
+ * - `slash_commands` は使えるスラッシュコマンドの名前（実測 2.1.245 で 62 個。
+ *   `compact` `context` `cost` など。**先頭の `/` は付いていない**）。
+ *   `terminal_slash_commands`（実測 `['doctor','color']`）は**対話版の画面でしか働かない**もの。
+ *   どちらもそのまま返し、**引き算はここでしない**（この層は行を読むだけで、
+ *   「どれが使えるか」は使う側の判断。混ぜると引き算の理由がこの層に居座る）
  *
  * それでも**キーが無いことを異常にしない。** 版が上がれば形は変わる。取れなければ null で進む。
  *
- * **`capabilities` は無ければ null。空配列に丸めない。**
+ * **`capabilities` も一覧も、無ければ null。空配列に丸めない。**
  * 「名乗らない版」と「何も持たない版」は別のことで、空配列にすると前者を後者と読み違えて、
- * 使えるはずの割り込みを断ることになる。
+ * 使えるはずの割り込みを断ることになる。スラッシュコマンドも同じで、
+ * 空配列にすると「1つも使えない」と読めてしまう。
  *
  * @param {object} line 読めた行
  * @returns {{model:string|null, cwd:string|null, permissionMode:string|null, tools:number|null,
- *   capabilities:string[]|null}}
+ *   capabilities:string[]|null, slashCommands:string[]|null,
+ *   terminalSlashCommands:string[]|null}}
  */
 function initInfo(line) {
   const tools = Array.isArray(line.tools) ? line.tools.length : null;
@@ -184,6 +191,8 @@ function initInfo(line) {
     permissionMode: str(line.permissionMode ?? line.permission_mode),
     tools,
     capabilities: strList(line.capabilities),
+    slashCommands: strList(line.slash_commands),
+    terminalSlashCommands: strList(line.terminal_slash_commands),
   };
 }
 

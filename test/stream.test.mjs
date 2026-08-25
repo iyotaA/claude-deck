@@ -60,6 +60,23 @@ test('名乗りに文字列でないものが混ざっていても落とすだ�
   assert.deepEqual(got.info.capabilities, ['interrupt_receipt_v1']);
 });
 
+test('スラッシュコマンドは2つの一覧をそのまま持つ。**ここでは引かない**', () => {
+  // 引き算（どれが使えるか）は判断なので台帳の仕事。この層は行を読むだけ
+  const got = read(sysInit({
+    slash_commands: ['compact', 'context', 'doctor'],
+    terminal_slash_commands: ['doctor', 'color'],
+  }));
+  assert.deepEqual(got.info.slashCommands, ['compact', 'context', 'doctor']);
+  assert.deepEqual(got.info.terminalSlashCommands, ['doctor', 'color']);
+});
+
+test('スラッシュコマンドが無ければ null。空配列に丸めない', () => {
+  // 空配列にすると「1つも使えない」と読めてしまう。「名乗らない」とは別のこと
+  const got = read(sysInit());
+  assert.equal(got.info.slashCommands, null);
+  assert.equal(got.info.terminalSlashCommands, null);
+});
+
 test('assistant の発言が読める', () => {
   const got = read(sAssistant('やってみる'));
   assert.equal(got.kind, 'assistant');

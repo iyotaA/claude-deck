@@ -12,6 +12,7 @@ import {
   createRunLedger, isChildDone, isRunOver, mergeRuns, quietFor,
   RUN_STATE_LABELS, RUN_MAX, STALL_MS, ASK_BODY_MAX, PENDING_MAX, PERMISSION_TIMEOUT_MS,
   buildQuestionInput, LIVE_FIELDS, LIVE_ACK_TIMEOUT_MS, INTERRUPT_CAP, CANCEL_QUEUED_CAP,
+  SLASH_MAX,
 } from '../src/run/ledger.mjs';
 import {
   sysInit, sAssistant, sResult, sPermission, sQuestion, sControlResponse, S_ID,
@@ -1728,6 +1729,62 @@ test('居ない実行へ言っても落ちない', () => {
   const { led } = started();
   assert.deepEqual(led.noteDropped('nope', 3, T), []);
   assert.equal(led.noteStderr('nope', 'x'), false);
+});
+
+/*
+ * スラッシュコマンド
+ */
+
+test('スラッシュコマンドは行に出る。init が来るまでは null', () => {
+  const { led, id } = started();
+  assert.equal(led.rows()[0].slashCommands, null, '起きた直後は「無い」ではなく「不明」');
+
+  feed(led, id, sysInit({ slash_commands: ['compact', 'context'] }), T + 5);
+  assert.deepEqual(led.rows()[0].slashCommands, ['compact', 'context']);
+});
+
+test('対話版でしか働かないものは引く', () => {
+  // 実測 2.1.245 で `terminal_slash_commands` は `['doctor','color']`。
+  // 送っても何も起きないので、札に出すと押した人が困る
+  const { led, id } = started();
+  feed(led, id, sysInit({
+    slash_commands: ['compact', 'doctor', 'context', 'color'],
+    terminal_slash_commands: ['doctor', 'color'],
+  }), T + 5);
+  assert.deepEqual(led.rows()[0].slashCommands, ['compact', 'context']);
+});
+
+test('全部が対話版のものなら空配列。null には戻さない', () => {
+  // ここは「名乗ったうえで1つも使えない」なので、空配列が正しい答え。
+  // null に倒すと「名乗っていない（不明）」と区別が付かなくなる
+  const { led, id } = started();
+  feed(led, id, sysInit({
+    slash_commands: ['doctor'],
+    terminal_slash_commands: ['doctor'],
+  }), T + 5);
+  assert.deepEqual(led.rows()[0].slashCommands, []);
+});
+
+test('一覧の無い init では前の一覧を潰さない', () => {
+  const { led, id } = started();
+  feed(led, id, sysInit({ slash_commands: ['compact'] }), T + 5);
+  // init はターンごとに来る。キーが消えた日に一覧が「無い」に化けると札が消える
+  feed(led, id, sysInit(), T + 10);
+  assert.deepEqual(led.rows()[0].slashCommands, ['compact']);
+});
+
+test('スラッシュコマンドは上限で切る', () => {
+  // 行は走っている本数ぶん SSE のフレームへ入る。桁が変わった日に黙って太らせない
+  const { led, id } = started();
+  const many = Array.from({ length: SLASH_MAX + 30 }, (_, i) => `cmd${i}`);
+  feed(led, id, sysInit({ slash_commands: many }), T + 5);
+  assert.equal(led.rows()[0].slashCommands.length, SLASH_MAX);
+});
+
+test('スラッシュコマンドに文字列でないものが混ざっていても落とすだけ', () => {
+  const { led, id } = started();
+  feed(led, id, sysInit({ slash_commands: ['compact', 7, null, ''] }), T + 5);
+  assert.deepEqual(led.rows()[0].slashCommands, ['compact']);
 });
 
 /*

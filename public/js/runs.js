@@ -153,6 +153,9 @@ function stampOf(row) {
     // 名乗り。init の1回で入ってそれきり動かないが、**入れないと札が出ない。**
     // 起きた直後は null で、init が来た次のフレームで初めて配列になる
     (row.capabilities ?? []).length,
+    // スラッシュコマンドの数。名乗りと同じ init の行で入るが、**別に数える。**
+    // 片方だけ来る版があったとき、数えていないほうの札が出なくなる
+    (row.slashCommands ?? []).length,
   ].join('/');
   return [row.runId, row.state, exit, row.reason ?? '', row.turns ?? '', ask, live].join(':');
 }
