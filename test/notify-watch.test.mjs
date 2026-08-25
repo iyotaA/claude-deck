@@ -462,6 +462,67 @@ test('byStatus が無い形が来ても鳴らさない', () => {
   assert.deepEqual(w.takeReady(AFTER_BOOT), []);
 });
 
+/*
+ * 画面から起こした実行の「許可待ち」。
+ *
+ * `run/ledger.mjs` の `overlay()` が組む形をそのまま手で並べてある（あちらを import しない）。
+ * 見どころは3つ。
+ *
+ * - `state` は承認待ちへ写る（台帳の `needs-permission` から）
+ * - `waitingFor` は null（台帳が正なので、ログの末尾から読んだ dangling は伏せる）
+ * - `byStatus` は true（未応答の `control_request` を実際に握っている＝止まっている裏づけ）
+ *
+ * この3つ目が無いと `requireByStatus` に当たって永久に黙る。
+ * 写す前は `awaiting-reply` だったので `{slow:true}` の2分後に鳴っていた。
+ * つまり**退行が「静かになる」方向に出る**ので、テストで押さえておく。
+ */
+function permissionRow(over = {}) {
+  return {
+    sessionId: 'sess-run',
+    name: 'deck-run',
+    project: 'claude-deck',
+    state: 'needs-approval',
+    // 画面に出す名前は台帳の実態のまま
+    stateLabel: '許可待ち',
+    stateConfident: true,
+    idleMs: 2000,
+    waitingFor: null,
+    anchorId: 'run-abc',
+    byStatus: true,
+    ...over,
+  };
+}
+
+test('画面から起こした許可待ちは、落ち着き待ちの6秒で1通鳴る', () => {
+  const w = createNotifyWatch({ settleMs: 6000, graceMs: 0, bootAt: T0 });
+  w.observe([permissionRow()], AFTER_BOOT);
+  // 2分（IDLE_SETTLE_MS）を待たない。requireByStatus 側の経路に乗るので settle だけ
+  assert.deepEqual(w.takeReady(AFTER_BOOT + 5999), []);
+
+  w.observe([permissionRow()], AFTER_BOOT + 6000);
+  const got = w.takeReady(AFTER_BOOT + 6000);
+  assert.equal(got.length, 1);
+  // 通知の本文に出るのは台帳の実態のほう（写した `needs-approval` ではない）。
+  // 「承認待ち」と言われても画面のどこを押せばいいか分からないため
+  assert.equal(got[0].stateLabel, '許可待ち');
+  // 台帳が正なので、ログの末尾から読んだツールは伏せてある
+  assert.equal(got[0].tool, null);
+});
+
+test('許可待ちが続いても2通目は積まれない', () => {
+  const w = createNotifyWatch({ settleMs: 6000, graceMs: 0, bootAt: T0 });
+  w.observe([permissionRow()], AFTER_BOOT);
+  w.observe([permissionRow()], AFTER_BOOT + 6000);
+  assert.equal(w.takeReady(AFTER_BOOT + 6000).length, 1);
+
+  // 許可待ちのあいだ会話ログには1行も追記されないので anchorId は動かない。
+  // だから鍵が同じままで、押すまで何分待たせても1通で済む
+  for (let i = 1; i <= 10; i += 1) {
+    w.observe([permissionRow({ idleMs: 2000 + i * 60_000 })], AFTER_BOOT + i * 60_000);
+  }
+  assert.deepEqual(w.takeReady(AFTER_BOOT + 600_000), []);
+});
+
 // --- 設定の差し替え（画面から保存されたとき） ---
 //
 // 器ごと作り直すと known が空になり、いま待っている分が保存した瞬間に

@@ -1340,7 +1340,24 @@ test('「今後も許可」で撃つモードは、session 行きの助言だけ
 test('許可待ちは一覧で「あなたの番」に並ぶ', () => {
   const { led, id } = asked();
   const [merged] = mergeRuns([listRow()], led.rows(), T + 2000);
-  assert.equal(merged.state, 'awaiting-reply');
+  // 返信待ち（rank 2）ではなく承認待ち（rank 1）。押さないと1行も進まないので、
+  // 放っておいても壊れないものと同じ高さに並べない
+  assert.equal(merged.state, 'needs-approval');
+  assert.equal(merged.blocking, true);
+  // 写し先を変えたら byStatus も立てる。立てないと `requireByStatus` に当たって
+  // いちばん急ぐ状態だけが永久に鳴らなくなる
+  assert.equal(merged.byStatus, true);
+  // 画面に出す名前は台帳の実態のまま（写しは並び順と色のためだけのもの）
+  assert.equal(merged.stateLabel, '許可待ち');
+});
+
+test('許可待ち以外の写しでは byStatus を立てない', () => {
+  const { led, id } = started();
+  feed(led, id, sysInit(), T + 1000);
+  const [merged] = mergeRuns([listRow()], led.rows(), T + 2000);
+  // 実行中は「止まっている裏づけ」が無い。ここを true にすると
+  // 通知の requireByStatus が意味を失う
+  assert.equal(merged.byStatus, false);
 });
 
 /* --------------------------------------------------- 質問に選択肢で答える（段2） */

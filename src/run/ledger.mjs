@@ -1936,8 +1936,14 @@ const RUN_TO_LIST_STATE = Object.freeze({
   switching: 'running',
   waiting: 'awaiting-reply',
   stalled: 'awaiting-reply',
-  // 許可待ちも「あなたの番」の位置。押さないと1行も進まないので、いちばん人を待たせている
-  'needs-permission': 'awaiting-reply',
+  // 許可待ちは承認待ちの位置（rank 1）。押さないと1行も進まないので、
+  // 返信待ち（rank 2・放っておいても壊れない）と同じ高さに並べてはいけない。
+  //
+  // **写し先を変えるなら byStatus も一緒に立てる。** 下の overlay() / synthRow() を見ること。
+  // 立てないと `notify/watch.mjs` の `requireByStatus` に当たって、
+  // いちばん急ぐ状態だけが永久に鳴らなくなる（写す前は awaiting-reply の
+  // `{slow:true, requireConfident:true}` で2分後に鳴っていた）
+  'needs-permission': 'needs-approval',
   // 予算切れも「あなたの番」の位置。上げて続けるか止めるかを決めるのは人なので、
   // 待たせているものとして同じ高さに並べる
   budget: 'awaiting-reply',
@@ -1981,7 +1987,11 @@ function overlay(row, run) {
     stateReason: run.reason ?? 'この画面から起こしたセッション',
     stateConfident: true,
     statusRaw: null,
-    byStatus: false,
+    // 「登録簿の status が待ち系」ではなく「**止まっている裏づけがある**
+    // （＝しきい値だけの推測ではない）」の意味で立てる。台帳は未応答の
+    // `control_request` を実際に握っているので、登録簿より強い証人。
+    // `statusRaw` は null のまま（あちらは別の問いに答えるフィールド）
+    byStatus: run.state === 'needs-permission',
     origin: 'deck',
     run: badge,
   };
@@ -2041,7 +2051,8 @@ function synthRow(run, now) {
     // ここが空だと鍵が生涯1つになり、2回目以降が黙って落ちる。
     // 会話ログが出れば overlay 側（ログ末尾の uuid）に入れ替わる
     anchorId: run.runId ?? null,
-    byStatus: false,
+    // overlay() と同じ理由（「止まっている裏づけがある」）で立てる
+    byStatus: run.state === 'needs-permission',
 
     // 一覧だけが使う項目
     nameSource: null,

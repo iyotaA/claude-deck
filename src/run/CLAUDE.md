@@ -239,6 +239,37 @@ headless でも紙は書かれるが `status` のキーが無いので、`derive
 - 同じ `sessionId` の run が2本あるなら、後から起こしたほうを採る
   （`--resume` で起こし直すと、前の run が終端のまま履歴に残っている）
 
+#### 写し先（`RUN_TO_LIST_STATE`）
+
+台帳の11種を一覧の7種へ寄せる表。**寄せるのは並び順と色のためだけ**で、
+画面に出す名前（`stateLabel`）は台帳の実態のまま残す。
+「承認待ち」と言われても画面のどこを押せばいいか分からないため。
+
+| 台帳 | 一覧 | なぜ |
+|---|---|---|
+| `needs-permission`（許可待ち） | `needs-approval` | 押さないと1行も進まない。返信待ち（rank 2・放っておいても壊れない）と同じ高さに並べない |
+| `waiting`（あなたの番） | `awaiting-reply` | 1行送れば進む |
+| `stalled`（無音） | `awaiting-reply` | 聞かれていない。**赤にしない** |
+| `budget`（予算切れ） | `awaiting-reply` | 問いではない。**赤にしない** |
+
+無音と予算切れを赤へ寄せたくなったら、下の `byStatus` の話を必ず一緒に読む。
+寄せるだけだと通知が黙る。
+
+#### `byStatus` は許可待ちのときだけ立てる
+
+`overlay()` と `synthRow()` が `run.state === 'needs-permission'` で立てている。
+
+意味は「登録簿の `status` が待ち系」ではなく、**「止まっている裏づけがある
+（＝しきい値だけの推測ではない）」**。台帳は未応答の `control_request` を実際に握っているので、
+登録簿より強い証人。`statusRaw` は `null` のまま置く（あちらは別の問いに答えるフィールド）。
+
+**これを立てずに写し先だけ変えると、いちばん急ぐ状態だけが永久に鳴らなくなる。**
+`notify/watch.mjs` の `needs-approval` は `requireByStatus: true` なので、
+偽のままだと落ちる。写す前は `awaiting-reply`（`{slow:true, requireConfident:true}`）だったので
+2分後に鳴っていた。**退行が「静かになる」方向に出る**ので気づきにくい。
+
+副産物として、許可待ちの通知が2分から6秒（`SETTLE_MS`）に速くなった。
+
 ### 替えて続ける（`POST /api/runs/:id/switch`）
 
 モデル・思考量・権限モードを替えて、**同じセッションの続き**を起こす。
@@ -394,8 +425,9 @@ CLI の Esc 相当。**いま走っている手を止めるだけで、会話は
 - **畳む子がいないなら切り替えの旗（`switchRequested`）を立てない。**
   立てっぱなしにすると、次の子が自分で異常終了したときに `onExit` が切り替えと読み、
   終端へ落ちないまま `RUN_MAX` の枠を掴み続ける
-- 一覧では `awaiting-reply`（あなたの番）の位置に置く。`unknown`（rank 4）へ沈めると、
-  上げるか止めるかを決める人が気づけない
+- 一覧では `awaiting-reply`（返信待ち）の位置に置く。`unknown`（rank 4）へ沈めると、
+  上げるか止めるかを決める人が気づけない。**`needs-approval` へは寄せない。**
+  あれは「答えないと1行も進まない」ものの位置で、予算切れは問いではない
 - 本数（`RUN_MAX`）の枠は掴んだまま数える。空いていると数えると、続きを打った瞬間に超える
 
 画面側（`public/js/run-view.js`）は色を `warn` にする。
@@ -509,6 +541,9 @@ Bash などを掴んだまま応じなかった子だけになる（実測でそ
 - **`bypassPermissions` を画面の語彙に入れない。** `CLAUDE_DECK_RUN_ALLOW_BYPASS` が立っているときだけ。ブラウザから押せる「許可を一切求めずに何でも実行する」ボタンは、このアプリが持ちうる最も危険なもの。`CLAUDE_DECK_NOTIFY_OFF` と同じ帯域外のスイッチにする
 - **`--permission-prompt-tool stdio` を外さない。** 外すと許可要求がホストへ届かず、CLI が自動で拒否へ倒す。plan で起こしたセッションが Bash / Edit の手前で必ず失敗する（実測 2.1.243。受け取る値は `stdio` の1語だけ）
 - **受け取った `control_request` には必ず何かを返す。** 未知の `subtype` にも `subtype:'error'` を返す。返さないと**その子は永久に待つ。** ルートの「未知の形で落ちない」は、ここでは「未知の形で詰まらない」まで含む
+- **写し先（`RUN_TO_LIST_STATE`）を `needs-*` へ変えるなら `byStatus` も一緒に立てる。**
+  `notify/watch.mjs` の `requireByStatus` に当たって、その状態だけが永久に鳴らなくなる。
+  退行が「静かになる」方向に出るので、画面を見ているだけでは気づけない
 - **許可待ちを `waiting` に寄せない。** `waiting` は「1行送れば進む」状態で、`markInput()` がそれを前提に `running` へ戻す。許可待ちの子に user 行を送っても `control_response` を待ち続けるので、寄せると「送ったのに動かない」を再生産する
 - **`needs-permission` を `isChildDone` にも `isRunOver` にも入れない。** 子は生きて待っている。畳むと答えられなくなる
 - **pending が原文の `input` を持つのは `AskUserQuestion` のときだけ。** `allow` は `updatedInput` を省略でき、省略すれば CLI が元の入力を使う。他まで持つとリングに数MBが載る
