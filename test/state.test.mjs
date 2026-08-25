@@ -174,6 +174,88 @@ test('busy のまま止まって承認待ちになった場合は自信なしに
   assert.equal(s.confident, false);
 });
 
+/* ------------------------------------------------ 権限モードで承認待ちを抑える */
+//
+// auto 系では Claude が自分で許可して進むので、しきい値だけを根拠に「承認待ち」と
+// 決めてはいけない。抑えるのは B5a（しきい値の段）だけで、登録簿の証言は抑えない。
+
+test('auto では、しきい値を超えても承認待ちにしない', () => {
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('Bash', { command: 'npm run build' }, { id: 't1' })]),
+    now: nowAfter(APPROVAL_MS + 1000),
+    permissionMode: 'auto',
+  });
+  assert.equal(s.kind, 'running');
+  assert.match(s.reason, /auto なので承認待ちと決めない/);
+});
+
+test('人に聞くモードなら、これまでどおり承認待ちになる', () => {
+  for (const mode of ['plan', 'default', 'manual']) {
+    const s = deriveState({
+      registry: reg({ status: 'thinking' }),
+      tail: tail([call('Edit', { file_path: 'C:\work\a.mjs' }, { id: 't1' })]),
+      now: nowAfter(APPROVAL_MS + 1000),
+      permissionMode: mode,
+    });
+    assert.equal(s.kind, 'needs-approval', `${mode} で承認待ちにならなかった`);
+  }
+});
+
+test('権限モードが読めなければ、抑えずに今までの判定を出す', () => {
+  // 取れなかったものを auto 扱いにすると、いちばん危ない側（見落とし）へ倒れる
+  for (const mode of [null, undefined, '', 'まだ知らないモード']) {
+    const s = deriveState({
+      registry: reg({ status: 'thinking' }),
+      tail: tail([call('Edit', { file_path: 'C:\work\a.mjs' }, { id: 't1' })]),
+      now: nowAfter(APPROVAL_MS + 1000),
+      permissionMode: mode,
+    });
+    assert.equal(s.kind, 'needs-approval', `${mode} で抑えてしまった`);
+  }
+});
+
+test('auto でも、登録簿が待ちと言っているなら承認待ちにする', () => {
+  // auto での唯一の受け皿。ここを抑えると本物の許可プロンプトが拾えなくなる
+  const s = deriveState({
+    registry: reg({ status: 'idle' }),
+    tail: tail([call('Bash', { command: 'rm -rf tmp' }, { id: 't1' })]),
+    now: nowAfter(QUIET_MS + 1000),
+    permissionMode: 'auto',
+  });
+  assert.equal(s.kind, 'needs-approval');
+  assert.equal(s.byStatus, true);
+});
+
+test('auto でも、質問とプランの承認は確定させる', () => {
+  const q = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('AskUserQuestion', {}, { id: 't1' })]),
+    now: nowAfter(1000),
+    permissionMode: 'auto',
+  });
+  assert.equal(q.kind, 'needs-answer');
+
+  const p = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('ExitPlanMode', {}, { id: 't2' })]),
+    now: nowAfter(1000),
+    permissionMode: 'auto',
+  });
+  assert.equal(p.kind, 'needs-plan-approval');
+});
+
+test('抑えた理由に経過秒を入れない', () => {
+  // 毎秒動く値を reason に置くと refresh() の差分に載って詳細ペインが毎秒作り直される
+  const at = (ms) => deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('Bash', { command: 'npm run build' }, { id: 't1' })]),
+    now: nowAfter(ms),
+    permissionMode: 'auto',
+  }).reason;
+  assert.equal(at(APPROVAL_MS + 1000), at(APPROVAL_MS + 90_000));
+});
+
 test('結果待ちなし ＋ 末尾が assistant の発言 ＋ 追記停止 → 返信待ち', () => {
   const s = deriveState({
     registry: reg({ status: 'thinking' }),

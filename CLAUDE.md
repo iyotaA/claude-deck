@@ -180,7 +180,8 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 ```
 一覧  read/registry.mjs（登録簿）＋ read/transcript.mjs:indexTranscripts
       → readTail（末尾 64KB だけ。足りなければ4倍ずつ広げる）
-      → parse/state.mjs:deriveState ＋ parse/meta.mjs:extractMeta
+      → parse/meta.mjs:extractMeta ＋ parse/state.mjs:deriveState
+        （meta が先。permissionMode を state へ渡すので順を入れ替えない）
       → view/sessions.mjs:listSessions が行を組んで状態順に並べる
 
 詳細  readAll（全文。詳細を開いたときだけ）

@@ -9,6 +9,17 @@
 一覧と詳細で同じ項目（`name` や `project` など）は `view/shape.mjs` が組む。
 以前は両方が別々に組んでいて、片方だけにフォールバックが付いている状態になっていた。
 
+**`permissionMode` を `deriveState` へ渡すのは、呼ぶ側（ここ）の仕事。**
+`state.mjs` から `meta.mjs` を import すると `parse` の中に新しい辺ができるので、
+`sessions.mjs` と `detail.mjs` が `extractMeta` の結果から1項目だけ抜いて渡す。
+**`extractMeta` → `deriveState` の順を崩さない**（もう meta を組んでいるので追加の走査は0）。
+**`meta` ごと渡さない**（理由は `src/parse/CLAUDE.md`）。
+
+一覧は末尾64KB、詳細は全文を読むので、`permissionMode` の見え方は食い違いうる
+（モードを途中で替えたセッションで、一覧が新しい値・詳細が最初の値を見る）。
+画面では `public/js/rows.js` の `LIVE_FIELDS` が一覧の状態を正にしているので、
+食い違っても左のカードと右のヘッダは揃う。
+
 `summarizeRows()` の `needsYou` は `row.blocking === true` だけを数える。
 **`ball === 'master'` で数えない**（返信待ちが混ざって、上のバーの数が
 「いま手を止めている件数」ではなくなる）。判断は `parse/state.mjs` の `isBlocking` が持ち、

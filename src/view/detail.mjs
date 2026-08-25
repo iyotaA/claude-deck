@@ -36,7 +36,7 @@ export async function getSessionDetail(sessionId, now = Date.now()) {
     : { entries: [], parseErrors: 0, size: 0, mtimeMs: 0 };
 
   const meta = extractMeta(log.entries);
-  const state = deriveState({ registry, tail: log, now });
+  const state = deriveState({ registry, tail: log, now, permissionMode: meta.permissionMode });
   const [digest, tasks] = await Promise.all([
     Promise.resolve(buildDigest({ entries: log.entries })),
     readTasks(sessionId),

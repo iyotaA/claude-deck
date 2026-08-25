@@ -24,7 +24,8 @@ async function buildRow({ registry, transcript, now }) {
   const tail = transcript ? await readTail(transcript.file) : { entries: [], parseErrors: 0, mtimeMs: 0, size: 0 };
   const entries = tail.entries ?? [];
   const meta = extractMeta(entries);
-  const state = deriveState({ registry, tail, now });
+  // meta が先。**この順を入れ替えない**（入れ替えると追加の走査が1回増える）
+  const state = deriveState({ registry, tail, now, permissionMode: meta.permissionMode });
   const sessionId = registry?.sessionId ?? transcript?.sessionId ?? null;
 
   // サブエージェントを使ったか。<セッションID>/ が無ければ子も無いので readdir を出さずに 0 と決める。
