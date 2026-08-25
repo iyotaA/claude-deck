@@ -445,6 +445,9 @@ export function askBlock(row) {
     count: asks.length > 1 ? `${asks.length} 件` : null,
   });
   p.section.classList.add('is-wait');
+  // 許可要求は定義上いつも「答えないと1行も進まない」ので、`row.blocking` を見ない。
+  // このカードは台帳から直に組むので、一覧の行がまだ来ていない時期でも出る
+  p.section.classList.add('is-block');
   p.body.append(el('p', 'note', guide.lead));
   if (asks.length > 1) {
     p.body.append(el('p', 'settings-hint', 'すべて答えるまで、この先へ進みません。'));
