@@ -251,6 +251,14 @@
   gap: .5rem;
 }
 
+/* 答えないと1行も進まないものの印。**色は上の `.is-hot` が持つ。**
+   ここで新しい色トークンを作ると tokens.css の二重定義を両方直す義務が生まれる。
+   面も塗らない。太さと見出し1段（.82rem → .88rem）だけにしてあるのは、
+   色を見分けにくい人にも届く印を1つ持たせるため。
+   タブの帯を太字にする案は捨てた（隣のタブの位置が動いて押し間違いが起きる） */
+.panel.is-block { border-left-width: 3px; }
+.panel.is-block > h3 { font-size: .88rem; }
+
 .wait-lead {
   font-size: .76rem;
   font-weight: 700;

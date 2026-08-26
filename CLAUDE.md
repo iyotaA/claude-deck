@@ -99,7 +99,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） `rate`（枠の使用率を紙に1枚） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
 | `src/startup/` | ランチャが書いた自動起動の紙を読む | `state` |
-| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool`） `appdata`（書き込み先） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `env`（止めるスイッチの読み方） |
+| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool` / `isLongRunningTool`） `appdata`（書き込み先） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `env`（止めるスイッチの読み方） |
 | `src/os/` | OS を叩く | `focus` `claude`（CLI を探す・版を読む・行を割る） |
 
 流れは `read` → `parse` → `view` → `notify`。
@@ -180,7 +180,8 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 ```
 一覧  read/registry.mjs（登録簿）＋ read/transcript.mjs:indexTranscripts
       → readTail（末尾 64KB だけ。足りなければ4倍ずつ広げる）
-      → parse/state.mjs:deriveState ＋ parse/meta.mjs:extractMeta
+      → parse/meta.mjs:extractMeta ＋ parse/state.mjs:deriveState
+        （meta が先。permissionMode を state へ渡すので順を入れ替えない）
       → view/sessions.mjs:listSessions が行を組んで状態順に並べる
 
 詳細  readAll（全文。詳細を開いたときだけ）
@@ -246,7 +247,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/runs/options` | 起こすフォームの選択肢。cwd の候補・権限モード・**モデルの候補**・思考量・予算の範囲・CLI の様子・いまの本数 |
 | `GET /api/runs/events?from=<seq>` | 取りこぼしの穴埋め。SSE が切れているあいだの速報を拾う |
 | `GET /api/runs/stream?from=<seq>` | **実行専用の SSE。**`/api/stream` には相乗りさせない |
-| `GET /api/runs/:id` | 1本ぶんの全部入り。粗い `rows()` と違って `counts` や `costUSD` も入る |
+| `GET /api/runs/:id` | 1本ぶんの全部入り。粗い `rows()` と違って `counts` や `lastLineAt` も入る |
 | `GET /api/health` | 生存確認。二重起動の判定にも使う。版・通知の設定と数え・**自動起動の様子**・**claude CLI を掴めたか**・**抱えている実行の数**もここに出る |
 | `GET /api/settings/notify` | 通知の設定。URL はマスク済み。出どころ（`sources` / `envSet`）も返す |
 | `GET /api/update` | 更新の状態。ランチャが書いた紙 ＋ `canApply`（いまの起動のされ方で当てられるか） |

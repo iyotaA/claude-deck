@@ -11,8 +11,11 @@ import {
   ballOf,
   STATE_LABELS,
   STATE_RANK,
+  STATE_BLOCKING,
+  isBlocking,
   QUIET_MS,
   APPROVAL_MS,
+  LONG_APPROVAL_MS,
 } from '../src/parse/state.mjs';
 import { T0, at, say, call, result, prompt, tail, reg } from './helpers.mjs';
 
@@ -162,14 +165,150 @@ test('結果待ちでも APPROVAL_MS 未満なら実行中（長く走る Bash �
 });
 
 test('busy のまま止まって承認待ちになった場合は自信なしにする', () => {
-  // status が busy だと「単に長いコマンド」の可能性が残るので断定しない
+  // status が busy だと「単に長いコマンド」の可能性が残るので断定しない。
+  // 主題は confident の規則なので、しきい値の短い側（Edit）で組んである
   const s = deriveState({
     registry: reg({ status: 'busy' }),
-    tail: tail([call('Bash', { command: 'npm run build' }, { id: 't1' })]),
+    tail: tail([call('Edit', { file_path: 'C:\work\a.mjs' }, { id: 't1' })]),
     now: nowAfter(APPROVAL_MS + 1000),
   });
   assert.equal(s.kind, 'needs-approval');
   assert.equal(s.confident, false);
+});
+
+/* ------------------------------------------------------ ツール別のしきい値 */
+//
+// 長さがツール自身では決まらないもの（外のコマンド・ネットワーク・別のエージェント）は
+// 60秒まで待つ。実測で短い側 3,608件の60秒超は0件なので、短いほうの判定は変わらない。
+
+test('長く走るツールは 15秒では承認待ちにしない', () => {
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('Bash', { command: 'npm run build' }, { id: 't1' })]),
+    now: nowAfter(APPROVAL_MS + 1000),
+  });
+  assert.equal(s.kind, 'running');
+});
+
+test('長く走るツールでも 60秒を超えたら承認待ち', () => {
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('Bash', { command: 'npm run build' }, { id: 't1' })]),
+    now: nowAfter(LONG_APPROVAL_MS),
+  });
+  assert.equal(s.kind, 'needs-approval');
+  assert.match(s.reason, /60 秒来ないまま停止/);
+});
+
+test('短いツールのしきい値は 15秒のまま', () => {
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('Read', { file_path: 'C:\work\a.mjs' }, { id: 't1' })]),
+    now: nowAfter(APPROVAL_MS),
+  });
+  assert.equal(s.kind, 'needs-approval');
+  assert.match(s.reason, /15 秒来ないまま停止/);
+});
+
+test('mcp__ で始まるツールは名前を知らなくても長い側', () => {
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('mcp__まだ知らないサーバ__なにか', {}, { id: 't1' })]),
+    now: nowAfter(APPROVAL_MS + 1000),
+  });
+  assert.equal(s.kind, 'running');
+});
+
+test('人待ち専用のツールはしきい値を待たずに確定する', () => {
+  // 長い側にも短い側にも属さない。1の段で抜けるので、しきい値の変更に影響されない
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('AskUserQuestion', {}, { id: 't1' })]),
+    now: nowAfter(1000),
+  });
+  assert.equal(s.kind, 'needs-answer');
+});
+
+/* ------------------------------------------------ 権限モードで承認待ちを抑える */
+//
+// auto 系では Claude が自分で許可して進むので、しきい値だけを根拠に「承認待ち」と
+// 決めてはいけない。抑えるのは B5a（しきい値の段）だけで、登録簿の証言は抑えない。
+
+test('auto では、しきい値を超えても承認待ちにしない', () => {
+  const s = deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('Bash', { command: 'npm run build' }, { id: 't1' })]),
+    now: nowAfter(LONG_APPROVAL_MS + 1000),
+    permissionMode: 'auto',
+  });
+  assert.equal(s.kind, 'running');
+  assert.match(s.reason, /auto なので承認待ちと決めない/);
+});
+
+test('人に聞くモードなら、これまでどおり承認待ちになる', () => {
+  for (const mode of ['plan', 'default', 'manual']) {
+    const s = deriveState({
+      registry: reg({ status: 'thinking' }),
+      tail: tail([call('Edit', { file_path: 'C:\work\a.mjs' }, { id: 't1' })]),
+      now: nowAfter(APPROVAL_MS + 1000),
+      permissionMode: mode,
+    });
+    assert.equal(s.kind, 'needs-approval', `${mode} で承認待ちにならなかった`);
+  }
+});
+
+test('権限モードが読めなければ、抑えずに今までの判定を出す', () => {
+  // 取れなかったものを auto 扱いにすると、いちばん危ない側（見落とし）へ倒れる
+  for (const mode of [null, undefined, '', 'まだ知らないモード']) {
+    const s = deriveState({
+      registry: reg({ status: 'thinking' }),
+      tail: tail([call('Edit', { file_path: 'C:\work\a.mjs' }, { id: 't1' })]),
+      now: nowAfter(APPROVAL_MS + 1000),
+      permissionMode: mode,
+    });
+    assert.equal(s.kind, 'needs-approval', `${mode} で抑えてしまった`);
+  }
+});
+
+test('auto でも、登録簿が待ちと言っているなら承認待ちにする', () => {
+  // auto での唯一の受け皿。ここを抑えると本物の許可プロンプトが拾えなくなる
+  const s = deriveState({
+    registry: reg({ status: 'idle' }),
+    tail: tail([call('Bash', { command: 'rm -rf tmp' }, { id: 't1' })]),
+    now: nowAfter(QUIET_MS + 1000),
+    permissionMode: 'auto',
+  });
+  assert.equal(s.kind, 'needs-approval');
+  assert.equal(s.byStatus, true);
+});
+
+test('auto でも、質問とプランの承認は確定させる', () => {
+  const q = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('AskUserQuestion', {}, { id: 't1' })]),
+    now: nowAfter(1000),
+    permissionMode: 'auto',
+  });
+  assert.equal(q.kind, 'needs-answer');
+
+  const p = deriveState({
+    registry: reg({ status: 'busy' }),
+    tail: tail([call('ExitPlanMode', {}, { id: 't2' })]),
+    now: nowAfter(1000),
+    permissionMode: 'auto',
+  });
+  assert.equal(p.kind, 'needs-plan-approval');
+});
+
+test('抑えた理由に経過秒を入れない', () => {
+  // 毎秒動く値を reason に置くと refresh() の差分に載って詳細ペインが毎秒作り直される
+  const at = (ms) => deriveState({
+    registry: reg({ status: 'thinking' }),
+    tail: tail([call('Bash', { command: 'npm run build' }, { id: 't1' })]),
+    now: nowAfter(ms),
+    permissionMode: 'auto',
+  }).reason;
+  assert.equal(at(LONG_APPROVAL_MS + 1000), at(LONG_APPROVAL_MS + 90_000));
 });
 
 test('結果待ちなし ＋ 末尾が assistant の発言 ＋ 追記停止 → 返信待ち', () => {
@@ -281,10 +420,11 @@ test('Skill の結果待ちは スキル名と引数を出す', () => {
   assert.deepEqual(s.waitingFor, { id: 't1', tool: 'Skill', detail: 'pr-review (1234)' });
 });
 
-test('返しうる状態はすべてラベルと並び順を持っている', () => {
+test('返しうる状態はすべてラベルと並び順と急ぎの区別を持っている', () => {
   for (const kind of Object.keys(STATE_LABELS)) {
     assert.equal(typeof STATE_LABELS[kind], 'string', `${kind} のラベルが無い`);
     assert.equal(typeof STATE_RANK[kind], 'number', `${kind} の並び順が無い`);
+    assert.equal(typeof STATE_BLOCKING[kind], 'boolean', `${kind} の blocking が無い`);
   }
 });
 
@@ -296,6 +436,30 @@ test('ボールの持ち主の割り当て', () => {
   assert.equal(ballOf('needs-plan-approval'), 'master');
   assert.equal(ballOf('needs-approval'), 'master');
   assert.equal(ballOf('awaiting-reply'), 'master');
+});
+
+test('答えないと進まないのはどれか', () => {
+  assert.equal(isBlocking('needs-answer'), true);
+  assert.equal(isBlocking('needs-plan-approval'), true);
+  assert.equal(isBlocking('needs-approval'), true);
+  assert.equal(isBlocking('running'), false);
+  assert.equal(isBlocking('ended'), false);
+  assert.equal(isBlocking('unknown'), false);
+});
+
+test('ボールの所在と「進まないか」は別の問い', () => {
+  // 返信待ちは確かにあなたのコートにある（ball）が、黙っていても Claude は困らない（blocking）。
+  // ここが同じ答えになったら、どちらかの軸が要らなくなったということ
+  assert.equal(ballOf('awaiting-reply'), 'master');
+  assert.equal(isBlocking('awaiting-reply'), false);
+});
+
+test('知らない状態は急かさない側に倒す', () => {
+  // 断定できないものを赤にしない。未知の status が来る前提のアプリなので、
+  // 表に無い語が出たときの倒し方をここで固定しておく
+  assert.equal(isBlocking('まだ知らない状態'), false);
+  assert.equal(isBlocking(undefined), false);
+  assert.equal(isBlocking(null), false);
 });
 
 // --- 通知が使う2つの手がかり ---
@@ -349,7 +513,7 @@ test('しきい値だけが根拠の承認待ちには裏づけが付かない',
   const s = deriveState({
     registry: reg({ status: 'busy' }),
     tail: tail([call('Bash', { command: 'npm run build' })]),
-    now: nowAfter(APPROVAL_MS + 1000),
+    now: nowAfter(LONG_APPROVAL_MS + 1000),
   });
   assert.equal(s.kind, 'needs-approval');
   assert.equal(s.byStatus, false);

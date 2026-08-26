@@ -8,7 +8,7 @@
  *  - name の「不明」フォールバックが一覧にしか無かった
  *  - project の projectDir フォールバックが一覧にしか無かった
  */
-import { STATE_LABELS, ballOf } from '../parse/state.mjs';
+import { STATE_LABELS, ballOf, isBlocking } from '../parse/state.mjs';
 
 /**
  * そのセッションの身元にあたる項目を組む。
@@ -57,6 +57,8 @@ export function stateFields(state) {
     state: state.kind,
     stateLabel: STATE_LABELS[state.kind] ?? state.kind,
     ball: ballOf(state.kind),
+    // ball とは別の問い（答えないと1行も進まないか）。判断は日本語と同じくサーバーが配る
+    blocking: isBlocking(state.kind),
     idleMs: state.idleMs,
     lastActivityAt: state.lastActivityAt,
     waitingFor: state.waitingFor,

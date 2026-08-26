@@ -2,64 +2,32 @@
  *
  * 層3。detail-panels.js・agents.js・usage-panel.js と同格で、返す形も同じ（節点か null）。
  *
- * ## 中だけ差し替える
+ * ## 速報は1件も出さない
  *
- * 詳細ペインは detailKeyOf() が動いたときだけ作り直す。速報は1ターンで数百行来るので、
- * それを鍵に混ぜると開いた <details>・スクロール位置・入力中の caret が毎回消える。
- * だから timeline/ と同じ形にして、器（.run-log）を attach() で預け、
- * render() が**新しく届いたぶんだけ追記**する。
+ * 以前はここに `.run-log` があり、SSE の速報を縦に流していた（最大400件）。
+ * 外した理由は、**同じものを経過タブが会話ログから描いていた**から。
+ * 読み返す正本は ~/.claude/projects/ の会話ログのほうで、そちらは走っている最中でも追いつく。
+ * 2通りに描くぶん、情報量が増えてスクロールが要る＝判断すべき点が埋もれる。
  *
- * 全部作り直さないのは、出来事が増えるだけで前の行は動かないから。
- * 全消し＋再構築にすると、行数が増えるほど描き直しが重くなる。
+ * 残したのは「状態」と facts と操作の3つだけ。
+ * ここが答えるのは「いま何が起きているか」であって、読み返しではない。
  *
- * ## 操作の器も使い回す
+ * **戻すなら器と一緒に。** 落とした件数だけを数えて出す欄（`.run-drop`）も一緒に消してある。
+ * 数だけ戻すと「全部見えている」と読める空欄が残る。
+ *
+ * ## 操作の器は使い回す
  *
  * 送る・止める・替えるの節点も module-level に1つだけ持ち、作り直すたびに append し直す。
  * document から外れても <textarea> の value と <details> の開閉は消えないので、
  * 詳細ペインが丸ごと作り直されても書きかけの文が残る。
  * 焦点だけは外れるので、detach() で控えて runPanel() の最後に戻す。
  *
- * ## 速報であって正本ではない
- *
- * ここに出るのは「いま何が起きているか」。読み返す正本は ~/.claude/projects/ の会話ログで、
- * そちらは同じ詳細ペインの時系列パネルが描く。同じものを2通りに描かない。
  */
-import { el, dur, stamp, shortModel, fact } from './util.js';
+import { el, stamp, shortModel, fact } from './util.js';
 import { panel, SEC } from './panel.js';
 import {
-  runFor, eventsOf, droppedOf, runsMissed, EVENTS_PER_RUN, EFFORT_LABELS,
-  MODEL_FREE, modelOptions, modelPick, modelValue,
+  runFor, EFFORT_LABELS, MODEL_FREE, modelOptions, modelPick, modelValue,
 } from './runs.js';
-import { bodyText } from './timeline/index.js';
-
-/** 地の文の頭出し。これを超えたら <details> に畳む（時系列と同じ作法）。 */
-const TEXT_LIMIT = 600;
-const TEXT_LINES = 10;
-
-/** 出来事の種類の名前。ここに無いものは kind をそのまま出す。 */
-const EVENT_LABELS = {
-  init: '開始',
-  text: 'Claude',
-  tool: '道具',
-  'tool-result': '結果',
-  echo: 'あなた',
-  result: '1往復の終わり',
-  note: '記録',
-  hook: 'フック',
-  other: 'その他',
-  broken: '読めなかった行',
-};
-
-/**
- * 「実行されなかった理由」の名前。
- *
- * 実測で出たのは `permission-rule` の1種類だけ（自分が `control_response` で断ったとき）。
- * **ここに無い語はそのまま出す。** 版が上がって新しい語が来た日に、
- * 知らない語を黙って捨てると「エラーになった」としか見えなくなる。
- */
-const NON_EXEC_LABELS = {
-  'permission-rule': 'あなたが断ったので実行されていません',
-};
 
 /**
  * 状態に応じたパネルの色。
@@ -75,124 +43,18 @@ function toneOf(state) {
   return null;
 }
 
-/** 出来事1件の中身。kind ごとに形が違う。 */
-function bodyOf(ev) {
-  switch (ev.kind) {
-    case 'text':
-    case 'echo':
-      return bodyText(ev.text, TEXT_LIMIT, TEXT_LINES);
-
-    case 'tool': {
-      const line = el('div', 'run-tool');
-      line.append(el('span', 'run-tool-name', ev.tool ?? '(名前なし)'));
-      // detail は材料が無ければ null で来る。空文字に丸めない
-      if (ev.detail) line.append(el('span', 'run-tool-detail', ev.detail));
-      return [line];
-    }
-
-    case 'tool-result': {
-      const out = [];
-      // **断ったものはエラーの赤で出さない。** こちらが断った結果は `is_error:true` で返るので
-      // （実測。`stream.mjs` の `nonExecutionOf` を見ること）、印を見ずに色を付けると
-      // 「自分で止めた」と「向こうが壊れた」が画面で同じ顔になる
-      if (ev.nonExecution) out.push(el('div', 'run-skip', NON_EXEC_LABELS[ev.nonExecution] ?? `実行されませんでした（${ev.nonExecution}）`));
-
-      const line = el('div', 'run-out');
-      if (ev.isError && !ev.nonExecution) line.classList.add('is-error');
-      // 中身が空でも「返ってきた」ことは伝える（黙って空行にしない）
-      line.textContent = ev.text || (ev.isError ? '（エラー。中身なし）' : '（中身なし）');
-      out.push(line);
-      return out;
-    }
-
-    case 'init': {
-      const dl = el('dl', 'facts');
-      fact(dl, 'モデル', shortModel(ev.model));
-      fact(dl, '権限', ev.permissionMode);
-      fact(dl, 'フォルダ', ev.cwd);
-      fact(dl, '道具', Array.isArray(ev.tools) ? `${ev.tools.length} 種` : null);
-      return dl.childElementCount > 0 ? [dl] : [];
-    }
-
-    case 'result':
-      return resultBody(ev);
-
-    case 'note':
-      return [el('div', 'run-note', ev.text ?? '')];
-
-    case 'broken':
-      return [el('div', 'run-out is-error', ev.sample ? `読めなかった行: ${ev.sample}` : '読めなかった行')];
-
-    case 'hook': {
-      const line = el('div', 'run-tool');
-      line.append(el('span', 'run-tool-name', ev.name ?? ev.event ?? '(名前なし)'));
-      // ok が null なのは「成功か分からなかった」。そのときは何も言わない（成功と書かない）
-      if (ev.ok === false) {
-        const code = typeof ev.exitCode === 'number' ? `失敗（code ${ev.exitCode}）` : '失敗';
-        line.append(el('span', 'run-tool-detail is-error', code));
-      }
-      const out = [line];
-      // フックの出力は拾っていない（数KBあるため）。stderr だけは出す。壊れたときの唯一の手がかり
-      if (ev.stderr) out.push(el('div', 'run-out is-error', ev.stderr));
-      return out;
-    }
-
-    case 'other':
-      return [el('div', 'run-other', [ev.type, ev.subtype].filter(Boolean).join(' / ') || '(型なし)')];
-
-    default:
-      // 知らない kind が来ても行ごと消さない。見出しだけは出ている
-      return [];
-  }
-}
-
-/** 1往復の終わり。数字の意味が種類で違うので、ラベルで書き分ける。 */
-function resultBody(ev) {
-  const out = [];
-  if (ev.text) out.push(...bodyText(ev.text, TEXT_LIMIT, TEXT_LINES));
-
-  const dl = el('dl', 'facts');
-  fact(dl, 'かかった時間', typeof ev.durationMs === 'number' ? dur(ev.durationMs) : null);
-  // num_turns は**そのターンぶん**の数（実測で2往復目も 1）。累積ではない
-  fact(dl, 'このターンの往復', ev.numTurns);
-  // total_cost_usd のほうは累積（実測 0.803025 → 0.843727）。同じ行に並んでいるので混ぜやすい。
-  //
-  // ただし**累積するのは同じ子のあいだだけ。**「権限モード・モデルを替える」の建て直し側は子を起こし直すので、
-  // そこで起点に戻る（実測 0.401036 → 切り替え後の最初の result で 0.130617）。
-  // だから「ここまで」とは書かない。切り替えを挟んだぶんは、並んだ result を足したものが合計になる
-  fact(dl, 'この起動ぶんの費用', typeof ev.costUSD === 'number' ? `$${ev.costUSD.toFixed(4)}` : null);
-  // そのターンで考えた量。台帳が刻みを畳んだもの（速報には1件も並ばない）。
-  // 0 は「考えなかった」で不明ではないので、そのまま出す
-  fact(dl, '考えた量', typeof ev.thinkingTokens === 'number' ? `${ev.thinkingTokens.toLocaleString()} トークン` : null);
-  fact(dl, '止まった理由', ev.terminalReason);
-  // 断ったものが無いときは行ごと出さない。0 を隠すのは「取れなかった」ではなく
-  // 「起きなかった」ので、0 と不明を分ける原則には触れない
-  fact(dl, '断ったツール', ev.denials || null);
-  if (dl.childElementCount > 0) out.push(dl);
-
-  // errors の中身の形は実測できていない。文字にして出すだけにして、黙って落とさない
-  if (Array.isArray(ev.errors) && ev.errors.length > 0) {
-    const text = ev.errors.map((e) => (typeof e === 'string' ? e : JSON.stringify(e))).join('\n');
-    out.push(el('div', 'run-out is-error', text));
-  }
-  return out;
-}
-
-/** 出来事1件の節点。 */
-function eventNode(ev) {
-  const wrap = el('div', 'run-ev');
-  wrap.dataset.kind = ev.kind;
-  // サブエージェントの行は親の発言と混ざって並ぶ。どちらが本流か分かるように下げる
-  if (ev.sub) wrap.classList.add('is-sub');
-
-  const head = el('div', 'run-ev-head');
-  if (ev.at) head.append(el('span', 'run-ev-at', stamp(ev.at).slice(11)));
-  head.append(el('span', 'run-ev-kind', EVENT_LABELS[ev.kind] ?? ev.kind));
-  if (ev.sub) head.append(el('span', 'run-ev-sub', 'サブ'));
-  wrap.append(head);
-
-  for (const node of bodyOf(ev)) wrap.append(node);
-  return wrap;
+/**
+ * ドルの額を読める形にする。
+ *
+ * 桁を1本に決めない。1本の起動は 0.01 ドルを切ることもあれば数ドルにもなるので、
+ * 2桁だと前者が全部 `$0.00` になり、4桁だと後者が `$12.3456` で読みづらい。
+ *
+ * @param {unknown} n 額。数でなければ null（**0 と不明は別物**なので 0 は通す）
+ * @returns {string|null} 出せないなら null（fact が欄ごと落とす）
+ */
+function usd(n) {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return null;
+  return `$${n >= 1 ? n.toFixed(2) : n.toFixed(4)}`;
 }
 
 /** 実行の見出しに出す情報。状態が変わるまで動かない値だけを並べる。 */
@@ -205,6 +67,10 @@ function factsOf(row) {
   fact(dl, '始めた時刻', row.startedAt ? stamp(row.startedAt) : null);
   fact(dl, 'PID', row.pid);
   fact(dl, '往復', row.turns);
+  // この起動で使った額。**速報を外したとき、この値だけがどこにも出なくなった**ので
+  // 行へ移して facts に置いた（`result` の行にしか無く、往復と同時にしか動かない）。
+  // 1往復も閉じていなければ null が来て欄ごと消える。**0 と不明を分ける**
+  fact(dl, '費用', usd(row.costUSD));
   // 0 が正常終了。fact が落とすのは null / undefined / 空文字だけなので、0 はそのまま出る
   // （util.js の tokens() と違って `if (!n)` ではない。ここは 0 と不明が別物として出る）
   fact(dl, '終了コード', row.exitCode);
@@ -218,95 +84,18 @@ function factsOf(row) {
   return dl;
 }
 
-/* ── 描く先を預かる。外から中の状態を触らせない ───────────────── */
-
-/** @type {{log: HTMLElement, drop: HTMLElement, runId: string, seq: number}|null} */
-let cur = null;
+/* ── 焦点だけを控える ─────────────────────────────────────── */
 
 /**
- * 描く先を預ける。
+ * 詳細ペインが作り直される直前に呼ぶ。
  *
- * @param {{log: HTMLElement, drop: HTMLElement, runId: string}} opts
- */
-export function attach(opts) {
-  cur = { log: opts.log, drop: opts.drop, runId: opts.runId, seq: 0 };
-}
-
-/**
- * 預かった先を手放す。
- *
- * detail.js が詳細ペインを作り直す直前に呼ぶ。
- * 呼ばないと、画面から外れた節点を掴んだまま追記し続けることになる。
+ * 速報の器はもう無いので、ここでやるのは焦点の控えだけ。
+ * それでも要るのは、detail.js がこの直後に replaceChildren() するので、
+ * 掴んでいた節点が document から外れて焦点が body へ飛ぶため。
+ * runPanel() の最後に restoreFocus() で戻す（run-resume.js に同型の前例がある）。
  */
 export function detach() {
-  // 焦点はここで控える。detail.js はこの直後に replaceChildren() するので、
-  // 掴んでいた節点が document から外れ、焦点が body へ飛ぶ
   saveFocus();
-  cur = null;
-}
-
-/** 下端に張り付いているか。人が上へスクロールして読んでいるあいだは動かさない。 */
-function atBottom(host) {
-  return host.scrollHeight - host.scrollTop - host.clientHeight < 40;
-}
-
-/**
- * 落とした件数の行。増えるので毎回書き換える。
- *
- * 黙って捨てない。ここが空欄のままだと「全部見えている」と読めてしまう。
- */
-function syncDrop(node, runId) {
-  const parts = [];
-  const drop = droppedOf(runId);
-  const lost = runsMissed();
-  if (drop > 0) parts.push(`古い ${drop} 件は画面から落としました`);
-  // つなぎ直しの取りこぼしは実行ごとに数えていない。全体の数だとそのまま書く
-  if (lost > 0) parts.push(`つなぎ直しのあいだに ${lost} 件を取りこぼしました（全実行ぶん）`);
-  node.textContent = parts.join('　');
-  node.hidden = parts.length === 0;
-}
-
-/**
- * 新しく届いたぶんを追記する。
- *
- * 何度呼ばれても、前に出したところから先だけを足す。
- */
-export function render() {
-  if (!cur) return;
-
-  syncDrop(cur.drop, cur.runId);
-
-  const all = eventsOf(cur.runId);
-  const fresh = all.filter((ev) => ev.seq > cur.seq);
-  if (fresh.length === 0) {
-    if (all.length === 0 && cur.log.childElementCount === 0) {
-      cur.log.append(el('div', 'run-empty', 'まだ何も届いていません。'));
-    }
-    return;
-  }
-
-  const empty = cur.log.querySelector('.run-empty');
-  if (empty) empty.remove();
-
-  const first = cur.seq === 0;
-  const stick = first || atBottom(cur.log);
-
-  for (const ev of fresh) {
-    cur.log.append(eventNode(ev));
-    cur.seq = ev.seq;
-  }
-  // 画面に残す数は runs.js が持つぶんと同じにする。DOM だけ無限に伸びない
-  while (cur.log.childElementCount > EVENTS_PER_RUN) cur.log.removeChild(cur.log.firstElementChild);
-
-  if (!stick) return;
-  if (first) {
-    // 初回は detail.js がまだ document へ付ける前に呼ぶので、この場では高さが取れない。
-    // 次の描画まで待ってから下端へ寄せる
-    const log = cur.log;
-    requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });
-    return;
-  }
-  cur.log.scrollTop = cur.log.scrollHeight;
 }
 
 /* ── 操作（送る・止める・替える）───────────────────────────── */
@@ -1308,7 +1097,7 @@ function saveFocus() {
  *
  * **実際に focus するのは requestAnimationFrame の中。**
  * runPanel() が返る時点では detail.js がまだ節点を document へ付けていないので、
- * この場で focus しても効かない（render() の初回スクロールが待つのと同じ理由）。
+ * この場で focus しても効かない。
  */
 function restoreFocus() {
   const memo = focusMemo;
@@ -1365,18 +1154,9 @@ export function runPanel(sessionId) {
 
   p.body.append(factsOf(row));
 
-  const drop = el('p', 'run-drop');
-  drop.hidden = true;
-  p.body.append(drop);
-
-  const log = el('div', 'run-log');
-  p.body.append(log);
-
   // 操作は全部 composer 側にある（composerFor）。ここでは行に合わせるだけ呼ぶ
   syncOps(row);
 
-  attach({ log, drop, runId: row.runId });
-  render();
   restoreFocus();
 
   return p.section;

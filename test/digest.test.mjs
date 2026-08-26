@@ -467,12 +467,47 @@ test('サブエージェントの行は時系列に混ぜない', () => {
 
 test('長い本文は切って、切る前の長さを持たせる', () => {
   const long = 'あ'.repeat(1300);
-  const d = buildDigest({ entries: [say(long)] });
+  // 最後の発言は幅が広い（LIMIT.sayLast）ので、その手前で見る
+  const d = buildDigest({ entries: [say(long), say('おわり', { ms: 100 })] });
   const [item] = only(d, 'say');
   // 切ったあとの本文から長さを計ると「全文（1,200字）」と嘘をつく。切る前の数を持たせる
   assert.equal(item.fullLength, 1300);
   assert.ok(item.text.endsWith('…（以下省略）'));
   assert.equal(item.text.length, 1200 + '…（以下省略）'.length);
+});
+
+test('最後の発言だけは切らない', () => {
+  const long = 'あ'.repeat(1300);
+  const d = buildDigest({ entries: [say(long)] });
+  const [item] = only(d, 'say');
+  // 「いま」タブの待ちブロックが出すのはここ。末尾が「…（以下省略）」で終わると、
+  // 答えるための材料がその場で足りなくなる
+  assert.equal(item.text, long);
+  assert.ok(!item.text.endsWith('…（以下省略）'));
+  // 切っていないので、切る前の長さと一致する
+  assert.equal(item.fullLength, 1300);
+});
+
+test('最後の発言でも sayLast を超えれば切る', () => {
+  const huge = 'あ'.repeat(24100);
+  const d = buildDigest({ entries: [say(huge)] });
+  const [item] = only(d, 'say');
+  // 上限を外したのではなく広げただけ。実測で 47,092字の応答が1件ある
+  assert.ok(item.text.endsWith('…（以下省略）'));
+  assert.equal(item.text.length, 24000 + '…（以下省略）'.length);
+  assert.equal(item.fullLength, 24100);
+});
+
+test('手前の発言は広げない（応答が膨らむため）', () => {
+  const long = 'あ'.repeat(5000);
+  const d = buildDigest({ entries: [say(long), say(long, { ms: 100 }), say('おわり', { ms: 200 })] });
+  const [a, b, c] = only(d, 'say');
+  // 実測（20ログ・assistant text 2,639件）で 1200 超は 166件（6.29%）。
+  // say そのものを 4000 にすると総量が +20.3%、切らないと +31.0% になる。
+  // 経過タブには数十件並ぶので、広げるのは待ちブロックに出る1件だけにする
+  assert.equal(a.text.length, 1200 + '…（以下省略）'.length);
+  assert.equal(b.text.length, 1200 + '…（以下省略）'.length);
+  assert.equal(c.text, 'おわり');
 });
 
 test('項目が多すぎるときは説明文から落とし、判断の記録は残す', () => {

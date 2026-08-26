@@ -17,8 +17,9 @@
  *
  * ## 要求は「行」から読む。速報からは読まない
  *
- * `runs.js` の器は2つで、`events` は `EVENTS_PER_RUN = 400` で溢れたぶんを捨てる。
- * 1ターンで数百行来るので、そこに要求を載せると**要求そのものが消えて二度と答えられない。**
+ * `runs.js` は速報（run の出来事）を1件も持たない。seq の水位だけ進めて中身は捨てる。
+ * 溜めていた頃も溢れたぶんは捨てていた（1ターンで数百行来る）ので、
+ * どちらにせよ**要求を速報に載せると消えて二度と答えられない。**
  * 行（`rows`）は毎フレーム総入れ替えなので、取りこぼしが次のフレームで自己修復する。
  *
  * ## 送るのは「選んだ札」だけ
@@ -445,6 +446,9 @@ export function askBlock(row) {
     count: asks.length > 1 ? `${asks.length} 件` : null,
   });
   p.section.classList.add('is-wait');
+  // 許可要求は定義上いつも「答えないと1行も進まない」ので、`row.blocking` を見ない。
+  // このカードは台帳から直に組むので、一覧の行がまだ来ていない時期でも出る
+  p.section.classList.add('is-block');
   p.body.append(el('p', 'note', guide.lead));
   if (asks.length > 1) {
     p.body.append(el('p', 'settings-hint', 'すべて答えるまで、この先へ進みません。'));

@@ -159,7 +159,7 @@ function detailKeyOf() {
     baselineStamp(),
     // 実行の状態。**出来事が増えただけでは動かない値**を runs.js が組んでいる。
     // 速報は1ターンで数百行来るので、それを鍵に混ぜると入力中の caret まで毎回消える。
-    // 中への追記は RunView.render() が別に受け持つ
+    // 画面は速報を1件も持たないので、追記の受け持ちはどこにも無い
     runStampFor(store.selected),
   ].join('');
 }
@@ -456,7 +456,7 @@ export function renderDetail() {
   const error = detailErrorNow();
   lastDetailRender = { detail: store.detail, key: detailKeyOf() };
   // 前の取っ手はここで捨てる。作り直したあとの画面に無い節点を掴んだままにしない。
-  // 実行パネルも同じ形で器を預かっているので、そちらも一緒に手放す
+  // 実行パネル（RunView）は器を持たないが、焦点の控えだけは同じ合図で要る
   Timeline.detach();
   RunView.detach();
   RunResume.detach();

@@ -79,7 +79,7 @@
  * **同じ判断を2箇所に置かない**ため。
  */
 import { sameSessionId } from '../parse/stream.mjs';
-import { ballOf } from '../parse/state.mjs';
+import { ballOf, isBlocking } from '../parse/state.mjs';
 import { clip, oneLine } from '../shared/text.mjs';
 import { askKindOf, toRunEvents } from './event.mjs';
 
@@ -1013,6 +1013,12 @@ export function createRunLedger({
       reason: run.reason,
       startedAt: run.startedAt,
       turns: run.turns,
+      // ここまでに使った額（累計）。**`turns` と同じ `result` でしか動かない。**
+      // 増えるのは往復が閉じた回だけで、そのとき `turns` も一緒に動くから、
+      // 粗い行に載せても差分判定に新しい変化点を作らない（毎秒 push にならない）。
+      // 行へ移したのは、実行の速報を画面から外してこの値の出口が無くなったため。
+      // まだ1往復も閉じていなければ null。**0 と不明を分ける**ので 0 を書かない
+      costUSD: run.costUSD,
       // 毎秒動かない（切り替えたときだけ変わる）ので粗い行に載せてよい。
       // 実行パネルの「替えて続ける」が `rows()` 側しか見ないため、ここに無いと欄を埋められない
       budgetUsd: run.budgetUsd,
@@ -1839,7 +1845,6 @@ export function createRunLedger({
       return {
         ...toRow(run),
         lastLineAt: run.lastLineAt,
-        costUSD: run.costUSD,
         counts: { ...run.counts },
       };
     },
@@ -1936,8 +1941,14 @@ const RUN_TO_LIST_STATE = Object.freeze({
   switching: 'running',
   waiting: 'awaiting-reply',
   stalled: 'awaiting-reply',
-  // 許可待ちも「あなたの番」の位置。押さないと1行も進まないので、いちばん人を待たせている
-  'needs-permission': 'awaiting-reply',
+  // 許可待ちは承認待ちの位置（rank 1）。押さないと1行も進まないので、
+  // 返信待ち（rank 2・放っておいても壊れない）と同じ高さに並べてはいけない。
+  //
+  // **写し先を変えるなら byStatus も一緒に立てる。** 下の overlay() / synthRow() を見ること。
+  // 立てないと `notify/watch.mjs` の `requireByStatus` に当たって、
+  // いちばん急ぐ状態だけが永久に鳴らなくなる（写す前は awaiting-reply の
+  // `{slow:true, requireConfident:true}` で2分後に鳴っていた）
+  'needs-permission': 'needs-approval',
   // 予算切れも「あなたの番」の位置。上げて続けるか止めるかを決めるのは人なので、
   // 待たせているものとして同じ高さに並べる
   budget: 'awaiting-reply',
@@ -1972,13 +1983,20 @@ function overlay(row, run) {
     // 上の写しは並び順と色のためだけのもの
     stateLabel: run.stateLabel,
     ball: ballOf(state),
+    // `state` を上書きするので、blocking も一緒に写す。片方だけだと1行の中で
+    // `state:'needs-approval'` と `blocking:false` が矛盾し、`needsYou` が数え落とす
+    blocking: isBlocking(state),
     // 台帳が正なので、ログの末尾から読んだ「待っているツール」は伏せる。
     // 残すと、実際には次の手へ進んでいるのに古い dangling が出続ける
     waitingFor: null,
     stateReason: run.reason ?? 'この画面から起こしたセッション',
     stateConfident: true,
     statusRaw: null,
-    byStatus: false,
+    // 「登録簿の status が待ち系」ではなく「**止まっている裏づけがある**
+    // （＝しきい値だけの推測ではない）」の意味で立てる。台帳は未応答の
+    // `control_request` を実際に握っているので、登録簿より強い証人。
+    // `statusRaw` は null のまま（あちらは別の問いに答えるフィールド）
+    byStatus: run.state === 'needs-permission',
     origin: 'deck',
     run: badge,
   };
@@ -2024,6 +2042,7 @@ function synthRow(run, now) {
     state,
     stateLabel: run.stateLabel,
     ball: ballOf(state),
+    blocking: isBlocking(state),
     // **ここだけは動いてよい。** `refresh()` の差分判定が除外している2つなので、
     // 毎秒変わっても押し出しは起きない（それ以外の値は動かさない）
     idleMs: Number.isFinite(now) && startedAt !== null ? Math.max(0, now - startedAt) : null,
@@ -2037,7 +2056,8 @@ function synthRow(run, now) {
     // ここが空だと鍵が生涯1つになり、2回目以降が黙って落ちる。
     // 会話ログが出れば overlay 側（ログ末尾の uuid）に入れ替わる
     anchorId: run.runId ?? null,
-    byStatus: false,
+    // overlay() と同じ理由（「止まっている裏づけがある」）で立てる
+    byStatus: run.state === 'needs-permission',
 
     // 一覧だけが使う項目
     nameSource: null,

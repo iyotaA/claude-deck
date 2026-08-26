@@ -10,7 +10,7 @@
 import { readRegistry } from '../read/registry.mjs';
 import { indexTranscripts, readTail } from '../read/transcript.mjs';
 import { countSubagents } from '../read/subagents.mjs';
-import { deriveState, STATE_RANK, STATE_LABELS } from '../parse/state.mjs';
+import { deriveState, STATE_RANK, STATE_LABELS, STATE_BLOCKING } from '../parse/state.mjs';
 import { extractMeta } from '../parse/meta.mjs';
 import { identity, stateFields } from './shape.mjs';
 
@@ -24,7 +24,8 @@ async function buildRow({ registry, transcript, now }) {
   const tail = transcript ? await readTail(transcript.file) : { entries: [], parseErrors: 0, mtimeMs: 0, size: 0 };
   const entries = tail.entries ?? [];
   const meta = extractMeta(entries);
-  const state = deriveState({ registry, tail, now });
+  // meta が先。**この順を入れ替えない**（入れ替えると追加の走査が1回増える）
+  const state = deriveState({ registry, tail, now, permissionMode: meta.permissionMode });
   const sessionId = registry?.sessionId ?? transcript?.sessionId ?? null;
 
   // サブエージェントを使ったか。<セッションID>/ が無ければ子も無いので readdir を出さずに 0 と決める。
@@ -109,7 +110,9 @@ export function summarizeRows(rows) {
   for (const row of rows) counts[row.state] = (counts[row.state] ?? 0) + 1;
   return {
     live: rows.filter((r) => r.alive).length,
-    needsYou: rows.filter((r) => r.ball === 'master').length,
+    // 数えるのは「答えないと1行も進まない」ものだけ。返信待ちは ball が master でも入れない。
+    // `=== true` で見るのは、台帳側が項目を足し忘れた将来でも undefined を「数えない」に倒すため
+    needsYou: rows.filter((r) => r.blocking === true).length,
     counts,
   };
 }
@@ -163,6 +166,7 @@ export async function listSessions(now = Date.now()) {
       // 画面側にラベルの日本語を持たせないために毎回そのまま渡す。
       // 6件しかないので量は問題にならない
       stateLabels: STATE_LABELS,
+    stateBlocking: STATE_BLOCKING,
       registryReadErrors: readErrors,
       transcriptsIndexed: index.size,
     },

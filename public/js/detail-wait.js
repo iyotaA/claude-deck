@@ -43,6 +43,30 @@ const WAIT_GUIDE = {
 };
 
 /**
+ * パネルの見出しを組む。
+ *
+ * 「あなたの番」は状態ラベルではなく**このアプリの目的の語**なので、ここが持つ。
+ * 止まらない側は状態名を `row.stateLabel`（サーバーの `STATE_LABELS`）から引く。
+ * これで「状態ラベルの日本語は画面側に持たない」を守れる。
+ *
+ * **判断は `row.blocking` だけ。** `row.state` で分岐すると、どの状態が
+ * 「答えないと1行も進まない」かを画面側が2枚目の表として持つことになり、
+ * サーバーの `meta.stateBlocking` と必ずずれる（実際に一覧・監視盤・詳細の
+ * 3箇所で食い違っていた）。
+ *
+ * @param {object} row 一覧の1行
+ * @param {object} guide WAIT_GUIDE の1件
+ * @returns {string}
+ */
+function headingOf(row, guide) {
+  if (row.blocking === true) return `あなたの番 — ${guide.title}`;
+
+  // 状態名が取れないときは説明だけ出す。**代わりの日本語をここで作らない**
+  const label = typeof row.stateLabel === 'string' ? row.stateLabel : null;
+  return label ? `${label} — ${guide.title}` : guide.title;
+}
+
+/**
  * まだ答えていない質問。
  *
  * 選択肢は説明つきで全部出す。ここで選ぶわけではないが、
@@ -88,8 +112,11 @@ export function waitingBlock(row, d) {
   const guide = WAIT_GUIDE[row.state];
   if (!guide) return null;
 
-  const p = panel(`あなたの番 — ${guide.title}`, { id: SEC.wait, tone: guide.tone });
+  const p = panel(headingOf(row, guide), { id: SEC.wait, tone: guide.tone });
   p.section.classList.add('is-wait');
+  // 答えないと1行も進まないものだけ、左の縁を太くして見出しを1段上げる。
+  // 色は既存の `.panel.is-hot` が持つので、ここで新しい色を作らない
+  if (row.blocking === true) p.section.classList.add('is-block');
   p.body.append(el('p', 'note', guide.lead));
 
   const items = d?.digest?.items ?? [];
