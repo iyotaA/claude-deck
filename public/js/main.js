@@ -10,7 +10,8 @@
  * 依存は上から下へ一方向にだけ流す。逆向きに import したくなったら置き場所が間違っている。
  *   層0  util.js / perf.js / timeline/kinds.js       誰にも依存しない
  *   層1  store.js（kinds.js を直に見る）/ panel.js / detail-head.js / usage-chart.js
- *   層2  rows.js / drawer.js / resize.js / runs.js / timeline/（外からは index.js の1枚として見る）
+ *   層2  rows.js / drawer.js / zoom.js / resize.js / runs.js /
+ *        timeline/（外からは index.js の1枚として見る）
  *   層3  detail-wait.js / detail-panels.js / agents.js / usage-panel.js /
  *        run-view.js / run-resume.js
  *   層4  detail.js
@@ -39,6 +40,8 @@
  *   - store.js は timeline/kinds.js を直に見る（index → view → store を切る）
  *   - detailErrorNow は rows.js に置く（detail ⇄ session を切る）
  *   - setListOpen は drawer.js に置く（list → main → list を切る）
+ *   - 拡大は zoom.js（層2）に置き、組み直しは initZoom({ onChange }) で差す
+ *     （detail → zoom → detail を切る）
  *
  * 実行の速報も同じ形で切ってある。runs.js（層2）は描画側を知らず、
  * subscribeRuns(fn) で外から登録する。配線するのはこのファイル（層8）で、
@@ -52,9 +55,10 @@
 import { query, dom, store } from './store.js';
 import { visibleRows } from './rows.js';
 import { initListDrawer } from './drawer.js';
+import { initZoom } from './zoom.js';
 import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
-import { renderDetailIfNeeded, initInspector } from './detail.js';
+import { renderDetail, renderDetailIfNeeded, initInspector } from './detail.js';
 import { renderList, renderRate } from './list.js';
 import { initTabs } from './archive.js';
 import { showUsage, initUsageTab } from './usage-tab.js';
@@ -114,6 +118,11 @@ function initListKeys(listEl, from) {
 
 initTheme();
 initListDrawer();
+// 拡大は帯のボタン・Esc・背面・× の4つで開閉する。どれで閉じても札が
+// 「縮小」のまま残らないよう、組み直しをこちらから差す（向きは 8 -> 2）。
+// 差すのは renderDetail のほう。renderDetailIfNeeded は中身が同じなら何もしないので、
+// 札だけを付け替えたいこの用には効かない
+initZoom({ onChange: renderDetail });
 initInspector();
 initResize();
 initTabs();

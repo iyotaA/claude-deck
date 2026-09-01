@@ -3,7 +3,7 @@
  * 層7。キーボードだけで「移る・出す・起こす」を通せるようにする1枚。
  *
  * **自分では何も決めない。** すでにある窓口（select / setDetailTab / setInspector /
- * setListOpen / openRunForm / focusTerminal）を呼ぶだけの器にしてある。
+ * setListOpen / openRunForm / openZoom / focusTerminal）を呼ぶだけの器にしてある。
  * 判定をここに持たせると、画面の押しボタンとパレットで挙動が食い違う。
  * 押したあとの後始末（URL の同期・描き直し・巻き戻し）も向こうに任せる。
  *
@@ -12,7 +12,7 @@
  * 打った文字で並びが動くので、狙っていないものを実行する事故が起きうる。
  * この3つは実行パネルの押しやすい場所にあるので、そちらで足りる。
  * 出すのは「起こす」（モーダルが開くだけで、確かめる関門が残る）と
- * 「ターミナルを前面に」（窓が出るだけ）の2つ。
+ * 「拡大」（見え方が変わるだけ）と「ターミナルを前面に」（窓が出るだけ）の3つ。
  *
  * **個別のショートカット（Ctrl+N など）は付けない。** Ctrl+K 以外はブラウザが
  * 先に取っているものが多く、奪えないキーを画面に書くと「押しても効かないキー」を
@@ -25,6 +25,7 @@ import { el, since } from './util.js';
 import { dom, store, STATE_COLOR } from './store.js';
 import { idleOf } from './rows.js';
 import { NARROW, setListOpen } from './drawer.js';
+import { openZoom } from './zoom.js';
 import { focusTerminal } from './detail-head.js';
 import { TAB_DEFS, INSP_DEFS, setDetailTab, setInspector } from './detail.js';
 import { select } from './session.js';
@@ -155,6 +156,21 @@ function buildAll() {
         run: () => setDetailTab(t.id),
       });
     }
+
+    // 拡大は出してよい側。モーダルが開くだけで子プロセスには触らない
+    // （出さない3つ = 止める・替える・続ける と違う）。
+    //
+    // **畳むほうは出さない。** open() が「ほかの dialog が開いていたら開かない」で
+    // 弾くので、拡大しているあいだパレットは出てこない。畳む口は
+    // 帯のボタン・Esc・×・背面の4つで足りる
+    out.push({
+      group: '出す・畳む',
+      verb: '拡大',
+      name: '詳細を大きく開く',
+      desc: '判断を求められるものを、切らずに読む',
+      hay: hay('拡大 縮小 大きく 全画面 zoom 詳細'),
+      run: openZoom,
+    });
   }
 
   // 引き出しがあるのは狭い画面だけ。広い画面では一覧が常に見えているので、
