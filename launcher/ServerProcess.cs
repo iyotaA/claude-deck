@@ -38,13 +38,27 @@ static class ServerProcess
     /// <summary>server.log から人に見せるために読む上限。末尾だけあればよい。</summary>
     const int LOG_TAIL_MAX = 8192;
 
+    /// <summary>
+    /// /api/health の startedBy が「手で立てた」を表す語。
+    ///
+    /// 語は `src/shared/portclaim.mjs` が決めている（あちらのテストで固定してある）。
+    /// ここで文字列を照合するので、片方だけ変えると相乗りの判断が黙って効かなくなる。
+    /// </summary>
+    public const string STARTED_BY_MANUAL = "manual";
+
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(2) };
 
     /// <summary>port.json の中身。取れなかった項目は既定値のままにする。</summary>
     public record PortInfo(int Port, int Pid, string? Version, long StartedAt);
 
-    /// <summary>/api/health の返事。version は古いサーバーだと入っていない。</summary>
-    public record HealthInfo(string? Version, string? ConfigDir, int Clients);
+    /// <summary>
+    /// /api/health の返事。version は古いサーバーだと入っていない。
+    ///
+    /// StartedBy は「どう立ったか」（'launcher' / 'manual'）。0.9.0 から返る。
+    /// 版だけでは相乗りしてよい相手か分からない
+    /// （開発リポジトリと入れた版の版が同じ日がある。実測で踏んだ）。
+    /// </summary>
+    public record HealthInfo(string? Version, string? ConfigDir, int Clients, string? StartedBy = null);
 
     /// <summary>見つかった、いま動いているサーバー。</summary>
     public record RunningInfo(int Port, HealthInfo Health);
@@ -95,7 +109,10 @@ static class ServerProcess
             return new HealthInfo(
                 JsonRead.GetString(root, "version"),
                 JsonRead.GetString(root, "configDir"),
-                JsonRead.GetInt(root, "clients"));
+                JsonRead.GetInt(root, "clients"),
+                // 0.9.0 より前は返さない。**その null を manual に倒さない**
+                // （倒すと、古いインストール版が動いている手元で二重に立ち上がる）
+                JsonRead.GetString(root, "startedBy"));
         }
         catch
         {
@@ -165,12 +182,30 @@ static class ServerProcess
     public static async Task<int> EnsureRunningAsync(int preferPort)
     {
         var running = await FindRunningAsync(preferPort);
+
+        // 手で立てた server.mjs には**相乗りしない。**
+        //
+        // 譲ると、窓（Edge）がそちらを映す。相手に CLAUDE_DECK_LAUNCHER は無いので
+        // /api/update の canApply が false になり、「入れた版を起動したのに更新ボタンが
+        // 押せない」になる。版が同じ日は下の「別の場所の server.mjs」も出ないので、
+        // 理由がどこにも残らない。いちばん理由の見えない壊れ方なので、ここで分ける。
+        //
+        // 止めるほうは選ばない（下のコメントと同じ理由）。ずらして自分の番号で立てる。
+        // 何番にするかは決めない。server 側の listen が +1 でずらし、
+        // 実ポートは port.json から読み直す（判断は src/shared/portclaim.mjs）。
+        if (running is not null && running.Health.StartedBy == STARTED_BY_MANUAL)
+        {
+            Log.Line($"ポート {running.Port} は手で立てた server.mjs が使っています（版 {running.Health.Version ?? "(不明)"}）");
+            Log.Line("  相乗りすると更新が当てられないので、こちらは別の番号で立てます");
+            running = null;
+        }
+
         if (running is not null)
         {
             Log.Line($"すでに動いています ポート={running.Port} 版={running.Health.Version ?? "(不明)"}");
 
             // 版が食い違うのは、別の場所の server.mjs が動いているとき
-            // （リポジトリ直下から npm start したもの、旧方式の自動起動で立ったもの）。
+            // （旧方式の自動起動で立ったもの、startedBy を返さない 0.9.0 より前のもの）。
             //
             // 勝手に止めない。何日も動いているものを別のプロセスが黙って落とすほうが行儀が悪い。
             // 代わりにここへ残す。画面の中身が古いことに気づいたとき、理由をここから辿れる
@@ -270,6 +305,23 @@ static class ServerProcess
             // 10秒待ち切ってから「応答がありません」と言うより、理由を添えてすぐ止まるほうがよい
             if (proc.HasExited)
             {
+                // 終了コード 0 は「立てる必要が無かった」の合図。
+                // server 側の二重起動の見張りが、相手も入れた版だと見て譲ったときにこうなる。
+                //
+                // 紙が古い・消えているせいで探しきれなかったときにここへ来る
+                // （FindRunningAsync の穴と同じ形。あちらは見に行く番号を4つに絞っているので、
+                // ずれた先の 4318 以降に入れた版が居ると拾えない）。
+                // もう一度探して、居ればそれを使う。10秒待って「応答がありません」と言うより正確
+                if (proc.ExitCode == 0)
+                {
+                    var again = await FindRunningAsync(preferPort);
+                    if (again is not null && again.Health.StartedBy != STARTED_BY_MANUAL)
+                    {
+                        Log.Line($"すでに動いていました ポート={again.Port} 版={again.Health.Version ?? "(不明)"}");
+                        return again.Port;
+                    }
+                }
+
                 throw new InvalidOperationException(
                     $"サーバーがすぐに終了しました（終了コード {proc.ExitCode}）。{ReadServerLogTail()}");
             }
@@ -335,6 +387,14 @@ static class ServerProcess
                 TryDelete(Paths.PortFile);
             }
             return true;
+        }
+
+        // 手で立てたものも止める。`--stop` は人が明示して撃つものなので、
+        // 「黙って落とす」には当たらない。ただし何を止めたかは残す
+        // （相乗りを避ける側は EnsureRunningAsync で、あちらは止めない）
+        if (running.Health.StartedBy == STARTED_BY_MANUAL)
+        {
+            Log.Line($"止める相手は手で立てた server.mjs です（ポート {running.Port}）");
         }
 
         // content-type を付けないと書き込みの門番（isTrustedWrite）に断られる

@@ -36,6 +36,7 @@ import {
 import { loadUpdateState, parseUpdateState } from './src/update/state.mjs';
 import { loadStartupState, parseStartupState } from './src/startup/state.mjs';
 import { isTrustedWrite } from './src/shared/origin.mjs';
+import { decidePortClash, VIA_LAUNCHER, VIA_MANUAL } from './src/shared/portclaim.mjs';
 import { VERSION } from './src/shared/appinfo.mjs';
 import {
   resolvePortFile, hasPortFileFlag, writePortFile, removePortFile,
@@ -507,6 +508,18 @@ function readStartup() {
 function launcherPath() {
   const p = process.env.CLAUDE_DECK_LAUNCHER;
   return typeof p === 'string' && p.trim() ? p : null;
+}
+
+/**
+ * この起動の経路。`/api/health` に載せるのと、ポートの取り合いを決めるのとで同じものを使う。
+ *
+ * 判定の出どころは `launcherPath()` の1つだけにする。
+ * `canApply` と食い違うと、「更新できないと言う画面」と「譲らないサーバー」が別の理由で動く。
+ *
+ * @returns {string} `VIA_LAUNCHER` か `VIA_MANUAL`
+ */
+function startedBy() {
+  return launcherPath() ? VIA_LAUNCHER : VIA_MANUAL;
 }
 
 /**
@@ -1399,6 +1412,9 @@ const server = http.createServer((req, res) => {
     const update = readUpdate();
     sendJson(res, 200, {
       ok: true, version: VERSION, configDir, clients: clients.size, notify: notifier.health(),
+      // どう立ったか。ランチャがこれを見て「相乗りしてよい相手か」を決める。
+      // 版だけでは分からない（開発リポジトリと入れた版の版が同じ日がある。実測で踏んだ）
+      startedBy: startedBy(),
       // 画面からセッションを起こすための土台。掴めていなければここで分かる。
       // 起動直後は state:'checking'（ok は null。0 と不明を分けるのと同じ扱い）
       claude: claudeInfo(),
@@ -1439,19 +1455,37 @@ async function askRunning(port) {
   }
 }
 
+/**
+ * 最後に listen を試した番号。
+ *
+ * 立ち上がりの知らせは `listen()` の外で1回だけ受ける（理由はそちらに書いた）ので、
+ * 実ポートが取れなかったときの控えをここに置く。
+ */
+let lastTriedPort = 0;
+
 /** ポートが埋まっていたら少しずつずらして探す。 */
 function listen(port, attemptsLeft = 12) {
+  lastTriedPort = port;
   server.once('error', async (err) => {
     if (err.code === 'EADDRINUSE') {
       // 自動起動でもう動いていることがある。二重に立てても監視が二重になるだけなので、
-      // 相手が ClaudeDeck なら画面を開くだけにする
+      // 相手が ClaudeDeck なら画面を開くだけにする。
+      //
+      // ただし**必ず譲るわけではない**。相手が手で立てた server.mjs で、
+      // こちらがランチャ経由なら、譲るとランチャの窓が開発サーバーを映してしまう
+      // （更新ボタンが死ぬ。理由は shared/portclaim.mjs に書いた）。判断はそちらに寄せる
       const running = await askRunning(port);
       if (running) {
-        const url = `http://${HOST}:${port}/`;
-        console.log('ClaudeDeck はすでに起動しています');
-        console.log(`  ${url}`);
-        if (!noOpen) openBrowser(url);
-        process.exit(0);
+        const theirs = typeof running.startedBy === 'string' ? running.startedBy : null;
+        if (decidePortClash({ mine: startedBy(), theirs }) === 'yield') {
+          const url = `http://${HOST}:${port}/`;
+          console.log('ClaudeDeck はすでに起動しています');
+          console.log(`  ${url}`);
+          if (!noOpen) openBrowser(url);
+          process.exit(0);
+        }
+        // ずらす側へ落ちる。何番になったかは下の listen が出す
+        console.log(`ポート ${port} は手で立てた ClaudeDeck が使っています。番号をずらします`);
       }
 
       if (attemptsLeft > 0) {
@@ -1463,53 +1497,66 @@ function listen(port, attemptsLeft = 12) {
     process.exit(1);
   });
 
-  server.listen(port, HOST, () => {
-    const url = `http://${HOST}:${port}/`;
-    // 書き込みの門番が host と origin を照合するのに要る。決まってから入れる
-    boundPort = server.address()?.port ?? port;
-
-    // 実ポートが決まってから置く。外から 4317 決め打ちで探されないように。
-    // 書けなくてもサーバーは動くべきなので、失敗を致命扱いにしない
-    let portFileError = null;
-    if (writesPortFile) {
-      try {
-        writePortFile(portFile, {
-          port: boundPort,
-          pid: process.pid,
-          url: `http://${HOST}:${boundPort}/`,
-          version: VERSION,
-          startedAt: Date.now(),
-        });
-      } catch (err) {
-        portFileError = err?.message ?? String(err);
-      }
-    }
-
-    const w = startWatching();
-    console.log('ClaudeDeck');
-    console.log(`  ${url}`);
-    console.log(`  読み取り元: ${configDir}`);
-    if (!w.okProjects) console.log('  （ファイル監視が使えないため定期確認のみで動きます）');
-    if (portFileError) console.log(`  （実ポートを書き出せませんでした: ${portFileError}）`);
-    // 通知の行は有効なときと、書き間違えているときだけ出る。設定していなければ黙る
-    const notifyLine = notifier.banner();
-    if (notifyLine) console.log(`  ${notifyLine}`);
-    console.log('  終了するには Ctrl+C');
-
-    // 深いリンクに使う。ポートはずれることがあるので、決まってから渡す
-    notifier.setBaseUrl(url);
-    // 送信は refresh() とは別の時計で回す。flush は refresh を呼ばず、待たない
-    setInterval(() => { notifier.flush(); }, FLUSH_MS).unref();
-
-    // claude CLI を1回だけ探して版を読む。結果は /api/health の claude に出る。
-    // 掴めなくてもダッシュボードとしては動くので、待たないし致命扱いにもしない。
-    // probeClaude は必ず解決するが、約束どおり受け皿は付けておく
-    probeClaude().catch(() => {});
-
-    refresh(true);
-    if (!noOpen) openBrowser(url);
-  });
+  server.listen(port, HOST);
 }
+
+/*
+ * 立ち上がったときの1回。**`listen()` の中に置かない。**
+ *
+ * `server.listen(port, host, cb)` の cb は listening の一度きりの受け手として積まれるが、
+ * 発火しなかったぶんは外れずに残る。だから番号をずらすたびに1つ増え、
+ * 最後に立ったときへ**まとめて**降ってくる。
+ *
+ * 実測（4400 が埋まっていて 4401 へずれた回）では、監視とフラッシュのタイマが2セット立ち、
+ * コンソールには古い番号の URL が出た。12 回ずらせば12セットになる。
+ * 受ける口を外に1つ置けば、何回ずれても1回で済む。
+ */
+server.once('listening', () => {
+  // 書き込みの門番が host と origin を照合するのに要る。決まってから入れる
+  boundPort = server.address()?.port ?? lastTriedPort;
+  const url = `http://${HOST}:${boundPort}/`;
+
+  // 実ポートが決まってから置く。外から 4317 決め打ちで探されないように。
+  // 書けなくてもサーバーは動くべきなので、失敗を致命扱いにしない
+  let portFileError = null;
+  if (writesPortFile) {
+    try {
+      writePortFile(portFile, {
+        port: boundPort,
+        pid: process.pid,
+        url: `http://${HOST}:${boundPort}/`,
+        version: VERSION,
+        startedAt: Date.now(),
+      });
+    } catch (err) {
+      portFileError = err?.message ?? String(err);
+    }
+  }
+
+  const w = startWatching();
+  console.log('ClaudeDeck');
+  console.log(`  ${url}`);
+  console.log(`  読み取り元: ${configDir}`);
+  if (!w.okProjects) console.log('  （ファイル監視が使えないため定期確認のみで動きます）');
+  if (portFileError) console.log(`  （実ポートを書き出せませんでした: ${portFileError}）`);
+  // 通知の行は有効なときと、書き間違えているときだけ出る。設定していなければ黙る
+  const notifyLine = notifier.banner();
+  if (notifyLine) console.log(`  ${notifyLine}`);
+  console.log('  終了するには Ctrl+C');
+
+  // 深いリンクに使う。ポートはずれることがあるので、決まってから渡す
+  notifier.setBaseUrl(url);
+  // 送信は refresh() とは別の時計で回す。flush は refresh を呼ばず、待たない
+  setInterval(() => { notifier.flush(); }, FLUSH_MS).unref();
+
+  // claude CLI を1回だけ探して版を読む。結果は /api/health の claude に出る。
+  // 掴めなくてもダッシュボードとしては動くので、待たないし致命扱いにもしない。
+  // probeClaude は必ず解決するが、約束どおり受け皿は付けておく
+  probeClaude().catch(() => {});
+
+  refresh(true);
+  if (!noOpen) openBrowser(url);
+});
 
 function openBrowser(url) {
   try {

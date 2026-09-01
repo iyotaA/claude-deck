@@ -41,6 +41,7 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `appdata.test.mjs` | 書き込み先の解決。ログと設定が同じ場所を指すこと |
 | `appinfo.test.mjs` | 版の出どころ。読めないときに 0 でなく null を返すこと |
 | `portfile.test.mjs` | `--port-file` の受け取り方と、既定の場所 |
+| `portclaim.test.mjs` | ポートの取り合いの決め方。ランチャ経由が手で立てたものに譲らないこと。相手の経路が不明なら譲ること |
 | `origin.test.mjs` | 書き込み口の門番。どのヘッダの組み合わせを断るか |
 | `notify-watch.test.mjs` | いつ何を送るかの状態機械（通知の本丸） |
 | `notify-message.test.mjs` | 通知の本文。載せないものと、URL のマスク |
