@@ -23,17 +23,10 @@
  * 判断（parseNotifyConfig）と読み取り（loadNotifyConfig）を分けてある。
  * 前者が純関数なので、優先順と URL 検証だけをテストできる。
  */
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { appDataFile } from '../shared/appdata.mjs';
+import { configFilePath, readConfigFile } from '../shared/configfile.mjs';
 import { isSwitchOn } from '../shared/env.mjs';
 import { maskWebhook } from './message.mjs';
 import { normalizeStates } from './watch.mjs';
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-/** 環境変数がどれも無いときの控え。アプリ直下に置く */
-const appRoot = path.resolve(here, '..', '..');
 
 /** 送り先はここに固定する。タイポで別のホストへ業務内容を POST する事故を機能で防ぐ。 */
 export const ALLOWED = /^https:\/\/hooks\.slack\.com\//;
@@ -214,22 +207,20 @@ export function parseNotifyConfig({ env = {}, file = null, configPath = null } =
  * @returns {object} parseNotifyConfig の戻り
  */
 export function loadNotifyConfig(env = process.env) {
-  const configPath = notifyConfigPath(env);
-  let file = null;
-  try {
-    file = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch {
-    // 無くてよい。壊れていても黙って無視する（設定なし＝通知しない、で困らない）
-  }
-  return parseNotifyConfig({ env, file, configPath });
+  // 無くてよい。壊れていても黙って無視する（設定なし＝通知しない、で困らない）。
+  // 読めなかったときに null が返るのは shared/configfile.mjs の約束
+  return parseNotifyConfig({ env, file: readConfigFile(env), configPath: notifyConfigPath(env) });
 }
 
 /**
  * 設定ファイルの置き場所。診断のときに人へ見せる。
  *
+ * 実体は `shared/configfile.mjs`。**口はここに残す。**
+ * 通知の側から見える名前を消すと、呼んでいる場所を全部書き換えることになる。
+ *
  * @param {object} [env] 環境変数
  * @returns {string}
  */
 export function notifyConfigPath(env = process.env) {
-  return appDataFile('config.json', appRoot, env);
+  return configFilePath(env);
 }

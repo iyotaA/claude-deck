@@ -57,7 +57,7 @@ function blockReason() {
     return `いま ${s.active} 本動いています（同時に動かせるのは ${s.max} 本まで）`;
   }
 
-  if (!options.cwds?.length) return '起こせるフォルダがありません';
+  if (!options.cwds?.length) return '起こせるフォルダがありません（設定の「作業フォルダ」から足せます）';
   return null;
 }
 

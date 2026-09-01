@@ -252,6 +252,21 @@
 
     <p class="settings-path" id="settings-path"></p>
 
+    <!-- 起こしてよいフォルダ。ここに無いフォルダでは、画面からセッションを起こせない。
+         **足した時点で保存される。** 下の「保存」は通知のぶんなので、そう書いておく。
+         一覧に出すのは登録ぶんと環境変数ぶんだけ（セッション由来のものは消せないので、
+         消せる顔をして並べない）。中身は settings.js が組む -->
+    <section class="settings-sec settings-rundirs">
+      <h3 class="settings-h3">作業フォルダ</h3>
+      <div class="settings-row">
+        <input class="settings-text" id="run-dir-add" type="text"
+               spellcheck="false" autocomplete="off" placeholder="C:\path\to\project">
+        <button class="btn" id="run-dir-add-btn" type="button">足す</button>
+      </div>
+      <p class="settings-hint" id="run-dirs-hint"></p>
+      <ul class="settings-dirs" id="run-dirs"></ul>
+    </section>
+
     <!-- 自動起動。ここは読むだけで、入切はコマンドの役目。
          押した結果を返せないため（スタブが子の終了コードを伝えない）、
          同期的に成否を返すボタンはそもそも作れない -->
@@ -296,7 +311,7 @@
       <div class="settings-row">
         <select class="settings-select runform-wide" id="run-cwd"></select>
       </div>
-      <p class="settings-hint">Claude Code が動いたことのあるフォルダだけを出しています</p>
+      <p class="settings-hint">Claude Code が動いたことのあるフォルダと、設定で足したフォルダを出しています</p>
     </section>
 
     <section class="settings-sec">

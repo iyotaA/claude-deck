@@ -190,6 +190,12 @@ export const dom = {
   setRemind: document.getElementById('set-remind'),
   setDetail: document.getElementById('set-detail'),
   setStates: document.getElementById('set-states'),
+  // 起こしてよいフォルダ（settings.js）。**足した時点で保存する**ので、
+  // 下の「保存」ボタン（通知のぶん）とは経路が別
+  runDirs: document.getElementById('run-dirs'),
+  runDirAdd: document.getElementById('run-dir-add'),
+  runDirAddBtn: document.getElementById('run-dir-add-btn'),
+  runDirsHint: document.getElementById('run-dirs-hint'),
   startupState: document.getElementById('startup-state'),
   startupLegacy: document.getElementById('startup-legacy'),
   startupError: document.getElementById('startup-error'),

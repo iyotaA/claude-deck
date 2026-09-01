@@ -1,6 +1,10 @@
 /* 設定モーダル。層7。
  *
- * 中身は2つ。通知（読んで書ける）と自動起動（読むだけ）。
+ * 中身は3つ。通知（読んで書ける）・作業フォルダ（読んで書ける）・自動起動（読むだけ）。
+ *
+ * 作業フォルダだけ保存の経路が違う。**足す・消すはその場で効く**（別の窓口
+ * /api/settings/rundirs を叩く）ので、下の「保存」ボタンは通知のぶんだけを送る。
+ * 1つのボタンに2つの意味を持たせない代わりに、画面にそう書いてある。
  * 自動起動に入切のボタンを置かないのは、押した結果を返せないため。
  * スタブ（<install>\ClaudeDeck.exe）は子の終了コードを伝えない（実測）ので、
  * 窓口を作ってもいつも「できました」と言うことになる。
@@ -55,6 +59,8 @@ function setBusy(on) {
   busy = on;
   dom.settingsSave.disabled = on;
   dom.settingsTest.disabled = on;
+  // 作業フォルダの「足す」も同じ旗で止める。二重に書き込む道を作らない
+  dom.runDirAddBtn.disabled = on;
 }
 
 /**
@@ -185,6 +191,129 @@ async function load() {
   } catch (err) {
     say(`設定を読めませんでした（${err.message}）`, 'bad');
   }
+}
+
+/* ------------------------------------------------------------ 作業フォルダ */
+
+/**
+ * 一覧の上に出す1行。
+ *
+ * **「その場で保存される」を必ず書く。** 下に「保存」ボタンがあるので、
+ * 書かないと押さないと効かないように見える。
+ */
+const DIRS_HINT = '足したフォルダとその配下で、画面からセッションを起こせます。'
+  + 'Claude Code が動いたことのあるフォルダは自動で使えるので、ここには出ません。'
+  + '足す・消すはその場で保存されます';
+
+/**
+ * 起こしてよいフォルダの一覧を組み直す。
+ *
+ * 消すボタンを出すのは、この画面で登録したぶん（source が 'config'）だけ。
+ * 環境変数のぶんはここからは消せないので、押せないボタンを出す代わりに出どころを書く。
+ *
+ * @param {object|null} d /api/settings/rundirs の応答。読めなければ null
+ * @param {string} [error] 読めなかった理由
+ */
+function fillDirs(d, error) {
+  dom.runDirs.replaceChildren();
+
+  if (!d) {
+    // 読めなかったことを「1つも登録されていません」に読み替えない。
+    // 足の1行には出さない（保存が失敗したように見えるため）
+    dom.runDirsHint.textContent = `作業フォルダを読めませんでした（${error ?? '理由不明'}）`;
+    return;
+  }
+
+  dom.runDirsHint.textContent = DIRS_HINT;
+
+  const dirs = d.dirs ?? [];
+  if (!dirs.length) {
+    dom.runDirs.append(el('li', 'note', 'まだ登録されていません'));
+    return;
+  }
+
+  for (const item of dirs) {
+    const li = el('li');
+    li.append(el('span', 'mono', item.path));
+
+    if (item.source === 'env') {
+      li.append(el('span', 'note', '環境変数'));
+    } else {
+      const del = el('button', 'btn', '消す');
+      del.type = 'button';
+      del.addEventListener('click', () => removeDir(item.path));
+      li.append(del);
+    }
+    dom.runDirs.append(li);
+  }
+}
+
+/**
+ * いまの一覧を引いて画面へ入れる。通知とは別の窓口なので、片方が転んでももう片方は出る。
+ */
+async function loadDirs() {
+  try {
+    const res = await fetch('/api/settings/rundirs');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    fillDirs(await res.json());
+  } catch (err) {
+    fillDirs(null, err.message);
+  }
+}
+
+/**
+ * 足す・消すを送る。応答は GET と同じ形なので、そのまま一覧に流し込める。
+ *
+ * @param {object} body {add} か {remove}
+ * @param {string} okText うまくいったときに足の1行へ出す文
+ * @returns {Promise<boolean>} 通ったか
+ */
+async function postDirs(body, okText) {
+  if (busy) return false;
+  setBusy(true);
+  try {
+    const { res, data } = await post('/api/settings/rundirs', body);
+    if (!res.ok || !data.ok) {
+      // サーバは断る理由を日本語で返す。HTTP の番号より読めるので、あればそれを出す
+      say(data.reason ?? `保存できませんでした（HTTP ${res.status}）`, 'bad');
+      return false;
+    }
+    fillDirs(data);
+    say(okText, 'good');
+    return true;
+  } catch (err) {
+    say(`保存できませんでした（${err.message}）`, 'bad');
+    return false;
+  } finally {
+    setBusy(false);
+  }
+}
+
+/**
+ * 入力欄のフォルダを足す。
+ *
+ * **断られたときに入力欄を空にしない。** 打ち直しになるうえ、
+ * 何を入れたのかが画面から消える。
+ */
+async function addDir() {
+  const value = dom.runDirAdd.value.trim();
+  if (!value) {
+    say('足すフォルダを入れてください', 'bad');
+    dom.runDirAdd.focus();
+    return;
+  }
+  if (await postDirs({ add: value }, '足しました。起こすフォームからすぐ選べます')) {
+    dom.runDirAdd.value = '';
+  }
+}
+
+/**
+ * 登録を1つ消す。確かめは出さない（間違えても、もう一度足せば戻る）。
+ *
+ * @param {string} dir 消すフォルダ
+ */
+function removeDir(dir) {
+  postDirs({ remove: dir }, '消しました');
 }
 
 /**
@@ -355,9 +484,10 @@ function open() {
   dom.setUrl.value = '';
   say('');
   dom.settings.showModal();
-  // 別々の窓口なので、片方が転んでももう片方は出る。
-  // どちらも中で受け止めているので、await せずに投げてよい
+  // 別々の窓口なので、1つが転んでも他は出る。
+  // どれも中で受け止めているので、await せずに投げてよい
   load();
+  loadDirs();
   loadStartup();
 }
 
@@ -375,6 +505,7 @@ export function initSettings() {
   dom.settingsSave.addEventListener('click', save);
   dom.settingsTest.addEventListener('click', sendTest);
   dom.setUrlClear.addEventListener('click', clearUrl);
+  dom.runDirAddBtn.addEventListener('click', addDir);
 
   // <form> で囲っていないので、Enter は自分で拾う。
   // 囲うと Enter がモーダルを閉じてしまい、保存したつもりで消える
@@ -382,6 +513,9 @@ export function initSettings() {
     if (ev.key !== 'Enter') return;
     if (!ev.target.matches('.settings-text, .settings-num')) return;
     ev.preventDefault();
-    save();
+    // 作業フォルダの追加欄だけ行き先が違う。見た目を .settings-text から借りているので
+    // クラスでは見分けられない。参照で分ける（run-form.js が本文欄を分けているのと同じ）
+    if (ev.target === dom.runDirAdd) addDir();
+    else save();
   });
 }

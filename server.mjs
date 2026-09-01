@@ -30,6 +30,9 @@ import {
   allowedModes, runDirsFromEnv, BYPASS_MODE, DEFAULT_PERMISSION_MODE, PERMISSION_MODE_LABELS,
   EFFORTS, DEFAULT_BUDGET_USD, BUDGET_MIN_USD, BUDGET_MAX_USD, PROMPT_MAX, checkModel,
 } from './src/run/spec.mjs';
+import {
+  RUN_DIRS_MAX, addRunDir, checkRunDir, dirExists, loadRunDirs, removeRunDir, saveRunDirs,
+} from './src/run/dirs.mjs';
 import { loadUpdateState, parseUpdateState } from './src/update/state.mjs';
 import { loadStartupState, parseStartupState } from './src/startup/state.mjs';
 import { isTrustedWrite } from './src/shared/origin.mjs';
@@ -635,9 +638,14 @@ runner.subscribe((events) => {
 /**
  * 起こしてよいフォルダ。
  *
- * 任意の文字列を受けない。許すのは2つだけ。
+ * 任意の文字列を受けない。許すのは3つだけ。
  * - 一覧に出ている cwd（＝このマシンで Claude Code が実際に動いたことのあるフォルダ）
  * - `CLAUDE_DECK_RUN_DIRS`（`;` 区切り）で明示的に足したフォルダ
+ * - 設定画面から登録したフォルダ（config.json の `run.dirs`）
+ *
+ * **登録ぶんはそのつど紙から読む。持ち回さない。** `/api/update` と同じ理由で、
+ * 抱えると裏で書き換わったときに古いまま固まる。ここを通るのは
+ * 「起こすフォームを開いたとき」と「起こしたとき」だけで、毎秒の経路には乗らない。
  *
  * 書き込みの門番はブラウザ越しの攻撃を止めるが、**この機能の被害は
  * 「コードが実行される」という質の違うもの**なので、万一そこを抜けて届いても
@@ -647,11 +655,111 @@ runner.subscribe((events) => {
  * @returns {string[]} 許可するフォルダ
  */
 function allowedRunDirs() {
-  const dirs = new Set(runDirsFromEnv());
+  const dirs = new Set([...runDirsFromEnv(), ...registeredRunDirs()]);
   for (const row of lastPayload?.rows ?? []) {
     if (typeof row?.cwd === 'string' && row.cwd) dirs.add(row.cwd);
   }
   return [...dirs];
+}
+
+/**
+ * 設定画面から登録したフォルダ。読めなければ空で進む。
+ *
+ * **読めないことを異常にしない。** 紙が無いのは「まだ1つも登録していない」だけで、
+ * ここで投げると起こすフォームが丸ごと開かなくなる。
+ *
+ * @returns {string[]}
+ */
+function registeredRunDirs() {
+  try {
+    return loadRunDirs();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 設定画面へ返す、起こしてよいフォルダの一覧。
+ *
+ * **セッション由来のフォルダは返さない。** あれは消せないものなので、
+ * 消せる顔をして並べない（画面には但し書きを1行置く）。出すのは登録ぶんと環境変数ぶんだけで、
+ * 環境変数のほうは消すボタンを出さないための印（`source`）を付けて渡す。
+ *
+ * @returns {object} GET と POST で同じ形を返す
+ */
+function runDirsPayload() {
+  const env = runDirsFromEnv();
+  return {
+    dirs: [
+      ...registeredRunDirs().map((dir) => ({ path: dir, source: 'config' })),
+      ...env.map((dir) => ({ path: dir, source: 'env' })),
+    ],
+    max: RUN_DIRS_MAX,
+  };
+}
+
+/**
+ * 起こしてよいフォルダを1つ足す・消す。
+ *
+ * **ここは許可リストにブラウザから書き足す口。** 断る順を1箇所で決める。
+ *
+ *   400 形が不正（絶対パスでない・ドライブ直下・空）
+ *   → 400 実在しない → 400 登録済み・上限（run/dirs.mjs の判断）
+ *   → 500 書けなかった
+ *
+ * 本文の上限は既定の `BODY_MAX`（8KB）のまま。来るのはパス1本なので、
+ * ここに大きい口を開ける理由が無い。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ */
+async function handleRunDirs(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    return;
+  }
+
+  const adding = typeof body?.add === 'string';
+  const raw = adding ? body.add : body?.remove;
+  if (!adding && typeof raw !== 'string') {
+    sendJson(res, 400, { ok: false, reason: '足すフォルダも消すフォルダも指定されていません' });
+    return;
+  }
+
+  const checked = checkRunDir(raw);
+  if (!checked.ok) {
+    sendJson(res, 400, { ok: false, reason: checked.reason });
+    return;
+  }
+
+  // **実在しないものを許可リストに入れない。** 打ち間違いをその場で返せるし、
+  // 起こそうとして初めて断られる形にもならない。消すときは見ない
+  // （消えたフォルダの登録が外せなくなる）
+  if (adding && !dirExists(checked.dir)) {
+    sendJson(res, 400, { ok: false, reason: 'そのフォルダは見つかりません' });
+    return;
+  }
+
+  const current = registeredRunDirs();
+  const next = adding
+    ? addRunDir(current, checked.dir)
+    : removeRunDir(current, checked.dir);
+  if (!next.ok) {
+    sendJson(res, 400, { ok: false, reason: next.reason });
+    return;
+  }
+
+  try {
+    saveRunDirs(next.dirs);
+  } catch (err) {
+    sendJson(res, 500, { ok: false, reason: `保存できませんでした: ${err?.message ?? err}` });
+    return;
+  }
+
+  sendJson(res, 200, { ok: true, ...runDirsPayload() });
 }
 
 /**
@@ -1017,6 +1125,10 @@ function handleWrite(req, res, pathname, url) {
     handleTestNotify(res);
     return;
   }
+  if (pathname === '/api/settings/rundirs') {
+    handleRunDirs(req, res);
+    return;
+  }
   if (pathname === '/api/quit') {
     handleQuit(res);
     return;
@@ -1261,6 +1373,12 @@ const server = http.createServer((req, res) => {
   // 設定モーダルが開いたときに1回だけ引く。生の Webhook URL は入らない
   if (pathname === '/api/settings/notify') {
     sendJson(res, 200, notifier.settings());
+    return;
+  }
+
+  // 起こしてよいフォルダ。**セッション由来のぶんは入らない**（runDirsPayload を見よ）
+  if (pathname === '/api/settings/rundirs') {
+    sendJson(res, 200, runDirsPayload());
     return;
   }
 
