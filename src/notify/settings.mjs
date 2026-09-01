@@ -8,15 +8,8 @@
  * 書く先は %LOCALAPPDATA%\ClaudeDeck\config.json だけ。
  * ~/.claude 配下へは何があっても書かない。
  */
-import fs from 'node:fs';
-import path from 'node:path';
-import {
-  ALLOWED,
-  MAX_IDLE_MIN,
-  MAX_REMIND_MIN,
-  MAX_SETTLE_SEC,
-  notifyConfigPath,
-} from './config.mjs';
+import { readConfigFile, writeConfigFile } from '../shared/configfile.mjs';
+import { ALLOWED, MAX_IDLE_MIN, MAX_REMIND_MIN, MAX_SETTLE_SEC } from './config.mjs';
 import { NOTIFY_STATES } from './watch.mjs';
 
 /**
@@ -142,29 +135,16 @@ export function mergeSettings(file, patch) {
 /**
  * 検証済みの差分を config.json へ書く。薄い殻。
  *
- * 一時ファイルへ書いてから rename する。途中で落ちても壊れたファイルを残さない。
- * フォルダはここで作る（appdata.mjs は場所を決めるだけ、を守る）。
+ * 読むのも書くのも shared/configfile.mjs に任せる（一時ファイル ＋ rename）。
+ * 同じ紙を run/dirs.mjs も読み書きするので、書き方を2箇所に持たない。
+ *
+ * 読めなかったときは null が来る。**そこで諦めない。**
+ * 無ければ作る、壊れていたら作り直す（読めない設定を残しても誰も得しない）。
  *
  * @param {object} patch validateSettings が返した差分
  * @param {object} [env] 環境変数
  * @returns {string} 書いたファイルのパス
  */
 export function writeSettings(patch, env = process.env) {
-  const target = notifyConfigPath(env);
-
-  let file = null;
-  try {
-    file = JSON.parse(fs.readFileSync(target, 'utf8'));
-  } catch {
-    // 無くてよい。壊れていたら作り直す（読めない設定を残しても誰も得しない）
-  }
-
-  const next = mergeSettings(file, patch);
-
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  const tmp = `${target}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  fs.renameSync(tmp, target);
-
-  return target;
+  return writeConfigFile(mergeSettings(readConfigFile(env), patch), env);
 }
