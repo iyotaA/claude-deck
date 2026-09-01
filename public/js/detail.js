@@ -37,6 +37,7 @@ import {
   decisionsPanel, todoPanel, compactionPanel, timelinePanel, filesPanel, basicsPanel,
 } from './detail-panels.js';
 import { agentsPanel } from './agents.js';
+import { isZoomed, toggleZoom, closeZoom } from './zoom.js';
 import { usagePanel } from './usage-panel.js';
 import { runStampFor } from './runs.js';
 import * as RunView from './run-view.js';
@@ -236,6 +237,20 @@ function tabBar(ctx) {
     b.addEventListener('click', () => setDetailTab(t.id));
     bar.append(b);
   }
+
+  // 右端に拡大。判断を求められるものを大きく読むための口。
+  // **帯ごと拡大する**ので、拡大したまま経過・調査へも移れる。
+  // 押したあとの札の付け替えはここでやらない。zoom.js が組み直しを呼ぶので、
+  // Esc・背面・× で閉じたときも同じ経路を通る（押しボタン側で書き換えると
+  // そちらの経路で「縮小」のまま残る）
+  const on = isZoomed();
+  const zoom = el('button', 'detail-zoom', on ? '縮小' : '拡大');
+  zoom.type = 'button';
+  zoom.setAttribute('aria-pressed', on ? 'true' : 'false');
+  zoom.title = on ? '元の大きさに戻す' : '詳細を大きく開く';
+  zoom.addEventListener('click', toggleZoom);
+  bar.append(zoom);
+
   return bar;
 }
 
@@ -453,6 +468,13 @@ export function renderDetail() {
   const t0 = performance.now();
   // row と呼んでいるのは一覧の行と同じ形のもの。一覧に居なければ詳細から組む
   const row = headOf(store.selected);
+  // 出すものが無いなら拡大を畳む。膜の裏で一覧が触れないまま
+  // 「左の一覧から選ぶと…」だけが出る状態を作らない。
+  //
+  // **DOM を触る前に呼ぶ。** closeZoom() は組み直し（= この関数）を呼び返すので、
+  // 下の replaceChildren() より後に置くと、内側の組み立てのあとに
+  // 外側がもう一度同じものを足して二重に出る
+  if (!row) closeZoom();
   const error = detailErrorNow();
   lastDetailRender = { detail: store.detail, key: detailKeyOf() };
   // 前の取っ手はここで捨てる。作り直したあとの画面に無い節点を掴んだままにしない。

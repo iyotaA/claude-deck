@@ -25,6 +25,7 @@
 <link rel="stylesheet" href="css/markdown.css">
 <link rel="stylesheet" href="css/palette.css">
 <link rel="stylesheet" href="css/board.css">
+<link rel="stylesheet" href="css/zoom.css">
 <link rel="stylesheet" href="css/narrow.css">
 </head>
 <body>
@@ -149,7 +150,7 @@
     <!-- 詳細ペイン。中身が流れる箱と、下に留まる入力欄の2段に割ってある。
          入力欄を #detail の中に置くと renderDetail() の replaceChildren() で毎回消えるので、
          器はここに出して中身だけ差し替える（レールのボタンと同じ流儀） -->
-    <section class="detail-pane" aria-label="セッションの詳細">
+    <section class="detail-pane" id="detail-pane" aria-label="セッションの詳細">
       <div class="detail-scroll" id="detail" tabindex="-1">
         <div class="detail-empty">左の一覧からセッションを選ぶと、ここに中身が出ます</div>
       </div>
@@ -390,6 +391,18 @@
     <span><span class="kbd">Esc</span> 閉じる</span>
     <span class="pal-tip">打った文字で、上の全部を横断して絞り込む</span>
   </p>
+</dialog>
+
+<!-- 詳細ペインの拡大。showModal() で開くと Esc・背面の膜・焦点の閉じ込めがタダで付く。
+     **中身をここに書かない。** zoom.js が上の .detail-pane を節点ごと運んでくる。
+     2枚目を組むと、許可要求のカードがどちらの節点で動いているかを管理する話が増える
+     （人が承認したものと違うものが動く事故の隣）。理由は zoom.js の冒頭に書いた -->
+<dialog class="zoom" id="zoom" aria-label="セッションの詳細（拡大）">
+  <div class="settings-head">
+    <h2>いま見ているセッション</h2>
+    <button class="settings-x" id="zoom-close" type="button" aria-label="拡大をやめる">&#215;</button>
+  </div>
+  <div class="zoom-body" id="zoom-body"></div>
 </dialog>
 <!-- ESM なので読み込む順を人が守る必要はない。import が解決の順を決める。
      読むのはこの1本だけ。増やすと、また順番が意味を持ってしまう -->

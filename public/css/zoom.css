@@ -1,0 +1,94 @@
+/* ClaudeDeck ── 詳細ペインの拡大
+ *
+ * 「いま」タブに出るのは、ほぼ全部が判断を求められるもの（許可要求のカード・
+ * 承認待ちのプラン・最後の応答）。承認するかどうかを決める場所なのに、
+ * 中央列の幅と高さの上限のせいでいちばん読みにくかった。ここを広げる。
+ *
+ * **中身は1つも組み直さない。** zoom.js が .detail-pane を節点ごと運んでくるので、
+ * ここに書くのは器と、高さの上限を外す2行だけ。
+ *
+ * <link> は board.css の次・narrow.css の前に置く（narrow.css は必ず最後）。
+ */
+
+.zoom {
+  /* 余白を dialog 自身に持たせない。持たせると、その余白を押したときに
+     背面を押したのと同じに見える（.settings と同じ理由） */
+  padding: 0;
+  width: min(96rem, calc(100vw - 2rem));
+  height: calc(100vh - 2rem);
+  /* dialog の既定は max-width / max-height が calc(100% - 6px - 2em)。
+     消しておかないと上の width / height がそこで頭打ちになる */
+  max-width: none;
+  max-height: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+}
+
+.zoom::backdrop { background: rgb(0 0 0 / 45%); }
+
+.zoom[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* 1セルの grid。中の .detail-pane が自分の2段組（流れる箱 ＋ 入力欄）を持つので、
+   ここは場所を1つ渡すだけでいい。
+
+   **列を増やさない。** 狭い窓では narrow.css が .detail-pane へ
+   grid-area: 1 / 1 を当てる。2列にすると、その指定が効いたまま
+   入力欄の側が空いた列へ流れる */
+.zoom-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+/* 帯の右端の拡大ボタン。detail.js が組むが、拡大のためだけに在るのでここに置く。
+
+   **.detail-tab を借りない。** あちらは aria-pressed で下線を引くので、
+   押した状態が「4つ目のタブを選んでいる」に見える */
+.detail-zoom {
+  margin: 0 0 .25rem auto;
+  align-self: center;
+  padding: .2rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  font-size: .76rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.detail-zoom:hover {
+  border-color: var(--fg-faint);
+  color: var(--fg);
+}
+
+.detail-zoom:focus-visible { border-color: var(--accent); }
+
+.detail-zoom[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+/* 高さの上限を外す。ここは切らずに全部読むための場所なので、
+   24rem / 16rem で切られると拡大した意味が無い。
+
+   詳細度で勝つ。.zoom .is-wait .md は (0,3,0) で markdown.css の (0,2,0) に、
+   .zoom .ask > pre は (0,2,1) で ask.css の (0,1,1) に勝つ。
+   **読む順に頼っていない**ので、<link> の位置が動いても効き続ける */
+.zoom .is-wait .md { max-height: none; }
+.zoom .ask > pre { max-height: none; }
+
+/* 拡大しているあいだ、後ろの盤は隠す。
+   .deck は「子の数と列の数が釣り合う」前提で組んであるので、中央のペインが
+   1枚抜けると右のレールが中央の列へずれる。その姿が膜越しに透けて見える。
+
+   **display: none にしない。** 中のスクロール位置を捨てるので、
+   閉じたときに一覧が先頭へ飛ぶ */
+.is-zoom .deck { visibility: hidden; }

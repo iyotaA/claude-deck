@@ -132,6 +132,9 @@ export const dom = {
   // 枠の使用率（上のバー）。list.js の renderRate() だけが書く
   rate: document.getElementById('rate'),
   detail: document.getElementById('detail'),
+  // 詳細ペインそのもの。zoom.js が節点ごとモーダルへ運ぶので、器の側にも取っ手が要る。
+  // **中身は組み直さない**（理由は zoom.js の冒頭）
+  detailPane: document.getElementById('detail-pane'),
   // 中央下の入力欄の器。詳細ペインの外に置いてあるので replaceChildren() で消えない
   composer: document.getElementById('composer'),
   live: document.getElementById('live'),
@@ -216,6 +219,11 @@ export const dom = {
   runEffort: document.getElementById('run-effort'),
   runBudget: document.getElementById('run-budget'),
   runNote: document.getElementById('run-note'),
+  // 詳細ペインの拡大。zoom.js だけが使う。開いているかは dialog 自身に聞くので、
+  // ここにも store にも旗を持たない
+  zoom: document.getElementById('zoom'),
+  zoomBody: document.getElementById('zoom-body'),
+  zoomClose: document.getElementById('zoom-close'),
   // 画面の中のコマンド入力（Ctrl+K）。palette.js だけが使う。
   // 開いているかどうかも URL には持たせない（開いた状態を人に渡す意味が無い）
   palette: document.getElementById('palette'),
