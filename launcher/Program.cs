@@ -317,6 +317,12 @@ static class Program
             Console.WriteLine($"  版            : {running.Health.Version ?? "(返していない = 入れ替え前のもの)"}");
             Console.WriteLine($"  読み取り元    : {running.Health.ConfigDir}");
             Console.WriteLine($"  つないでいる窓: {running.Health.Clients}");
+            // 手で立てたものが混ざっていると、更新ボタンが押せない理由がこれになる。
+            // 「動いているのに更新できない」を診断でそのまま説明できるようにする
+            if (running.Health.StartedBy == ServerProcess.STARTED_BY_MANUAL)
+            {
+                Console.WriteLine("  ※ 手で立てた server.mjs です（npm start など）。更新はこの起動には当てられません");
+            }
             if (info is null)
             {
                 Console.WriteLine("  ※ port.json がありません。入れ替え前のサーバーが動いています");

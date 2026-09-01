@@ -57,6 +57,9 @@ Node 側で足すのは3つ（`idle` / `stale` / `unknown`）。
 ```
 1. 画面     「更新」を押す → POST /api/update/apply
 2. server    CLAUDE_DECK_LAUNCHER が無ければ 409「この起動の仕方では更新できません」
+             （同じ環境変数から /api/health の startedBy も決まる。ランチャはそれを見て
+             「手で立てた server.mjs」に相乗りしない。相乗りされると、入れた版を起動しても
+             画面がこちらを映し、この 409 の側が表に出てしまう。launcher/CLAUDE.md 参照）
              あれば ClaudeDeck.exe --apply-update --wait-pid <自分の PID> を切り離して起こす
              spawn に失敗したら 500 をそのまま返す（ここで {ok:true} を返さない）
              成功したら 202

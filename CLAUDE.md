@@ -99,7 +99,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） `dirs`（起こしてよいフォルダの登録） `rate`（枠の使用率を紙に1枚） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
 | `src/startup/` | ランチャが書いた自動起動の紙を読む | `state` |
-| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool` / `isLongRunningTool`） `appdata`（書き込み先） `configfile`（`config.json` の読み書き） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `env`（止めるスイッチの読み方） |
+| `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool` / `isLongRunningTool`） `appdata`（書き込み先） `configfile`（`config.json` の読み書き） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `portclaim`（ポートの取り合いの決め方） `env`（止めるスイッチの読み方） |
 | `src/os/` | OS を叩く | `focus` `claude`（CLI を探す・版を読む・行を割る） |
 
 流れは `read` → `parse` → `view` → `notify`。
@@ -248,7 +248,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/runs/events?from=<seq>` | 取りこぼしの穴埋め。SSE が切れているあいだの速報を拾う |
 | `GET /api/runs/stream?from=<seq>` | **実行専用の SSE。**`/api/stream` には相乗りさせない |
 | `GET /api/runs/:id` | 1本ぶんの全部入り。粗い `rows()` と違って `counts` や `lastLineAt` も入る |
-| `GET /api/health` | 生存確認。二重起動の判定にも使う。版・通知の設定と数え・**自動起動の様子**・**claude CLI を掴めたか**・**抱えている実行の数**もここに出る |
+| `GET /api/health` | 生存確認。二重起動の判定にも使う。版・通知の設定と数え・**自動起動の様子**・**claude CLI を掴めたか**・**抱えている実行の数**・**どう立ったか（`startedBy`）**もここに出る |
 | `GET /api/settings/notify` | 通知の設定。URL はマスク済み。出どころ（`sources` / `envSet`）も返す |
 | `GET /api/settings/rundirs` | 起こしてよいフォルダ。**登録ぶんと環境変数ぶんだけ**（セッション由来のものは消せないので出さない） |
 | `GET /api/update` | 更新の状態。ランチャが書いた紙 ＋ `canApply`（いまの起動のされ方で当てられるか） |
@@ -349,6 +349,19 @@ Node 18 以降はプロセスごと終わる。画面が死ぬだけでなく通
 
 同じポートで既に動いていたら、`/api/health` を叩いて相手が ClaudeDeck か確かめる。
 そうならブラウザを開くだけにして終わる（自動起動と手動起動がぶつかる場面のため）。
+
+**ただし必ず譲るわけではない。** 相手が手で立てた `server.mjs`（`npm start`）で、
+こちらがランチャ経由なら、譲らずに番号をずらす。
+譲ると窓がそちらを映し、`CLAUDE_DECK_LAUNCHER` が無いぶん `canApply` が false になって
+「入れた版を起動したのに更新ボタンが押せない」になる（実測）。
+判断は `shared/portclaim.mjs` の1箇所に置き、**ずらす先はそちらで決めない**
+（`listen` の +1 を12回に任せる。決め方を2箇所に置くと片方だけ直った日に食い違う）。
+相手を止める道は選んでいない。何日も動いているものを黙って落とすほうが行儀が悪い。
+
+立ち上がりの処理（`server.once('listening')`）は **`listen()` の外に1つだけ置く。**
+`server.listen(port, host, cb)` の cb は listening の一度きりの受け手として積まれるが、
+発火しなかったぶんは外れずに残る。中に置くと、ずらすたびに増えて最後にまとめて降ってくる
+（実測で監視とフラッシュのタイマが2セット立ち、コンソールに古い番号の URL が出た）。
 ## 触るときに壊してはいけないこと
 
 このプロジェクトは制約のほうが設計を決めている。以下は理由つきで守る。
