@@ -17,7 +17,7 @@ import { dom, store } from './store.js';
 import { setListOpen } from './drawer.js';
 import { select } from './session.js';
 import {
-  block, hitRateNote, statTile, barList, trendList, tableDetails, deltaText,
+  block, readNote, hitRateNote, statTile, barList, trendList, tableDetails, deltaText,
   tokensStrict, pctStrict, numStrict,
 } from './usage-chart.js';
 
@@ -113,18 +113,28 @@ function scanNote(d) {
  * @returns {HTMLElement}
  */
 function tiles(d) {
+  const out = new DocumentFragment();
   const box = el('div', 'stats');
+  // 実消費の但し書きだけは札に残す。あれは「その数がどこから出たか」の内訳で、
+  // 数を読むときに一緒に読む値だから（他の3本は読み方の断り書き）
   box.append(statTile('実消費', tokensStrict(d.totals.ite), `${numStrict(d.requests)} 回の要求`));
   // 本数で割ると「長く話したセッションが多い月」というだけで動く。
   // 要求あたりなら、セッションの長さの違いを気にせず並べられる
-  box.append(statTile(
-    '1要求あたり',
-    tokensStrict(d.requests > 0 ? d.totals.ite / d.requests : null),
-    '長さの違いを均した値。作業の中身でも動きます',
-  ));
-  box.append(statTile('セッション', `${numStrict(d.sessions)} 本`, scanNote(d)));
-  box.append(statTile('キャッシュ命中率', pctStrict(d.cache.hitRate), crossHitRateNote(d)));
-  return box;
+  box.append(statTile('1要求あたり', tokensStrict(d.requests > 0 ? d.totals.ite / d.requests : null)));
+  box.append(statTile('セッション', `${numStrict(d.sessions)} 本`));
+  box.append(statTile('キャッシュ命中率', pctStrict(d.cache.hitRate)));
+  out.append(box);
+
+  // **1本も減らしていない。** 札から外したぶんは、そのまま下の塊へ移すだけ。
+  // 札に付けたままだと、長い但し書きを持つ札（命中率）だけ背が高くなり、
+  // 面も枠も持たない4枚がどこで区切れているのか読めなかった
+  const read = readNote([
+    '1要求あたりは長さの違いを均した値です。作業の中身でも動きます。',
+    scanNote(d),
+    crossHitRateNote(d),
+  ]);
+  if (read) out.append(read);
+  return out;
 }
 
 /**
@@ -191,23 +201,25 @@ function appendTrends(box, skills, undated) {
     // 上の棒とは別の話（量 と 向き）なので `note-part` で破線を引いて区切る
     box.append(el('p', 'note note-part', '呼ぶたびの実消費です。左が古く、右がいちばん新しい回。'));
     box.append(list);
-    // しきい値の数字は書かない。決めているのはサーバー側なので、
-    // ここに写すと片方だけ古くなる（`percentile` を2箇所に書かないのと同じ理屈）
-    box.append(el('p', 'spark-caption',
-      '右端の割合は、最新の1回と、それより前の中央値との差です。'
-      + '比べる相手が足りないものは差を出しません。'));
   }
 
-  // 絵から落ちたぶんと、並べようがなかったぶん。**どちらも黙って捨てない**
+  // 絵から落ちたぶんと、並べようがなかったぶん。**どちらも黙って捨てない。**
+  // 読む位置は絵のすぐ下でよいが、3本が縦に散らばると絵より注記のほうが嵩む。
+  // 読むだけの塊へまとめて、面で1つに見せる
   const omitted = rows.reduce((n, s) => n + (s.seriesOmitted ?? 0), 0);
-  if (omitted > 0) {
-    box.append(el('p', 'note note-sub',
-      `古い ${omitted} 回は絵から外しました（新しいほうだけ描いています）。`));
-  }
-  if (undated > 0) {
-    box.append(el('p', 'note note-sub',
-      `時刻が読めなかった ${undated} 回は推移に並べていません（回数と合計には入っています）。`));
-  }
+  const read = readNote([
+    // しきい値の数字は書かない。決めているのはサーバー側なので、
+    // ここに写すと片方だけ古くなる（`percentile` を2箇所に書かないのと同じ理屈）
+    list
+      ? '右端の割合は、最新の1回と、それより前の中央値との差です。'
+        + '比べる相手が足りないものは差を出しません。'
+      : null,
+    omitted > 0 ? `古い ${omitted} 回は絵から外しました（新しいほうだけ描いています）。` : null,
+    undated > 0
+      ? `時刻が読めなかった ${undated} 回は推移に並べていません（回数と合計には入っています）。`
+      : null,
+  ]);
+  if (read) box.append(read);
 }
 
 /**
@@ -244,15 +256,19 @@ function skillsBlock(d) {
       value: s.avg,
       sub: `${numStrict(s.runs)} 回`,
     }))));
-    box.append(el('p', 'note note-sub', '1回あたりの実消費で並べています。'));
-  } else {
-    box.append(el('p', 'note note-sub',
-      `どれも ${RANK_MIN_RUNS} 回に届いていないので、順位は付けません。`));
   }
-  if (few > 0) {
-    box.append(el('p', 'note note-sub',
-      `呼んだ回数が ${RANK_MIN_RUNS} 回に満たない ${few} 件は順位から外しました（表に「参考」として出ます）。`));
-  }
+  // 並べ方の断りと、順位から外したぶん。**どちらも消さない**（何で並んでいるか、
+  // 何が並んでいないかは、棒だけを見ても分からない）。
+  // 面で1つにまとめて、棒より目立たない段に落とす
+  const read = readNote([
+    ranked.length
+      ? '1回あたりの実消費で並べています。'
+      : `どれも ${RANK_MIN_RUNS} 回に届いていないので、順位は付けません。`,
+    few > 0
+      ? `呼んだ回数が ${RANK_MIN_RUNS} 回に満たない ${few} 件は順位から外しました（表に「参考」として出ます）。`
+      : null,
+  ]);
+  if (read) box.append(read);
 
   appendTrends(box, skills, d.skillsUndated);
 

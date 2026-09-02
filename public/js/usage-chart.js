@@ -29,6 +29,27 @@ export function block(title) {
 }
 
 /**
+ * 読むだけの塊。散らばっていた但し書きを1つの面へまとめる。
+ *
+ * **1本も減らさない。** 注記は折りたたまずに常時出す決まりなので、
+ * 消すのではなく「読めるが目立たない」段を面で作る。
+ * 形は `settings.css` の `.settings-read`（押せるものが1つも無いことを
+ * 文ではなく面で示す）から借りている。
+ *
+ * 節ではなく塊にしてあるので、札の下にも節の中にも置ける。
+ *
+ * @param {(string|null|undefined)[]} lines 出す文。null と空文字は飛ばす
+ * @returns {HTMLElement|null} 1本も残らなければ null（空の面を置かない）
+ */
+export function readNote(lines) {
+  const kept = (lines ?? []).filter((s) => typeof s === 'string' && s);
+  if (!kept.length) return null;
+  const box = el('div', 'usage-read');
+  for (const line of kept) box.append(el('p', null, line));
+  return box;
+}
+
+/**
  * キャッシュ命中率に添える但し書き。
  *
  * **モデルまたぎで比べられない。** キャッシュの最小長がモデル別で、
