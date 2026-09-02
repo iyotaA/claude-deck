@@ -24,6 +24,7 @@ import {
   recapOf,
   DENIAL_KINDS,
   ASK_TOOLS,
+  attributionSkillOf,
 } from '../src/parse/entries.mjs';
 import { at, say, call, result, prompt } from './helpers.mjs';
 
@@ -270,4 +271,28 @@ test('却下の種類と待ち専用ツールの一覧', () => {
 
 test('ツール呼び出しの行は指示ではない', () => {
   assert.equal(isUserPrompt(call('Bash', { command: 'ls' })), false);
+});
+
+test('帰属ラベルはエントリの直下から読む', () => {
+  // **message の中ではない。** 実測で assistant 行のトップレベルに付いていた
+  assert.equal(attributionSkillOf({ type: 'assistant', attributionSkill: 'dev-workflow' }), 'dev-workflow');
+});
+
+test('帰属ラベルを message の中から拾わない', () => {
+  // ここを緩めると、形が変わった日に「たまたま動く」経路ができる
+  assert.equal(attributionSkillOf({ type: 'assistant', message: { attributionSkill: 'x' } }), null);
+});
+
+test('帰属ラベルが無い行は null', () => {
+  // 2.1.220 より前のログには無い。**無いことは異常ではない**
+  assert.equal(attributionSkillOf({ type: 'assistant' }), null);
+  assert.equal(attributionSkillOf(null), null);
+  assert.equal(attributionSkillOf(undefined), null);
+});
+
+test('帰属ラベルが文字列でなければ null', () => {
+  // 空文字を通すと「空文字という名前のスキル」ができて、並べ替えのタイブレークに混ざる
+  assert.equal(attributionSkillOf({ attributionSkill: '' }), null);
+  assert.equal(attributionSkillOf({ attributionSkill: 123 }), null);
+  assert.equal(attributionSkillOf({ attributionSkill: ['a'] }), null);
 });

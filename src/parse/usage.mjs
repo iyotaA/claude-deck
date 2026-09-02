@@ -22,6 +22,7 @@
  */
 
 import {
+  attributionSkillOf,
   isInterrupt,
   isMainline,
   isUserPrompt,
@@ -151,7 +152,10 @@ function collectRequests(entries, sidechain) {
     if (seen) {
       duplicateLines += 1;
       // 同じ requestId で usage が食い違う例は0件だったので、後から来た usage は見ない。
-      // 拾うのは tool_use だけ
+      // **帰属ラベルも同じ扱い。** 実測（複数行の requestId 16,341 件）で、
+      // 値の食い違いも「ある行と無い行の混在」も0件だったので、最初の1行だけ見れば足りる。
+      // ここに「非 null を優先」を足すと、実データで一度も効かない分岐が
+      // テストのためだけに生き残る。拾うのは tool_use だけ
       for (const u of uses) seen.uses.push(u);
       continue;
     }
@@ -172,6 +176,8 @@ function collectRequests(entries, sidechain) {
       context: contextOf(usage),
       ite: iteOf(usage),
       uses,
+      // その要求のあいだ効いていたスキル。Claude Code が要求ごとに書いている
+      skill: attributionSkillOf(entry),
     });
   }
 
