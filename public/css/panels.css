@@ -36,7 +36,7 @@
 
 .agents { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
 
-.agent { border-top: 1px solid var(--line); padding-top: .35rem; }
+.agent { border-top: 1px solid var(--border); padding-top: .35rem; }
 .agent:first-child { border-top: 0; padding-top: 0; }
 
 /* 種類・指示・ボタンの3列。指示だけが伸びる */
