@@ -9,18 +9,22 @@
  * 中央（TAB_DEFS）は「その作業をするのに要るもの」。どれか1つが必ず出ている。
  *
  *   いま … あなたの番 / この画面から起こした実行 / 続きを起こす
- *   経過 … 文脈の圧縮 / 時系列
+ *   経過 … 文脈の圧縮 / 時系列 / ここまで
+ *   成果 … 決めたこと / TODO / 書き換えたファイル
  *   調査 … サブエージェントの記録
  *
  * 右のインスペクタ（INSP_DEFS）は「作業しながら横目で見るもの」。既定では閉じている。
  *
  *   数値 … 何にトークンを使ったか
- *   成果 … 決めたこと / TODO / 書き換えたファイル
  *   状態 … セッションの状態
  *
- * 分けたのは、この3つを中央に混ぜると、数字を見るために作業の手元を隠すことになるため。
+ * 分けたのは、これを中央に混ぜると数字を見るために作業の手元を隠すことになるため。
  * 右なら中央と同時に見られる。**同時に開くのは1つだけ**にしてあるのは、
- * 3つ並べると元の縦棒に戻るから。
+ * 並べると元の縦棒に戻るから。
+ *
+ * **「成果」は右から中央へ戻した。** あれは芯の「どうなったのか」に答えるもので、
+ * 横目で見るものではない。レールを1押ししないと見えない場所に置いていたのをやめ、
+ * 要約（ここまで）を経過タブの終わりに、詳しくを成果タブに置く。
  *
  * **選んだタブのぶんだけ組む。** 全部組んで CSS で隠す形にはしない。
  * timelinePanel() は必ず Timeline.attach() を呼ぶので、隠した節点を掴んだままになり、
@@ -35,6 +39,7 @@ import { detailActions, summaryBlock } from './detail-head.js';
 import { waitingBlock } from './detail-wait.js';
 import {
   decisionsPanel, todoPanel, compactionPanel, timelinePanel, filesPanel, basicsPanel,
+  outcomeBlock,
 } from './detail-panels.js';
 import { agentsPanel } from './agents.js';
 import { isZoomed, toggleZoom, closeZoom } from './zoom.js';
@@ -73,6 +78,9 @@ const NOW_TONE = {
 export const TAB_DEFS = [
   { id: 'now', label: 'いま' },
   { id: 'log', label: '経過', needsDetail: true, count: (c) => c.d?.digest.items.length ?? null },
+  // 数はファイルの件数。決めたことと TODO を足した合計にはしない（種類の違う3つを足した数は読めない）。
+  // ファイルにしたのは、芯の「どんな作業をしたか」の主指標で、いちばん動く数だから
+  { id: 'out', label: '成果', needsDetail: true, count: (c) => c.d?.digest.files.length ?? null },
   { id: 'agents', label: '調査', needsDetail: true, count: (c) => c.d?.subagents?.items?.length ?? null },
 ];
 
@@ -87,7 +95,6 @@ export const TAB_DEFS = [
  */
 export const INSP_DEFS = [
   { id: 'usage', label: '数値', title: '何にトークンを使ったか' },
-  { id: 'out', label: '成果', title: 'このセッションの成果', needsDetail: true },
   { id: 'basics', label: '状態', title: 'セッションの状態' },
 ];
 
@@ -274,7 +281,19 @@ function fillTab(stack, ctx) {
       add(compactionPanel(d));
       // timelinePanel は必ず節点を返す（Timeline.attach() を呼ぶのはここだけ）
       add(timelinePanel(d));
+      // 到達点は時系列の後ろ。並び順に関わらずここへ置く（時刻を持たない累積の集計なので、
+      // 時系列のどの位置とも対応しない）。onMore を差すのはここ（層3 から層4 を呼ばせない）
+      add(outcomeBlock(d, { onMore: () => setDetailTab('out') }));
       break;
+
+    case 'out': {
+      const before = stack.childElementCount;
+      add(decisionsPanel(d));
+      add(todoPanel(d));
+      add(filesPanel(d));
+      if (stack.childElementCount === before) none('まだ決めたこと・TODO・書き換えたファイルはありません');
+      break;
+    }
 
     case 'agents': {
       const p = agentsPanel(d.subagents, row.sessionId);
@@ -320,7 +339,7 @@ function fillPending(stack, error) {
  * 右のインスペクタの中身を組んで stack へ積む。
  *
  * 中央の fillTab() と同じ作法（空なら1行だけ書く）。
- * 中央から移した3つなので、中身は移す前と同じものを出す
+ * 中身は移す前と同じものを出す（「成果」は中央のタブへ戻したので、ここには無い）
  *
  * @param {HTMLElement} stack 積む先
  * @param {{row: object, d: object|null}} ctx
@@ -331,15 +350,6 @@ function fillInsp(stack, ctx) {
   const none = (text) => stack.append(el('p', 'tab-none', text));
 
   switch (store.inspector) {
-    case 'out': {
-      const before = stack.childElementCount;
-      add(decisionsPanel(d));
-      add(todoPanel(d));
-      add(filesPanel(d));
-      if (stack.childElementCount === before) none('まだ決めたこと・TODO・書き換えたファイルはありません');
-      break;
-    }
-
     case 'basics':
       add(basicsPanel(row, d));
       break;

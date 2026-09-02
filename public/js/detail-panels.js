@@ -9,11 +9,39 @@
  * 中央タブに割ったときに目次ごと外した。タブと役目が重なるうえ、
  * タブの数は選んでいないタブのぶんも要るので、パネルの戻り値からは取れない。
  */
-import { el, since, stamp, shortModel, fact } from './util.js';
+import { el, since, stamp, shortModel, fact, num } from './util.js';
 import { store, syncQuery } from './store.js';
 import { idleOf } from './rows.js';
 import { panel, SEC, toggle } from './panel.js';
 import * as Timeline from './timeline/index.js';
+// 層0 の語彙なので直に見てよい（store.js が同じことをしている）。
+// index.js を経由させると index -> view -> store の循環になる
+import { splitEdits } from './timeline/kinds.js';
+
+/**
+ * ファイル1件の行。
+ *
+ * 「書き換えたファイル」と「ここまで」で同じ顔にする。片方だけ切り方を変えると、
+ * 同じパスが場所によって違って見える。
+ *
+ * 末尾2階層だけ薄く出すのは、フルパスを出すと器の幅を越えるため。
+ * 時系列の edit 行（timeline/item.js）も同じ切り方にしてある
+ *
+ * @param {string} path ファイルのパス
+ * @param {string|number} lead 1列目に出すもの（回数、またはツール名）
+ */
+function fileLi(path, lead) {
+  const li = el('li');
+  li.append(el('span', 'n', lead));
+  const parts = String(path ?? '').split(/[\\/]/).filter(Boolean);
+  const name = parts.pop();
+  const box = el('span', 'p');
+  if (parts.length) box.append(el('span', 'dir', `${parts.slice(-2).join('/')}/`));
+  // パスが取れていないものもある。空欄にせず、取れていないことを書く
+  box.append(document.createTextNode(name ?? '(パス不明)'));
+  li.append(box);
+  return li;
+}
 
 /**
  * 「あなたが決めたこと」。回答と提出したプランを、時系列と同じ見せ方で並べる。
@@ -129,18 +157,73 @@ export function filesPanel(d) {
 
   const p = panel('書き換えたファイル', { id: SEC.files, count: `${d.digest.files.length} 件` });
   const ul = el('ul', 'files');
-  for (const f of d.digest.files.slice(0, 40)) {
-    const li = el('li');
-    li.append(el('span', 'n', f.count));
-    const parts = String(f.path).split(/[\\/]/);
-    const name = parts.pop();
-    const box = el('span', 'p');
-    if (parts.length) box.append(el('span', 'dir', `${parts.slice(-2).join('/')}/`));
-    box.append(document.createTextNode(name));
-    li.append(box);
-    ul.append(li);
-  }
+  for (const f of d.digest.files.slice(0, 40)) ul.append(fileLi(f.path, f.count));
   p.body.append(ul);
+
+  return p.section;
+}
+
+/**
+ * 「ここまで」。時系列の終わりに置く、いまの到達点のまとめ。
+ *
+ * **芯の5つのうち「どうなったのか」に答える1枚。**
+ * これまで触ったファイル・TODO・決めたことは右のインスペクタの中にあり、
+ * レールを1押ししないと見えなかった。読み終わる場所へ出す。
+ *
+ * 並び順（新しい順・古い順）に関わらず時系列の後ろに置く。
+ * ここに出すのは時刻を持たない**累積の集計**なので、時系列のどの位置とも対応しない。
+ *
+ * 詳しくは「成果」タブが持つ。ここは要約と、そこへの入り口だけ。
+ *
+ * @param {object} d 詳細の応答
+ * @param {object} [opts]
+ * @param {Function} [opts.onMore] 「成果」タブへ移る。**層4 から差す**
+ *   （ここから setDetailTab を呼ぶと detail-panels(3) -> detail(4) の逆向きになる）
+ */
+export function outcomeBlock(d, { onMore } = {}) {
+  const files = d.digest.files ?? [];
+  const tasks = d.tasks?.items ?? [];
+  const answers = d.digest.items
+    .filter((i) => i.kind === 'answer')
+    .flatMap((i) => i.answers ?? []).length;
+  const plans = d.digest.stats?.plans ?? 0;
+
+  if (!files.length && !tasks.length && !answers && !plans) return null;
+
+  const p = panel('ここまで', { id: SEC.outcome });
+
+  const writes = files.reduce((s, f) => s + (f.count ?? 0), 0);
+  const dl = el('dl', 'facts');
+  fact(dl, '触ったファイル', files.length ? `${num(files.length)} 件 / ${num(writes)} 回` : null);
+  fact(dl, 'TODO', tasks.length ? `${num(d.tasks.counts.completed ?? 0)} / ${num(tasks.length)} 完了` : null);
+  fact(dl, '決めたこと', (answers || plans) ? `回答 ${num(answers)} / プラン ${num(plans)}` : null);
+  p.body.append(dl);
+
+  // よく触ったファイルの上位だけ。全部は「成果」タブにある
+  if (files.length) {
+    const ul = el('ul', 'files');
+    for (const f of files.slice(0, 3)) ul.append(fileLi(f.path, f.count));
+    p.body.append(ul);
+  }
+
+  if (onMore) {
+    const more = el('button', 'btn', '成果をぜんぶ見る');
+    more.type = 'button';
+    more.addEventListener('click', onMore);
+    p.body.append(more);
+  }
+
+  // **数が食い違うことを隠さない。**
+  // 時系列の edit 行は足跡（trace）から拾っているので、間引き（MAX_TRACES = 200）で
+  // 落ちた区間の書き換えは calls ごと消えていて拾えない。いっぽう digest.files は
+  // 全走査の集計なので落ちない。断らないと「時系列に出ている数を数えても合わない」になる
+  const shown = splitEdits(d.digest.items)
+    .filter((i) => i.kind === 'edit')
+    .reduce((s, i) => s + (i.calls?.length ?? 0), 0);
+  if (writes > shown) {
+    p.body.append(el('p', 'note',
+      `時系列に出している書き換えは、残っている足跡から拾ったぶんだけです（${num(shown)} 回 / ${num(writes)} 回）。古いぶんは間引きで落ちています`));
+  }
 
   return p.section;
 }

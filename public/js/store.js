@@ -110,19 +110,31 @@ export const TABS = new Set(['live', 'archive']);
  * TABS と同じく集合で持つ。三項演算子で二値に畳むと、増やすたびに
  * 判定と syncQuery の2箇所を直すことになる
  */
-export const DETAIL_TABS = new Set(['now', 'log', 'agents']);
+export const DETAIL_TABS = new Set(['now', 'log', 'out', 'agents']);
 
 /**
  * 右のインスペクタに出せるもの。知らない値は null（閉じた状態）に落とす。
  *
- * 中央と分けてあるのは、この3つが「作業しながら横目で見るもの」だから。
+ * 中央と分けてあるのは、これが「作業しながら横目で見るもの」だから。
  * 中央のタブに混ぜると、数字を見るために作業の手元（いま・経過）を隠すことになる。
  *
- * 中央から移したので `?dtab=usage` のような古い指定は DETAIL_TABS に無く、
- * 既定（いま）へ落ちる。**読み替えは入れない。** 段1 はまだ誰にも配っていないので、
- * 拾うべき古いブックマークが存在しない
+ * **「成果」（out）は中央のタブへ戻した。** あれは芯の「どうなったのか」に答えるもので、
+ * 横目で見るものではない。レールを1押ししないと見えない場所に置くのをやめた
  */
-export const INSPECTOR_TABS = new Set(['usage', 'out', 'basics']);
+export const INSPECTOR_TABS = new Set(['usage', 'basics']);
+
+/**
+ * 開く中央タブを決める。
+ *
+ * `?insp=out` を拾うのは、成果が右のインスペクタだった版の URL が実在するため。
+ * **v0.6.0 で配っている**（`git tag --contains bedff48`）ので読み替えを入れる。
+ * 以前ここに「段1 はまだ誰にも配っていない」と書いてあったが、それは古くなっていた
+ */
+function initialDetailTab() {
+  const t = query.get('dtab');
+  if (DETAIL_TABS.has(t)) return t;
+  return query.get('insp') === 'out' ? 'out' : 'now';
+}
 
 export const dom = {
   app: document.getElementById('app'),
@@ -345,7 +357,7 @@ export const store = {
    * セッションを選び直しても戻さない。見たいものは人ごとに決まっていて、
    * セッションごとに変わるものではないため
    */
-  detailTab: DETAIL_TABS.has(query.get('dtab')) ? query.get('dtab') : 'now',
+  detailTab: initialDetailTab(),
   /**
    * 右のインスペクタ。INSPECTOR_TABS のどれか、または null で閉じている。
    *
