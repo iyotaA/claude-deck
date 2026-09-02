@@ -12,7 +12,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseUsageQuery, aggregateUsage, baselineFrom, USAGE_SCAN_MAX } from '../src/view/usage.mjs';
+import {
+  parseUsageQuery, aggregateUsage, baselineFrom, foldSubUsage, USAGE_SCAN_MAX,
+} from '../src/view/usage.mjs';
 import { buildUsage } from '../src/parse/usage.mjs';
 import { reply, prompt, call, result, at } from './helpers.mjs';
 
@@ -452,4 +454,42 @@ test('スキルもツールも無いセッションでも、無帰属の形は�
   assert.deepEqual(agg.skills, []);
   assert.equal(typeof agg.skillsUnattributed.requests, 'number');
   assert.equal(typeof agg.skillsOmitted.count, 'number');
+});
+
+test('サブエージェントの消費をスキル別に割る', () => {
+  // 子ログにも同じ帰属ラベルが付く（実測：子の assistant 行 9,982 のうち 4,399 行）
+  const child = (skill, out) => buildUsage([
+    reply('', { requestId: `${skill}-1`, usage: { in: 0, out }, isSidechain: true, attributionSkill: skill }),
+  ], { sidechain: true });
+
+  const sub = foldSubUsage([child('Explore', 10), child('Explore', 30), child('Plan', 20)]);
+
+  // 母数は「そのスキルに紐づいた子ログの本数」。**runs という語を子側で使わない**
+  // （親の runs は区間の数なので、同じ語に2つの意味が乗る）
+  assert.deepEqual(sub.skills.map((s) => [s.skill, s.agents, s.ite]), [
+    ['Explore', 2, 200],
+    ['Plan', 1, 100],
+  ]);
+  assert.equal(sub.ite, 300);
+  // 分母は**子ぶんの合計**。親の totals とは混ぜない（別の節として出すため）
+  assert.equal(sub.skills[0].share, 200 / 300);
+});
+
+test('子ログのラベルが無いぶんも数える', () => {
+  const bare = buildUsage([
+    reply('', { requestId: 'x', usage: { in: 0, out: 10 }, isSidechain: true }),
+  ], { sidechain: true });
+
+  const sub = foldSubUsage([bare]);
+  assert.deepEqual(sub.skills, []);
+  assert.equal(sub.skillsUnattributed.requests, 1);
+  assert.equal(sub.skillsUnattributed.share, 1);
+});
+
+test('子ログが1本も無くても形は崩れない', () => {
+  const sub = foldSubUsage([]);
+  assert.equal(sub.ite, 0);
+  assert.deepEqual(sub.skills, []);
+  // 分母が 0 なので割合は 0 ではなく null
+  assert.equal(sub.skillsUnattributed.share, null);
 });

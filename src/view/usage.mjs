@@ -205,25 +205,90 @@ async function subUsageFor(sessionId, transcriptFile) {
   const hit = memoGet(key);
   if (hit) return hit;
 
-  let requests = 0;
-  let ite = 0;
-  let truncated = 0;
   const logs = await pooled(refs, READ_CONCURRENCY, (ref) =>
     readSubagentLog(ref).catch(() => null));
 
+  // 子ログは全行が isSidechain: true。sidechain を立てないと1件も拾えない
+  const parsed = [];
+  let truncated = 0;
   for (const log of logs) {
     if (!log) continue;
-    // 子ログは全行が isSidechain: true。sidechain を立てないと1件も拾えない
-    const u = buildUsage(log.entries, { sidechain: true });
-    requests += u.requests;
-    ite += u.totals.ite;
+    parsed.push(buildUsage(log.entries, { sidechain: true }));
     // 大きいログは頭だけしか読んでいない。過少集計を黙って出さない
     if (log.truncated) truncated += 1;
   }
 
-  const value = { agents: refs.length, requests, ite, truncated, readError: false };
+  const value = { ...foldSubUsage(parsed), agents: refs.length, truncated, readError: false };
   memoSet(key, value);
   return value;
+}
+
+/**
+ * 子ログの集計を1つに畳む。**ディスクを触らないので、そのままテストできる。**
+ *
+ * 子ログにも `attributionSkill` が付いている（実測：子の assistant 行 9,982 のうち
+ * 4,399 行・66 ファイル）ので、サブエージェントの消費もスキル別に割れる。
+ * **読みは1回も増えない** … 呼ぶ側は既に `buildUsage` を呼んでいて、
+ * その戻りの `skills` を捨てていただけ。
+ *
+ * ## 親の skills に足し込まない
+ *
+ * 既存の判断（`usage-panel.js` の `subBlock`）がそのまま効く。足し込むと
+ * `Task` を1回投げただけのセッションが機械的に上位へ来て、比較の意味が薄れる。
+ * スキル名で突き合わせるのは画面の仕事で、ここで混ぜると分ける道が消える。
+ *
+ * ## 子側で `runs` を使わない
+ *
+ * 親の `runs` は「ラベルが連続した区間の数」。子ログでは1本が1エージェントの実行なので、
+ * 意味のある母数は「そのスキルに紐づいた子ログの本数」＝ `agents` のほう。
+ * 同じ語に2つの意味を載せると、横断側で足すときに必ず混ざる。
+ *
+ * @param {object[]} list 子ログごとの buildUsage の戻り
+ * @returns {{requests: number, ite: number, skills: object[],
+ *            skillsUnattributed: {requests: number, ite: number}}}
+ */
+export function foldSubUsage(list) {
+  let requests = 0;
+  let ite = 0;
+  let unRequests = 0;
+  let unIte = 0;
+  /** @type {Map<string, {skill: string, agents: number, requests: number, ite: number}>} */
+  const byName = new Map();
+
+  for (const u of list) {
+    requests += u.requests;
+    ite += u.totals.ite;
+    unRequests += u.skillsUnattributed?.requests ?? 0;
+    unIte += u.skillsUnattributed?.ite ?? 0;
+
+    for (const s of u.skills ?? []) {
+      const acc = byName.get(s.skill) ?? { skill: s.skill, agents: 0, requests: 0, ite: 0 };
+      // 1本の子ログに同じスキルが何区間あっても、母数としては「1エージェント」
+      acc.agents += 1;
+      acc.requests += s.requests;
+      acc.ite += s.ite;
+      byName.set(s.skill, acc);
+    }
+  }
+
+  const skills = [...byName.values()]
+    .map((r) => ({
+      ...r,
+      // 分母は**子ぶんの合計**。親の totals と混ぜない（別の節として出すため）
+      share: ite > 0 ? r.ite / ite : null,
+    }))
+    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill));
+
+  return {
+    requests,
+    ite,
+    skills,
+    skillsUnattributed: {
+      requests: unRequests,
+      ite: unIte,
+      share: ite > 0 ? unIte / ite : null,
+    },
+  };
 }
 
 /**
