@@ -96,6 +96,17 @@
 
 .ask-pick-text { min-width: 0; }
 
+/* **選べる側だけ、触れたときに面を変える。**
+   .choices li は読むだけ（detail-wait.js の未回答質問）と選べる（こちら）で
+   同じものを使っていて、見た目の差は .ask-pick の cursor だけだった。
+   カーソルを乗せるまで「選べる」と分からないので、面で答えるようにする。
+
+   絞るのは先祖の .ask（すぐ下の .is-picked と同じ絞り方。**:has() は使わない**。
+   public/css/ に前例が1つも無い）。:focus-within を足すのはキーボードのためで、
+   base.css の :focus-visible は <input> そのものに当たるので li の面は動かない */
+.ask .choices li:hover,
+.ask .choices li:focus-within { background: var(--bg-sunk); }
+
 /* 選んだもの。**面は塗らず、左の帯の色だけ変える。**
    塗ると、選択肢が多いときにカードがその色だけになる */
 .ask .choices li.is-picked { border-left-color: var(--accent); }

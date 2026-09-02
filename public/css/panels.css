@@ -12,6 +12,10 @@
   font-size: .84rem;
 }
 
+/* TODO の状態札。**必ず印を前に置く。**
+   同じ詳細ペインに並ぶ .tag（list.css。セッションの属性）と、枠 1px --border・
+   角丸 4px・padding 0 .35rem・.72rem・--fg-muted がすべて同一で意味だけが別だった。
+   印の有無をその差にする（.tag は印を持たない。あちらは属性の名前で状態ではない） */
 .todo .st {
   font-size: .72rem;
   padding: 0 .35rem;
@@ -21,7 +25,16 @@
   white-space: nowrap;
 }
 
+/* 既定の印。未着手（pending）と待ち（blocked）のほか、**未知の status** も
+   ここに落ちる（read/tasks.mjs は知らないキーを生のまま、または「不明」で返す）。
+   状態が1つ増えても「.st は必ず印を持つ」が崩れない。
+   記号と色は markdown.css のチェックリスト（□ ■ ✓）から借りる。
+   あちらが panels.css から借りたものなので、借り元へ返す形になる */
+.todo .st::before { content: "□ "; }
+
 .todo li[data-status="in_progress"] .st { border-color: var(--accent); color: var(--accent); }
+.todo li[data-status="in_progress"] .st::before { content: "■ "; }
+
 .todo li[data-status="completed"] { color: var(--fg-faint); }
 .todo li[data-status="completed"] .subject { text-decoration: line-through; }
 
@@ -29,6 +42,10 @@
    全部が緑の面になると、残っている1件がどれか目で拾えなくなる */
 .todo li[data-status="completed"] .st { border-color: var(--done); color: var(--done); }
 .todo li[data-status="completed"] .st::before { content: "✓ "; }
+
+/* 取り消したもの。字と印を落として出す。**絵文字にしない**（× は画面の他所と同じ字） */
+.todo li[data-status="cancelled"] .st { color: var(--fg-faint); }
+.todo li[data-status="cancelled"] .st::before { content: "× "; }
 
 /* -------------------------------------------------------------- ファイル */
 

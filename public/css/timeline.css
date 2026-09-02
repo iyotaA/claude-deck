@@ -73,11 +73,27 @@
   color: var(--fg-faint);
 }
 
-/* 隠している種類。線で消すのは「押せば戻る」ことを見せるため。消さずに沈める */
+/* 隠している種類。線で消すのは「押せば戻る」ことを見せるため。消さずに沈める。
+
+   **破線にしない。** この画面の破線は但し書きと区切りの意味で6箇所に出ていて
+   （.facts-waits / .decision + .decision / .md-pre.is-open / .tl-wait .away /
+   .usage-block / .note-part）、押せるものの状態にも使うと1つの形が2つの意味を指す。
+   代わりに枠を透明にして、触ったときだけ出す（.ibtn と同じ作法）。
+   ピル型（999px）は残るので「押せるものの形」は落ちない */
 .tl-chip[aria-pressed="false"] {
-  border-style: dashed;
+  border-color: transparent;
   color: var(--fg-faint);
   text-decoration: line-through;
+}
+
+/* 外れているものの hover を**別に書く。** 上の .tl-chip:hover と
+   .tl-chip[aria-pressed="false"] はどちらも (0,2,0) で、後に読まれるこちらが
+   border-color を透明へ戻すので、**hover しても枠が出なかった**（実測）。
+   破線だったころは hover が border-color だけを触っていて衝突しなかった。
+   字は --fg-muted まで（--fg にすると出している側の通常と同じ濃さになる） */
+.tl-chip[aria-pressed="false"]:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-muted);
 }
 
 /* 検索に当たった所。ブラウザ既定の黄色い塗りを消す。
