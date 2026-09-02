@@ -13,7 +13,12 @@
      背面を押したのと同じに見えて閉じるので、中と外の境目が分からなくなる */
   padding: 0;
   width: min(44rem, calc(100vw - 2rem));
-  max-height: min(48rem, calc(100vh - 3rem));
+  /* **高さは固定する。max-height にしない。**
+     節ごとに中身の量が違うので、中身なりにすると切り替えるたびに伸び縮みし、
+     <dialog> の中央配置で上下に跳ねる（実測で 354〜535px・上端が 91px ずれた）。
+     値はいちばん中身の多い通知の節（本文 427px）が収まるところに置いてある。
+     窓が低いときは calc(100vh - 3rem) 側で縮む */
+  height: min(34rem, calc(100vh - 3rem));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
