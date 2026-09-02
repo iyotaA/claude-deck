@@ -409,3 +409,47 @@ test('スキルもツールも無いセッションが混ざっても落ちな�
   assert.ok(Array.isArray(agg.tools));
   assert.ok(Array.isArray(agg.skills));
 });
+
+test('無帰属はセッションを跨いで足す', () => {
+  const agg = aggregateUsage([
+    skillOnce('a', { ms: 100, out: 20 }),
+    rec('b', [reply('素', { ms: 200, requestId: 'b1', model: 'claude-opus-5', usage: { in: 0, out: 40 } })]),
+  ]);
+
+  // **黙って捨てない。** 実測で本流 ITE の 81% がここに落ちるので、
+  // これが無いと「スキルを全部足しても合計に届かない」が説明できない。
+  // 数えるのは a の1要求目（Skill を呼んだ側。ラベルは次から立つ）と、b の1要求
+  assert.equal(agg.skillsUnattributed.requests, 2);
+  assert.ok(agg.skillsUnattributed.ite > 0);
+});
+
+test('割合は併合したあとの合計から出し直す', () => {
+  const agg = aggregateUsage([
+    skillOnce('a', { ms: 100, out: 20 }),
+    skillOnce('b', { ms: 200, out: 20 }),
+  ]);
+  const s = agg.skills.find((x) => x.skill === 'review');
+
+  // **セッションごとの割合を平均しない**（mergeTools の avg と同じ原則）。
+  // 分母は集めた全体の実消費で、丸めるのは画面側の仕事
+  assert.equal(s.share, s.ite / agg.totals.ite);
+  // 足すと必ず 1 になる ... のではない。無帰属があるので届かないのが正しい
+  const sum = agg.skills.reduce((n, x) => n + x.share, 0) + agg.skillsUnattributed.share;
+  assert.ok(Math.abs(sum - 1) < 1e-9, `${sum} が 1 から離れている`);
+});
+
+test('実消費が 0 なら割合は 0 ではなく null', () => {
+  const agg = aggregateUsage([]);
+
+  // 「実際に 0 だった」と「出せない」は別物。cache.hitRate と同じ扱いにする
+  assert.equal(agg.totals.ite, 0);
+  assert.equal(agg.skillsUnattributed.share, null);
+});
+
+test('スキルもツールも無いセッションでも、無帰属の形は崩れない', () => {
+  const agg = aggregateUsage([rec('x', [reply('y', { requestId: 'x1', usage: { in: 5 } })])]);
+
+  assert.deepEqual(agg.skills, []);
+  assert.equal(typeof agg.skillsUnattributed.requests, 'number');
+  assert.equal(typeof agg.skillsOmitted.count, 'number');
+});
