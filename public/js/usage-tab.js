@@ -72,6 +72,28 @@ const TREND_MAX = 3;
  */
 const ROWS_MAX = 6;
 
+/**
+ * 節の並びと名前。**ここを1行足すだけで節が増える。**
+ *
+ * 出し分けは CSS が `data-sec` で行うので、JS は名前を書くだけでよい
+ * （`settings.js` と同じ作法。JS で出し入れすると節ごとに配線が増える）。
+ */
+const SECTIONS = [
+  { id: 'over', label: '概要' },
+  { id: 'tools', label: 'ツール', count: (d) => d.tools?.length },
+  { id: 'skills', label: 'スキル', count: (d) => d.skills?.length },
+  { id: 'rows', label: 'セッション', count: (d) => d.rows?.length },
+];
+
+/**
+ * いま開いている節。
+ *
+ * **`localStorage` に残さない。** モードと同じ扱いで、開くたび「概要」へ戻す
+ * （設定モーダルが「開くたびに畳んだ状態へ戻す」のと同じ理由 …
+ * 前に開いたかどうかを覚えると、開くたびに違う画面が出る）。
+ */
+let usageSec = 'over';
+
 /** 打ち終わる前の応答を捨てるための札。`archive.js` と同じ作法 */
 let usageToken = 0;
 
@@ -154,6 +176,93 @@ function tiles(d) {
     crossHitRateNote(d),
   ]);
   if (read) out.append(read);
+  return out;
+}
+
+/**
+ * 概要の節。**開いたときに最初に出るのはここ。**
+ *
+ * 4札と、この期間の内訳（帰属バー）と、3つのテーマの代表値だけを置く。
+ * 数えられる値は約19個で、下の3節（ツール・スキル・セッション）はどれも
+ * ここからは畳まれている。
+ *
+ * **並べ方が3つとも違うので、各行にその基準を書く。** ツールは文脈への積み上がり、
+ * スキルは全体に占める割合、セッションは実消費。1画面に3つの順序が混ざるので、
+ * 書かないと「同じものさしで並んでいる」と読まれる。
+ *
+ * @param {object} d `/api/usage` の応答
+ * @param {(sec: string) => void} go 節を切り替える口
+ * @returns {DocumentFragment}
+ */
+function overviewBlock(d, go) {
+  const out = new DocumentFragment();
+  out.append(tiles(d));
+
+  const un = d.skillsUnattributed;
+  if (un) {
+    const box = block('この期間の内訳');
+    box.append(shareBar('スキルに帰属', un.share === null ? null : 1 - un.share,
+      `残り ${pctStrict(un.share)}`));
+    const read = readNote([
+      'Claude Code が要求ごとに付けた帰属ラベルで数えています。'
+      + '帰属は原因ではありません — 重かったのは仕事の内容かもしれません。',
+      '残りはどのスキルにも紐づいていません。スキルを使わずに進めたぶんが入ります。',
+    ]);
+    if (read) box.append(read);
+    out.append(box);
+  }
+
+  const box = block('いちばん重いもの');
+  const list = el('ul', 'usage-peek');
+
+  /**
+   * 1行ぶん。名前・代表値・行き先。
+   *
+   * @param {string} key テーマの名前
+   * @param {string} sec 行き先の節
+   * @param {string} head 代表値（既に整形済みの文字列）
+   * @param {string} basis 何で並べているか
+   */
+  const row = (key, sec, head, basis) => {
+    const li = el('li');
+    li.append(el('span', 'peek-k', key));
+    const v = el('span', 'peek-v');
+    v.append(el('span', 'peek-head', head));
+    v.append(el('span', 'peek-basis', basis));
+    li.append(v);
+
+    // **押せるものは行き先の印を持つ。** 隣の代表値（押せない）と
+    // 止まった絵で見分けが付くようにする
+    const btn = el('button', 'peek-go', `${key}を見る`);
+    btn.type = 'button';
+    btn.append(icon('chevron'));
+    btn.addEventListener('click', () => go(sec));
+    li.append(btn);
+    list.append(li);
+  };
+
+  const tools = (d.tools ?? []).slice(0, 3);
+  if (tools.length) {
+    row('ツール', 'tools',
+      tools.map((t) => `${t.tool} ${tokensStrict(t.tokens)}`).join(' ／ '),
+      '文脈への積み上がりが多い順');
+  }
+  const skills = (d.skills ?? []).slice(0, 3);
+  if (skills.length) {
+    row('スキル', 'skills',
+      skills.map((x) => `${x.skill} ${pctStrict(x.share)}`).join(' ／ '),
+      '全体の実消費に占める割合が大きい順');
+  }
+  const rows = (d.rows ?? []).slice(0, 3);
+  if (rows.length) {
+    row('セッション', 'rows',
+      rows.map((r) => tokensStrict(r.ite)).join(' ／ '),
+      '実消費が多い順');
+  }
+
+  if (!list.children.length) return out;
+  box.append(list);
+  out.append(box);
   return out;
 }
 
@@ -451,11 +560,56 @@ function renderModelOptions() {
 }
 
 /** 数値モードの中身を描き直す */
+/**
+ * 節を切り替える。**器の data-sec を書き替えるだけ。**
+ *
+ * 出し入れは CSS がやるので、ここで節点を作り直さない
+ * （作り直すと開いた `<details>` が閉じる）。
+ *
+ * @param {string} sec 節の名前
+ */
+function setUsageSec(sec) {
+  usageSec = SECTIONS.some((x) => x.id === sec) ? sec : 'over';
+  dom.usage.dataset.sec = usageSec;
+  for (const btn of dom.usageNav.children) {
+    btn.setAttribute('aria-pressed', String(btn.dataset.sec === usageSec));
+  }
+  // 節を替えたら先頭から読ませる。前の節のスクロール位置が残ると、
+  // 短い節へ移ったときに何も見えない位置で止まる
+  dom.usage.scrollTop = 0;
+}
+
+/**
+ * 節ナビの札を組み直す。件数が変わるので、引き直すたびに呼ぶ。
+ *
+ * 見た目は `settings.css` の `.settings-navb` を借りている
+ * （**顔の語彙を増やさない**。選んでいないあいだは面も枠も持たず、
+ * 選んだものだけが面と `--accent` の棒を持つ）。
+ *
+ * @param {object|null} d `/api/usage` の応答
+ */
+function renderUsageNav(d) {
+  dom.usageNav.replaceChildren();
+  for (const sec of SECTIONS) {
+    const btn = el('button', 'settings-navb', sec.label);
+    btn.type = 'button';
+    btn.dataset.sec = sec.id;
+    btn.setAttribute('aria-pressed', String(sec.id === usageSec));
+    const n = d ? sec.count?.(d) : null;
+    // 0 と「まだ分からない」を分ける。0 件なら 0 と書く（消さない）
+    if (typeof n === 'number') btn.append(el('span', 'n', numStrict(n)));
+    btn.addEventListener('click', () => setUsageSec(sec.id));
+    dom.usageNav.append(btn);
+  }
+}
+
 function renderUsage() {
   const u = store.usageTab;
   dom.usage.replaceChildren();
   renderUsageCount();
   renderModelOptions();
+  renderUsageNav(u.loaded ? u.data : null);
+  dom.usage.dataset.sec = usageSec;
   // 引き直しているあいだも前の内容を出したままにする（薄くするのは CSS 側）。
   // 下の早い return より前で外す。失敗して差し替わったのに薄いまま、を防ぐ
   dom.usage.classList.toggle('is-stale', u.loading && u.loaded);
@@ -493,14 +647,20 @@ function renderUsage() {
     return;
   }
 
-  dom.usage.append(tiles(d));
-  const tools = toolsBlock(d);
-  if (tools) dom.usage.append(tools);
-  // 「何が食っているか」の系統なので、ツールの隣に置く
-  const skills = skillsBlock(d);
-  if (skills) dom.usage.append(skills);
-  const rows = rowsBlock(d);
-  if (rows) dom.usage.append(rows);
+  // **節ごとに器で包む。** 出し分けは CSS が data-sec で行うので、
+  // ここは「どの節に何を入れるか」だけを決める（settings.js と同じ作法）
+  for (const [name, node] of [
+    ['over', overviewBlock(d, setUsageSec)],
+    ['tools', toolsBlock(d)],
+    ['skills', skillsBlock(d)],
+    ['rows', rowsBlock(d)],
+  ]) {
+    if (!node) continue;
+    const sec = el('section', 'usage-sec');
+    sec.dataset.sec = name;
+    sec.append(node);
+    dom.usage.append(sec);
+  }
 }
 
 /**

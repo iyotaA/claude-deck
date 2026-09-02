@@ -465,6 +465,100 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* ------------------------------------------------------------ 節の出し分け */
+
+/* **出し分けは CSS がやる。** JS は器の data-sec に名前を書くだけで、
+   節を1つ足しても配線が増えない（settings.css の .settings-pane と同じ作法）。
+
+   一度に1テーマしか出さないので、それぞれの節に部屋ができる。
+   前は「集計の総量」「ツールの積み上がり」「スキルの効率」「セッションの重さ」という
+   **分母も単位も問いも違う4つ**が、同じ顔で縦一列に並んでいた */
+.usage-sec { display: none; }
+
+.usage-pane[data-sec="over"]   .usage-sec[data-sec="over"],
+.usage-pane[data-sec="tools"]  .usage-sec[data-sec="tools"],
+.usage-pane[data-sec="skills"] .usage-sec[data-sec="skills"],
+.usage-pane[data-sec="rows"]   .usage-sec[data-sec="rows"] { display: block; }
+
+/* 節ナビ。**見た目は settings.css の .settings-navb をそのまま借りる**
+   （顔の語彙を増やさない）。あちらは縦に並ぶが、こちらは絞り込みの帯の中なので横。
+
+   帯（.list-head）の地は --bg-sunk で、選んだ札だけが --bg へ浮く。
+   .settings-navb が「沈んだ帯の上で選んだものが浮く」形をそのまま持っているので、
+   その関係がここでも成り立つ */
+.usage-nav {
+  display: flex;
+  flex: 1 0 100%;
+  gap: .25rem;
+  margin-bottom: .15rem;
+}
+
+/* 節の見出しは器の中に出るので、ナビの札とは別。
+   ナビは「どれを見るか」、帯は「いま何の話か」 */
+.usage-nav .settings-navb { padding: .3rem .55rem; }
+
+/* ------------------------------------- 概要の「いちばん重いもの」 */
+
+/* 3つのテーマの代表値と行き先。**押せる行き先と、押せない代表値を同じ行に置く**ので、
+   前者だけが印（chevron）を持つ。止まった絵で見分けが付く */
+.usage-peek {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.usage-peek li {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .6rem;
+  padding: .45rem .1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: .78rem;
+}
+
+.usage-peek li:last-child { border-bottom: 0; }
+
+.usage-peek .peek-k { color: var(--fg-muted); }
+
+.usage-peek .peek-v {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  min-width: 0;
+}
+
+.usage-peek .peek-head {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* **何で並べているかを必ず書く。** 3つの行はそれぞれ別のものさしなので、
+   書かないと同じ順序で並んでいると読まれる */
+.usage-peek .peek-basis {
+  font-size: .7rem;
+  color: var(--fg-faint);
+}
+
+/* 行き先。触れたときだけ枠が出る形（base.css の .ibtn と同じ流儀）。
+   ピル型にしないのは、あれを押せるものの中でも「主役」の形に取ってあるため */
+.usage-peek .peek-go {
+  display: flex;
+  align-items: center;
+  gap: .2rem;
+  padding: .2rem .4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  font-size: .76rem;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.usage-peek .peek-go:hover { border-color: var(--border-strong); }
+
 /* 読む幅の上限。ここは全幅の器なので、但し書きが1行 120 字を超えて読まれなくなる。
 
    **ペイン全体には掛けない。** .stats の auto-fit と .usage-rows の auto-fill は
