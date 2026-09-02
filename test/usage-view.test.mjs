@@ -170,8 +170,9 @@ test('ツールはセッションを跨いで足す。最大は足さずに大�
   assert.equal(read.max, 900);
 });
 
-test('スキルは呼んだ回数と、使ったセッション数を両方持つ', () => {
-  // スキルを呼んだ直後の一続きを1区間として数える。障壁は次のユーザー発言
+test('スキルは区間の数と、使ったセッション数を両方持つ', () => {
+  // 帰属ラベルが連続しているあいだを1区間として数える。
+  // **呼んだ要求そのものにはラベルが付かない**（実測どおり、次の要求から立つ）
   const skillRun = (name, { requestId }) => [
     prompt('やって'),
     reply('呼ぶわ', {
@@ -182,7 +183,13 @@ test('スキルは呼んだ回数と、使ったセッション数を両方持�
       uses: [{ id: `${requestId}-s`, name: 'Skill', input: { skill: name } }],
     }),
     result(`${requestId}-s`, 'スキルを読み込みました', { ms: 20 }),
-    reply('やった', { ms: 30, requestId: `${requestId}-2`, model: 'claude-opus-5', usage: { in: 200, out: 20 } }),
+    reply('やった', {
+      ms: 30,
+      requestId: `${requestId}-2`,
+      model: 'claude-opus-5',
+      usage: { in: 200, out: 20 },
+      attributionSkill: name,
+    }),
   ];
 
   const agg = aggregateUsage([
@@ -200,7 +207,7 @@ test('スキルは呼んだ回数と、使ったセッション数を両方持�
 /**
  * スキルを1回呼んで1往復するだけのセッション。
  *
- * 区間に入るのは Skill を呼んだ**次**の要求だけなので、ite は 5×out になる。
+ * 区間に入るのは帰属ラベルの立った**次**の要求だけなので、ite は 5×out になる。
  *
  * @param {string} id
  * @param {{ms: number, out: number, skill?: string}} opt
@@ -215,7 +222,13 @@ const skillOnce = (id, { ms, out, skill = 'review' }) =>
       uses: [{ id: `${id}-s`, name: 'Skill', input: { skill } }],
     }),
     result(`${id}-s`, 'ok', { ms: ms + 1 }),
-    reply('できた', { ms: ms + 2, requestId: `${id}-2`, model: 'claude-opus-5', usage: { in: 0, out } }),
+    reply('できた', {
+      ms: ms + 2,
+      requestId: `${id}-2`,
+      model: 'claude-opus-5',
+      usage: { in: 0, out },
+      attributionSkill: skill,
+    }),
   ]);
 
 test('同じスキルの1回ごとが、時刻の昇順で推移として並ぶ', () => {
@@ -267,7 +280,14 @@ test('時刻の無い区間は推移に混ぜず、落とした数を返す', ()
         usage: { in: 10, out: 1 },
         uses: [{ id: 'b-s', name: 'Skill', input: { skill: 'review' } }],
       }),
-      reply('できた', { ms: 5, requestId: 'b2', model: 'claude-opus-5', usage: { in: 0, out: 20 } }),
+      // 区間の先頭になる要求から時刻が読めない形。合計には入るが、並べようがない
+      reply('できた', {
+        timestamp: null,
+        requestId: 'b2',
+        model: 'claude-opus-5',
+        usage: { in: 0, out: 20 },
+        attributionSkill: 'review',
+      }),
     ]),
   ]);
   const s = agg.skills.find((x) => x.skill === 'review');

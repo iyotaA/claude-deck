@@ -12,9 +12,24 @@ import assert from 'node:assert/strict';
 import { buildUsage, ITE_WEIGHTS } from '../src/parse/usage.mjs';
 import { at, prompt, reply, result, synthetic } from './helpers.mjs';
 
-/** スキルを呼んだ要求を1つ作る小道具。長い uses の綴りをテストの本文から追い出す。 */
+/**
+ * `Skill` を呼んだ要求を1つ作る小道具。
+ *
+ * **この要求そのものには帰属ラベルが付かない。** 実測（101 組）で、呼んだ要求の
+ * ラベルは「同じスキル 0 件 / null 91 / 前のスキル 10」だった。
+ */
 function callSkill(name, { ms, requestId, id, usage = { in: 1 } }) {
   return reply('', { ms, requestId, usage, uses: [{ id, name: 'Skill', input: { skill: name } }] });
+}
+
+/**
+ * 帰属ラベルの付いた要求を1つ作る小道具。
+ *
+ * `reply` の `...rest` はエントリ直下へ展開されるので、実物と同じ位置に乗る
+ * （`message` の中ではない）。
+ */
+function labeled(skill, opts = {}) {
+  return reply('', { ...opts, attributionSkill: skill });
 }
 
 test('同じ requestId の3行を1回として数える', () => {
@@ -270,73 +285,83 @@ test('未知の形が来ても落ちない', () => {
   assert.equal(u.syntheticSkipped, 1);
 });
 
-test('スキル区間は呼んだ次の要求から、次のあなたの番まで', () => {
+test('帰属ラベルの付いた要求だけを、そのスキルのぶんとして数える', () => {
   const u = buildUsage([
+    // 呼んだ要求そのものにはラベルが付かない（実測：同じスキル0件 / null 91 / 前のスキル10）
     callSkill('pr-review', { ms: 0, requestId: 'r1', id: 's1', usage: { in: 1000, out: 100 } }),
     result('s1', { ms: 1 }),
-    reply('', { ms: 2, requestId: 'r2', usage: { in: 2000, out: 200 } }),
-    reply('', { ms: 3, requestId: 'r3', usage: { in: 3000, out: 300 } }),
-    prompt('ありがと', { ms: 4 }),
+    labeled('pr-review', { ms: 2, requestId: 'r2', usage: { in: 2000, out: 200 } }),
+    labeled('pr-review', { ms: 3, requestId: 'r3', usage: { in: 3000, out: 300 } }),
     reply('', { ms: 5, requestId: 'r4', usage: { in: 4000, out: 400 } }),
   ]);
 
   const s = u.skills.find((x) => x.skill === 'pr-review');
   assert.equal(s.runs, 1);
-  // 数えるのは r2 と r3 だけ。
-  // 呼んだ要求（r1）にはスキルの本文がまだ積まれていないので入れない。
-  // あなたが発言したあと（r4）は、もうスキルの続きではない
+  // 数えるのは r2 と r3 だけ。呼んだ要求（r1）と、ラベルの外れた r4 は入らない
   assert.equal(s.requests, 2);
   // (2000 + 200×5) + (3000 + 300×5) = 3000 + 4500
   assert.equal(s.ite, 7500);
   assert.equal(s.avg, 7500);
 });
 
-test('スキル区間は4つの障壁のどれでも切れる', () => {
-  const barriers = {
-    あなたの発言: prompt('つぎこれやって', { ms: 3 }),
-    スラッシュコマンド: prompt('<command-name>/clear</command-name>', { ms: 3 }),
-    中断: prompt('[Request interrupted by user]', { ms: 3 }),
-    圧縮の境目: { type: 'system', subtype: 'compact_boundary', timestamp: at(3) },
-  };
-
-  for (const [name, barrier] of Object.entries(barriers)) {
-    const u = buildUsage([
-      callSkill('test-review', { ms: 0, requestId: 'r1', id: 's1' }),
-      reply('', { ms: 2, requestId: 'r2', usage: { in: 100 } }),
-      barrier,
-      reply('', { ms: 4, requestId: 'r3', usage: { in: 1000 } }),
-    ]);
-
-    assert.equal(u.skills[0].requests, 1, `${name} で切れていない`);
-    assert.equal(u.skills[0].ite, 100, `${name} で切れていない`);
-  }
-});
-
-test('次のスキルを呼んだ要求は、前のスキルの区間の最後として数える', () => {
+test('あなたが発言してもラベルが続くかぎり同じ区間', () => {
+  // **実測で 132 回中 94 回（71%）がこの形。**
+  // 前の実装はここで打ち切っていたので、正解の 40% しか拾えていなかった
   const u = buildUsage([
-    callSkill('a', { ms: 0, requestId: 'r1', id: 's1' }),
-    reply('', { ms: 1, requestId: 'r2', usage: { in: 100 } }),
-    callSkill('b', { ms: 2, requestId: 'r3', id: 's2', usage: { in: 200 } }),
-    reply('', { ms: 3, requestId: 'r4', usage: { in: 400 } }),
+    callSkill('dev-workflow', { ms: 0, requestId: 'r1', id: 's1' }),
+    labeled('dev-workflow', { ms: 1, requestId: 'r2', usage: { in: 100 } }),
+    prompt('つぎこれやって', { ms: 2 }),
+    labeled('dev-workflow', { ms: 3, requestId: 'r3', usage: { in: 300 } }),
   ]);
 
-  // a は r2 と r3。r3 は「a のもとで働いた最後の1回」なので含める
-  const a = u.skills.find((x) => x.skill === 'a');
-  assert.equal(a.requests, 2);
-  assert.equal(a.ite, 300);
-
-  const b = u.skills.find((x) => x.skill === 'b');
-  assert.equal(b.requests, 1);
-  assert.equal(b.ite, 400);
+  assert.deepEqual(u.skills, [
+    { skill: 'dev-workflow', runs: 1, requests: 2, ite: 400, avg: 400 },
+  ]);
 });
 
-test('同じスキルを2回呼んだら、回数を足して合算する', () => {
+test('圧縮を跨いでもラベルが続くかぎり同じ区間', () => {
+  // 実測：呼んだ直後に compact_boundary が来て区間ゼロになっていたが、
+  // 実際は圧縮を跨いで 19 要求ぶん（636,122 ITE）が同じスキルに帰属していた
   const u = buildUsage([
-    callSkill('pr-review', { ms: 0, requestId: 'r1', id: 's1' }),
-    reply('', { ms: 1, requestId: 'r2', usage: { in: 100 } }),
-    prompt('つぎ', { ms: 2 }),
-    callSkill('pr-review', { ms: 3, requestId: 'r3', id: 's2' }),
-    reply('', { ms: 4, requestId: 'r4', usage: { in: 300 } }),
+    callSkill('html-deliverable-design', { ms: 0, requestId: 'r1', id: 's1' }),
+    { type: 'system', subtype: 'compact_boundary', timestamp: at(1) },
+    labeled('html-deliverable-design', { ms: 2, requestId: 'r2', usage: { in: 100 } }),
+  ]);
+
+  assert.equal(u.skills[0].ite, 100);
+  assert.equal(u.skills[0].requests, 1);
+});
+
+test('Skill の呼び出しが無くても、ラベルだけで数える', () => {
+  // /handoff のようなスラッシュコマンド起動には Skill の tool_use がどこにも出てこない。
+  // **実測 130 区間のうち 29 区間（22%）がこの形**で、前の実装は構造上見えなかった
+  const u = buildUsage([
+    prompt('<command-name>/handoff</command-name>', { ms: 0 }),
+    labeled('handoff', { ms: 1, requestId: 'r1', usage: { in: 500 } }),
+  ]);
+
+  assert.deepEqual(u.skills, [{ skill: 'handoff', runs: 1, requests: 1, ite: 500, avg: 500 }]);
+});
+
+test('ラベルが別のスキルへ変わったら、そこで区間を閉じる', () => {
+  const u = buildUsage([
+    labeled('a', { ms: 0, requestId: 'r1', usage: { in: 100 } }),
+    labeled('b', { ms: 1, requestId: 'r2', usage: { in: 400 } }),
+  ]);
+
+  assert.deepEqual(u.skills.map((s) => [s.skill, s.runs, s.requests, s.ite]), [
+    ['b', 1, 1, 400],
+    ['a', 1, 1, 100],
+  ]);
+});
+
+test('ラベルが途切れて再開したら、別の回として数える', () => {
+  // 実データには1件も無い（426 ファイル・130 区間で0件）が、規則としては固定しておく。
+  // **無ラベルを跨がせる橋渡しを入れない** … N の根拠が実データに無いつまみになる
+  const u = buildUsage([
+    labeled('pr-review', { ms: 0, requestId: 'r1', usage: { in: 100 } }),
+    reply('', { ms: 1, requestId: 'r2', usage: { in: 999 } }),
+    labeled('pr-review', { ms: 2, requestId: 'r3', usage: { in: 300 } }),
   ]);
 
   assert.deepEqual(u.skills, [{ skill: 'pr-review', runs: 2, requests: 2, ite: 400, avg: 200 }]);
@@ -352,28 +377,64 @@ test('同じスキルを2回呼んだら、回数を足して合算する', () =
   assert.ok(u.skillRuns[0].at < u.skillRuns[1].at, '時刻の昇順で並ぶ');
 });
 
-test('1回の要求で2つ呼んだら、区間のぶんを等分する', () => {
+test('ラベルの無い要求は skillsUnattributed へ積む', () => {
   const u = buildUsage([
-    reply('', {
-      ms: 0,
-      requestId: 'r1',
-      usage: { in: 1 },
-      uses: [
-        { id: 's1', name: 'Skill', input: { skill: 'a' } },
-        { id: 's2', name: 'Skill', input: { skill: 'b' } },
-      ],
-    }),
-    reply('', { ms: 1, requestId: 'r2', usage: { in: 100 } }),
+    labeled('a', { ms: 0, requestId: 'r1', usage: { in: 100 } }),
+    reply('', { ms: 1, requestId: 'r2', usage: { in: 900 } }),
   ]);
 
-  // どちらのぶんかは分けられない。片方へ寄せずに半分ずつ持たせる
-  assert.deepEqual(u.skills.map((s) => [s.skill, s.runs, s.ite]), [['a', 1, 50], ['b', 1, 50]]);
+  assert.equal(u.skills[0].ite, 100);
+  // **黙って捨てない。** 実測で本流 ITE の 65% がここに落ちる
+  assert.deepEqual(u.skillsUnattributed, { requests: 1, ite: 900 });
+});
 
-  // 畳む前も同じ等分にする。**丸めるのは1件ごと。** 足してから丸めると
-  // 端数が積もって skills 側の合計と食い違う
-  assert.deepEqual(u.skillRuns.map((r) => [r.skill, r.ite]), [['a', 50], ['b', 50]]);
-  // 同じ要求から出た2件なので時刻も同じ。どちらが先ということは無い
-  assert.equal(u.skillRuns[0].at, u.skillRuns[1].at);
+test('スキルと無帰属と切り捨てを足すと、実消費の合計になる', () => {
+  // この不変条件は前の実装では成り立たなかった（区間の等分で端数が出ていた）
+  const u = buildUsage([
+    labeled('a', { ms: 0, requestId: 'r1', usage: { in: 100, out: 7 } }),
+    labeled('b', { ms: 1, requestId: 'r2', usage: { in: 250, cr: 33 } }),
+    reply('', { ms: 2, requestId: 'r3', usage: { in: 900, cw: 11 } }),
+  ]);
+
+  const sum = u.skills.reduce((n, s) => n + s.ite, 0)
+    + u.skillsUnattributed.ite
+    + u.skillsOmitted.ite;
+  assert.ok(Math.abs(sum - u.totals.ite) <= 2, `${sum} と ${u.totals.ite} が離れている`);
+});
+
+test('畳む前の合計は、畳んだあとの合計と一致する', () => {
+  const u = buildUsage([
+    labeled('a', { ms: 0, requestId: 'r1', usage: { in: 100, out: 3 } }),
+    reply('', { ms: 1, requestId: 'r2', usage: { in: 50 } }),
+    labeled('a', { ms: 2, requestId: 'r3', usage: { in: 300, cr: 17 } }),
+  ]);
+
+  const runs = u.skillRuns.reduce((n, r) => n + r.ite, 0);
+  const skills = u.skills.reduce((n, s) => n + s.ite, 0);
+  assert.equal(runs, skills);
+});
+
+test('ラベルを1つも持たない古いログでも落ちない', () => {
+  // 2.1.220 より前のログにはフィールドそのものが無い。**無いことは異常ではない**
+  const u = buildUsage([
+    reply('', { ms: 0, requestId: 'r1', usage: { in: 100 } }),
+    reply('', { ms: 1, requestId: 'r2', usage: { in: 200 } }),
+  ]);
+
+  assert.deepEqual(u.skills, []);
+  assert.deepEqual(u.skillRuns, []);
+  assert.equal(u.skillsUnattributed.requests, 2);
+  assert.equal(u.skillsUnattributed.ite, u.totals.ite);
+});
+
+test('サブエージェントの行でもラベルを拾う', () => {
+  const u = buildUsage([
+    labeled('test-review', { ms: 0, requestId: 'r1', usage: { in: 100 }, isSidechain: true }),
+  ], { sidechain: true });
+
+  assert.deepEqual(u.skills, [
+    { skill: 'test-review', runs: 1, requests: 1, ite: 100, avg: 100 },
+  ]);
 });
 
 test('スキルを呼んでいなければ、スキルの集計は空', () => {
