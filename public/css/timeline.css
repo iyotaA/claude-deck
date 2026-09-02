@@ -73,9 +73,15 @@
   color: var(--fg-faint);
 }
 
-/* 隠している種類。線で消すのは「押せば戻る」ことを見せるため。消さずに沈める */
+/* 隠している種類。線で消すのは「押せば戻る」ことを見せるため。消さずに沈める。
+
+   **破線にしない。** この画面の破線は但し書きと区切りの意味で6箇所に出ていて
+   （.facts-waits / .decision + .decision / .md-pre.is-open / .tl-wait .away /
+   .usage-block / .note-part）、押せるものの状態にも使うと1つの形が2つの意味を指す。
+   代わりに枠を透明にして、触ったときだけ出す（.ibtn と同じ作法）。
+   ピル型（999px）は残るので「押せるものの形」は落ちない */
 .tl-chip[aria-pressed="false"] {
-  border-style: dashed;
+  border-color: transparent;
   color: var(--fg-faint);
   text-decoration: line-through;
 }
