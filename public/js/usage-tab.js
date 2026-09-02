@@ -12,6 +12,7 @@
  * あちらは開いている1本、こちらは横断。絵の部品（層1の `usage-chart.js`）だけを共有する。
  */
 import { el, shortModel } from './util.js';
+import { icon } from './icons.js';
 import { dom, store } from './store.js';
 import { setListOpen } from './drawer.js';
 import { select } from './session.js';
@@ -298,6 +299,11 @@ function usageCard(row) {
   // 混ざっている行は命中率が読めない。表の列をそのまま信じさせない
   if (row.mixed) meta.append(el('span', 'tag', 'モデル混在'));
   if (meta.childElementCount > 0) card.append(meta);
+
+  // 行き先の印。**押すと右に詳細が出る**ことを、動かさなくても分かる形で出す
+  // （すぐ上に並ぶ .stat は押せないので印を持たない）。
+  // 絶対配置で右端の中央に置くので、DOM 上の位置は末尾でよい
+  card.append(icon('chevron'));
 
   card.addEventListener('click', () => {
     // **作業台へ移すのを先にやる。** 詳細ペインは数値モードのあいだ display で消えていて、
