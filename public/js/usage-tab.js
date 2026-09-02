@@ -17,7 +17,8 @@ import { dom, store } from './store.js';
 import { setListOpen } from './drawer.js';
 import { select } from './session.js';
 import {
-  block, readNote, hitRateNote, statTile, barList, trendList, tableDetails, foldBlock, deltaText,
+  block, readNote, hitRateNote, statTile, barList, shareBar, trendList, tableDetails,
+  foldBlock, deltaText,
   tokensStrict, pctStrict, numStrict,
 } from './usage-chart.js';
 
@@ -42,17 +43,18 @@ let onPick = null;
 const BARS_MAX = 6;
 
 /**
- * スキルを順位付けする最低の呼び出し回数。
+ * 横棒に出すスキルの数。残りは下の表で読む。
  *
- * **実測で全ログのスキルは12種82件、うち6種が n=1。**
- * 1回しか呼んでいないものを並べると、たまたま重い作業だった1回が
- * そのまま「このスキルは重い」と読まれる。母数の小さいものは順位から外し、
- * 下の表に「参考」として回す。
+ * **母数で足切りしなくなった。** 前は「呼んだ回数が3回未満は順位から外す」を
+ * 持っていたが、帰属ラベルで数えると runs は「使ったセッション数」になり、
+ * 1本でしか使っていないスキルが実際に重いことは普通にある
+ * （実測で claude-in-chrome は1セッションで 3.0M）。
+ *
+ * 並べる軸も「1回あたり」から「全体に占める割合」へ変えたので、
+ * たまたま重い1回が順位を歪める心配がそもそも無い
+ * （割合が大きいということは、実際に全体を食っているということ）。
  */
-const RANK_MIN_RUNS = 3;
-
-/** 順位付けするスキルの数。 */
-const SKILL_RANK_MAX = 5;
+const SKILL_RANK_MAX = 6;
 
 /**
  * 常時出す推移の数。残りは畳んだ中で読む。
@@ -249,49 +251,67 @@ function appendTrends(box, skills, undated) {
 }
 
 /**
- * スキルを呼んだあと。
+ * スキルはどれだけ占めているか。
  *
  * **注記は折りたたまずに常時出す。ここを消すなら、この節ごと消すこと。**
- * 測っているのは「Skill を呼んだ次の要求から、次にあなたの番が来るまで」で、
- * その消費がスキルのせいなのか、たまたま重い作業だったのかは分けられない。
+ * 数えているのは Claude Code が要求ごとに付けた帰属ラベルで、
+ * 「そのスキルの文脈下で走った」であって「そのスキルのせいで増えた」ではない。
  *
- * 横断だと標本が増えるぶん、順位が「事実」に見えやすくなる。
- * だから1本ぶんより強く、母数の小さいものを順位から外す。
+ * **無帰属を先に出す。** 実測で全体の 5〜8 割がどのスキルにも紐づかないので、
+ * それを言わずに個別の割合だけ並べると、足しても 100% に届かない理由が読めない。
  *
  * @param {object} d
  * @returns {HTMLElement|null}
  */
 function skillsBlock(d) {
   const skills = d.skills ?? [];
-  if (!skills.length) return null;
+  const un = d.skillsUnattributed;
+  // ラベルが1つも無くても、無帰属の説明は出す価値がある（古い版のログだと全部そこへ落ちる）
+  if (!skills.length && !un) return null;
 
-  const box = block('スキルを呼んだあと');
-  box.append(el('p', 'note',
-    '「スキルを呼び出した直後の一続き」を測っています。スキルが原因とは限りません。'));
+  const box = block('スキルはどれだけ占めているか');
 
-  // 順位は1回あたりで付ける。合計だと「よく呼ぶスキル」が上に来るだけになる
-  const ranked = skills
-    .filter((s) => s.runs >= RANK_MIN_RUNS)
-    .sort((a, b) => b.avg - a.avg)
-    .slice(0, SKILL_RANK_MAX);
-  const few = skills.length - skills.filter((s) => s.runs >= RANK_MIN_RUNS).length;
-
-  if (ranked.length) {
-    box.append(barList(ranked.map((s) => ({
-      label: s.skill,
-      value: s.avg,
-      sub: `${numStrict(s.runs)} 回`,
-    }))));
+  // **無帰属を先に置く。** ここが全体の何割かを示してから個別の割合を出さないと、
+  // 下の棒を全部足しても 100% に届かない理由が読めない。
+  // 溝が「残り」そのものになるので、部品を新しく作らずに済む
+  if (un) {
+    box.append(shareBar('スキルに帰属', un.share === null ? null : 1 - un.share,
+      `残り ${pctStrict(un.share)}`));
   }
-  // 並べ方の断りと、順位から外したぶん。**どちらも消さない**（何で並んでいるか、
-  // 何が並んでいないかは、棒だけを見ても分からない）。
-  // 面で1つにまとめて、棒より目立たない段に落とす
+
+  // **文言は帰属ラベルの話へ直した。** 前の「呼び出した直後の一続き」は
+  // もう事実と違う（あなたの発言も圧縮も跨ぐ）。因果が取れないことは変わらない
+  const lead = readNote([
+    'Claude Code が要求ごとに付けた帰属ラベルで数えています。'
+    + '帰属は原因ではありません — 重かったのは仕事の内容かもしれません。',
+    '分母は集めた全体の実消費です。'
+    + '下の割合を足しても 100% にならないのは、残りがどのスキルにも紐づいていないためです。',
+    d.skillsOmitted?.count
+      ? `${numStrict(d.skillsOmitted.count)} 件は上限で切りました（実消費 ${tokensStrict(d.skillsOmitted.ite)}）。`
+      : null,
+  ]);
+  if (lead) box.append(lead);
+
+  if (!skills.length) return box;
+
+  // **並べ替えない。** サーバーが実消費の降順で返したものをそのまま使う。
+  // 前は「1回あたり」で並べ直していたが、いまは runs が「使ったセッション数」なので
+  // avg が「1セッションあたり」になり、順位の意味が変わってしまう
+  const ranked = skills.slice(0, SKILL_RANK_MAX);
+
+  box.append(barList(ranked.map((s) => ({
+    label: s.skill,
+    // 棒の長さは全体に占める割合。値の列も割合にするので、
+    // 「棒は share、折れ線は向き」と1つの絵に1つの問いだけを語らせられる
+    value: s.share ?? 0,
+    text: pctStrict(s.share),
+    sub: `${numStrict(s.sessions)} 本`,
+  }))));
+
   const read = readNote([
-    ranked.length
-      ? '1回あたりの実消費で並べています。'
-      : `どれも ${RANK_MIN_RUNS} 回に届いていないので、順位は付けません。`,
-    few > 0
-      ? `呼んだ回数が ${RANK_MIN_RUNS} 回に満たない ${few} 件は順位から外しました（表に「参考」として出ます）。`
+    '全体の実消費に占める割合の大きい順です。右は使ったセッションの数。',
+    skills.length > ranked.length
+      ? `残り ${numStrict(skills.length - ranked.length)} 件は下の表で読めます。`
       : null,
   ]);
   if (read) box.append(read);
@@ -300,10 +320,11 @@ function skillsBlock(d) {
 
   box.append(tableDetails(
     `スキル ${skills.length} 件を表で見る`,
-    ['スキル', '呼んだ回数', '使ったセッション', '実消費', '1回あたり'],
+    ['スキル', '全体の％', '実消費', '使ったセッション', '1セッションあたり', '要求'],
     skills.map((s) => [
-      s.runs >= RANK_MIN_RUNS ? s.skill : `${s.skill}（参考）`,
-      numStrict(s.runs), numStrict(s.sessions), numStrict(s.ite), numStrict(s.avg),
+      s.skill,
+      pctStrict(s.share), numStrict(s.ite), numStrict(s.sessions),
+      numStrict(s.avg), numStrict(s.requests),
     ]),
   ));
   return box;

@@ -206,6 +206,11 @@
 .bar.is-top .bar-fill { background: var(--accent); }
 .bar.is-top .bar-label { font-weight: 700; }
 
+/* 部分と全体を1本で示す行。**溝がそのまま「残り」を表す**ので、
+   他の棒より少しだけ太くして、比べる対象ではないことを見た目でも分ける。
+   面も色も新しく作らない（.bar-track と .bar-fill のまま） */
+.bar.is-share .bar-track { height: .7rem; }
+
 .bar-value {
   font-variant-numeric: tabular-nums;
   text-align: right;

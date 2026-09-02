@@ -131,7 +131,19 @@ export function deltaText(value, base, { kind = 'ratio', unit = '' } = {}) {
   if (kind === 'point') return `${sign}${(abs * 100).toFixed(1)}pt`;
   // 相手が 0 なら、何倍かを言えない。差だけ書いても単位が伝わらないので伏せる
   if (base === 0) return null;
-  return `${sign}${Math.round((abs / base) * 100)}%`;
+
+  const pct = (abs / base) * 100;
+  // **桁が増えたら倍率へ切り替える。** 「+9687%」は事実だが、桁を数えないと読めない
+  // （実測：セッションを跨いだスキルの推移で、1本目 70k → 直近 6.9M のときに出た）。
+  // 値を隠すのではなく、読める単位に替えるだけ。
+  //
+  // **符号は付けない。** 減った側は `abs / base` が 1 を超えないので、
+  // 倍率が出た時点で必ず増加。`+×99` のように印を2つ重ねない
+  if (pct >= 1000) {
+    const times = value / base;
+    return `×${times >= 10 ? Math.round(times) : times.toFixed(1)}`;
+  }
+  return `${sign}${Math.round(pct)}%`;
 }
 
 /**
@@ -157,13 +169,50 @@ export function statTile(label, value, note, delta) {
 }
 
 /**
- * 横棒の一覧。**1位だけアクセント、残りは control。**
+ * 部分と全体を1本で示す横棒。
  *
- * 名義カテゴリ（ツール名）なので、値の大きさで色を変えない。
- * 色に段階を付けると「赤いから悪い」のような読み方が生まれるが、
- * ここに良し悪しは無い。あるのは大小だけなので、長さで示す。
+ * **溝がそのまま「残り」になる。** `.bar-track`（--bg-sunk）が全体、
+ * `.bar-fill` が部分で、塗られていないところが説明を要する余りにあたる。
+ * 新しい部品を作らず、`.bar` の行を1本置くだけで成立する。
  *
- * @param {{label: string, value: number, sub?: string}[]} rows 大きい順に渡す
+ * **これは「単一の現在値を棒にしない」に当たらない。** 比べる相手のいない値を
+ * 棒にすると長さに意味があるように見えるが、こちらは部分と全体の関係そのものを
+ * 長さで語っている。
+ *
+ * **床を --bg へ上げてからでないと成立しない。** 前は地も溝も --bg-sunk だったので、
+ * 塗られていない部分が見えなかった。
+ *
+ * @param {string} label 左に置く名前
+ * @param {number|null} ratio 0〜1。null は「出せない」（分母が0）
+ * @param {string} [restLabel] 右に添える残りの説明
+ * @returns {HTMLElement}
+ */
+export function shareBar(label, ratio, restLabel) {
+  const list = el('ul', 'bars');
+  const li = el('li', 'bar is-share is-top');
+  li.append(el('span', 'bar-label', label));
+
+  const track = el('span', 'bar-track');
+  const fill = el('span', 'bar-fill');
+  // null（分母が0で出せない）は 0 幅。**0 と不明を見た目で分けるのは値の側の仕事**で、
+  // 右に出す文字が「—」になる
+  const pct = typeof ratio === 'number' && Number.isFinite(ratio) ? ratio : 0;
+  fill.style.width = `${Math.max(0, Math.min(1, pct)) * 100}%`;
+  track.append(fill);
+  li.append(track);
+
+  li.append(el('span', 'bar-value', pctStrict(ratio)));
+  li.append(el('span', 'bar-sub', restLabel ?? ''));
+  list.append(li);
+  return list;
+}
+
+/**
+ * 横棒の一覧。量を長さで語る。
+ *
+ * **名義のカテゴリなので、値の大小で色を変えない。** 強調は1位だけ。
+ *
+ * @param {{label: string, value: number, sub?: string}[]} rows
  * @returns {HTMLElement}
  */
 export function barList(rows) {
@@ -182,7 +231,9 @@ export function barList(rows) {
     track.append(fill);
     li.append(track);
 
-    li.append(el('span', 'bar-value', tokensStrict(row.value)));
+    // 既定はトークン数として書く。割合のように単位が違うものは text で渡す
+    // （**value は長さのため、text は読ませるため**。1つの値に2つの役目を持たせない）
+    li.append(el('span', 'bar-value', row.text ?? tokensStrict(row.value)));
     li.append(el('span', 'bar-sub', row.sub ?? ''));
     list.append(li);
   });

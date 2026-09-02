@@ -14,7 +14,7 @@
 import { el, fact, shortModel } from './util.js';
 import { panel, SEC } from './panel.js';
 import {
-  block, hitRateNote, statTile, barList, sparkline, tableDetails,
+  block, readNote, hitRateNote, statTile, barList, shareBar, sparkline, tableDetails,
   tokensStrict, pctStrict, numStrict, deltaText,
 } from './usage-chart.js';
 
@@ -157,25 +157,46 @@ function toolsBlock(usage) {
 function skillsBlock(usage) {
   // 古いサーバー（この窓口が無い版）から来た応答にはキーごと無い
   const skills = usage.skills ?? [];
-  if (!skills.length) return null;
+  const un = usage.skillsUnattributed;
+  if (!skills.length && !un) return null;
 
-  const box = block('スキルを呼んだあと');
-  box.append(el('p', 'note',
-    '「スキルを呼び出した直後の一続き」を測っています。スキルが原因とは限りません。'));
-  box.append(el('p', 'note note-sub',
-    '次にあなたが発言する（または /clear・中断・圧縮が入る）までを1区間として数えています。'));
+  const box = block('スキルはどれだけ占めているか');
+
+  // この会話の実消費のうち、どれだけがスキルに紐づくか。
+  // **溝がそのまま「残り」になる**ので、部品を新しく作らずに済む
+  const total = usage.totals.ite;
+  if (un) {
+    const share = total > 0 ? 1 - un.ite / total : null;
+    box.append(shareBar('スキルに帰属', share, `残り ${pctStrict(total > 0 ? un.ite / total : null)}`));
+  }
+
+  // **文言は帰属ラベルの話へ直した。** 前の「呼び出した直後の一続き」「次にあなたが
+  // 発言するまで」は**もう事実と違う**（発言も圧縮も跨ぐ）。因果が取れないことは変わらない
+  const lead = readNote([
+    'Claude Code が要求ごとに付けた帰属ラベルで数えています。'
+    + '帰属は原因ではありません — 重かったのは仕事の内容かもしれません。',
+  ]);
+  if (lead) box.append(lead);
+
+  if (!skills.length) return box;
 
   box.append(barList(skills.slice(0, BARS_MAX).map((s) => ({
     label: s.skill,
     value: s.ite,
-    sub: `${numStrict(s.runs)} 回`,
+    // **「呼んだ回数」を出さない。** 1本の会話では、同じスキルのラベルが
+    // 途切れて再開する例が実測で0件なので、runs は常に 1 になり情報がゼロ。
+    // 代わりに、この会話に占める割合を出す
+    sub: pctStrict(total > 0 ? s.ite / total : null),
   }))));
 
   box.append(tableDetails(
-    `全 ${skills.length} 件を表で見る`,
-    ['スキル', '呼んだ回数', '要求', '実消費', '1回あたり'],
+    `スキル ${skills.length} 件を表で見る`,
+    ['スキル', 'この会話の％', '実消費', '要求'],
     skills.map((s) => [
-      s.skill, numStrict(s.runs), numStrict(s.requests), numStrict(s.ite), numStrict(s.avg),
+      s.skill,
+      pctStrict(total > 0 ? s.ite / total : null),
+      numStrict(s.ite),
+      numStrict(s.requests),
     ]),
   ));
   return box;
@@ -217,6 +238,18 @@ function subBlock(usage) {
   fact(dl, '実消費', tokensStrict(s.ite));
   fact(dl, '親と合わせて', `${tokensStrict(total)}（うちサブ ${pctStrict(total > 0 ? s.ite / total : null)}）`);
   box.append(dl);
+
+  // 子ログにも帰属ラベルが付いているので、スキル別に割れる。
+  // **親の skills には足し込まない**（Task を1回投げただけの会話が機械的に上位へ来る）。
+  // 分母も子ぶんの合計にしてあるので、上の割合とは別の話として読める
+  if (s.skills?.length) {
+    box.append(barList(s.skills.slice(0, BARS_MAX).map((x) => ({
+      label: x.skill,
+      value: x.ite,
+      sub: pctStrict(x.share),
+    }))));
+    box.append(el('p', 'note note-sub', '割合はサブエージェントの消費に占めるぶんです。'));
+  }
 
   if (s.truncated > 0) {
     // 過少に出ていることを黙って隠さない
