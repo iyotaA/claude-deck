@@ -122,20 +122,25 @@ export function renderSummary() {
   const counts = store.meta?.counts ?? {};
   // ラベルはサーバ側の STATE_LABELS。まだ受け取っていない間はキーをそのまま出す
   const labels = store.meta?.stateLabels ?? {};
+  // **「答えないと1行も進まないか」も画面側に持たない。** サーバの表から引く。
+  // 前は key.startsWith('needs') で見ていたが、あれは名前の付け方への当て推量で、
+  // 接頭辞の違う状態を1つ足した日にここだけ古くなる（行の blocking と同じ出どころに揃える）
+  const blocking = store.meta?.stateBlocking ?? {};
   for (const key of SUMMARY_ORDER) {
     const n = counts[key] ?? 0;
     if (n === 0) continue;
     const label = labels[key] ?? key;
-    const chip = el('span', 'chip');
-    chip.style.setProperty('--state-color', STATE_COLOR[key]);
+    const item = el('span', 'tally');
+    // 点だけを出す。`.state` は色を --state-color から取るが、
+    // ここは点1つなので color を直に置く（インラインなので変数より先に効く）
     const dot = el('span', 'state');
     dot.style.color = STATE_COLOR[key];
-    chip.append(dot, document.createTextNode(label), el('strong', null, n));
-    if (key.startsWith('needs')) chip.classList.add('is-hot');
-    dom.summary.append(chip);
+    item.append(dot, document.createTextNode(label), el('strong', null, n));
+    if (blocking[key]) item.classList.add('is-hot');
+    dom.summary.append(item);
   }
   if (dom.summary.childElementCount === 0) {
-    dom.summary.append(el('span', 'chip', '動いているセッションなし'));
+    dom.summary.append(el('span', 'tally', '動いているセッションなし'));
   }
 }
 
@@ -170,14 +175,14 @@ export function renderRate() {
   if (rateKey === key) return;
   rateKey = key;
 
-  const chip = el('span', 'chip');
-  if (v.hot) chip.classList.add('is-hot');
-  chip.append(document.createTextNode('枠'));
-  // 「5h:42%」と繋ぐ。空白だと 5h と 42% がどちらも `.chip` の gap と同じ幅で離れて、
+  const box = el('span', 'rate-val');
+  if (v.hot) box.classList.add('is-hot');
+  box.append(document.createTextNode('枠'));
+  // 「5h:42%」と繋ぐ。空白だと 5h と 42% がどちらも器の gap と同じ幅で離れて、
   // どの数がどの枠のものか目で組み直すことになる。コロンで結んで1語に見せる
-  if (v.fiveHour !== null) chip.append(el('strong', null, `5h:${v.fiveHour}`));
-  if (v.sevenDay !== null) chip.append(el('strong', null, `7d:${v.sevenDay}`));
-  if (v.age) chip.append(el('span', 'rate-age', v.age));
+  if (v.fiveHour !== null) box.append(el('strong', null, `5h:${v.fiveHour}`));
+  if (v.sevenDay !== null) box.append(el('strong', null, `7d:${v.sevenDay}`));
+  if (v.age) box.append(el('span', 'rate-age', v.age));
 
   const note = [`測ったのは ${stamp(v.at)}`];
   if (v.resetsAt !== null) {
@@ -185,9 +190,9 @@ export function renderRate() {
       ? '5時間枠は空いたはず（新しい数はまだ届いていません）'
       : `5時間枠が空くのは ${stamp(v.resetsAt)}`);
   }
-  chip.title = note.join(' / ');
+  box.title = note.join(' / ');
 
-  dom.rate.replaceChildren(chip);
+  dom.rate.replaceChildren(box);
   dom.rate.hidden = false;
 }
 
