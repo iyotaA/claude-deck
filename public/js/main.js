@@ -183,7 +183,7 @@ subscribeRuns(() => {
 dom.brand.prepend(icon('deck'));
 dom.runformOpen.prepend(icon('plus', 14));
 dom.reload.append(icon('refresh'));
-dom.settingsOpen.append(icon('sliders'));
+dom.settingsOpen.append(icon('gear'));
 dom.themeToggle.append(icon('contrast'));
 
 fetchOnce().then(() => {
