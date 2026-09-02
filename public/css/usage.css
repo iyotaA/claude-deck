@@ -488,6 +488,9 @@
    その関係がここでも成り立つ */
 .usage-nav {
   display: flex;
+  /* 帯そのものは折り返すが、中のこれは別の flex コンテナなので自分で畳む。
+     狭い窓では札4つが1行に収まらない */
+  flex-wrap: wrap;
   flex: 1 0 100%;
   gap: .25rem;
   margin-bottom: .15rem;
