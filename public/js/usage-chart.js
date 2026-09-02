@@ -7,12 +7,11 @@
  *
  * SVG を扱うので `util.js` の `el()` は使えない（あれは `createElement`。
  * 名前空間が付かないので、SVG として解釈されず何も描かれない）。
- * 代わりに `svgEl()` をここに置く。
+ * 代わりに同じ `util.js` の `svgEl()` を使う（もとはここに置いていたが、
+ * アイコン（`icons.js`）からも呼ぶので層0 へ移した）。
  */
 
-import { el, num, shortModel } from './util.js';
-
-const SVG_NS = 'http://www.w3.org/2000/svg';
+import { el, num, shortModel, svgEl } from './util.js';
 
 /**
  * 節を1つ作る。数値の枠の中の小見出し。
@@ -51,25 +50,6 @@ export function hitRateNote(usage) {
   }
   const name = usage.model ? shortModel(usage.model) : null;
   return name ? `${name} の中でだけ比べられます` : 'モデルが分かりません';
-}
-
-/**
- * SVG の要素を作る。
- *
- * `el()` の SVG 版。属性は文字列として設定する（SVG は `.width = 100` のような
- * プロパティ代入が効かない属性が多いため、必ず `setAttribute` を通す）。
- *
- * @param {string} tag 要素名（`svg` / `polyline` など）
- * @param {Record<string, string|number>} [attrs] 属性。`undefined` と `null` は飛ばす
- * @returns {SVGElement}
- */
-export function svgEl(tag, attrs = {}) {
-  const node = document.createElementNS(SVG_NS, tag);
-  for (const [key, value] of Object.entries(attrs)) {
-    if (value === undefined || value === null) continue;
-    node.setAttribute(key, String(value));
-  }
-  return node;
 }
 
 /**
