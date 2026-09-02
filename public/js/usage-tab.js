@@ -17,7 +17,7 @@ import { dom, store } from './store.js';
 import { setListOpen } from './drawer.js';
 import { select } from './session.js';
 import {
-  block, readNote, hitRateNote, statTile, barList, trendList, tableDetails, deltaText,
+  block, readNote, hitRateNote, statTile, barList, trendList, tableDetails, foldBlock, deltaText,
   tokensStrict, pctStrict, numStrict,
 } from './usage-chart.js';
 
@@ -33,8 +33,13 @@ import {
  */
 let onPick = null;
 
-/** 横棒に出すツールの数。残りは下の表で読む。 */
-const BARS_MAX = 8;
+/**
+ * 横棒に出すツールの数。残りは下の表で読む。
+ *
+ * **6 で足りる。** 実測（27 種）で 7 位以下は 1 位の 5% を切っていて、
+ * 棒の長さでは差が読めない。読めない棒を並べるより表へ回す。
+ */
+const BARS_MAX = 6;
 
 /**
  * スキルを順位付けする最低の呼び出し回数。
@@ -49,8 +54,21 @@ const RANK_MIN_RUNS = 3;
 /** 順位付けするスキルの数。 */
 const SKILL_RANK_MAX = 5;
 
-/** カードで出すセッションの数。残りは表で読む。 */
-const ROWS_MAX = 12;
+/**
+ * 常時出す推移の数。残りは畳んだ中で読む。
+ *
+ * 折れ線は1本ずつ形を追うものなので、20 本並べても上から順に見るだけになる。
+ * **畳むのは絵だけで、注記も表も畳まない**（何が省かれたかは畳みの外に残る）。
+ */
+const TREND_MAX = 3;
+
+/**
+ * カードで出すセッションの数。残りは表で読む。
+ *
+ * 12 枚だと 3 列 × 4 段で、節ひとつが画面の高さを丸ごと使う。
+ * ここは「重いのはどれか」を見る場所で、全部を眺める場所ではない。
+ */
+const ROWS_MAX = 6;
 
 /** 打ち終わる前の応答を捨てるための札。`archive.js` と同じ作法 */
 let usageToken = 0;
@@ -161,7 +179,7 @@ function toolsBlock(d) {
   }))));
 
   box.append(tableDetails(
-    `全 ${d.tools.length} 件を表で見る`,
+    `ツール ${d.tools.length} 件を表で見る`,
     ['ツール', '回数', '合計', '平均', '最大1回'],
     d.tools.map((t) => [
       t.tool, numStrict(t.calls), numStrict(t.tokens), numStrict(t.avg), numStrict(t.max),
@@ -189,18 +207,26 @@ function appendTrends(box, skills, undated) {
   // 絵は2点から描ける。差の文字が付くのは `trend`（比べる相手が3件）のあるものだけ。
   // **絵と差で条件を分ける。** 揃えると、3回呼んだスキルの並びが丸ごと見えなくなる
   const rows = skills.filter((s) => (s.series?.length ?? 0) >= 2);
-
-  const list = trendList(rows.map((s) => ({
+  const toRow = (s) => ({
     label: s.skill,
     values: s.series.map((p) => p.ite),
     value: tokensStrict(s.series[s.series.length - 1].ite),
     sub: (s.trend ? deltaText(s.trend.last, s.trend.prevMedian) : null) ?? '',
     alt: `${s.skill} を呼ぶたびの実消費の移り変わり`,
-  })));
+  });
+
+  // 上位だけ常時出し、残りは畳む。**並べ替えない** —
+  // 上の棒と同じ並び（サーバーが実消費の降順で返したもの）のまま頭から取る。
+  // ここで別の比較器を持つと、棒と絵で順位が食い違って同じ節に2つの順序ができる
+  const list = trendList(rows.slice(0, TREND_MAX).map(toRow));
+  const restList = trendList(rows.slice(TREND_MAX).map(toRow));
   if (list) {
     // 上の棒とは別の話（量 と 向き）なので `note-part` で破線を引いて区切る
     box.append(el('p', 'note note-part', '呼ぶたびの実消費です。左が古く、右がいちばん新しい回。'));
     box.append(list);
+    // 畳むのは絵だけ。下の注記も表も畳まないので、何が省かれたかは畳みの外に残る
+    const rest = foldBlock(`残り ${rows.length - TREND_MAX} 件の推移を見る`, restList);
+    if (rest) box.append(rest);
   }
 
   // 絵から落ちたぶんと、並べようがなかったぶん。**どちらも黙って捨てない。**
@@ -273,7 +299,7 @@ function skillsBlock(d) {
   appendTrends(box, skills, d.skillsUndated);
 
   box.append(tableDetails(
-    `全 ${skills.length} 件を表で見る`,
+    `スキル ${skills.length} 件を表で見る`,
     ['スキル', '呼んだ回数', '使ったセッション', '実消費', '1回あたり'],
     skills.map((s) => [
       s.runs >= RANK_MIN_RUNS ? s.skill : `${s.skill}（参考）`,
@@ -352,7 +378,7 @@ function rowsBlock(d) {
   box.append(list);
 
   box.append(tableDetails(
-    `全 ${d.rows.length} 件を表で見る`,
+    `セッション ${d.rows.length} 件を表で見る`,
     ['セッション', '要求', '実消費', '文脈（最後）', '命中率'],
     d.rows.map((r) => [
       rowName(r), numStrict(r.requests), numStrict(r.ite),

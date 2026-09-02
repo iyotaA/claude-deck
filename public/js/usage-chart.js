@@ -286,6 +286,28 @@ export function trendList(rows) {
 }
 
 /**
+ * 表以外を畳む。中身は呼ぶ側が作った節点をそのまま入れる。
+ *
+ * 見た目は `tableDetails` と同じ `summary` にする
+ * （「開くと続きがある」を1つの形に保つ。`usage.css` が2つを並べて宣言している）。
+ *
+ * **`tableDetails` と別にしてあるのは、あちらが「絵に添える表」だから。**
+ * 表を畳むのと、絵そのものを畳むのは別の判断で、
+ * 片方の口に `head` や `rows` を null で渡せる抜け道を作らない。
+ *
+ * @param {string} summaryText 閉じているときの見出し
+ * @param {HTMLElement|null} node 中に入れる節点。null なら畳みごと作らない
+ * @returns {HTMLElement|null}
+ */
+export function foldBlock(summaryText, node) {
+  if (!node) return null;
+  const box = el('details', 'usage-fold');
+  box.append(el('summary', null, summaryText));
+  box.append(node);
+  return box;
+}
+
+/**
  * 折りたたんだ表。絵の対にする。
  *
  * 絵だけだと値が読めない。色や長さに頼らずに数を確かめられる道を、必ず横に置く。

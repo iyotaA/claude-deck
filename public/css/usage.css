@@ -287,16 +287,23 @@
 
 /* すべての絵に表を添える。色だけに頼った符号化が無くなり、値は必ず読める。
    見出しは details.more と同じ見た目にする（「開くと続きがある」を1つの形に保つ） */
-.usage-table {
+/* .usage-fold（表以外を畳む）も同じ顔にする。
+   「開くと続きがある」を1つの形に保つので、宣言を分けない */
+.usage-table,
+.usage-fold {
   margin-top: .6rem;
   font-size: .76rem;
 }
 
-.usage-table > summary {
+.usage-table > summary,
+.usage-fold > summary {
   cursor: pointer;
   padding: .1rem 0;
   color: var(--accent);
 }
+
+/* 畳んだ中の絵は、閉じているときの見出しから少し離す */
+.usage-fold > .bars { margin-top: .45rem; }
 
 /* 横に長い表はここの中だけで滑らせる。画面ごと横に伸ばさない */
 .table-scroll {
