@@ -21,15 +21,19 @@
   gap: .6rem;
 }
 
-/* 押せない札。**枠を外して面を沈める。**
+/* 押せない札。**面も枠も持たない。字だけ。**
    すぐ下に並ぶ .card.is-usage（押せる）と枠・面・角丸・padding が
    完全に一致していて、差は hover と cursor しか無かった
-   （動かさないと出ない＝止まった絵で見分けが付かない）。
-   読むだけのかたまり（settings.css の .settings-read）と同じ形にする */
+   （どれも動かさないと出ない＝止まった絵で見分けが付かない）。
+   上のバーの .tally / .rate-val と同じ形に寄せる。
+
+   **--bg-sunk へ沈める形にはできない。** このペインの地そのものが
+   --bg-sunk（base.css の body）なので、ライトでは札が地に溶けて消えた（実測）。
+
+   padding は残す。面が無くても、これが無いと札の字だけ器の端まで寄って
+   下のカードの字（padding-left .7rem）と左端が揃わなくなる */
 .stat {
   padding: .6rem .7rem;
-  border-radius: var(--radius);
-  background: var(--bg-sunk);
 }
 
 .stat-label {
