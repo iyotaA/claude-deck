@@ -315,13 +315,25 @@ function bannerOf(up) {
   }
 
   // 7. 新しい版がある
+  //
+  // **鍵は押せるかどうかで分ける。** 同じ鍵にすると、押せないと言われて閉じた帯が、
+  // 押せる状態になっても二度と出てこない（閉じた鍵は keep: true で localStorage に残り、
+  // 版が変わるまで一致し続けるため）。
+  //
+  // 実測で踏んだ形はこう。手で立てた server.mjs の画面で
+  // 「この起動の仕方では入れ替えられません」を閉じ、そのあとインストールした側から
+  // 立て直して canApply が true になったのに、版が同じだから帯が出なかった。
+  // 押せない知らせを閉じたことが、押せる知らせまで殺していた。
+  //
+  // 古い鍵（`available:<版>`）はどちらとも一致しないので、
+  // 押せない帯を閉じたまま埋もれていた人も1回だけ出直す。
   if (up.state === 'available') {
     // 版が読めない紙でも知らせる意味はあるので、そこは '?' で通す
-    const key = `available:${up.available || '?'}`;
+    const ver = up.available || '?';
     const text = up.available ? `新しい版があります（${up.available}）` : '新しい版があります';
     if (!up.canApply) {
       return {
-        key,
+        key: `available-cant:${ver}`,
         tone: 'new',
         text,
         note: 'この起動の仕方では入れ替えられません。インストールした ClaudeDeck から起動してください',
@@ -330,7 +342,7 @@ function bannerOf(up) {
       };
     }
     return {
-      key,
+      key: `available-can:${ver}`,
       tone: 'new',
       text,
       note: up.current ? `いまは ${up.current}` : '',
