@@ -130,10 +130,13 @@ body {
 
 /* ------------------------------------------------------------------ 見出し */
 
+/* 行の間（row-gap）を padding の上下と同じ .7rem にする。
+   1rem のままだと、下段や更新の帯が自分の行へ折り返したときに
+   「padding-top .7rem ＋ row-gap 1rem」で上下が食い違う（実測で上 11px・下 27px） */
 .topbar {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: .7rem 1rem;
   flex-wrap: wrap;
   padding: .7rem 1rem;
   background: var(--bg);
@@ -207,12 +210,17 @@ body {
    .topbar の padding を負の margin で相殺して、幅いっぱいに沈める。
    面を1段落とすので、上段の道具と混ざらない */
 .statusbar {
-  flex: 0 0 100%;
+  /* **100% ではなく calc(100% + 2rem)。**
+     flex-basis の 100% は .topbar の padding を除いた幅なので、
+     負の margin で左へ寄せただけだと右が 2rem ぶん足りない（実測で 32px 切れていた）。
+     左右へ 1rem ずつ食い込ませるぶんを、幅にも足しておく */
+  flex: 0 0 calc(100% + 2rem);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: .2rem 1.3rem;
-  margin: .7rem -1rem -.7rem;
+  /* 上は .topbar の row-gap（.7rem）に任せる。ここで足すと二重に空く */
+  margin: 0 -1rem -.7rem;
   padding: .38rem 1rem;
   background: var(--bg-sunk);
   border-top: 1px solid var(--border);
@@ -296,6 +304,10 @@ body {
   align-items: center;
   gap: .5rem;
   margin-left: auto;
+  /* アイコンボタンは 1.9rem の箱の中に 1rem の絵を置くので、
+     箱の右端を padding に揃えると、絵の右端は .45rem 内側に見える。
+     左端のロゴ（絵がそのまま端に来る）と揃わないので、箱のぶんだけ外へ出す */
+  margin-right: -.45rem;
 }
 
 button {
