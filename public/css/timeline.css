@@ -259,6 +259,20 @@ mark {
   overflow-y: auto;
 }
 
+/* ファイルの書き換え（splitEdits が足跡から抜き出したもの）。
+
+   **種類の名前に色を付けない。** 既定（--fg-muted・太字）のままにすると、
+   足跡（--fg-faint・細字）より重く、判断（--accent / --warn / --hot）より軽い段に落ちる。
+   Claude が動かしたことであって、あなたが決めたことではないので、この段が正しい。
+
+   一覧は panels.css の .files を借りている。あちらの1列目は回数（2rem）だが、
+   ここはツール名（Edit / Write / NotebookEdit）が入るので広げて左へ寄せる */
+.tl[data-kind="edit"] .files .n {
+  min-width: 4.6rem;
+  text-align: left;
+  color: var(--fg-muted);
+}
+
 /* 足跡（ふつうのツール呼び出し）。行ごと沈める。
    状態色は付けない。ここは判断の記録ではなく、そこへ至る道すじの控えなので、
    色を付けると「あなたの回答」や「却下」と同じ重さに見えて順番が読めなくなる */

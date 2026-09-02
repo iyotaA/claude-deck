@@ -99,6 +99,31 @@ export function timelineItem(item, ctx = {}) {
     case 'slash':
       body.append(marked('div', 'tl-text', item.args ? `${item.command} ${item.args}` : item.command, needle));
       break;
+    // ファイルの書き換え。足跡から splitEdits が抜き出したもの。
+    // **畳まない。** 「どのファイルを触ったか」はこの画面がいちばん出したいことで、
+    // 足跡と同じように畳むと、抜き出した意味がなくなる。
+    //
+    // 一覧は panels.css の .files を借りる（右の「書き換えたファイル」と同じ顔）。
+    // 借り元は 1列目に回数を入れるが、ここは行ごとにツールが違うのでツール名を入れる
+    case 'edit': {
+      const ul = el('ul', 'files');
+      for (const c of item.calls ?? []) {
+        const li = el('li');
+        li.append(marked('span', 'n', c.tool ?? '?', needle));
+        // detail は describeTool が入れた file_path そのもの。
+        // 末尾2階層だけ薄く出して、ファイル名を濃く残す（filesPanel と同じ切り方）
+        const parts = String(c.detail ?? '').split(/[\\/]/).filter(Boolean);
+        const name = parts.pop();
+        const box = el('span', 'p');
+        if (parts.length) box.append(el('span', 'dir', `${parts.slice(-2).join('/')}/`));
+        // パスが取れていない呼び出しもある。空欄にせず、取れていないことを書く
+        box.append(...markUp(name ?? '(パス不明)', needle));
+        li.append(box);
+        ul.append(li);
+      }
+      body.append(ul);
+      break;
+    }
     // 足跡。assistant の1行につき1件で、並列に呼んだ分は calls にまとまっている。
     // 既定では畳んでおく。1件ずつ広げると、ここだけで画面が埋まって判断の記録が流れる
     case 'trace': {

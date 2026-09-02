@@ -9,7 +9,7 @@
 import { el, num } from '../util.js';
 import { mark } from '../perf.js';
 import { store, syncQuery } from '../store.js';
-import { KIND_LABELS, SIDECHAIN_LABELS } from './kinds.js';
+import { KIND_LABELS, SIDECHAIN_LABELS, splitEdits } from './kinds.js';
 import { filterTimeline, countKinds } from './search.js';
 import { rawUrlFor } from './blocks.js';
 import { timelineItem } from './item.js';
@@ -101,7 +101,9 @@ export function attach(ref) {
   tlRef = {
     host: ref.host,
     count: ref.count ?? null,
-    items: ref.items ?? [],
+    // 書き換えを足跡から抜き出してから持つ。**filterBar にも同じものを通す**
+    // （片方だけにすると、チップの件数と実際に出る行数が食い違う）
+    items: splitEdits(ref.items ?? []),
     dropped: ref.dropped ?? 0,
   };
 }
@@ -125,6 +127,9 @@ export function detach() {
  * @param {Array} all 間引き後の全 item。チップの並びと件数はここから作る
  */
 export function filterBar(all) {
+  // attach() と同じ派生を通す。ここを素の items のままにすると、
+  // 「ファイルの書き換え」のチップが出ないうえ、足跡の件数も割る前の数になる
+  const items = splitEdits(all ?? []);
   const bar = el('div', 'tl-filter');
 
   const q = el('input', 'tl-q');
@@ -146,7 +151,7 @@ export function filterBar(all) {
   bar.append(q);
 
   const kinds = el('div', 'tl-kinds');
-  for (const [kind, n] of countKinds(all)) {
+  for (const [kind, n] of countKinds(items)) {
     // 省略はチップに出さない。自分で選ぶ種類ではなく、間引きの副産物だから。
     //
     // 目印の中身が隠している種類だけなら、目印も一緒に落としている（elidedAllHidden）。
@@ -273,6 +278,8 @@ export function render({ reset = false } = {}) {
  */
 export function renderPlain(items = []) {
   const box = el('div', 'timeline');
-  for (const item of items) box.append(timelineItem(item, { labels: SIDECHAIN_LABELS }));
+  // 子ログでも書き換えは抜き出す。サブエージェントに任せた作業でこそ
+  // 「何を触ったのか」が読みたい（親のログには結果しか残らない）
+  for (const item of splitEdits(items)) box.append(timelineItem(item, { labels: SIDECHAIN_LABELS }));
   return box;
 }
