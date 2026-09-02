@@ -173,6 +173,7 @@ export const dom = {
   archiveCount: document.getElementById('archive-count'),
   // 横断の数値。usage-tab.js だけが使う
   usageHead: document.getElementById('usage-head'),
+  usageNav: document.getElementById('usage-nav'),
   usage: document.getElementById('usage'),
   usageDays: document.getElementById('usage-days'),
   usageLimit: document.getElementById('usage-limit'),

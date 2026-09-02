@@ -17,7 +17,8 @@ import { dom, store } from './store.js';
 import { setListOpen } from './drawer.js';
 import { select } from './session.js';
 import {
-  block, hitRateNote, statTile, barList, trendList, tableDetails, deltaText,
+  block, readNote, hitRateNote, statTile, barList, shareBar, trendList, tableDetails,
+  foldBlock, deltaText,
   tokensStrict, pctStrict, numStrict,
 } from './usage-chart.js';
 
@@ -33,24 +34,65 @@ import {
  */
 let onPick = null;
 
-/** 横棒に出すツールの数。残りは下の表で読む。 */
-const BARS_MAX = 8;
+/**
+ * 横棒に出すツールの数。残りは下の表で読む。
+ *
+ * **6 で足りる。** 実測（27 種）で 7 位以下は 1 位の 5% を切っていて、
+ * 棒の長さでは差が読めない。読めない棒を並べるより表へ回す。
+ */
+const BARS_MAX = 6;
 
 /**
- * スキルを順位付けする最低の呼び出し回数。
+ * 横棒に出すスキルの数。残りは下の表で読む。
  *
- * **実測で全ログのスキルは12種82件、うち6種が n=1。**
- * 1回しか呼んでいないものを並べると、たまたま重い作業だった1回が
- * そのまま「このスキルは重い」と読まれる。母数の小さいものは順位から外し、
- * 下の表に「参考」として回す。
+ * **母数で足切りしなくなった。** 前は「呼んだ回数が3回未満は順位から外す」を
+ * 持っていたが、帰属ラベルで数えると runs は「使ったセッション数」になり、
+ * 1本でしか使っていないスキルが実際に重いことは普通にある
+ * （実測で claude-in-chrome は1セッションで 3.0M）。
+ *
+ * 並べる軸も「1回あたり」から「全体に占める割合」へ変えたので、
+ * たまたま重い1回が順位を歪める心配がそもそも無い
+ * （割合が大きいということは、実際に全体を食っているということ）。
  */
-const RANK_MIN_RUNS = 3;
+const SKILL_RANK_MAX = 6;
 
-/** 順位付けするスキルの数。 */
-const SKILL_RANK_MAX = 5;
+/**
+ * 常時出す推移の数。残りは畳んだ中で読む。
+ *
+ * 折れ線は1本ずつ形を追うものなので、20 本並べても上から順に見るだけになる。
+ * **畳むのは絵だけで、注記も表も畳まない**（何が省かれたかは畳みの外に残る）。
+ */
+const TREND_MAX = 3;
 
-/** カードで出すセッションの数。残りは表で読む。 */
-const ROWS_MAX = 12;
+/**
+ * カードで出すセッションの数。残りは表で読む。
+ *
+ * 12 枚だと 3 列 × 4 段で、節ひとつが画面の高さを丸ごと使う。
+ * ここは「重いのはどれか」を見る場所で、全部を眺める場所ではない。
+ */
+const ROWS_MAX = 6;
+
+/**
+ * 節の並びと名前。**ここを1行足すだけで節が増える。**
+ *
+ * 出し分けは CSS が `data-sec` で行うので、JS は名前を書くだけでよい
+ * （`settings.js` と同じ作法。JS で出し入れすると節ごとに配線が増える）。
+ */
+const SECTIONS = [
+  { id: 'over', label: '概要' },
+  { id: 'tools', label: 'ツール', count: (d) => d.tools?.length },
+  { id: 'skills', label: 'スキル', count: (d) => d.skills?.length },
+  { id: 'rows', label: 'セッション', count: (d) => d.rows?.length },
+];
+
+/**
+ * いま開いている節。
+ *
+ * **`localStorage` に残さない。** モードと同じ扱いで、開くたび「概要」へ戻す
+ * （設定モーダルが「開くたびに畳んだ状態へ戻す」のと同じ理由 …
+ * 前に開いたかどうかを覚えると、開くたびに違う画面が出る）。
+ */
+let usageSec = 'over';
 
 /** 打ち終わる前の応答を捨てるための札。`archive.js` と同じ作法 */
 let usageToken = 0;
@@ -113,18 +155,115 @@ function scanNote(d) {
  * @returns {HTMLElement}
  */
 function tiles(d) {
+  const out = new DocumentFragment();
   const box = el('div', 'stats');
+  // 実消費の但し書きだけは札に残す。あれは「その数がどこから出たか」の内訳で、
+  // 数を読むときに一緒に読む値だから（他の3本は読み方の断り書き）
   box.append(statTile('実消費', tokensStrict(d.totals.ite), `${numStrict(d.requests)} 回の要求`));
   // 本数で割ると「長く話したセッションが多い月」というだけで動く。
   // 要求あたりなら、セッションの長さの違いを気にせず並べられる
-  box.append(statTile(
-    '1要求あたり',
-    tokensStrict(d.requests > 0 ? d.totals.ite / d.requests : null),
-    '長さの違いを均した値。作業の中身でも動きます',
-  ));
-  box.append(statTile('セッション', `${numStrict(d.sessions)} 本`, scanNote(d)));
-  box.append(statTile('キャッシュ命中率', pctStrict(d.cache.hitRate), crossHitRateNote(d)));
-  return box;
+  box.append(statTile('1要求あたり', tokensStrict(d.requests > 0 ? d.totals.ite / d.requests : null)));
+  box.append(statTile('セッション', `${numStrict(d.sessions)} 本`));
+  box.append(statTile('キャッシュ命中率', pctStrict(d.cache.hitRate)));
+  out.append(box);
+
+  // **1本も減らしていない。** 札から外したぶんは、そのまま下の塊へ移すだけ。
+  // 札に付けたままだと、長い但し書きを持つ札（命中率）だけ背が高くなり、
+  // 面も枠も持たない4枚がどこで区切れているのか読めなかった
+  const read = readNote([
+    '1要求あたりは長さの違いを均した値です。作業の中身でも動きます。',
+    scanNote(d),
+    crossHitRateNote(d),
+  ]);
+  if (read) out.append(read);
+  return out;
+}
+
+/**
+ * 概要の節。**開いたときに最初に出るのはここ。**
+ *
+ * 4札と、この期間の内訳（帰属バー）と、3つのテーマの代表値だけを置く。
+ * 数えられる値は約19個で、下の3節（ツール・スキル・セッション）はどれも
+ * ここからは畳まれている。
+ *
+ * **並べ方が3つとも違うので、各行にその基準を書く。** ツールは文脈への積み上がり、
+ * スキルは全体に占める割合、セッションは実消費。1画面に3つの順序が混ざるので、
+ * 書かないと「同じものさしで並んでいる」と読まれる。
+ *
+ * @param {object} d `/api/usage` の応答
+ * @param {(sec: string) => void} go 節を切り替える口
+ * @returns {DocumentFragment}
+ */
+function overviewBlock(d, go) {
+  const out = new DocumentFragment();
+  out.append(tiles(d));
+
+  const un = d.skillsUnattributed;
+  if (un) {
+    const box = block('この期間の内訳');
+    box.append(shareBar('スキルに帰属', un.share === null ? null : 1 - un.share,
+      `残り ${pctStrict(un.share)}`));
+    const read = readNote([
+      'Claude Code が要求ごとに付けた帰属ラベルで数えています。'
+      + '帰属は原因ではありません — 重かったのは仕事の内容かもしれません。',
+      '残りはどのスキルにも紐づいていません。スキルを使わずに進めたぶんが入ります。',
+    ]);
+    if (read) box.append(read);
+    out.append(box);
+  }
+
+  const box = block('いちばん重いもの');
+  const list = el('ul', 'usage-peek');
+
+  /**
+   * 1行ぶん。名前・代表値・行き先。
+   *
+   * @param {string} key テーマの名前
+   * @param {string} sec 行き先の節
+   * @param {string} head 代表値（既に整形済みの文字列）
+   * @param {string} basis 何で並べているか
+   */
+  const row = (key, sec, head, basis) => {
+    const li = el('li');
+    li.append(el('span', 'peek-k', key));
+    const v = el('span', 'peek-v');
+    v.append(el('span', 'peek-head', head));
+    v.append(el('span', 'peek-basis', basis));
+    li.append(v);
+
+    // **押せるものは行き先の印を持つ。** 隣の代表値（押せない）と
+    // 止まった絵で見分けが付くようにする
+    const btn = el('button', 'peek-go', `${key}を見る`);
+    btn.type = 'button';
+    btn.append(icon('chevron'));
+    btn.addEventListener('click', () => go(sec));
+    li.append(btn);
+    list.append(li);
+  };
+
+  const tools = (d.tools ?? []).slice(0, 3);
+  if (tools.length) {
+    row('ツール', 'tools',
+      tools.map((t) => `${t.tool} ${tokensStrict(t.tokens)}`).join(' ／ '),
+      '文脈への積み上がりが多い順');
+  }
+  const skills = (d.skills ?? []).slice(0, 3);
+  if (skills.length) {
+    row('スキル', 'skills',
+      skills.map((x) => `${x.skill} ${pctStrict(x.share)}`).join(' ／ '),
+      '全体の実消費に占める割合が大きい順');
+  }
+  const rows = (d.rows ?? []).slice(0, 3);
+  if (rows.length) {
+    row('セッション', 'rows',
+      rows.map((r) => tokensStrict(r.ite)).join(' ／ '),
+      '実消費が多い順');
+  }
+
+  if (!list.children.length) return out;
+  box.append(list);
+  out.append(box);
+  return out;
 }
 
 /**
@@ -151,7 +290,7 @@ function toolsBlock(d) {
   }))));
 
   box.append(tableDetails(
-    `全 ${d.tools.length} 件を表で見る`,
+    `ツール ${d.tools.length} 件を表で見る`,
     ['ツール', '回数', '合計', '平均', '最大1回'],
     d.tools.map((t) => [
       t.tool, numStrict(t.calls), numStrict(t.tokens), numStrict(t.avg), numStrict(t.max),
@@ -179,89 +318,122 @@ function appendTrends(box, skills, undated) {
   // 絵は2点から描ける。差の文字が付くのは `trend`（比べる相手が3件）のあるものだけ。
   // **絵と差で条件を分ける。** 揃えると、3回呼んだスキルの並びが丸ごと見えなくなる
   const rows = skills.filter((s) => (s.series?.length ?? 0) >= 2);
-
-  const list = trendList(rows.map((s) => ({
+  const toRow = (s) => ({
     label: s.skill,
     values: s.series.map((p) => p.ite),
     value: tokensStrict(s.series[s.series.length - 1].ite),
     sub: (s.trend ? deltaText(s.trend.last, s.trend.prevMedian) : null) ?? '',
     alt: `${s.skill} を呼ぶたびの実消費の移り変わり`,
-  })));
+  });
+
+  // 上位だけ常時出し、残りは畳む。**並べ替えない** —
+  // 上の棒と同じ並び（サーバーが実消費の降順で返したもの）のまま頭から取る。
+  // ここで別の比較器を持つと、棒と絵で順位が食い違って同じ節に2つの順序ができる
+  const list = trendList(rows.slice(0, TREND_MAX).map(toRow));
+  const restList = trendList(rows.slice(TREND_MAX).map(toRow));
   if (list) {
     // 上の棒とは別の話（量 と 向き）なので `note-part` で破線を引いて区切る
     box.append(el('p', 'note note-part', '呼ぶたびの実消費です。左が古く、右がいちばん新しい回。'));
     box.append(list);
-    // しきい値の数字は書かない。決めているのはサーバー側なので、
-    // ここに写すと片方だけ古くなる（`percentile` を2箇所に書かないのと同じ理屈）
-    box.append(el('p', 'spark-caption',
-      '右端の割合は、最新の1回と、それより前の中央値との差です。'
-      + '比べる相手が足りないものは差を出しません。'));
+    // 畳むのは絵だけ。下の注記も表も畳まないので、何が省かれたかは畳みの外に残る
+    const rest = foldBlock(`残り ${rows.length - TREND_MAX} 件の推移を見る`, restList);
+    if (rest) box.append(rest);
   }
 
-  // 絵から落ちたぶんと、並べようがなかったぶん。**どちらも黙って捨てない**
+  // 絵から落ちたぶんと、並べようがなかったぶん。**どちらも黙って捨てない。**
+  // 読む位置は絵のすぐ下でよいが、3本が縦に散らばると絵より注記のほうが嵩む。
+  // 読むだけの塊へまとめて、面で1つに見せる
   const omitted = rows.reduce((n, s) => n + (s.seriesOmitted ?? 0), 0);
-  if (omitted > 0) {
-    box.append(el('p', 'note note-sub',
-      `古い ${omitted} 回は絵から外しました（新しいほうだけ描いています）。`));
-  }
-  if (undated > 0) {
-    box.append(el('p', 'note note-sub',
-      `時刻が読めなかった ${undated} 回は推移に並べていません（回数と合計には入っています）。`));
-  }
+  const read = readNote([
+    // しきい値の数字は書かない。決めているのはサーバー側なので、
+    // ここに写すと片方だけ古くなる（`percentile` を2箇所に書かないのと同じ理屈）
+    list
+      ? '右端の割合は、最新の1回と、それより前の中央値との差です。'
+        + '比べる相手が足りないものは差を出しません。'
+      : null,
+    omitted > 0 ? `古い ${omitted} 回は絵から外しました（新しいほうだけ描いています）。` : null,
+    undated > 0
+      ? `時刻が読めなかった ${undated} 回は推移に並べていません（回数と合計には入っています）。`
+      : null,
+  ]);
+  if (read) box.append(read);
 }
 
 /**
- * スキルを呼んだあと。
+ * スキルはどれだけ占めているか。
  *
  * **注記は折りたたまずに常時出す。ここを消すなら、この節ごと消すこと。**
- * 測っているのは「Skill を呼んだ次の要求から、次にあなたの番が来るまで」で、
- * その消費がスキルのせいなのか、たまたま重い作業だったのかは分けられない。
+ * 数えているのは Claude Code が要求ごとに付けた帰属ラベルで、
+ * 「そのスキルの文脈下で走った」であって「そのスキルのせいで増えた」ではない。
  *
- * 横断だと標本が増えるぶん、順位が「事実」に見えやすくなる。
- * だから1本ぶんより強く、母数の小さいものを順位から外す。
+ * **無帰属を先に出す。** 実測で全体の 5〜8 割がどのスキルにも紐づかないので、
+ * それを言わずに個別の割合だけ並べると、足しても 100% に届かない理由が読めない。
  *
  * @param {object} d
  * @returns {HTMLElement|null}
  */
 function skillsBlock(d) {
   const skills = d.skills ?? [];
-  if (!skills.length) return null;
+  const un = d.skillsUnattributed;
+  // ラベルが1つも無くても、無帰属の説明は出す価値がある（古い版のログだと全部そこへ落ちる）
+  if (!skills.length && !un) return null;
 
-  const box = block('スキルを呼んだあと');
-  box.append(el('p', 'note',
-    '「スキルを呼び出した直後の一続き」を測っています。スキルが原因とは限りません。'));
+  const box = block('スキルはどれだけ占めているか');
 
-  // 順位は1回あたりで付ける。合計だと「よく呼ぶスキル」が上に来るだけになる
-  const ranked = skills
-    .filter((s) => s.runs >= RANK_MIN_RUNS)
-    .sort((a, b) => b.avg - a.avg)
-    .slice(0, SKILL_RANK_MAX);
-  const few = skills.length - skills.filter((s) => s.runs >= RANK_MIN_RUNS).length;
-
-  if (ranked.length) {
-    box.append(barList(ranked.map((s) => ({
-      label: s.skill,
-      value: s.avg,
-      sub: `${numStrict(s.runs)} 回`,
-    }))));
-    box.append(el('p', 'note note-sub', '1回あたりの実消費で並べています。'));
-  } else {
-    box.append(el('p', 'note note-sub',
-      `どれも ${RANK_MIN_RUNS} 回に届いていないので、順位は付けません。`));
+  // **無帰属を先に置く。** ここが全体の何割かを示してから個別の割合を出さないと、
+  // 下の棒を全部足しても 100% に届かない理由が読めない。
+  // 溝が「残り」そのものになるので、部品を新しく作らずに済む
+  if (un) {
+    box.append(shareBar('スキルに帰属', un.share === null ? null : 1 - un.share,
+      `残り ${pctStrict(un.share)}`));
   }
-  if (few > 0) {
-    box.append(el('p', 'note note-sub',
-      `呼んだ回数が ${RANK_MIN_RUNS} 回に満たない ${few} 件は順位から外しました（表に「参考」として出ます）。`));
-  }
+
+  // **文言は帰属ラベルの話へ直した。** 前の「呼び出した直後の一続き」は
+  // もう事実と違う（あなたの発言も圧縮も跨ぐ）。因果が取れないことは変わらない
+  const lead = readNote([
+    'Claude Code が要求ごとに付けた帰属ラベルで数えています。'
+    + '帰属は原因ではありません — 重かったのは仕事の内容かもしれません。',
+    '分母は集めた全体の実消費です。'
+    + '下の割合を足しても 100% にならないのは、残りがどのスキルにも紐づいていないためです。',
+    d.skillsOmitted?.count
+      ? `${numStrict(d.skillsOmitted.count)} 件は上限で切りました（実消費 ${tokensStrict(d.skillsOmitted.ite)}）。`
+      : null,
+  ]);
+  if (lead) box.append(lead);
+
+  if (!skills.length) return box;
+
+  // **並べ替えない。** サーバーが実消費の降順で返したものをそのまま使う。
+  // 前は「1回あたり」で並べ直していたが、いまは runs が「使ったセッション数」なので
+  // avg が「1セッションあたり」になり、順位の意味が変わってしまう
+  const ranked = skills.slice(0, SKILL_RANK_MAX);
+
+  box.append(barList(ranked.map((s) => ({
+    label: s.skill,
+    // 棒の長さは全体に占める割合。値の列も割合にするので、
+    // 「棒は share、折れ線は向き」と1つの絵に1つの問いだけを語らせられる
+    value: s.share ?? 0,
+    text: pctStrict(s.share),
+    sub: `${numStrict(s.sessions)} 本`,
+  }))));
+
+  const read = readNote([
+    '全体の実消費に占める割合の大きい順です。右は使ったセッションの数。',
+    skills.length > ranked.length
+      ? `残り ${numStrict(skills.length - ranked.length)} 件は下の表で読めます。`
+      : null,
+  ]);
+  if (read) box.append(read);
 
   appendTrends(box, skills, d.skillsUndated);
 
   box.append(tableDetails(
-    `全 ${skills.length} 件を表で見る`,
-    ['スキル', '呼んだ回数', '使ったセッション', '実消費', '1回あたり'],
+    `スキル ${skills.length} 件を表で見る`,
+    ['スキル', '全体の％', '実消費', '使ったセッション', '1セッションあたり', '要求'],
     skills.map((s) => [
-      s.runs >= RANK_MIN_RUNS ? s.skill : `${s.skill}（参考）`,
-      numStrict(s.runs), numStrict(s.sessions), numStrict(s.ite), numStrict(s.avg),
+      s.skill,
+      pctStrict(s.share), numStrict(s.ite), numStrict(s.sessions),
+      numStrict(s.avg), numStrict(s.requests),
     ]),
   ));
   return box;
@@ -336,7 +508,7 @@ function rowsBlock(d) {
   box.append(list);
 
   box.append(tableDetails(
-    `全 ${d.rows.length} 件を表で見る`,
+    `セッション ${d.rows.length} 件を表で見る`,
     ['セッション', '要求', '実消費', '文脈（最後）', '命中率'],
     d.rows.map((r) => [
       rowName(r), numStrict(r.requests), numStrict(r.ite),
@@ -388,11 +560,56 @@ function renderModelOptions() {
 }
 
 /** 数値モードの中身を描き直す */
+/**
+ * 節を切り替える。**器の data-sec を書き替えるだけ。**
+ *
+ * 出し入れは CSS がやるので、ここで節点を作り直さない
+ * （作り直すと開いた `<details>` が閉じる）。
+ *
+ * @param {string} sec 節の名前
+ */
+function setUsageSec(sec) {
+  usageSec = SECTIONS.some((x) => x.id === sec) ? sec : 'over';
+  dom.usage.dataset.sec = usageSec;
+  for (const btn of dom.usageNav.children) {
+    btn.setAttribute('aria-pressed', String(btn.dataset.sec === usageSec));
+  }
+  // 節を替えたら先頭から読ませる。前の節のスクロール位置が残ると、
+  // 短い節へ移ったときに何も見えない位置で止まる
+  dom.usage.scrollTop = 0;
+}
+
+/**
+ * 節ナビの札を組み直す。件数が変わるので、引き直すたびに呼ぶ。
+ *
+ * 見た目は `settings.css` の `.settings-navb` を借りている
+ * （**顔の語彙を増やさない**。選んでいないあいだは面も枠も持たず、
+ * 選んだものだけが面と `--accent` の棒を持つ）。
+ *
+ * @param {object|null} d `/api/usage` の応答
+ */
+function renderUsageNav(d) {
+  dom.usageNav.replaceChildren();
+  for (const sec of SECTIONS) {
+    const btn = el('button', 'settings-navb', sec.label);
+    btn.type = 'button';
+    btn.dataset.sec = sec.id;
+    btn.setAttribute('aria-pressed', String(sec.id === usageSec));
+    const n = d ? sec.count?.(d) : null;
+    // 0 と「まだ分からない」を分ける。0 件なら 0 と書く（消さない）
+    if (typeof n === 'number') btn.append(el('span', 'n', numStrict(n)));
+    btn.addEventListener('click', () => setUsageSec(sec.id));
+    dom.usageNav.append(btn);
+  }
+}
+
 function renderUsage() {
   const u = store.usageTab;
   dom.usage.replaceChildren();
   renderUsageCount();
   renderModelOptions();
+  renderUsageNav(u.loaded ? u.data : null);
+  dom.usage.dataset.sec = usageSec;
   // 引き直しているあいだも前の内容を出したままにする（薄くするのは CSS 側）。
   // 下の早い return より前で外す。失敗して差し替わったのに薄いまま、を防ぐ
   dom.usage.classList.toggle('is-stale', u.loading && u.loaded);
@@ -430,14 +647,20 @@ function renderUsage() {
     return;
   }
 
-  dom.usage.append(tiles(d));
-  const tools = toolsBlock(d);
-  if (tools) dom.usage.append(tools);
-  // 「何が食っているか」の系統なので、ツールの隣に置く
-  const skills = skillsBlock(d);
-  if (skills) dom.usage.append(skills);
-  const rows = rowsBlock(d);
-  if (rows) dom.usage.append(rows);
+  // **節ごとに器で包む。** 出し分けは CSS が data-sec で行うので、
+  // ここは「どの節に何を入れるか」だけを決める（settings.js と同じ作法）
+  for (const [name, node] of [
+    ['over', overviewBlock(d, setUsageSec)],
+    ['tools', toolsBlock(d)],
+    ['skills', skillsBlock(d)],
+    ['rows', rowsBlock(d)],
+  ]) {
+    if (!node) continue;
+    const sec = el('section', 'usage-sec');
+    sec.dataset.sec = name;
+    sec.append(node);
+    dom.usage.append(sec);
+  }
 }
 
 /**

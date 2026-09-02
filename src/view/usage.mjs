@@ -33,9 +33,18 @@ const READ_CONCURRENCY = 4;
 /** 何も指定しなかったときに見るセッションの数。 */
 const LIMIT_DEFAULT = 30;
 
-/** ツール別・スキル別で返す上限。1本ぶん（24 / 12）より広く取る。 */
+/** ツール別で返す上限。1本ぶん（24）より広く取る。 */
 const TOOLS_MAX = 30;
-const SKILLS_MAX = 20;
+
+/**
+ * スキル別で返す上限。
+ *
+ * **横断では実際に当たる。** 帰属ラベルで数えた実測（429 ファイル）で
+ * 一意なスキル名は 24 種あり、20 だと 4 種が消えていた。
+ * 24 に合わせると次に増えた日にまた消えるので、少し先まで見て 32 にする。
+ * それでも切れたぶんは skillsOmitted で件数と量を返す。
+ */
+const SKILLS_MAX = 32;
 
 /**
  * 同じスキルの推移として、1つのスキルに何件まで並べるか。
@@ -196,25 +205,90 @@ async function subUsageFor(sessionId, transcriptFile) {
   const hit = memoGet(key);
   if (hit) return hit;
 
-  let requests = 0;
-  let ite = 0;
-  let truncated = 0;
   const logs = await pooled(refs, READ_CONCURRENCY, (ref) =>
     readSubagentLog(ref).catch(() => null));
 
+  // 子ログは全行が isSidechain: true。sidechain を立てないと1件も拾えない
+  const parsed = [];
+  let truncated = 0;
   for (const log of logs) {
     if (!log) continue;
-    // 子ログは全行が isSidechain: true。sidechain を立てないと1件も拾えない
-    const u = buildUsage(log.entries, { sidechain: true });
-    requests += u.requests;
-    ite += u.totals.ite;
+    parsed.push(buildUsage(log.entries, { sidechain: true }));
     // 大きいログは頭だけしか読んでいない。過少集計を黙って出さない
     if (log.truncated) truncated += 1;
   }
 
-  const value = { agents: refs.length, requests, ite, truncated, readError: false };
+  const value = { ...foldSubUsage(parsed), agents: refs.length, truncated, readError: false };
   memoSet(key, value);
   return value;
+}
+
+/**
+ * 子ログの集計を1つに畳む。**ディスクを触らないので、そのままテストできる。**
+ *
+ * 子ログにも `attributionSkill` が付いている（実測：子の assistant 行 9,982 のうち
+ * 4,399 行・66 ファイル）ので、サブエージェントの消費もスキル別に割れる。
+ * **読みは1回も増えない** … 呼ぶ側は既に `buildUsage` を呼んでいて、
+ * その戻りの `skills` を捨てていただけ。
+ *
+ * ## 親の skills に足し込まない
+ *
+ * 既存の判断（`usage-panel.js` の `subBlock`）がそのまま効く。足し込むと
+ * `Task` を1回投げただけのセッションが機械的に上位へ来て、比較の意味が薄れる。
+ * スキル名で突き合わせるのは画面の仕事で、ここで混ぜると分ける道が消える。
+ *
+ * ## 子側で `runs` を使わない
+ *
+ * 親の `runs` は「ラベルが連続した区間の数」。子ログでは1本が1エージェントの実行なので、
+ * 意味のある母数は「そのスキルに紐づいた子ログの本数」＝ `agents` のほう。
+ * 同じ語に2つの意味を載せると、横断側で足すときに必ず混ざる。
+ *
+ * @param {object[]} list 子ログごとの buildUsage の戻り
+ * @returns {{requests: number, ite: number, skills: object[],
+ *            skillsUnattributed: {requests: number, ite: number}}}
+ */
+export function foldSubUsage(list) {
+  let requests = 0;
+  let ite = 0;
+  let unRequests = 0;
+  let unIte = 0;
+  /** @type {Map<string, {skill: string, agents: number, requests: number, ite: number}>} */
+  const byName = new Map();
+
+  for (const u of list) {
+    requests += u.requests;
+    ite += u.totals.ite;
+    unRequests += u.skillsUnattributed?.requests ?? 0;
+    unIte += u.skillsUnattributed?.ite ?? 0;
+
+    for (const s of u.skills ?? []) {
+      const acc = byName.get(s.skill) ?? { skill: s.skill, agents: 0, requests: 0, ite: 0 };
+      // 1本の子ログに同じスキルが何区間あっても、母数としては「1エージェント」
+      acc.agents += 1;
+      acc.requests += s.requests;
+      acc.ite += s.ite;
+      byName.set(s.skill, acc);
+    }
+  }
+
+  const skills = [...byName.values()]
+    .map((r) => ({
+      ...r,
+      // 分母は**子ぶんの合計**。親の totals と混ぜない（別の節として出すため）
+      share: ite > 0 ? r.ite / ite : null,
+    }))
+    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill));
+
+  return {
+    requests,
+    ite,
+    skills,
+    skillsUnattributed: {
+      requests: unRequests,
+      ite: unIte,
+      share: ite > 0 ? unIte / ite : null,
+    },
+  };
 }
 
 /**
@@ -458,15 +532,26 @@ function mergeTools(list) {
  * @param {object[]} list 各セッションの usage
  * @returns {object[]}
  */
-function mergeSkills(recs) {
+function mergeSkills(recs, totalIte) {
   const byName = new Map();
   /** @type {Map<string, object[]>} スキル名 → 畳む前の1回ごと */
   const seriesOf = new Map();
   // 時刻を持たない区間は並べようがないので落とす。落とした数は返す（黙って捨てない）
   let undated = 0;
+  // どのスキルにも紐づかなかったぶん。セッションを跨いで足す
+  let unattributedRequests = 0;
+  let unattributedIte = 0;
+  // 1本ぶんの集計が既に切っていたぶん。ここで拾わないと、横断の合計から静かに消える
+  let cutCount = 0;
+  let cutIte = 0;
 
   for (const rec of recs) {
     const usage = rec.usage;
+
+    unattributedRequests += usage.skillsUnattributed?.requests ?? 0;
+    unattributedIte += usage.skillsUnattributed?.ite ?? 0;
+    cutCount += usage.skillsOmitted?.count ?? 0;
+    cutIte += usage.skillsOmitted?.ite ?? 0;
 
     for (const s of usage.skills ?? []) {
       const acc = byName.get(s.skill) ?? { skill: s.skill, runs: 0, requests: 0, ite: 0, sessions: 0 };
@@ -499,16 +584,36 @@ function mergeSkills(recs) {
       return {
         ...r,
         avg: r.runs > 0 ? Math.round(r.ite / r.runs) : null,
+        // 集めた全体の実消費に対する割合。**丸めない**（画面の pctStrict が丸める）。
+        // 分母が 0 のときは 0 ではなく null … 「実際に0だった」と「出せない」は別物で、
+        // cache.hitRate が既に同じ形をしている
+        share: totalIte > 0 ? r.ite / totalIte : null,
         series,
         // 絵から落ちたぶん。runs と絵の点の数が合わないときの理由になる
         seriesOmitted: all.length - series.length,
         trend: skillTrend(series),
       };
     })
-    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill))
-    .slice(0, SKILLS_MAX);
+    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill));
 
-  return { skills, undated };
+  // ここでも切る。**実測でスキルは 24 種**あるので、SKILLS_MAX = 20 だと実際に当たる。
+  // 黙って落とすと、画面の割合を全部足しても帰属率に届かない理由が消える
+  const cut = skills.slice(SKILLS_MAX);
+
+  return {
+    skills: skills.slice(0, SKILLS_MAX),
+    undated,
+    unattributed: {
+      requests: unattributedRequests,
+      ite: unattributedIte,
+      share: totalIte > 0 ? unattributedIte / totalIte : null,
+    },
+    omitted: {
+      // 1本ぶんで切られたものと、ここで切ったものの両方
+      count: cutCount + cut.length,
+      ite: cutIte + cut.reduce((n, r) => n + r.ite, 0),
+    },
+  };
 }
 
 /**
@@ -611,7 +716,14 @@ export function aggregateUsage(recs) {
   }
 
   const { model, models } = mergeModels(list);
-  const { skills, undated: skillsUndated } = mergeSkills(recs);
+  // 割合の分母は**集めた全体の実消費**。ここで決めて share を持たせる。
+  // 画面に割らせると、1本ぶんのパネルと横断で分母が違うのに同じ式が2本生きる
+  const {
+    skills,
+    undated: skillsUndated,
+    unattributed: skillsUnattributed,
+    omitted: skillsOmitted,
+  } = mergeSkills(recs, totals.ite);
   // **モデルが混ざっていたら命中率は出さない。** 最小長がモデル別（Opus5=512 /
   // Opus4.7=2048 / Opus4.6・Haiku4.5=4096）で、未満だとエラーも出さずに黙って
   // キャッシュされない。混ぜて平均すると、行動の差と構造の差が見分けられなくなる。
@@ -631,6 +743,11 @@ export function aggregateUsage(recs) {
     skills,
     // 時刻が無くて推移に並べられなかった区間の数。0 と不明を分けるのと同じ扱い
     skillsUndated,
+    // どのスキルにも紐づかなかったぶん。**実測で本流 ITE の 81%。**
+    // これを出さないと「スキルを全部足しても合計に届かない」が説明できない
+    skillsUnattributed,
+    // 上限で切ったぶん（1本ぶんで切られたものと、ここで切ったものの合計）
+    skillsOmitted,
     // 実消費の多い順。いま見て効くのは「どれが重かったか」なので、新しい順にはしない
     rows: recs.map(publicRow).sort((a, b) => b.ite - a.ite),
   };

@@ -12,7 +12,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseUsageQuery, aggregateUsage, baselineFrom, USAGE_SCAN_MAX } from '../src/view/usage.mjs';
+import {
+  parseUsageQuery, aggregateUsage, baselineFrom, foldSubUsage, USAGE_SCAN_MAX,
+} from '../src/view/usage.mjs';
 import { buildUsage } from '../src/parse/usage.mjs';
 import { reply, prompt, call, result, at } from './helpers.mjs';
 
@@ -170,8 +172,9 @@ test('ツールはセッションを跨いで足す。最大は足さずに大�
   assert.equal(read.max, 900);
 });
 
-test('スキルは呼んだ回数と、使ったセッション数を両方持つ', () => {
-  // スキルを呼んだ直後の一続きを1区間として数える。障壁は次のユーザー発言
+test('スキルは区間の数と、使ったセッション数を両方持つ', () => {
+  // 帰属ラベルが連続しているあいだを1区間として数える。
+  // **呼んだ要求そのものにはラベルが付かない**（実測どおり、次の要求から立つ）
   const skillRun = (name, { requestId }) => [
     prompt('やって'),
     reply('呼ぶわ', {
@@ -182,7 +185,13 @@ test('スキルは呼んだ回数と、使ったセッション数を両方持�
       uses: [{ id: `${requestId}-s`, name: 'Skill', input: { skill: name } }],
     }),
     result(`${requestId}-s`, 'スキルを読み込みました', { ms: 20 }),
-    reply('やった', { ms: 30, requestId: `${requestId}-2`, model: 'claude-opus-5', usage: { in: 200, out: 20 } }),
+    reply('やった', {
+      ms: 30,
+      requestId: `${requestId}-2`,
+      model: 'claude-opus-5',
+      usage: { in: 200, out: 20 },
+      attributionSkill: name,
+    }),
   ];
 
   const agg = aggregateUsage([
@@ -200,7 +209,7 @@ test('スキルは呼んだ回数と、使ったセッション数を両方持�
 /**
  * スキルを1回呼んで1往復するだけのセッション。
  *
- * 区間に入るのは Skill を呼んだ**次**の要求だけなので、ite は 5×out になる。
+ * 区間に入るのは帰属ラベルの立った**次**の要求だけなので、ite は 5×out になる。
  *
  * @param {string} id
  * @param {{ms: number, out: number, skill?: string}} opt
@@ -215,7 +224,13 @@ const skillOnce = (id, { ms, out, skill = 'review' }) =>
       uses: [{ id: `${id}-s`, name: 'Skill', input: { skill } }],
     }),
     result(`${id}-s`, 'ok', { ms: ms + 1 }),
-    reply('できた', { ms: ms + 2, requestId: `${id}-2`, model: 'claude-opus-5', usage: { in: 0, out } }),
+    reply('できた', {
+      ms: ms + 2,
+      requestId: `${id}-2`,
+      model: 'claude-opus-5',
+      usage: { in: 0, out },
+      attributionSkill: skill,
+    }),
   ]);
 
 test('同じスキルの1回ごとが、時刻の昇順で推移として並ぶ', () => {
@@ -267,7 +282,14 @@ test('時刻の無い区間は推移に混ぜず、落とした数を返す', ()
         usage: { in: 10, out: 1 },
         uses: [{ id: 'b-s', name: 'Skill', input: { skill: 'review' } }],
       }),
-      reply('できた', { ms: 5, requestId: 'b2', model: 'claude-opus-5', usage: { in: 0, out: 20 } }),
+      // 区間の先頭になる要求から時刻が読めない形。合計には入るが、並べようがない
+      reply('できた', {
+        timestamp: null,
+        requestId: 'b2',
+        model: 'claude-opus-5',
+        usage: { in: 0, out: 20 },
+        attributionSkill: 'review',
+      }),
     ]),
   ]);
   const s = agg.skills.find((x) => x.skill === 'review');
@@ -388,4 +410,86 @@ test('スキルもツールも無いセッションが混ざっても落ちな�
   assert.equal(agg.rows.length, 2);
   assert.ok(Array.isArray(agg.tools));
   assert.ok(Array.isArray(agg.skills));
+});
+
+test('無帰属はセッションを跨いで足す', () => {
+  const agg = aggregateUsage([
+    skillOnce('a', { ms: 100, out: 20 }),
+    rec('b', [reply('素', { ms: 200, requestId: 'b1', model: 'claude-opus-5', usage: { in: 0, out: 40 } })]),
+  ]);
+
+  // **黙って捨てない。** 実測で本流 ITE の 81% がここに落ちるので、
+  // これが無いと「スキルを全部足しても合計に届かない」が説明できない。
+  // 数えるのは a の1要求目（Skill を呼んだ側。ラベルは次から立つ）と、b の1要求
+  assert.equal(agg.skillsUnattributed.requests, 2);
+  assert.ok(agg.skillsUnattributed.ite > 0);
+});
+
+test('割合は併合したあとの合計から出し直す', () => {
+  const agg = aggregateUsage([
+    skillOnce('a', { ms: 100, out: 20 }),
+    skillOnce('b', { ms: 200, out: 20 }),
+  ]);
+  const s = agg.skills.find((x) => x.skill === 'review');
+
+  // **セッションごとの割合を平均しない**（mergeTools の avg と同じ原則）。
+  // 分母は集めた全体の実消費で、丸めるのは画面側の仕事
+  assert.equal(s.share, s.ite / agg.totals.ite);
+  // 足すと必ず 1 になる ... のではない。無帰属があるので届かないのが正しい
+  const sum = agg.skills.reduce((n, x) => n + x.share, 0) + agg.skillsUnattributed.share;
+  assert.ok(Math.abs(sum - 1) < 1e-9, `${sum} が 1 から離れている`);
+});
+
+test('実消費が 0 なら割合は 0 ではなく null', () => {
+  const agg = aggregateUsage([]);
+
+  // 「実際に 0 だった」と「出せない」は別物。cache.hitRate と同じ扱いにする
+  assert.equal(agg.totals.ite, 0);
+  assert.equal(agg.skillsUnattributed.share, null);
+});
+
+test('スキルもツールも無いセッションでも、無帰属の形は崩れない', () => {
+  const agg = aggregateUsage([rec('x', [reply('y', { requestId: 'x1', usage: { in: 5 } })])]);
+
+  assert.deepEqual(agg.skills, []);
+  assert.equal(typeof agg.skillsUnattributed.requests, 'number');
+  assert.equal(typeof agg.skillsOmitted.count, 'number');
+});
+
+test('サブエージェントの消費をスキル別に割る', () => {
+  // 子ログにも同じ帰属ラベルが付く（実測：子の assistant 行 9,982 のうち 4,399 行）
+  const child = (skill, out) => buildUsage([
+    reply('', { requestId: `${skill}-1`, usage: { in: 0, out }, isSidechain: true, attributionSkill: skill }),
+  ], { sidechain: true });
+
+  const sub = foldSubUsage([child('Explore', 10), child('Explore', 30), child('Plan', 20)]);
+
+  // 母数は「そのスキルに紐づいた子ログの本数」。**runs という語を子側で使わない**
+  // （親の runs は区間の数なので、同じ語に2つの意味が乗る）
+  assert.deepEqual(sub.skills.map((s) => [s.skill, s.agents, s.ite]), [
+    ['Explore', 2, 200],
+    ['Plan', 1, 100],
+  ]);
+  assert.equal(sub.ite, 300);
+  // 分母は**子ぶんの合計**。親の totals とは混ぜない（別の節として出すため）
+  assert.equal(sub.skills[0].share, 200 / 300);
+});
+
+test('子ログのラベルが無いぶんも数える', () => {
+  const bare = buildUsage([
+    reply('', { requestId: 'x', usage: { in: 0, out: 10 }, isSidechain: true }),
+  ], { sidechain: true });
+
+  const sub = foldSubUsage([bare]);
+  assert.deepEqual(sub.skills, []);
+  assert.equal(sub.skillsUnattributed.requests, 1);
+  assert.equal(sub.skillsUnattributed.share, 1);
+});
+
+test('子ログが1本も無くても形は崩れない', () => {
+  const sub = foldSubUsage([]);
+  assert.equal(sub.ite, 0);
+  assert.deepEqual(sub.skills, []);
+  // 分母が 0 なので割合は 0 ではなく null
+  assert.equal(sub.skillsUnattributed.share, null);
 });

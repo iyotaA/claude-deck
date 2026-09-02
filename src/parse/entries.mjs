@@ -155,6 +155,35 @@ export function requestIdOf(entry) {
 }
 
 /**
+ * その要求のあいだ効いていたスキルの名前。Claude Code 自身が書いている。
+ *
+ * **`message` の中ではなくエントリ直下にある。** 実測（本流 328 ファイル）:
+ *
+ *   - assistant 行 33,022 のうち 8,021 行（24.3%）が持つ
+ *   - **assistant 以外の型が持っていた例は0件**
+ *   - 複数行に割れた requestId 16,341 件で、値の食い違いも
+ *     「ある行と無い行の混在」も**0件**。だから requestId 単位のプロパティとして扱える
+ *   - 一意なスキル名は 24 種。子ログ（`subagents/*.jsonl`）にも同じ形で付く
+ *
+ * 初出は Claude Code `2.1.220`（2026-08-03）。**それ以前のログには無い。**
+ * 無いことは異常ではないので、null を返して呼び側に「帰属なし」として数えさせる。
+ *
+ * 隣に `attributionPlugin` もあるが**読まない。** 実測 927 件すべてが
+ * この値の `:` より手前と完全に一致し（不一致0・skill 無しの plugin も0）、
+ * `skill.split(':')` で出せる。軸を増やす値打ちが無い。
+ *
+ * 空文字は null と同じ扱いにする。通すと「空文字という名前のスキル」ができて、
+ * 並べ替えのタイブレークに混ざる。
+ *
+ * @param {object} entry 会話ログの1行
+ * @returns {string|null}
+ */
+export function attributionSkillOf(entry) {
+  const v = entry?.attributionSkill;
+  return typeof v === 'string' && v ? v : null;
+}
+
+/**
  * assistant 行の usage を、数えやすい形に直して返す。
  *
  * 実測した形（キーはすべて省略されうるので、無ければ0として扱う）:

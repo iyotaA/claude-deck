@@ -22,11 +22,9 @@
  */
 
 import {
-  isInterrupt,
+  attributionSkillOf,
   isMainline,
-  isUserPrompt,
   requestIdOf,
-  slashCommandOf,
   timestampOf,
   toolResults,
   toolUses,
@@ -59,8 +57,9 @@ const TOOLS_MAX = 24;
 /**
  * スキル別の集計で、上位いくつまで返すか。
  *
- * 全ログを走査してもスキルは 12種・82件しか無かった（実測）。
- * 1セッションに何種類も出るものではないので、ツールより小さくてよい。
+ * **帰属ラベルで数え直した実測（429 ファイル）で、1本あたりの種類数は
+ * 最大 4・p90 が 2・中央が 1。** 12 なら実質切れないが、上限そのものは残す
+ * （1本で何十種も使う形を禁じてはいない）。切ったぶんは skillsOmitted で返す。
  */
 const SKILLS_MAX = 12;
 
@@ -70,10 +69,10 @@ const SKILLS_MAX = 12;
  * 上の SKILLS_MAX が「何種類まで」なら、こちらは「何回ぶんまで」。
  * 同じスキルを前回とどう比べるかを見るには、平均へ畳む前の1回ごとが要る。
  *
- * 実測では全ログ273本を走ってもスキルの呼び出しは82件しか無く、
- * 1本あたりでは十数件が上限だった。60 なら実質切れないが、
- * 上限そのものは要る（1本のログに何十回も呼ぶ使い方を禁じてはいない）。
- * 切るときは**新しいほうを残す**。推移で見たいのは直近だから。
+ * **帰属ラベルでは、1本での同一スキルの区間数は実測で最大 1 だった**
+ * （429 ファイル。ラベルが途切れて再開する例が0件なので当然そうなる）。
+ * 種類を跨いでも1本あたり 4 区間までなので 60 は実質切れないが、
+ * 上限そのものは要る。切るときは**新しいほうを残す**。推移で見たいのは直近だから。
  */
 const SKILL_RUNS_MAX = 60;
 
@@ -151,7 +150,10 @@ function collectRequests(entries, sidechain) {
     if (seen) {
       duplicateLines += 1;
       // 同じ requestId で usage が食い違う例は0件だったので、後から来た usage は見ない。
-      // 拾うのは tool_use だけ
+      // **帰属ラベルも同じ扱い。** 実測（複数行の requestId 16,341 件）で、
+      // 値の食い違いも「ある行と無い行の混在」も0件だったので、最初の1行だけ見れば足りる。
+      // ここに「非 null を優先」を足すと、実データで一度も効かない分岐が
+      // テストのためだけに生き残る。拾うのは tool_use だけ
       for (const u of uses) seen.uses.push(u);
       continue;
     }
@@ -172,6 +174,8 @@ function collectRequests(entries, sidechain) {
       context: contextOf(usage),
       ite: iteOf(usage),
       uses,
+      // その要求のあいだ効いていたスキル。Claude Code が要求ごとに書いている
+      skill: attributionSkillOf(entry),
     });
   }
 
@@ -314,151 +318,123 @@ function attributeTools(requests, sizes) {
 }
 
 /**
- * スキル区間の切れ目になる時刻を集める。
+ * 要求ごとの帰属ラベルから、スキル別の消費を数える。
  *
- * 区間は「Skill を呼んでから、次にあなたの番が来るまで」。
- * スキルは指示を読み込ませるものなので、効き目は呼んだ**後**の作業に現れる。
- * 打ち切るのは次の4つで、どれかが先に来た時点で終わり。
+ * **区間の推定はしない。** Claude Code が要求ごとに `attributionSkill` を
+ * 書いているので、それを足すだけで正解になる。
  *
- * - あなたの発言 … 区間の本来の終わり
- * - スラッシュコマンド … `/clear` など。話がまるごと切り替わる
- * - 中断 … Esc で止めた
- * - 圧縮の境目 … それより前のやり取りは要約に置き換わっている
+ * 前は「`Skill` の `tool_use` から次の障壁（あなたの発言 / スラッシュコマンド /
+ * 中断 / `compact_boundary`）まで」を積んでいたが、実測でラベルの **40%** しか
+ * 拾えていなかった（96 ファイルで 50,824,164 対 126,266,831）。外れた原因は3つ。
  *
- * 障壁はもう1つ「次の Skill」があるが、これはここに入れない。
- * assistant 行なので時刻ではなく **requests の並びの位置**で切れるため
- * （attributeSkills の側で見ている）。
+ * - **あなたの発言で切っていた。** スキルが効いている最中に発言が入った 132 回のうち、
+ *   **94 回（71%）は Claude Code 側の帰属が同じスキルのまま続いていた**
+ * - **圧縮で切っていた。** 呼んだ直後に `compact_boundary` が来ると区間ゼロになるが、
+ *   実際は圧縮を跨いで 19 要求ぶん（636,122 ITE）が同じスキルに帰属していた
+ * - **スラッシュコマンド起動が構造上見えなかった。** `/handoff` のような起動は
+ *   `<command-name>` の user 行から始まり、`Skill` の `tool_use` がどこにも出てこない。
+ *   実測 130 区間のうち **29 区間（22%）** がこの形（`pr-impact:analyze` 13 など）
  *
- * `digest/waits.mjs` の collectBarriers と同じ形をしている。
- * あちらは「待ち時間を跨いでよいか」を見るためのもので、こちらは「スキルの効き目が続いているか」。
- * 見る行の種類が違う（あちらはあなたの発言を障壁にしない）ので、まとめずに別に持つ。
+ * ## 「1回」の数え方
  *
- * @param {object[]} entries 会話ログの行
- * @param {boolean} sidechain true ならサブエージェントの行だけを見る
- * @returns {number[]} 時刻の昇順
+ * **ラベルが連続している最大の区間を1回と数える。** 1要求でも別のラベル
+ * （または無ラベル）を挟んだら、そこで閉じる。
+ *
+ * 実測（426 ファイル・130 区間）で「同じスキルのラベルが途切れて再開する」例は
+ * **0 件**だったので、跨がせる規則は持たない。「無ラベルを N 件までは跨いで
+ * 同じ回とみなす」を入れると、N に実データ上の根拠が1件も無い調整つまみが残る。
+ *
+ * その結果、**1セッションでは同じスキルの区間がほぼ必ず1つになる**
+ * （実測で1ファイルあたり 1〜4 区間、同じスキルが2度出た例は 101 組中 0 件）。
+ * つまり1本ぶんの `runs` は実データでは常に 1 で、`avg === ite` になる。
+ * 横断側（`view/usage.mjs`）で束ねると `runs` が「そのスキルを使ったセッション数」に一致する。
+ *
+ * `at` は区間の先頭要求の時刻。呼んだ要求自身はラベルを持たない
+ * （実測：同じスキル 0 件 / null 91 / 前のスキル 10）ので、
+ * 「呼んだ次から始まる」という前の判断はそのまま生きている。
+ *
+ * **`requests` はソート済みで渡す。** 時刻を持たない要求は末尾へ寄るので、
+ * 理屈の上では無関係な2区間がつながりうる（実データでは0件）。
+ *
+ * ## 因果は取れない（ラベルでも変わらない）
+ *
+ * `attributionSkill` は「どのスキルの文脈下で走った要求か」の記録であって、
+ * 「そのスキルのせいで増えた」ではない。だから画面側の但し書きは**外せない。**
+ * ただし「呼び出した直後の一続き」という説明はもう事実と違う（発言も圧縮も跨ぐ）ので、
+ * 文言のほうを帰属ラベルの話に直す。
+ *
+ * @param {object[]} requests 時系列に並んだ要求（`skill` を持つ）
+ * @returns {{skills: object[], runs: object[],
+ *            unattributed: {requests: number, ite: number},
+ *            omitted: {count: number, ite: number}}}
+ *          skills は ite の降順、runs は時刻の昇順
  */
-function collectSkillBarriers(entries, sidechain) {
-  const out = [];
-
-  for (const entry of entries) {
-    if (isMainline(entry) === sidechain) continue;
-    const at = timestampOf(entry);
-    if (at === null) continue;
-
-    if (entry?.type === 'system' && entry.subtype === 'compact_boundary') {
-      out.push(at);
-      continue;
-    }
-    if (entry?.type !== 'user') continue;
-    if (isUserPrompt(entry) || slashCommandOf(entry) || isInterrupt(entry)) out.push(at);
-  }
-
-  return out.sort((a, b) => a - b);
-}
-
-/**
- * スキルを呼んだ直後の一続きを、スキルごとに数える。
- *
- * **因果は取れない。** ここで出るのは
- * 「そのスキルを呼んだあと、次にあなたの番が来るまでに何を使ったか」であって、
- * その消費がスキルのせいなのか、たまたま重い作業だったのかは分けられない。
- * だから画面側は、この但し書きを**折りたたまずに常時**出す約束にしてある。
- * その表示を外すなら、この数字も一緒に外すこと。
- *
- * 区間は Skill を呼んだ要求の**次**から始める。
- * その要求自身の usage は「Skill を呼ぶと決めるまで」の文脈で、
- * スキルの本文はまだ積まれていない（積まれるのは結果が返る次の要求から）。
- *
- * 返すのは2つ。**畳んだもの（skills）と、畳む前の1回ごと（runs）。**
- * 平均だけを返していたころ、同じスキルを5回呼んだ記録が1つの数へ溶けていて、
- * 1回目より速くなったのか遅くなったのかが読めなかった。
- * 畳む前の値はここで既に計算しているので、配列で持つだけで済む。
- *
- * @param {object[]} requests 時系列に並んだ要求
- * @param {number[]} barriers 区間を打ち切る時刻（昇順）
- * @returns {{skills: object[], runs: object[]}} skills は ite の降順、runs は時刻の昇順
- */
-function attributeSkills(requests, barriers) {
-  // Skill を呼んだ位置を先に拾う。区間の終わりを決めるのに「次はどこか」が要る
-  const starts = [];
-  for (let i = 0; i < requests.length; i += 1) {
-    const names = [];
-    for (const u of requests[i].uses) {
-      if (u.name === 'Skill' && typeof u.input?.skill === 'string' && u.input.skill) names.push(u.input.skill);
-    }
-    if (names.length) starts.push({ index: i, names });
-  }
-  if (!starts.length) return { skills: [], runs: [] };
-
+function attributeSkills(requests) {
   /** @type {Map<string, {skill: string, runs: number, requests: number, ite: number}>} */
   const byName = new Map();
-  /** @type {{skill: string, at: number|null, ite: number, requests: number}[]} 畳む前の1回ごと。時刻の昇順 */
+  /** @type {{skill: string, at: number|null, ite: number, requests: number}[]} 畳む前の1回ごと */
   const runsList = [];
+  let unattributedRequests = 0;
+  let unattributedIte = 0;
 
-  for (let s = 0; s < starts.length; s += 1) {
-    const { index, names } = starts[s];
-    // 次に Skill を呼んだ要求までを見る。その要求自身は
-    // 「前のスキルのもとで働いた最後の1回」なので、区間に含める
-    const stop = starts[s + 1]?.index ?? requests.length - 1;
+  /** いま開いている区間。ラベルが変わったら閉じて runsList へ積む */
+  let open = null;
+  const close = () => {
+    if (!open) return;
+    runsList.push({
+      skill: open.skill,
+      at: open.at,
+      ite: Math.round(open.ite),
+      requests: open.requests,
+    });
+    const rec = byName.get(open.skill) ?? { skill: open.skill, runs: 0, requests: 0, ite: 0 };
+    rec.runs += 1;
+    rec.requests += open.requests;
+    rec.ite += open.ite;
+    byName.set(open.skill, rec);
+    open = null;
+  };
 
-    // 開始より後に来る最初の障壁。時刻を持たない要求からは判定できないので、
-    // そのときは次の Skill までを区間にする（実データでは時刻の無い assistant 行は見ていない）
-    const startAt = requests[index].at;
-    let endAt = Infinity;
-    if (startAt !== null) {
-      for (const b of barriers) {
-        if (b > startAt) {
-          endAt = b;
-          break;
-        }
-      }
+  for (const r of requests) {
+    const name = r.skill;
+    if (!name) {
+      // どのスキルにも紐づかない要求。**黙って捨てない。**
+      // 実測で本流 ITE の 65% がここに落ちるので、返さないと
+      // 「スキルを全部足しても合計に届かない」が説明できなくなる
+      close();
+      unattributedRequests += 1;
+      unattributedIte += r.ite;
+      continue;
     }
-
-    let ite = 0;
-    let count = 0;
-    for (let i = index + 1; i <= stop; i += 1) {
-      const at = requests[i].at;
-      if (at !== null && at >= endAt) break;
-      ite += requests[i].ite;
-      count += 1;
-    }
-
-    // 1回の要求で2つのスキルを呼ぶことがある。どちらのぶんかは分けられないので等分する
-    // （ツール別の按分と同じ考え方。分けられないものを片方へ寄せない）。
-    // 呼んだ回数だけは、どちらも1回として数える
-    const share = 1 / names.length;
-    for (const name of names) {
-      // 畳む前の1件。**ここでだけ丸める。** 足してから丸めると、
-      // 等分した端数が積もって skills 側の合計と食い違う
-      runsList.push({
-        skill: name,
-        at: startAt,
-        ite: Math.round(ite * share),
-        requests: Math.round(count * share),
-      });
-
-      const rec = byName.get(name) ?? { skill: name, runs: 0, requests: 0, ite: 0 };
-      rec.runs += 1;
-      rec.requests += count * share;
-      rec.ite += ite * share;
-      byName.set(name, rec);
-    }
+    if (open && open.skill !== name) close();
+    if (!open) open = { skill: name, at: r.at, ite: 0, requests: 0 };
+    open.ite += r.ite;
+    open.requests += 1;
   }
+  close();
 
-  const skills = [...byName.values()]
+  const all = [...byName.values()]
     .map((r) => ({
       skill: r.skill,
       runs: r.runs,
-      requests: Math.round(r.requests),
+      requests: r.requests,
       ite: Math.round(r.ite),
-      // runs は必ず1以上（呼んだから記録がある）ので、ここは 0 で割らない
+      // runs は必ず1以上（区間があるから記録がある）ので、ここは 0 で割らない
       avg: Math.round(r.ite / r.runs),
     }))
-    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill))
-    .slice(0, SKILLS_MAX);
+    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill));
 
-  // starts は index の昇順なので runsList も時刻の昇順。切るのは古いほうから
-  return { skills, runs: runsList.slice(-SKILL_RUNS_MAX) };
+  // 切ったぶんも黙って落とさず、件数と量で返す
+  // （画面に出る割合の合計が 100% に届かない理由の一部になる）
+  const cut = all.slice(SKILLS_MAX);
+
+  return {
+    skills: all.slice(0, SKILLS_MAX),
+    // runsList は requests の並び（時刻の昇順）のまま。切るのは古いほうから
+    runs: runsList.slice(-SKILL_RUNS_MAX),
+    unattributed: { requests: unattributedRequests, ite: Math.round(unattributedIte) },
+    omitted: { count: cut.length, ite: cut.reduce((n, r) => n + r.ite, 0) },
+  };
 }
 
 /**
@@ -605,15 +581,14 @@ export function buildUsage(entries, { sidechain = false } = {}) {
   const sizes = collectResultSizes(list, sidechain);
   const { tools, unattributed } = attributeTools(requests, sizes);
   const { model, models } = modelBreakdown(requests);
-  // 区間の切れ目は entries 側にしかない（あなたの発言も compact_boundary も assistant 行ではない）ので、
-  // requests ではなく list を渡して時刻で拾う
-  const { skills, runs: skillRuns } = attributeSkills(
-    requests,
-    collectSkillBarriers(list, sidechain)
-  );
-  // entries を1周増やすが、既に3周しているので誤差。
-  // collectSkillBarriers も compact_boundary を見ているが、そこへ相乗りさせない。
-  // 「区切りを集める」関数に「圧縮を数える」を混ぜると、どちらのテストも読みにくくなる
+  // ラベルは requests に載っているので、entries をもう1周する必要がなくなった
+  // （前は障壁の時刻を拾うために list を舐めていた。4周 → 3周）
+  const {
+    skills,
+    runs: skillRuns,
+    unattributed: skillsUnattributed,
+    omitted: skillsOmitted,
+  } = attributeSkills(requests);
   const compact = collectCompactions(list, sidechain);
 
   return {
@@ -643,11 +618,20 @@ export function buildUsage(entries, { sidechain = false } = {}) {
     cache: { hitRate: cacheBase > 0 ? totals.cacheRead / cacheBase : null },
     tools,
     toolsUnattributed: unattributed,
-    // **因果は取れない。** 「呼んだ直後の一続き」でしかないことを、画面側が必ず併記する
+    // **因果は取れない。** 帰属ラベルは「どのスキルの文脈下で走ったか」であって
+    // 「そのスキルのせいで増えた」ではないことを、画面側が必ず併記する
     skills,
     // 畳む前の1回ごと。横断側が同じスキルの推移を並べるのに使う。
     // 但し書きは skills と同じものが効く（推移が下がっても、楽な仕事だっただけかもしれない）
     skillRuns,
+    // どのスキルにも紐づかなかったぶん。**実測で本流 ITE の 65% がここに落ちる。**
+    // 返さないと「スキルを全部足しても合計に届かない」が説明できない。
+    // tools の隣に toolsUnattributed があるのと同じ形で、skills には混ぜない
+    // （混ぜると必ず1位になって棒の枠を1つ食い、横断側の sessions や推移も意味を失う）
+    skillsUnattributed,
+    // SKILLS_MAX で切ったぶん。1本では実測4種が最大なので当たらないが、
+    // 横断側は 24 種に対して上限があるので実際に切れる
+    skillsOmitted,
     compact,
   };
 }

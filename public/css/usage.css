@@ -110,6 +110,40 @@
   color: var(--fg-faint);
 }
 
+/* 読むだけの塊。散らばっていた但し書きをここへまとめる。
+
+   **1本も減らしていない。** 注記は折りたたまずに常時出す決まりなので、
+   消すのではなく「読めるが目立たない」段を面で作る。
+   形は settings.css の .settings-read から借りた
+   （押せるものが1つも無いことを、文ではなく面で示す）。
+
+   **床を --bg へ上げたので、この形が数値画面でも使えるようになった。**
+   前は地そのものが --bg-sunk だったので、沈めても消えるだけだった（05bebd5）。
+
+   ダークでは --bg-sunk（#232220）が --bg（#1C1B19）より明るいので
+   「沈める」が「浮く」になるが、.settings-read がモーダルで既に持っている関係と
+   同じで、新しい逆転を作ってはいない。
+
+   **上限は面の側に置く。** 中の p だけに掛けると、字は 46rem で折り返すのに
+   面だけ器の端まで伸びて、塊ではなく帯に見える（実測。1512px の窓で全幅に広がった）。
+   .usage-pane は flex なので、align-self を触らずに max-width だけで止まる */
+.usage-read {
+  margin-top: .6rem;
+  padding: .5rem .6rem;
+  max-width: 46rem;
+  border-radius: var(--radius);
+  background: var(--bg-sunk);
+}
+
+.usage-read p {
+  margin: 0;
+  font-size: .72rem;
+  line-height: 1.55;
+  color: var(--fg-faint);
+}
+
+.usage-read p + p { margin-top: .3rem; }
+
 /* ------------------------------------------------- 何が文脈を食っているか */
 
 .bars {
@@ -121,12 +155,27 @@
   gap: .3rem;
 }
 
-/* 4列。名前・棒・値・回数。
-   棒だけが 1fr で伸び、他は中身なりの幅にする。
-   棒を固定幅にすると、名前が長い行だけ右端が飛び出す */
+/* 5列。名前・絵・値・回数・余り。**棒と折れ線で同じ組にする。**
+
+   前は棒が4列（2列目が 1fr）で、折れ線だけ5列に組み替えてあった。
+   同じ .bars の中に列構成が2種類あるので、棒と折れ線が交互に来る節
+   （スキル）で行の形が揃わない。
+
+   寄せる先を折れ線の側にしたのは、あちらが実測で決めた値だから
+   （2列目 14rem は器の高さ 1.5rem に対して 9.3:1。全幅では 48:1 まで伸びて
+   折れ線の形が消えた）。**棒の側も上限を持つことで、伸びきる問題が同時に解ける** —
+   全幅のとき棒が画面の端まで伸びて、長さの差が読めなくなっていた。
+
+   余りは5列目に吸わせる。棒の行は子が4つしか無いので5列目は空になるが、
+   grid は子が足りなくても列を作るのでそれでいい。
+
+   **1列目に上限を置く。** .bar は行ごとに独立した grid なので、auto のままだと
+   名前の長さで絵の開始位置が行ごとにずれ、階段状に並ぶ。
+   minmax(0, …) にしてあるのは狭い画面の引き出しで縮めるため
+   （広いところでは常に上限まで伸びるので、固定と同じに揃う）*/
 .bar {
   display: grid;
-  grid-template-columns: minmax(4rem, auto) minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 13rem) minmax(0, 14rem) auto auto minmax(0, 1fr);
   align-items: center;
   gap: .5rem;
   font-size: .78rem;
@@ -156,6 +205,11 @@
 /* 強調は1位だけ。ここが「次に手を入れる先」になる */
 .bar.is-top .bar-fill { background: var(--accent); }
 .bar.is-top .bar-label { font-weight: 700; }
+
+/* 部分と全体を1本で示す行。**溝がそのまま「残り」を表す**ので、
+   他の棒より少しだけ太くして、比べる対象ではないことを見た目でも分ける。
+   面も色も新しく作らない（.bar-track と .bar-fill のまま） */
+.bar.is-share .bar-track { height: .7rem; }
 
 .bar-value {
   font-variant-numeric: tabular-nums;
@@ -229,38 +283,32 @@
 /* 行の高さが絵のぶん増えるので、行間も少し広げる。
    詰めると隣の行の折れ線と地続きに見えて、1本の長い線に読める。
 
-   列は借りものを組み替える。**棒と折れ線で幅の要求が逆だから。**
-   棒は量を長さで語るので長いほど差が読めるが、折れ線は形で語るので
-   引き伸ばすと山と谷が潰れて平らに見える（`preserveAspectRatio: 'none'` で
-   器の縦横比がそのまま絵の比になる。全幅にしたとき 48:1 まで伸びて形が消えた）。
-
-   余りは5列目に吸わせて、値と回数を絵のすぐ右に置く。棒と同じ位置に流すと、
-   値が 1000px 先に離れてどの行のものか追えなくなる。
-
-   **1列目も上限を決める。** `.bar` は行ごとに独立した grid なので、
-   `auto` のままだと名前の長さで絵の開始位置が行ごとにずれ、
-   右端に張り付かない値まで階段状に並ぶ（棒の側は 1fr が最後にあるので揃っていた）。
-   `minmax(0, …)` にしてあるのは、狭い画面の引き出しで縮めるため
-   （広いところでは常に上限まで伸びるので、固定と同じに揃う） */
+   **列はもう組み替えない。** `.bar` の側を同じ5列にそろえたので、ここは余白だけ持つ */
 .bar.is-trend {
   padding: .1rem 0;
-  grid-template-columns: minmax(0, 13rem) minmax(0, 14rem) auto auto minmax(0, 1fr);
 }
 
 /* -------------------------------------------------------------- 表の対 */
 
 /* すべての絵に表を添える。色だけに頼った符号化が無くなり、値は必ず読める。
    見出しは details.more と同じ見た目にする（「開くと続きがある」を1つの形に保つ） */
-.usage-table {
+/* .usage-fold（表以外を畳む）も同じ顔にする。
+   「開くと続きがある」を1つの形に保つので、宣言を分けない */
+.usage-table,
+.usage-fold {
   margin-top: .6rem;
   font-size: .76rem;
 }
 
-.usage-table > summary {
+.usage-table > summary,
+.usage-fold > summary {
   cursor: pointer;
   padding: .1rem 0;
   color: var(--accent);
 }
+
+/* 畳んだ中の絵は、閉じているときの見出しから少し離す */
+.usage-fold > .bars { margin-top: .45rem; }
 
 /* 横に長い表はここの中だけで滑らせる。画面ごと横に伸ばさない */
 .table-scroll {
@@ -341,13 +389,32 @@
 /* 器。一覧（.list）と同じ縦スクロールの作りにする。
    .list を使い回さないのは、あれが <ul> 前提の flex + gap で、
    節と節のあいだに一定の隙間が入ってしまうため */
+/* **床を --bg にする。** ここを宣言していなかったので、地は base.css の
+   body（--bg-sunk）がそのまま出ていた。そのせいで .bar-track と
+   .trend-spark が敷いている --bg-sunk が地と同色になり、
+   **横断側でだけ溝と折れ線の器が消えていた**（詳細ペインは .panel が --bg なので見えている）。
+
+   沈める形（--bg-sunk）が使えるのは地が --bg か --bg-elev のときだけ、という
+   05bebd5 の判断はそのまま生きている。あれが禁じたのは「札を沈めること」で、
+   ここで変えているのは床のほう。床を上げれば、沈める側の前提が満たされる。
+
+   ライトではカードの面（--bg-elev）が床より暗くなるが、枠 1px を持つので消えない。
+   ダークでは差が広がる（#2B2A27 on #1C1B19）。どちらも .panel の中で既に起きている関係と同じ。
+
+   **上の余白は器ではなく最初の子が持つ。** 器の padding-top にすると、
+   sticky した節見出しの帯（top: 0 で padding box の上端に貼り付く）との間に
+   その余白ぶんの隙間が残り、**スクロール中の中身がそこを通って見える**（実測 11px）。
+   flex コンテナなので子のマージンは相殺されない */
 .usage-pane {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: .7rem .75rem 1.2rem;
+  padding: 0 .75rem 1.2rem;
+  background: var(--bg);
   overflow-y: auto;
 }
+
+.usage-pane > :first-child { margin-top: .7rem; }
 
 /* display を1つ書いた時点でブラウザ既定の [hidden] { display: none } に勝ってしまう。
    list.css の .list[hidden] と同じ話で、これが無いと書庫と数値が縦に積まれて出る */
@@ -356,6 +423,157 @@
 /* 引き直しているあいだは薄く残す。消してから描き直すと、
    絞り込みを変えるたびに画面が空白になって、どこを見ていたか分からなくなる */
 .usage-pane.is-stale { opacity: .55; }
+
+/* **節の境に線を引かない。下の帯そのものが境を示す。**
+
+   前は節の境も節の中（.note-part）も 1px dashed --border で、太さも種類も色も同じで、
+   節が変わったのか節の中で話が変わったのかが線から読めなかった。
+   そこを直すのに、境を実線へ変える案をまず試したが、
+   **帯の下線との2本が 20px の間に並んで入れ子の箱に見えた**（実測）。
+
+   帯は面と下線と粘りを持つので、それだけで「ここから新しい節」を言える。
+   線は1種類（節の中の破線）だけ残り、役割が1対1になる。
+   節どうしの間は余白（margin-top と padding-top）が受け持つ。
+
+   **横断側だけに絞る。** 詳細ペインは .panel という器が既に階層を持っており、
+   あちらは帯を持たないので破線の境が要る（78行のコメント）*/
+.is-usage .usage-block { border-top: 0; }
+
+/* 節見出しを帯にして、スクロールのあいだ上に残す。
+
+   **狙いは大きさではなく役割の分離。** h4 は .82rem、.stat-value は 1.35rem で、
+   見出しより数字のほうが 1.6 倍大きく、視線が見出しを飛ばしていた。
+   字を大きくして competing させるのではなく、見出しの側にだけ
+   「線」と「粘り」を持たせて別の役割に見せる。
+
+   **面は視覚のためではなく、透けないために敷く。** 監視盤の .col-head は
+   沈んだ地（--bg-sunk）の上で --bg を敷いて立たせているが、こちらは床そのものを
+   --bg へ上げたので同じ手が使えない。ここの background は sticky で
+   下の棒が透けるのを止めるだけの役目で、見た目の区別は線と太字が持つ。
+
+   左右の負のマージンで .usage-pane の padding（.75rem）を相殺し、
+   帯だけ器の端まで伸ばす。padding を同じだけ戻すので字の左端は動かない。
+
+   z-index は棒と折れ線の上に出すため。数値ペインには他に重なるものが無いので 1 で足りる */
+.is-usage .usage-block > h4 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 -.75rem .5rem;
+  padding: .4rem .75rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ------------------------------------------------------------ 節の出し分け */
+
+/* **出し分けは CSS がやる。** JS は器の data-sec に名前を書くだけで、
+   節を1つ足しても配線が増えない（settings.css の .settings-pane と同じ作法）。
+
+   一度に1テーマしか出さないので、それぞれの節に部屋ができる。
+   前は「集計の総量」「ツールの積み上がり」「スキルの効率」「セッションの重さ」という
+   **分母も単位も問いも違う4つ**が、同じ顔で縦一列に並んでいた */
+.usage-sec { display: none; }
+
+.usage-pane[data-sec="over"]   .usage-sec[data-sec="over"],
+.usage-pane[data-sec="tools"]  .usage-sec[data-sec="tools"],
+.usage-pane[data-sec="skills"] .usage-sec[data-sec="skills"],
+.usage-pane[data-sec="rows"]   .usage-sec[data-sec="rows"] { display: block; }
+
+/* 節ナビ。**見た目は settings.css の .settings-navb をそのまま借りる**
+   （顔の語彙を増やさない）。あちらは縦に並ぶが、こちらは絞り込みの帯の中なので横。
+
+   帯（.list-head）の地は --bg-sunk で、選んだ札だけが --bg へ浮く。
+   .settings-navb が「沈んだ帯の上で選んだものが浮く」形をそのまま持っているので、
+   その関係がここでも成り立つ */
+.usage-nav {
+  display: flex;
+  /* 帯そのものは折り返すが、中のこれは別の flex コンテナなので自分で畳む。
+     狭い窓では札4つが1行に収まらない */
+  flex-wrap: wrap;
+  flex: 1 0 100%;
+  gap: .25rem;
+  margin-bottom: .15rem;
+}
+
+/* 節の見出しは器の中に出るので、ナビの札とは別。
+   ナビは「どれを見るか」、帯は「いま何の話か」 */
+.usage-nav .settings-navb { padding: .3rem .55rem; }
+
+/* ------------------------------------- 概要の「いちばん重いもの」 */
+
+/* 3つのテーマの代表値と行き先。**押せる行き先と、押せない代表値を同じ行に置く**ので、
+   前者だけが印（chevron）を持つ。止まった絵で見分けが付く */
+.usage-peek {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.usage-peek li {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .6rem;
+  padding: .45rem .1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: .78rem;
+}
+
+.usage-peek li:last-child { border-bottom: 0; }
+
+.usage-peek .peek-k { color: var(--fg-muted); }
+
+.usage-peek .peek-v {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  min-width: 0;
+}
+
+.usage-peek .peek-head {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* **何で並べているかを必ず書く。** 3つの行はそれぞれ別のものさしなので、
+   書かないと同じ順序で並んでいると読まれる */
+.usage-peek .peek-basis {
+  font-size: .7rem;
+  color: var(--fg-faint);
+}
+
+/* 行き先。触れたときだけ枠が出る形（base.css の .ibtn と同じ流儀）。
+   ピル型にしないのは、あれを押せるものの中でも「主役」の形に取ってあるため */
+.usage-peek .peek-go {
+  display: flex;
+  align-items: center;
+  gap: .2rem;
+  padding: .2rem .4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  font-size: .76rem;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.usage-peek .peek-go:hover { border-color: var(--border-strong); }
+
+/* 読む幅の上限。ここは全幅の器なので、但し書きが1行 120 字を超えて読まれなくなる。
+
+   **ペイン全体には掛けない。** .stats の auto-fit と .usage-rows の auto-fill は
+   全幅で正しく畳むので、器を縛ると畳みのほうが効かなくなる。
+   **詳細ペイン側にも掛けない**（.usage-pane で絞る）。あちらは中央ペインの幅なので
+   もともと伸びきらず、上限を置くと逆に狭い窓で余白が中途半端に残る */
+.usage-pane .note,
+.usage-pane .note-sub,
+.usage-pane .stat-note,
+.usage-pane .spark-caption {
+  max-width: 46rem;
+}
 
 /* 最初の節（.stats のすぐ下）には区切り線を引かない。
    器の上端に線が近すぎて、ヘッダの下線と二重に見える */
