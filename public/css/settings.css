@@ -12,8 +12,13 @@
   /* 余白を dialog 自身に持たせない。持たせると、その余白を押したときに
      背面を押したのと同じに見えて閉じるので、中と外の境目が分からなくなる */
   padding: 0;
-  width: min(36rem, calc(100vw - 2rem));
-  max-height: min(48rem, calc(100vh - 3rem));
+  width: min(44rem, calc(100vw - 2rem));
+  /* **高さは固定する。max-height にしない。**
+     節ごとに中身の量が違うので、中身なりにすると切り替えるたびに伸び縮みし、
+     <dialog> の中央配置で上下に跳ねる（実測で 354〜535px・上端が 91px ずれた）。
+     値はいちばん中身の多い通知の節（本文 427px）が収まるところに置いてある。
+     窓が低いときは calc(100vh - 3rem) 側で縮む */
+  height: min(34rem, calc(100vh - 3rem));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
@@ -27,6 +32,76 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
+
+/* ------------------------------------------------------------ 左で節を選ぶ */
+
+/* 左の並びと右の中身。**min-height: 0 を外さない。**
+   親の grid が minmax(0, 1fr) でこの行を作っているので、
+   ここで 0 を許さないと中身の高さぶんだけ膨らみ、モーダルが画面から溢れる */
+.settings-split {
+  display: grid;
+  grid-template-columns: 9.5rem minmax(0, 1fr);
+  min-height: 0;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  padding: .6rem .4rem;
+  border-right: 1px solid var(--border);
+  background: var(--bg-sunk);
+}
+
+/* 選んでいないあいだは面も枠も持たない（上のバーの .ibtn と同じ流儀）。
+   選んだものだけが面を持ち、左に印が付く */
+.settings-navb {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .35rem .5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  font-size: .82rem;
+  color: var(--fg-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-navb:hover { color: var(--fg); }
+
+.settings-navb[aria-pressed="true"] {
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 700;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* 登録してあるフォルダの数。押せない札なので枠は持たない */
+.settings-navb .n {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  font-weight: 400;
+  color: var(--fg-faint);
+}
+
+/* 出し分けは CSS が data-sec で行う。JS は節の名前を書くだけにしてある
+   （出し入れを JS でやると、節を1つ足すたびに配線が増える） */
+.settings-pane { display: none; }
+
+.settings[data-sec="notify"] .settings-pane[data-sec="notify"],
+.settings[data-sec="dirs"] .settings-pane[data-sec="dirs"],
+.settings[data-sec="state"] .settings-pane[data-sec="state"] { display: block; }
+
+/* 足も同じ鍵で絞る。**通知の節でだけ**「テスト送信」「保存」と状態の1行が出る。
+   作業フォルダは足す・消すがその場で効き、いまの様子は読むだけなので、
+   そこに保存のボタンが残っていると「押さないと効かない」に見える */
+.settings:not([data-sec="notify"]) .settings-foot-state,
+.settings:not([data-sec="notify"]) #settings-test,
+.settings:not([data-sec="notify"]) #settings-save { display: none; }
 
 /* ------------------------------------------------------------------ 頭と足 */
 
@@ -149,22 +224,28 @@
 .settings-state[data-on="1"]::before { background: var(--done); }
 .settings-state[data-on="0"]::before { background: var(--hot); }
 
-/* 通知の設定とは別のかたまり。線で区切ってはっきり分ける。
-   分けないと、下の「保存」がこちらにも効くように見える
-   （作業フォルダは足した時点で保存され、自動起動はそもそも読むだけ） */
-.settings-rundirs,
-.settings-startup {
-  margin-top: 1.3rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border);
+/* 読むだけのかたまり。**面を沈めて枠を外す。**
+   押せるものが1つも無いことを、文ではなく面で示す
+   （上のバーで「押せないものは面も枠も持たない」と決めたのと同じ線） */
+.settings-read {
+  padding: .6rem .7rem;
+  border-radius: var(--radius);
+  background: var(--bg-sunk);
 }
 
-/* この節の状態の1行はすぐ下に補足が続く。既定の 1rem だと離れて見える */
-.settings-startup .settings-state { margin-bottom: .3rem; }
+/* 状態の1行はすぐ下に補足が続く。既定の 1rem だと離れて見える */
+.settings-read .settings-state { margin-bottom: .3rem; }
+
+/* 足に置いた状態の1行。ここでは下の余白が要らない */
+.settings-foot-state {
+  flex: none;
+  margin: 0;
+  white-space: nowrap;
+}
 
 /* 保存先。人に見せるためだけの1行なので、いちばん弱く出す */
 .settings-path {
-  margin: 1.1rem 0 0;
+  margin: .4rem 0 0;
   font-family: var(--font-mono);
   font-size: .7rem;
   color: var(--fg-faint);
@@ -225,6 +306,36 @@
   }
 
   .settings-grid .settings-hint { margin-bottom: .6rem; }
+}
+
+/* 左の並びを上へ回す。**閾値が上のグリッドと違うのはわざと。**
+   あちらは3列が潰れるかどうかで 34rem、こちらは左の 9.5rem を引いた残りで
+   長いパスが読めるかどうかなので、先に苦しくなる。
+   **窓の幅で見てよい。** このモーダルの幅は窓に付いて動く（min(44rem, 100vw - 2rem)）ので、
+   run.css に書いてある「器の幅と窓の幅がずれる」問題はここでは起きない */
+@media (max-width: 40rem) {
+  .settings-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .settings-nav {
+    flex-direction: row;
+    padding: .4rem .5rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+
+  /* 印も上へ回す。左に残すと、横に並んだときに隣の札との境目に見える */
+  .settings-navb {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .settings-navb[aria-pressed="true"] { box-shadow: inset 0 2px 0 var(--accent); }
+
+  .settings-navb .n { margin-left: .3rem; }
 }
 
 /* ---------------------------------------------------------- 作業フォルダ */

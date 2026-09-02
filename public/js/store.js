@@ -182,7 +182,11 @@ export const dom = {
   settings: document.getElementById('settings'),
   settingsOpen: document.getElementById('settings-open'),
   settingsClose: document.getElementById('settings-close'),
+  settingsNav: document.getElementById('settings-nav'),
   settingsState: document.getElementById('settings-state'),
+  // 「いまの様子」の節。足の1行は通知の節でしか出ないので、
+  // 鳴らない理由はこちらにも置く（他の節を見ているあいだ辿り着けなくなる）
+  settingsHealth: document.getElementById('settings-health'),
   settingsPath: document.getElementById('settings-path'),
   settingsMsg: document.getElementById('settings-msg'),
   settingsSave: document.getElementById('settings-save'),
@@ -198,6 +202,7 @@ export const dom = {
   // 起こしてよいフォルダ（settings.js）。**足した時点で保存する**ので、
   // 下の「保存」ボタン（通知のぶん）とは経路が別
   runDirs: document.getElementById('run-dirs'),
+  runDirsN: document.getElementById('run-dirs-n'),
   runDirAdd: document.getElementById('run-dir-add'),
   runDirAddBtn: document.getElementById('run-dir-add-btn'),
   runDirsHint: document.getElementById('run-dirs-hint'),
@@ -221,6 +226,10 @@ export const dom = {
   runEffort: document.getElementById('run-effort'),
   runBudget: document.getElementById('run-budget'),
   runNote: document.getElementById('run-note'),
+  // めったに触らない3つの畳み。札にはいまの中身を書く
+  // （「詳細設定」のような空の名前にすると、開かないと分からなくなる）
+  runFold: document.getElementById('run-fold'),
+  runFoldNote: document.getElementById('run-fold-note'),
   // 詳細ペインの拡大。zoom.js だけが使う。開いているかは dialog 自身に聞くので、
   // ここにも store にも旗を持たない
   zoom: document.getElementById('zoom'),

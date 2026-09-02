@@ -66,7 +66,17 @@
      run-form.js の ev.target === dialog の判定はこれが前提 */
   padding: 0;
   width: min(44rem, calc(100vw - 2rem));
-  max-height: min(50rem, calc(100vh - 3rem));
+  /* **上端を固定して、下だけ伸ばす。**
+     畳みを開くと中身が 120px 増える。<dialog> の既定（margin: auto）は
+     中央に置くので、その半分だけ上端が動き、押す位置も一緒に動く（実測で 60px）。
+     上を留めれば、開くまでに見えていたものは1つも動かない。
+
+     設定モーダルは高さそのものを固定してある（節ごとの差が小さいので空白が出ない）。
+     こちらは差が 120px あるので、固定すると畳んだときに大きな空きができる。
+     **結果はどちらも「上端が動かない」で同じ**。中身の性質で手を分けている */
+  margin-top: 3rem;
+  margin-bottom: auto;
+  max-height: min(50rem, calc(100vh - 6rem));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
@@ -83,9 +93,15 @@
 }
 
 /* 「途中で許可を求めない」がこの機能でいちばん驚かれる点。
-   折りたたまず、面も塗らず、左の線1本だけで目を留める */
+   折りたたまず、面も塗らず、左の線1本だけで目を留める。
+
+   **置き場所は本文のいちばん下。** 上に置くと毎回いちばん先に読まされるが、
+   効いてくるのは押したあとの話なので、押す手の隣にあるほうが届く */
 .runform-warn {
-  margin: 0 0 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  margin: 1.1rem 0 0;
   padding: .45rem .7rem;
   border-left: 2px solid var(--warn);
   font-size: .78rem;
@@ -93,8 +109,92 @@
   color: var(--fg-muted);
 }
 
+/* 絵だけ warn の色に振る。文字は muted のまま
+   （両方を振ると帯全体が黄色くなり、面を塗らない約束と競合する） */
+.runform-warn .icon {
+  margin-top: .15rem;
+  color: var(--warn);
+}
+
 /* 危ないモードを選んだときの但し書き。.settings-hint の色を上書きする */
 .runform-danger { color: var(--hot); }
+
+/* **:not([hidden]) を外さない。** この行は危ないモードのときだけ出す（hidden 属性で
+   出し入れする）が、[hidden] のブラウザ既定（display: none）は詳細度 0,1,0 しかない。
+   .runform-danger.has-icon は 0,2,0 なので、素で書くと display: flex が勝ち、
+   **plan mode を選んでいても「何でも実行します」が出たままになる**（実測） */
+.runform-danger.has-icon:not([hidden]) {
+  display: flex;
+  align-items: flex-start;
+  gap: .4rem;
+}
+
+/* 危ない権限モードを選んだときの、選ぶ欄そのもの。
+   **色だけで伝えない**ので但し書きに三角も出すが、欄にも印を付ける。
+   畳みの下を見ているあいだ、但し書きだけだと欄の状態が視界から外れる。
+   **is-danger は起こすフォームと替える窓だけで使う。**
+   .settings-select は設定モーダルと共有しているので、親を .runform に取る */
+.runform .settings-select.is-danger {
+  border-color: var(--hot);
+  color: var(--hot);
+}
+
+/* ラベルに絵を添えたときだけ inline-flex にする。
+   .settings-label は block なので、素のままだと絵が上の行に乗る。
+   **グリッドの中のラベル（モデル・思考量・上限）には付けない。**
+   絵が3つ縦に並ぶと、いちばん読ませたい警告と同じ重さになる */
+.runform .settings-label.has-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+/* ------------------------------------------- めったに触らない3つの畳み */
+
+/* 開いた札には、いまの中身を書く（「詳細設定」のような空の名前にしない）。
+   押せるものなので、面と枠は .btn と同じにする。
+   **破線にしない。** この画面では破線が「押せるが無効」と「但し書き」の
+   2つを指しているので、3つ目の意味を足すと形の語彙が壊れる */
+.runform-fold { margin-top: 1.1rem; }
+
+.runform-fold-head {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .4rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  font-size: .8rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  /* <summary> の既定の三角を消す。自前の chevron を回すため。
+     list-style は Firefox / Chrome、::-webkit-details-marker は Safari 側 */
+  list-style: none;
+}
+
+.runform-fold-head::-webkit-details-marker { display: none; }
+
+.runform-fold-head:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+/* 開いたら 90 度回す。動きを止める指定は base.css の頭で全体に効いている
+   （prefers-reduced-motion で transition-duration が .01ms に潰れる） */
+.runform-fold-head .icon { transition: transform .12s; }
+.runform-fold[open] .runform-fold-head .icon { transform: rotate(90deg); }
+
+/* いまの中身。押せない札なので枠は持たない */
+.runform-fold-note {
+  margin-left: auto;
+  font-size: .74rem;
+  color: var(--fg-faint);
+}
+
+/* 中の節。.settings-sec + .settings-sec は兄弟なので、
+   details の中の最初の1つには効かない。ここで明示する */
+.runform-fold > .settings-sec { margin-top: .7rem; }
 
 /* パスもモード名も長い。行の残りいっぱいまで伸ばす */
 .runform-wide {

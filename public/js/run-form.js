@@ -17,6 +17,7 @@
  * 詳細へ移るかどうかは押した人に決めてもらう。
  */
 import { el } from './util.js';
+import { icon } from './icons.js';
 import { EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
 import { dom } from './store.js';
 import { select } from './session.js';
@@ -82,10 +83,32 @@ function noteModel() {
   if (free && was) dom.runModel.focus();
   // 候補へ戻したら書きかけを捨てる。残すと、見えない欄の中身が送られる
   if (!free) dom.runModel.value = '';
+  noteFold();
 }
 
 function noteMode() {
-  dom.runNote.hidden = dom.runMode.selectedOptions[0]?.dataset.danger !== '1';
+  const danger = dom.runMode.selectedOptions[0]?.dataset.danger === '1';
+  dom.runNote.hidden = !danger;
+  // **色だけで伝えない。** 但し書きに三角を出すのに加えて、欄そのものにも印を付ける。
+  // 畳みの下を見ているあいだ、但し書きだけだと欄の状態が視界から外れる
+  dom.runMode.classList.toggle('is-danger', danger);
+}
+
+/**
+ * 畳んだ札に、いまの中身を書く。
+ *
+ * **「詳細設定」のような空の名前にしない。** 開かなくても中身が分かる札にすると、
+ * 開く回数そのものが減る。上限は金が減る話なので、既定のままでも必ず出す。
+ */
+function noteFold() {
+  const model = modelValue(dom.runModelPick.value, dom.runModel.value);
+  const effort = dom.runEffort.value;
+  const budget = dom.runBudget.value.trim();
+
+  const parts = [model || '既定のモデル'];
+  if (effort) parts.push(EFFORT_LABELS[effort] ?? effort);
+  parts.push(budget ? `上限 ${budget} USD` : '上限なし');
+  dom.runFoldNote.textContent = parts.join(' / ');
 }
 
 /**
@@ -133,6 +156,7 @@ function fillOptions(o) {
   if (Number.isFinite(o.promptMax)) dom.runPrompt.maxLength = o.promptMax;
 
   noteMode();
+  noteFold();
   const blocked = blockReason();
   dom.runformStart.disabled = Boolean(blocked);
   say(blocked ?? '', 'bad');
@@ -235,6 +259,9 @@ export function openRunForm() {
   started = null;
   dom.runformShow.hidden = true;
   say('');
+  // **開くたびに畳んだ状態へ戻す。** 前に開いたかどうかを覚えると、
+  // 起こすたびに違う高さの画面が出る。毎回同じところから始めるほうが迷わない
+  dom.runFold.open = false;
   dom.runform.showModal();
   // 中身は開いたときに1回だけ引く。ここを毎秒更新しない。
   // 中で受け止めているので await せずに投げてよい
@@ -243,6 +270,13 @@ export function openRunForm() {
 }
 
 export function initRunForm() {
+  // 絵を差す場所は data-icon で印を付けてある（作業フォルダ・最初の指示・
+  // 権限モード・畳みの札・警告・危ないモードの但し書き）。
+  // 名前は隣の文字が持つので aria-hidden のまま置く
+  for (const node of dom.runform.querySelectorAll('[data-icon]')) {
+    node.prepend(icon(node.dataset.icon));
+  }
+
   dom.runformOpen.addEventListener('click', openRunForm);
   dom.runformClose.addEventListener('click', () => dom.runform.close());
 
@@ -256,6 +290,13 @@ export function initRunForm() {
   dom.runformShow.addEventListener('click', show);
   dom.runMode.addEventListener('change', noteMode);
   dom.runModelPick.addEventListener('change', noteModel);
+
+  // 畳んだ札の中身。**3つとも見る。** 1つでも漏らすと、
+  // 畳んだまま変えた値が札に出ず、開かないと分からない状態に戻る
+  for (const node of [dom.runModelPick, dom.runModel, dom.runEffort, dom.runBudget]) {
+    node.addEventListener('change', noteFold);
+    node.addEventListener('input', noteFold);
+  }
 
   // <form> で囲っていないので Enter は自分で拾う。
   // **本文欄だけは別扱い。** あそこの Enter は改行で、実行は Ctrl+Enter。

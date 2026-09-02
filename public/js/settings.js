@@ -22,6 +22,7 @@
  *    これが無いとサーバの門番（src/shared/origin.mjs）に 415 で断られる
  */
 import { el } from './util.js';
+import { icon } from './icons.js';
 import { dom, store, SUMMARY_ORDER } from './store.js';
 
 /**
@@ -34,6 +35,26 @@ const STATE_NOTES = {
   'needs-answer': 'いまはほぼ鳴りません（Claude Code が質問中の行を書かないため）',
   'needs-approval': 'マスター判断で止まったときだけ',
   'awaiting-reply': '上の「返信待ち」の分だけ待ったら。実際に鳴るのはこれ',
+};
+
+/**
+ * 左の並びに差すアイコン。
+ *
+ * ここでしか使わないので main.js ではなく自分で差す（上のバーのぶんはあちらが差す）。
+ */
+const NAV_ICONS = { notify: 'bell', dirs: 'folder', state: 'info' };
+
+/**
+ * 節ごとに足へ出す作法の1行。
+ *
+ * **「いつ効くか」を足に置くのが要点。** 通知の節にだけ「保存」があり、
+ * 作業フォルダは押した瞬間に効く。前は9つが1枚に積んであって、
+ * その違いが本文の説明文にしか書かれていなかった。
+ */
+const SEC_NOTE = {
+  notify: '',
+  dirs: '足す・消すはその場で保存されます',
+  state: 'ここは読むだけです',
 };
 
 /** 送信中は押せなくする。二重に保存・二重に送信するのを防ぐ */
@@ -94,17 +115,25 @@ function urlHint(s) {
  */
 function fillStatus(s) {
   const h = s.health ?? {};
-  const parts = [s.enabled ? '通知は有効' : '通知は無効'];
-  // 止めるスイッチだけは環境変数のほうが強い。ここで言わないと、
-  // 保存しても鳴らない理由が画面のどこにも出ないことになる
-  if (s.off) parts.push('環境変数 CLAUDE_DECK_NOTIFY_OFF で止めています');
-  else if (!s.enabled && s.error) parts.push(s.error);
-  if ((h.state === 'disabled' || h.state === 'paused') && h.reason) {
-    parts.push(`停止中: ${h.reason}`);
-  }
-  parts.push(`送信 ${h.sent ?? 0}`, `失敗 ${h.failed ?? 0}`);
-  dom.settingsState.textContent = parts.join(' / ');
+
+  // 足の1行。**短く保つ。** 隣に結果のメッセージとボタン2つが並ぶので、
+  // 理由まで書くとボタンが押し出される
+  dom.settingsState.textContent =
+    `${s.enabled ? '有効' : '無効'} / 送信 ${h.sent ?? 0} / 失敗 ${h.failed ?? 0}`;
   dom.settingsState.dataset.on = s.enabled ? '1' : '0';
+
+  // 「いまの様子」の節。**鳴らない理由はこちらに置く。**
+  // 足は通知の節でしか出ないので、そこだけに書くと他の節から辿り着けない。
+  // 止めるスイッチだけは環境変数のほうが強いので、それも必ず言う
+  const why = [];
+  if (s.off) why.push('環境変数 CLAUDE_DECK_NOTIFY_OFF で止めています');
+  else if (!s.enabled && s.error) why.push(s.error);
+  if ((h.state === 'disabled' || h.state === 'paused') && h.reason) {
+    why.push(`停止中: ${h.reason}`);
+  }
+  why.push(`送信 ${h.sent ?? 0}`, `失敗 ${h.failed ?? 0}`);
+  dom.settingsHealth.textContent =
+    `${s.enabled ? '通知は有効' : '通知は無効'} / ${why.join(' / ')}`;
 
   // マスク済みしか来ない。生の URL はサーバが返さないので、ここに現れようがない
   dom.setUrl.placeholder = s.target ?? 'まだ設定されていません';
@@ -198,12 +227,12 @@ async function load() {
 /**
  * 一覧の上に出す1行。
  *
- * **「その場で保存される」を必ず書く。** 下に「保存」ボタンがあるので、
- * 書かないと押さないと効かないように見える。
+ * **「その場で保存される」はここに書かない。** 足の1行（SEC_NOTE）へ移した。
+ * 前は下に「保存」ボタンが並んでいたので本文で打ち消す必要があったが、
+ * いまはこの節で保存のボタンが出ない（settings.css が data-sec で隠す）。
  */
 const DIRS_HINT = '足したフォルダとその配下で、画面からセッションを起こせます。'
-  + 'Claude Code が動いたことのあるフォルダは自動で使えるので、ここには出ません。'
-  + '足す・消すはその場で保存されます';
+  + 'Claude Code が動いたことのあるフォルダは自動で使えるので、ここには出ません';
 
 /**
  * 起こしてよいフォルダの一覧を組み直す。
@@ -219,7 +248,9 @@ function fillDirs(d, error) {
 
   if (!d) {
     // 読めなかったことを「1つも登録されていません」に読み替えない。
-    // 足の1行には出さない（保存が失敗したように見えるため）
+    // 足の1行には出さない（保存が失敗したように見えるため）。
+    // 数の札も出さない（0 と「読めなかった」を同じ顔にしない）
+    dom.runDirsN.hidden = true;
     dom.runDirsHint.textContent = `作業フォルダを読めませんでした（${error ?? '理由不明'}）`;
     return;
   }
@@ -227,6 +258,10 @@ function fillDirs(d, error) {
   dom.runDirsHint.textContent = DIRS_HINT;
 
   const dirs = d.dirs ?? [];
+  // 左の並びに数を出す。0 のときは札ごと消す（「0」を出すと登録できない場所に見える）
+  dom.runDirsN.hidden = !dirs.length;
+  dom.runDirsN.textContent = dirs.length ? String(dirs.length) : '';
+
   if (!dirs.length) {
     dom.runDirs.append(el('li', 'note', 'まだ登録されていません'));
     return;
@@ -479,10 +514,31 @@ async function sendTest() {
   }
 }
 
+/**
+ * 節を切り替える。
+ *
+ * **出し入れは CSS がやる**（settings.css が `.settings[data-sec]` で絞る）。
+ * ここは名前を書くのと、押した札の印を付け替えるのと、足の1行を入れ替えるだけ。
+ * JS で出し入れすると、節を1つ足すたびに配線が増える。
+ *
+ * @param {string} name 'notify' | 'dirs' | 'state'
+ */
+function pickSec(name) {
+  dom.settings.dataset.sec = name;
+  for (const b of dom.settingsNav.querySelectorAll('.settings-navb')) {
+    b.setAttribute('aria-pressed', String(b.dataset.sec === name));
+  }
+  // 節を移るたびに前の結果を消す。残すと「保存しました」が
+  // 作業フォルダの節にも出て、どちらの話か分からなくなる
+  say(SEC_NOTE[name] ?? '');
+}
+
 /** モーダルを開く。中身は開くたびに引き直す。 */
 function open() {
   dom.setUrl.value = '';
-  say('');
+  // 開くたびに通知へ戻す。前に見ていた節を覚えると、
+  // 「設定を開いた」のに読むだけの節が出ることがある
+  pickSec('notify');
   dom.settings.showModal();
   // 別々の窓口なので、1つが転んでも他は出る。
   // どれも中で受け止めているので、await せずに投げてよい
@@ -493,6 +549,17 @@ function open() {
 
 /** 設定モーダルを配線する。main.js から1回だけ呼ぶ。 */
 export function initSettings() {
+  // 左の並びにアイコンを差す。名前は隣の文字が持つので aria-hidden のまま置く
+  for (const b of dom.settingsNav.querySelectorAll('.settings-navb')) {
+    const name = NAV_ICONS[b.dataset.sec];
+    if (name) b.prepend(icon(name));
+  }
+
+  dom.settingsNav.addEventListener('click', (ev) => {
+    const b = ev.target.closest('.settings-navb');
+    if (b) pickSec(b.dataset.sec);
+  });
+
   dom.settingsOpen.addEventListener('click', open);
   dom.settingsClose.addEventListener('click', () => dom.settings.close());
 
