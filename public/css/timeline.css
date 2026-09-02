@@ -86,6 +86,16 @@
   text-decoration: line-through;
 }
 
+/* 外れているものの hover を**別に書く。** 上の .tl-chip:hover と
+   .tl-chip[aria-pressed="false"] はどちらも (0,2,0) で、後に読まれるこちらが
+   border-color を透明へ戻すので、**hover しても枠が出なかった**（実測）。
+   破線だったころは hover が border-color だけを触っていて衝突しなかった。
+   字は --fg-muted まで（--fg にすると出している側の通常と同じ濃さになる） */
+.tl-chip[aria-pressed="false"]:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-muted);
+}
+
 /* 検索に当たった所。ブラウザ既定の黄色い塗りを消す。
    面を塗ると状態色の塗り分けとぶつかって、どれが自分の番か読めなくなる */
 mark {
