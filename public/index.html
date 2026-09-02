@@ -37,7 +37,10 @@
             aria-expanded="false" aria-controls="list-pane" aria-label="セッション一覧を開く">
       <span class="bars" aria-hidden="true"></span>
     </button>
-    <h1>ClaudeDeck<span class="sub">セッションの状態</span></h1>
+    <!-- 題名は落とす。毎日開く画面なので、名前は一度覚えれば済む。
+         前はここがバーでいちばん大きい字で、いちばん情報の少ないものが
+         いちばん目立っていた。脇の印（SVG）は main.js が差す -->
+    <h1 class="brand" id="brand">ClaudeDeck</h1>
     <!-- 見る目的が2つあるので、モードで分ける。同居させると「どれから手をつけるか」と
          「いまの作業」が同じ画面で場所を取り合う（それが組み替えの発端そのもの）。
          押した状態は aria-pressed で表す（.list-tabs と同じ理由。role="tab" は使わない） -->
@@ -46,25 +49,26 @@
       <button class="tab" id="mode-board" type="button" aria-pressed="false">監視盤</button>
       <button class="tab" id="mode-usage" type="button" aria-pressed="false">数値</button>
     </div>
-    <div class="summary" id="summary"></div>
-    <!-- 枠の使用率。アカウント共通の値なので**画面に1つだけ**。
-         .summary とは別の器にする。あちらは renderSummary() が replaceChildren() で
-         毎回まるごと入れ替えるので、混ぜると出どころの違う2つが同じ器を取り合う -->
-    <div class="rate" id="rate" role="status" hidden></div>
     <div class="topbar-actions">
       <!-- いまの版。触ると更新の確認の結果が出る。
            渡された側が自分の版を確かめられる場所が、画面にはここしか無い -->
       <span class="ver" id="ver" hidden></span>
+      <!-- 押せないものは面も枠も持たない。隣のボタンと形で分ける -->
       <span class="live" id="live" data-live="wait">接続中</span>
-      <button class="btn" id="runform-open" type="button" aria-label="新しいセッションを起こす">起こす</button>
-      <button class="btn" id="reload" type="button">再読み込み</button>
-      <button class="btn" id="settings-open" type="button" aria-label="設定を開く">設定</button>
-      <button class="btn" id="theme-toggle" type="button" aria-label="配色を切り替える">配色</button>
+      <!-- ここだけ文字を残す。他の3つと違って、押すと新しいものが生まれる -->
+      <button class="btn is-lead" id="runform-open" type="button" aria-label="新しいセッションを起こす">起こす</button>
+      <!-- 補助の3つはアイコンだけにする。名前は title と aria-label に残るので、
+           触れば出るし読み上げにも乗る。中身（SVG）は main.js が差す -->
+      <button class="ibtn" id="reload" type="button" title="再読み込み" aria-label="再読み込み"></button>
+      <button class="ibtn" id="settings-open" type="button" title="設定を開く" aria-label="設定を開く"></button>
+      <button class="ibtn" id="theme-toggle" type="button" title="配色を切り替える" aria-label="配色を切り替える"></button>
     </div>
 
     <!-- 更新のお知らせ。.app 直下ではなく topbar の中に置く。
          .app は grid-template-rows に2行しか宣言していないので、3つ目の子を足すと
-         高さの配分が崩れる。topbar は flex-wrap: wrap なので、幅いっぱいを取れば自分の行へ折り返す -->
+         高さの配分が崩れる。topbar は flex-wrap: wrap なので、幅いっぱいを取れば自分の行へ折り返す。
+         **下の .statusbar より前に置く。** 後ろに置くと、帯が出るたびに
+         常設のステータスバーが下へずれて、状態を見る位置が動く -->
     <div class="update" id="update" role="status" hidden>
       <span class="update-text" id="update-text"></span>
       <span class="update-note" id="update-note"></span>
@@ -73,6 +77,17 @@
            「いま押せるのはこれ1つ」が形で伝わる -->
       <button class="btn update-act" id="update-act" type="button" hidden></button>
       <button class="btn update-close" id="update-close" type="button">閉じる</button>
+    </div>
+
+    <!-- 下段。ボールの所在だけを置く帯。
+         上段と同じ行に混ぜない。混ぜると「どれから手をつけるか」が
+         道具（起こす・設定・配色）と横幅を取り合い、状態の名前を出せなくなる。
+         枠の使用率は .summary とは別の器にする。あちらは renderSummary() が
+         replaceChildren() で毎回まるごと入れ替えるので、混ぜると出どころの違う2つが
+         同じ器を取り合う -->
+    <div class="statusbar">
+      <div class="summary" id="summary"></div>
+      <div class="rate" id="rate" role="status" hidden></div>
     </div>
   </header>
 

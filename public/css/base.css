@@ -130,23 +130,40 @@ body {
 
 /* ------------------------------------------------------------------ 見出し */
 
+/* 行の間（row-gap）を padding の上下と同じ .7rem にする。
+   1rem のままだと、下段や更新の帯が自分の行へ折り返したときに
+   「padding-top .7rem ＋ row-gap 1rem」で上下が食い違う（実測で上 11px・下 27px） */
 .topbar {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: .7rem 1rem;
   flex-wrap: wrap;
   padding: .7rem 1rem;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 
-.topbar h1 {
+/* 題名。**毎日開く画面なので、名前は一度覚えれば済む。**
+   前は 1rem の太字で、バーの中でいちばん大きい字だった。
+   いちばん情報の少ないものがいちばん強く出ていたので、字を落として脇へ寄せる。
+   副題（「セッションの状態」）は消した。画面そのものがそれを示している */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
   margin: 0;
-  font-size: 1rem;
+  font-size: .8rem;
   font-weight: 700;
   letter-spacing: .01em;
+  color: var(--fg-muted);
   white-space: nowrap;
 }
+
+.brand .icon { color: var(--accent); }
+
+/* アイコンの器。線は currentColor なので、置いた場所の字の色をそのまま継ぐ。
+   縮まないようにするのだけがここの仕事（形は icons.js が持つ） */
+.icon { flex: none; }
 
 /* 一覧を引き出すボタン。広い画面では一覧が常に見えているので出さない */
 .hamburger {
@@ -186,65 +203,111 @@ body {
 .hamburger .bars::before { top: -5px; }
 .hamburger .bars::after { top: 5px; }
 
-.topbar h1 .sub {
-  font-weight: 400;
-  font-size: .8rem;
-  color: var(--fg-muted);
-  margin-left: .5rem;
+/* 下段。**ボールの所在だけを置く帯。**
+   上段と同じ行に混ぜない。混ぜると「どれから手をつけるか」が
+   道具（起こす・設定・配色）と横幅を取り合い、状態の名前を出せなくなる。
+
+   .topbar の padding を負の margin で相殺して、幅いっぱいに沈める。
+   面を1段落とすので、上段の道具と混ざらない */
+.statusbar {
+  /* **100% ではなく calc(100% + 2rem)。**
+     flex-basis の 100% は .topbar の padding を除いた幅なので、
+     負の margin で左へ寄せただけだと右が 2rem ぶん足りない（実測で 32px 切れていた）。
+     左右へ 1rem ずつ食い込ませるぶんを、幅にも足しておく */
+  flex: 0 0 calc(100% + 2rem);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .2rem 1.3rem;
+  /* 上は .topbar の row-gap（.7rem）に任せる。ここで足すと二重に空く */
+  margin: 0 -1rem -.7rem;
+  padding: .38rem 1rem;
+  background: var(--bg-sunk);
+  border-top: 1px solid var(--border);
 }
 
-/* 上のバーに並ぶ状態の数。題名とは別のものなので、細い縦線で区切る */
 .summary {
   display: flex;
   flex-wrap: wrap;
-  gap: .4rem;
-  margin-right: auto;
-  padding-left: .9rem;
-  border-left: 1px solid var(--border);
+  align-items: center;
+  gap: .2rem 1.3rem;
+  min-width: 0;
 }
 
-.chip {
+/* 状態の数。**面も枠も持たない。**
+   前は .chip（ピル型＋枠＋面）だったが、あれは押せる .composer-now と
+   枠の色・角丸・面の色・字の色がすべて同じで、差は字の 0.02rem と
+   余白の 0.1rem しか無かった。しかも上のバーは常に見えているので、
+   押せないものと押せるものが同時に画面へ出ていた。
+   押せないものから枠と面を外して、押せるものが自然に浮くようにする */
+.tally {
   display: inline-flex;
-  align-items: center;
-  gap: .35rem;
-  padding: .12rem .5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-elev);
+  align-items: baseline;
+  gap: .32rem;
   font-size: .78rem;
   color: var(--fg-muted);
   white-space: nowrap;
 }
 
-.chip strong {
+/* 点は baseline ではなく行の中心に置く。文字と違って上下の伸びが無い */
+.tally .state { align-self: center; }
+
+.tally strong {
   color: var(--fg);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
-.chip.is-hot { border-color: var(--hot); color: var(--hot); }
-.chip.is-hot strong { color: var(--hot); }
+/* 答えないと1行も進まないもの。数を1段大きくして色を乗せる。
+   **どれが止まっているかの判定は画面側に持たない**（meta.stateBlocking から引く） */
+.tally.is-hot { color: var(--hot); }
+.tally.is-hot strong { color: var(--hot); font-size: .95rem; }
 
 /* 枠の使用率。アカウント共通の値なので画面に1つだけ出す。
-   中身は .chip の使い回しで、ここは置き場所だけを決める。
+   状態ではないので下段の右端へ寄せる。
    display を宣言したので [hidden] を必ず添える（flex は hidden 属性に勝つ） */
 .rate {
   display: flex;
   align-items: center;
+  margin-left: auto;
 }
 
 .rate[hidden] { display: none; }
 
-/* 「いつ測ったか」。数そのものではないので、字を落として添え物に見せる */
-.rate-age {
+/* 数そのものは状態より一段うしろ。字を落として添え物に見せる */
+.rate-val {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .35rem;
+  font-family: var(--font-mono);
   font-size: .72rem;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
+  white-space: nowrap;
 }
 
+.rate-val strong { color: var(--fg-muted); font-weight: 400; }
+.rate-val.is-hot { color: var(--hot); }
+.rate-val.is-hot strong { color: var(--hot); }
+
+/* 「いつ測ったか」。数そのものではないので、さらに落とす */
+.rate-age {
+  font-size: .7rem;
+  color: var(--fg-faint);
+}
+
+/* 道具は右端へ寄せる。
+   前はここを押していたのが .summary の margin-right: auto だったが、
+   あれは下段（.statusbar）へ移った。押すものが無くなると道具が題名の隣に来て、
+   「現在地」と「道具」が同じかたまりに見える */
 .topbar-actions {
   display: flex;
   align-items: center;
   gap: .5rem;
+  margin-left: auto;
+  /* アイコンボタンは 1.9rem の箱の中に 1rem の絵を置くので、
+     箱の右端を padding に揃えると、絵の右端は .45rem 内側に見える。
+     左端のロゴ（絵がそのまま端に来る）と揃わないので、箱のぶんだけ外へ出す */
+  margin-right: -.45rem;
 }
 
 button {
@@ -263,12 +326,58 @@ button {
 
 .btn:hover { border-color: var(--border-strong); }
 
+/* 押すと新しいものが生まれるボタン。ここだけ文字を残して枠と字を強調する。
+   **面は塗らない。** 塗ると「状態色は点と細いバーだけ。面は塗らない」の
+   約束と競合して、上のバーでいちばん強い面がボタンになる */
+.btn.is-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding-left: .5rem;
+  border-color: var(--accent);
+  background: none;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.btn.is-lead:hover {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* 補助のアイコンボタン。**枠も面も持たず、触れたときだけ現れる。**
+   押せるものの中でも「いつでも使えるが、いま見るものではない」段を形で示す。
+   名前は title と aria-label が持つので、絵だけにしても意味は消えない */
+.ibtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--fg-muted);
+}
+
+.ibtn:hover {
+  border-color: var(--border);
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+
+/* つながっているか。押せないので面も枠も持たない。
+   触ると詳しい文が出ることを、形（カーソル）で知らせる（.ver と同じ） */
 .live {
   display: inline-flex;
   align-items: center;
   gap: .35rem;
-  font-size: .78rem;
-  color: var(--fg-muted);
+  font-size: .74rem;
+  color: var(--fg-faint);
+  white-space: nowrap;
+  cursor: help;
 }
 
 .live::before {

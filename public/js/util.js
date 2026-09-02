@@ -25,6 +25,32 @@ export function el(tag, className, text) {
   return node;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * SVG の節点を1つ作る。
+ *
+ * `el()` の SVG 版。`createElement` では名前空間が付かず、SVG として
+ * 解釈されないので何も描かれない。属性は必ず `setAttribute` を通す
+ * （SVG は `.width = 100` のようなプロパティ代入が効かない属性が多い）。
+ *
+ * もとは `usage-chart.js`（層1）にあった。スパークライン専用だったが、
+ * アイコン（`icons.js`）からも呼ぶので層0 へ移した。
+ * あちらに置いたままでは、層0 のファイルから呼べない。
+ *
+ * @param {string} tag 要素名（`svg` / `path` / `polyline` など）
+ * @param {Record<string, string|number>} [attrs] 属性。`undefined` と `null` は飛ばす
+ * @returns {SVGElement}
+ */
+export function svgEl(tag, attrs = {}) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === undefined || value === null) continue;
+    node.setAttribute(key, String(value));
+  }
+  return node;
+}
+
 /* ------------------------------------------------------------------ 文字の目印 */
 
 /**

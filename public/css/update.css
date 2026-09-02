@@ -57,13 +57,16 @@
   align-items: center;
   gap: .6rem 1rem;
   flex-wrap: wrap;
-  margin-top: .6rem;
+  /* 上は .topbar の row-gap（.7rem）に任せる。ここで足すと二重に空く
+     （下の .statusbar と同じ理由） */
   padding: .5rem .7rem;
   border: 1px solid var(--border);
   /* 面は塗らず、左の1本だけで知らせる */
   border-left: 3px solid var(--accent);
   border-radius: var(--radius);
-  background: var(--bg-elev);
+  /* **面は1段沈める。** 前は --bg-elev で、中に置く .btn とまったく同じ色だった。
+     帯とボタンの枠も角丸も同じなので、押せる札が帯の一段落に見えていた */
+  background: var(--bg-sunk);
   font-size: .8rem;
 }
 

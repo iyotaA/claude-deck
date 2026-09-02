@@ -138,6 +138,8 @@ export const dom = {
   // 中央下の入力欄の器。詳細ペインの外に置いてあるので replaceChildren() で消えない
   composer: document.getElementById('composer'),
   live: document.getElementById('live'),
+  // 題名。脇の印（SVG）を main.js が1回だけ差す
+  brand: document.getElementById('brand'),
   reload: document.getElementById('reload'),
   themeToggle: document.getElementById('theme-toggle'),
   onlyLive: document.getElementById('only-live'),

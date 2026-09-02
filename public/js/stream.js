@@ -66,9 +66,19 @@ function apply(payload) {
   loadDetail(store.selected, { silent: true });
 }
 
+/**
+ * 上のバーに出す短い語。詳しい文は title へ回す。
+ *
+ * 知らない状態が来たら、渡された文をそのまま出す（黙って空にしない）。
+ */
+const LIVE_SHORT = { on: '接続', off: '切断', wait: '接続中' };
+
 export function setLive(state, label) {
   dom.live.dataset.live = state;
-  dom.live.textContent = label;
+  // **出すのは短い語だけ。** ここは道具（起こす・設定・配色）の並ぶ場所なので、
+  // 押せない文が伸びると、押せるものを画面の端へ押しのける
+  dom.live.textContent = LIVE_SHORT[state] ?? label;
+  dom.live.title = label;
 }
 
 export async function fetchOnce() {

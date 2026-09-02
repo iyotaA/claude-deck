@@ -112,12 +112,6 @@
     transform: translateX(0);
   }
 
-  /* 折り返した先で縦線だけが行頭に残るので、狭いときは区切りを外す */
-  .summary {
-    padding-left: 0;
-    border-left: 0;
-  }
-
   .scrim {
     display: block;
     position: fixed;

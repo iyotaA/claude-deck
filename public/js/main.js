@@ -53,6 +53,7 @@
  * 'use strict' は書かない。module は常に strict で動く。
  */
 import { query, dom, store } from './store.js';
+import { icon } from './icons.js';
 import { visibleRows } from './rows.js';
 import { initListDrawer } from './drawer.js';
 import { initZoom } from './zoom.js';
@@ -171,6 +172,19 @@ subscribeRuns(() => {
   renderRate();
   renderDetailIfNeeded();
 });
+
+// 上のバーのアイコン。**起動時に1回だけ差す。**
+//
+// HTML 側は空のボタンにしてある。innerHTML を使わない決まりなので、
+// SVG は icons.js が createElementNS で組んだ節点をここで append する。
+// 名前は title と aria-label が持つので、絵だけにしても意味は消えない。
+//
+// 「起こす」だけ 14px にする。文字と並ぶので、16px だと絵のほうが大きく見える
+dom.brand.prepend(icon('deck'));
+dom.runformOpen.prepend(icon('plus', 14));
+dom.reload.append(icon('refresh'));
+dom.settingsOpen.append(icon('sliders'));
+dom.themeToggle.append(icon('contrast'));
 
 fetchOnce().then(() => {
   // つなぎっぱなしの接続があるとヘッドレスブラウザがロード完了を待ち続ける。
