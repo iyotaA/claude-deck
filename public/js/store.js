@@ -226,6 +226,10 @@ export const dom = {
   runEffort: document.getElementById('run-effort'),
   runBudget: document.getElementById('run-budget'),
   runNote: document.getElementById('run-note'),
+  // めったに触らない3つの畳み。札にはいまの中身を書く
+  // （「詳細設定」のような空の名前にすると、開かないと分からなくなる）
+  runFold: document.getElementById('run-fold'),
+  runFoldNote: document.getElementById('run-fold-note'),
   // 詳細ペインの拡大。zoom.js だけが使う。開いているかは dialog 自身に聞くので、
   // ここにも store にも旗を持たない
   zoom: document.getElementById('zoom'),

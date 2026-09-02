@@ -346,15 +346,8 @@
 
   <div class="settings-body">
 
-    <!-- この機能でいちばん驚かれる点なので、折りたたまずに常に見せる。
-         放っておくと止まることを先に言う（答えるまで待つので、席を外すと進まない） -->
-    <p class="runform-warn">
-      途中で確認が要るときは、この画面に出ます。答えるまで待ちます。
-      10分答えが無いと自動的に断って、あなたの番として止まります。
-    </p>
-
     <section class="settings-sec">
-      <label class="settings-label" for="run-cwd">作業フォルダ</label>
+      <label class="settings-label has-icon" data-icon="folder" for="run-cwd">作業フォルダ</label>
       <div class="settings-row">
         <select class="settings-select runform-wide" id="run-cwd"></select>
       </div>
@@ -362,49 +355,71 @@
     </section>
 
     <section class="settings-sec">
-      <label class="settings-label" for="run-prompt">最初の指示</label>
+      <label class="settings-label has-icon" data-icon="pencil" for="run-prompt">最初の指示</label>
       <textarea class="runform-prompt" id="run-prompt" rows="6" spellcheck="false"
                 placeholder="やってほしいことを書く"></textarea>
       <p class="settings-hint">Enter は改行。実行は Ctrl+Enter</p>
     </section>
 
+    <!-- **権限モードは畳まない。** ここは危ないほうへ倒せる唯一の欄で、
+         bypass permissions を選ぶと何も確認せずに走る。
+         畳む基準は「触る頻度」だけでなく「間違えたときの重さ」も見る -->
     <section class="settings-sec">
-      <label class="settings-label" for="run-mode">権限モード</label>
+      <label class="settings-label has-icon" data-icon="shield" for="run-mode">権限モード</label>
       <div class="settings-row">
         <select class="settings-select runform-wide" id="run-mode"></select>
       </div>
-      <!-- 危ないモードを選んだときだけ出す。中身は固定なので run-form.js は出し入れだけする -->
-      <p class="settings-hint runform-danger" id="run-note" hidden>
-        このモードは許可を一切求めず、何でも実行します。
+      <!-- 危ないモードを選んだときだけ出す。中身は固定なので run-form.js は出し入れだけする。
+           **色だけで伝えない。** 三角の印と、選ぶ欄そのものの枠も赤くする -->
+      <p class="settings-hint runform-danger has-icon" data-icon="alert" id="run-note" hidden>
+        <span>このモードは許可を一切求めず、何でも実行します。</span>
       </p>
     </section>
 
-    <section class="settings-sec settings-grid">
-      <!-- 候補は「このマシンで実際に使われたモデル」。サーバーが一覧から拾って返す。
-           そこに無いものは「自分で入力」で渡せる（新しいモデルが出た初日のため）。
-           入力欄は選ばれるまで畳んでおく。配線は run-form.js -->
-      <label class="settings-label" for="run-model-pick">モデル</label>
-      <span class="settings-row">
-        <select class="settings-select runform-wide" id="run-model-pick"></select>
-        <input class="settings-text" id="run-model" type="text" hidden
-               spellcheck="false" autocomplete="off" aria-label="モデル名を自分で入力"
-               placeholder="モデル名をそのまま書く">
-      </span>
-      <p class="settings-hint">使ったことのあるものを並べています。使えるかどうかは CLI が決めます</p>
+    <!-- めったに触らない3つは畳んでおく。開いた札には、いまの中身を書く
+         （「詳細設定」のような空の名前にすると、開かないと分からなくなる）。
+         **開くたびに畳んだ状態に戻す**（run-form.js）。毎回同じ画面から始めるため -->
+    <details class="runform-fold" id="run-fold">
+      <summary class="runform-fold-head" data-icon="chevron">
+        <span>モデル・思考量・上限</span>
+        <span class="runform-fold-note" id="run-fold-note"></span>
+      </summary>
 
-      <label class="settings-label" for="run-effort">思考量</label>
-      <span class="settings-row">
-        <select class="settings-select" id="run-effort"></select>
-      </span>
-      <p class="settings-hint">深いほど時間とトークンを使います</p>
+      <section class="settings-sec settings-grid">
+        <!-- 候補は「このマシンで実際に使われたモデル」。サーバーが一覧から拾って返す。
+             そこに無いものは「自分で入力」で渡せる（新しいモデルが出た初日のため）。
+             入力欄は選ばれるまで畳んでおく。配線は run-form.js -->
+        <label class="settings-label" for="run-model-pick">モデル</label>
+        <span class="settings-row">
+          <select class="settings-select runform-wide" id="run-model-pick"></select>
+          <input class="settings-text" id="run-model" type="text" hidden
+                 spellcheck="false" autocomplete="off" aria-label="モデル名を自分で入力"
+                 placeholder="モデル名をそのまま書く">
+        </span>
+        <p class="settings-hint">使ったことのあるものを並べています。使えるかどうかは CLI が決めます</p>
 
-      <label class="settings-label" for="run-budget">上限</label>
-      <span class="settings-row">
-        <input class="settings-num" id="run-budget" type="number" step="0.01">
-        <span class="settings-unit">USD</span>
-      </span>
-      <p class="settings-hint">空欄なら上限なし。入れた額に達すると止まります</p>
-    </section>
+        <label class="settings-label" for="run-effort">思考量</label>
+        <span class="settings-row">
+          <select class="settings-select" id="run-effort"></select>
+        </span>
+        <p class="settings-hint">深いほど時間とトークンを使います</p>
+
+        <label class="settings-label" for="run-budget">上限</label>
+        <span class="settings-row">
+          <input class="settings-num" id="run-budget" type="number" step="0.01">
+          <span class="settings-unit">USD</span>
+        </span>
+        <p class="settings-hint">空欄なら上限なし。入れた額に達すると止まります</p>
+      </section>
+    </details>
+
+    <!-- この機能でいちばん驚かれる点なので、折りたたまずに常に見せる。
+         **押す直前に置く。** 上に置くと毎回いちばん先に読まされるが、
+         効いてくるのは押したあとの話なので、押す手の隣にあるほうが届く -->
+    <p class="runform-warn has-icon" data-icon="alert">
+      <span>途中で確認が要るときは、この画面に出ます。答えるまで待ちます。
+      10分答えが無いと自動的に断って、あなたの番として止まります。</span>
+    </p>
   </div>
 
   <div class="settings-foot">
