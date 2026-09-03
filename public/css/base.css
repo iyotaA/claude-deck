@@ -11,6 +11,23 @@ html, body {
   height: 100%;
 }
 
+/* スクロールバーを細くして、地に沈める。
+
+   溝は透明。既定の太い溝は、列や紙の境目と紛らわしい縦線になる。
+   つまみは --border-strong ―― 幅のつまみ（.splitter）の hover と同じ色で、
+   「掴んで動かせるもの」の濃さをそろえてある。
+
+   **2つの指定を分けて書く理由。** scrollbar-color は継承するので html で足りるが、
+   **scrollbar-width は継承しない**（実測：html にだけ書いたら #detail が auto のまま、
+   器の幅の差が 15px＝既定の太さだった）。スクロールする器は20箇所あって
+   これからも増えるので、1つずつ拾わずに * で敷く。
+
+   **標準のプロパティだけで書く。** ::-webkit-scrollbar は非標準で、
+   そちらを足すと同じ見た目を2通りに書くことになる（片方だけ直す日が来る）。
+   代わりに諦めているのが「つまみの hover で濃くする」で、標準にその指定は無い */
+html { scrollbar-color: var(--border-strong) transparent; }
+* { scrollbar-width: thin; }
+
 body {
   background: var(--bg-sunk);
   color: var(--fg);
