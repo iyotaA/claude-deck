@@ -45,17 +45,23 @@ export function timelineItem(item, ctx = {}) {
   body.append(kindRow);
 
   switch (item.kind) {
-    // 自分の指示は判断の記録そのものなので、Claude の説明より長く出す
+    // 頭出しの予算。**切っても1文字も失わない**（bodyText が全文を畳みに残す）。
+    //
+    // 実測（489件のセッション）で say が 185件・全体の 38% を占めていて、
+    // 時系列4行で 666px 使っていた。1件あたり平均 166px。
+    // ここを詰めると「流れ」が1画面に入る（窓を広げるのは TL_FIRST の側）。
+    //
+    // 差は残す。自分の指示は判断の記録そのものなので、Claude の説明より長く出す
     case 'prompt':
-      body.append(...bodyText(item.text, 900, 12, null, needle));
+      body.append(...bodyText(item.text, 300, 4, null, needle));
       break;
     case 'say':
-      body.append(...bodyText(item.text, 260, 4, item.fullLength, needle));
+      body.append(...bodyText(item.text, 120, 1, item.fullLength, needle));
       break;
     // Claude の自己申告。時系列でもその場で断ってから本文を出す
     case 'recap':
       body.append(el('p', 'note', 'Claude 自身が書いた中間報告です。機械的に抜き出した記録ではありません'));
-      body.append(...bodyText(item.text, 600, 8, item.fullLength, needle));
+      body.append(...bodyText(item.text, 240, 2, item.fullLength, needle));
       break;
     // 間引きで落ちた区間の目印。何が落ちたかまで出す（足跡だけの区間かどうかが読めるように）
     case 'elided': {

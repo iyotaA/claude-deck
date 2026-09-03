@@ -118,7 +118,11 @@ function effectiveTab(d, error) {
  */
 export const INSP_DEFS = [
   { id: 'usage', label: '数値', title: '何にトークンを使ったか' },
-  { id: 'basics', label: '状態', title: 'セッションの状態' },
+  // **id は basics のまま。** ?insp=basics は v0.6.0 で配っているので、
+  // 名前を変えると配ったブックマークが切れる。替えるのは札と見出しだけ。
+  // 「状態」から替えたのは、いまの状態そのもの（あなたの番・返信待ち）は
+  // 帯とヘッダに出ていて、ここに残るのが困ったときに見る値だから
+  { id: 'basics', label: '診断', title: '困ったときに見る値' },
 ];
 
 /**

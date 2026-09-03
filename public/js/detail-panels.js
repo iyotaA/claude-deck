@@ -238,7 +238,17 @@ export function outcomeBlock(d, { onMore } = {}) {
  * @param {object|null} d 詳細（まだ読めていなければ null）
  */
 export function basicsPanel(row, d) {
-  const basics = panel('セッションの状態', { id: SEC.basics });
+  // 見出しは短い名前。長い説明は紙の側（#insp-title）が持つ。
+  // usagePanel が「何にトークンを使ったか」の紙に「数値」のパネルを置いているのと同じ作法。
+  // 前はどちらも「セッションの状態」で、同じ文字が縦に2つ並んでいた
+  const basics = panel('診断', { id: SEC.basics });
+
+  // **性質で3つに割る。** 前は17行が同じ濃さで1つの dl に並んでいて、
+  // 「いまどうなっているか」の3行が「PID」「セッションID」と同じ重さで埋もれていた。
+  // 区切りは .facts-waits の破線を借りる（**新しいクラスを作らない**）。
+  //
+  // 畳まない・節にも割らない。ここを探しているのは、たいてい何かがおかしいとき。
+  // そこで段階的に開示すると、開く順番を当てるゲームになる。**密でよい場所**
   const dl = el('dl', 'facts');
   const idleNode = el('dd', null, since(idleOf(row)));
   idleNode.dataset.liveIdle = row.sessionId;
@@ -246,21 +256,29 @@ export function basicsPanel(row, d) {
   fact(dl, '判定の根拠', row.stateReason);
   dl.append(el('dt', null, '最後の動きから'), idleNode);
   fact(dl, '登録簿の status', row.statusRaw);
-  fact(dl, '権限モード', row.permissionMode);
-  fact(dl, 'モデル', shortModel(row.model));
-  fact(dl, '思考量', row.effort);
   fact(dl, '文脈の量', row.contextTokens ? `${row.contextTokens.toLocaleString('ja-JP')} tokens` : null);
-  fact(dl, 'ブランチ', row.gitBranch);
-  fact(dl, 'PID', row.pid);
-  fact(dl, 'バージョン', row.version);
-  fact(dl, 'セッションID', row.sessionId);
-  if (row.startedAt) fact(dl, '開始', stamp(row.startedAt));
-  if (d) {
-    fact(dl, 'やり取りの回数', `${d.digest.stats.turns} 往復 / ツール ${d.digest.stats.toolCalls} 回`);
-    fact(dl, 'ログの大きさ', `${Math.round(d.log.size / 1024).toLocaleString('ja-JP')} KB / ${d.log.entries} 行`);
-    if (d.log.parseErrors) fact(dl, '読めなかった行', `${d.log.parseErrors} 行`);
-  }
+  if (d) fact(dl, 'やり取りの回数', `${d.digest.stats.turns} 往復 / ツール ${d.digest.stats.toolCalls} 回`);
   basics.body.append(dl);
+
+  // この作業がどう設定されているか。替えたくなったら入力欄の上の札から替える
+  const setup = el('dl', 'facts facts-waits');
+  fact(setup, '権限モード', row.permissionMode);
+  fact(setup, 'モデル', shortModel(row.model));
+  fact(setup, '思考量', row.effort);
+  fact(setup, 'ブランチ', row.gitBranch);
+  if (setup.childElementCount > 0) basics.body.append(setup);
+
+  // 素性。ふだん読む値ではないので最後に置く
+  const id = el('dl', 'facts facts-waits');
+  fact(id, 'PID', row.pid);
+  fact(id, 'バージョン', row.version);
+  fact(id, 'セッションID', row.sessionId);
+  if (row.startedAt) fact(id, '開始', stamp(row.startedAt));
+  if (d) {
+    fact(id, 'ログの大きさ', `${Math.round(d.log.size / 1024).toLocaleString('ja-JP')} KB / ${d.log.entries} 行`);
+    if (d.log.parseErrors) fact(id, '読めなかった行', `${d.log.parseErrors} 行`);
+  }
+  if (id.childElementCount > 0) basics.body.append(id);
 
   // 待ちの集計。1つも測れていなければ行も注記も出さない
   const waits = d?.digest?.stats?.waits;

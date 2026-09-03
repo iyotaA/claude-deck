@@ -23,7 +23,7 @@
  * 焦点だけは外れるので、detach() で控えて runPanel() の最後に戻す。
  *
  */
-import { el, stamp, shortModel, fact } from './util.js';
+import { el, shortModel, fact } from './util.js';
 import { panel, SEC } from './panel.js';
 import {
   runFor, EFFORT_LABELS, MODEL_FREE, modelOptions, modelPick, modelValue,
@@ -60,12 +60,17 @@ function usd(n) {
 /** 実行の見出しに出す情報。状態が変わるまで動かない値だけを並べる。 */
 function factsOf(row) {
   const dl = el('dl', 'facts');
-  fact(dl, 'モデル', shortModel(row.model));
-  fact(dl, '思考の深さ', row.effort);
-  fact(dl, '権限', row.permissionMode);
-  fact(dl, 'フォルダ', row.cwd);
-  fact(dl, '始めた時刻', row.startedAt ? stamp(row.startedAt) : null);
-  fact(dl, 'PID', row.pid);
+  // **6つ落とした。どれも同じ値が別の場所に出ている。**
+  //
+  //   モデル・権限   … 入力欄のすぐ上の札（.composer-now）。押せば替えられる側
+  //   フォルダ       … 詳細の頭の .path
+  //   思考の深さ・PID・始めた時刻 … 右の「診断」（basicsPanel）
+  //
+  // 画面から起こした行でも synthRow() がこの5つを入れているので、
+  // 診断の側が空になることはない（実測で確認済み）。
+  //
+  // 往復は残す。**出どころが違う。** ここは台帳が数えた数（result が来た回数）で、
+  // 診断のほうは会話ログの往復。会話ログが出るまでの時期は、こちらしか無い
   fact(dl, '往復', row.turns);
   // この起動で使った額。**速報を外したとき、この値だけがどこにも出なくなった**ので
   // 行へ移して facts に置いた（`result` の行にしか無く、往復と同時にしか動かない）。
