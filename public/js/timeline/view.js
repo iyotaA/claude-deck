@@ -92,6 +92,35 @@ const TL_DEBOUNCE_MS = 120;
 let tlSearchTimer = null;
 
 /**
+ * 種類のチップを出しているか。
+ *
+ * **`localStorage` にも URL にも残さない。** 開くたび畳んだ状態から始める。
+ * 隠している種類そのものは `?hide=` が持っているので、状態は人へ渡せる。
+ *
+ * `<details>` を使わないのは、詳細ペインが 2秒ごとに丸ごと作り直されるため
+ * （`detailKeyOf()` が `contextTokens` を鍵に含む）。走っているセッションでは
+ * 開いた畳みが毎回閉じる
+ */
+let kindsOpen = false;
+
+/**
+ * 畳んだ札に書く文字。
+ *
+ * **中身を書く。** 「絞り込み」だけだと、押すまで何が起きているのか分からない。
+ * 既定では足跡を隠しているので、畳んだままでもそれが読める
+ *
+ * @param {Set<string>} hidden いま隠している種類
+ */
+function filterLabel(hidden) {
+  if (!hidden.size) return '絞り込み';
+  if (hidden.size === 1) {
+    const [k] = hidden;
+    return `絞り込み — ${KIND_LABELS[k] ?? k}を隠しています`;
+  }
+  return `絞り込み — ${num(hidden.size)} 種類を隠しています`;
+}
+
+/**
  * 時系列パネルの取っ手を差し替える。
  *
  * @param {object} ref
@@ -153,7 +182,23 @@ export function filterBar(all) {
   });
   bar.append(q);
 
+  // 種類のチップは札の向こうへ畳む。**常時は「探す」だけ。**
+  // 実測（489件のセッション）でチップが11枚出ていて、絞り込みの帯だけで
+  // 常時見えているものの2割を占めていた。押す動機（特定の種類だけ見たい・隠したい）は
+  // はっきりしているので、1手の向こうで足りる
+  const kindsBtn = el('button', 'btn', filterLabel(store.hiddenKinds));
+  kindsBtn.type = 'button';
+  kindsBtn.setAttribute('aria-pressed', String(kindsOpen));
+  bar.append(kindsBtn);
+
   const kinds = el('div', 'tl-kinds');
+  kinds.hidden = !kindsOpen;
+  kindsBtn.addEventListener('click', () => {
+    kindsOpen = !kindsOpen;
+    kinds.hidden = !kindsOpen;
+    kindsBtn.setAttribute('aria-pressed', String(kindsOpen));
+  });
+
   for (const [kind, n] of countKinds(items)) {
     // 省略はチップに出さない。自分で選ぶ種類ではなく、間引きの副産物だから。
     //
@@ -178,6 +223,10 @@ export function filterBar(all) {
       if (store.hiddenKinds.has(kind)) store.hiddenKinds.delete(kind);
       else store.hiddenKinds.add(kind);
       paint();
+      // 畳んだときに読む文字なので、ここで追随させる。
+      // これを忘れると、種類を隠したのに札が「絞り込み」のままになり、
+      // 畳んだ人には何が隠れているのか分からなくなる
+      kindsBtn.textContent = filterLabel(store.hiddenKinds);
       // 残すのは URL（?hide=）だけ。localStorage に覚えさせない理由は initialHiddenKinds に書いた
       syncQuery();
       render({ reset: true });

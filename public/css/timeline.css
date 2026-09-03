@@ -46,7 +46,15 @@
   display: flex;
   flex-wrap: wrap;
   gap: .3rem;
+  /* 帯の中で行を分ける。札を押して出したとき、探す欄の下に回り込ませる */
+  flex: 1 0 100%;
 }
+
+/* **`display` を素で書いたので `[hidden]` を打ち消す。**
+   `[hidden]` のブラウザ既定（`display: none`）は詳細度 0,1,0 しか無く、
+   上の `.tl-kinds`（0,1,0）と同点で、後に読まれるこちらが勝ってしまう。
+   `run.css` の `.runform-danger` で同じ踏み方をしている */
+.tl-kinds[hidden] { display: none; }
 
 /* 目次のチップと同じ丸み。押した状態は色ではなく濃さで表す（状態色と混ぜない） */
 .tl-chip {
