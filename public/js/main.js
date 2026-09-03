@@ -184,6 +184,7 @@ subscribeRuns(() => {
 // 名前は title と aria-label が持つので、絵だけにしても意味は消えない。
 //
 // 「起こす」だけ 14px にする。文字と並ぶので、16px だと絵のほうが大きく見える
+dom.listToggle.append(icon('sidebar'));
 dom.brand.prepend(icon('deck'));
 dom.runformOpen.prepend(icon('plus', 14));
 dom.reload.append(icon('refresh'));

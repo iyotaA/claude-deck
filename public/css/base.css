@@ -190,10 +190,13 @@ body {
    縮まないようにするのだけがここの仕事（形は icons.js が持つ） */
 .icon { flex: none; }
 
-/* 一覧を引き出すボタン。広い画面では一覧が常に見えているので出さない */
-/* 一覧を出す口。**常時出す。** 一覧を引き出しへ降ろしたので、
-   これと Ctrl+K が一覧へ行く唯一の道になった（前は狭い窓だけの飾りだった） */
-.hamburger {
+/* 一覧を畳む・出す口。**常時出す。**
+   一覧が畳める列になったので、これと Ctrl+K が開閉の道になった。
+
+   **3本線（ハンバーガー）から替えた。** あれは「メニューを開く」の記号で、
+   左の列を畳む・出すことを示していない（押した先が読めない、という指摘を受けた）。
+   いまは画面の枠と左の帯で描いたサイドバーの記号で、帯の塗りが開閉を示す */
+.list-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -205,30 +208,11 @@ body {
   background: var(--bg-elev);
 }
 
-.hamburger:hover { border-color: var(--border-strong); }
-
-/* 3本線は線1本＋擬似要素2本で作る。字形に頼るとフォントで太さが変わる */
-.hamburger .bars,
-.hamburger .bars::before,
-.hamburger .bars::after {
-  display: block;
-  width: 1.05rem;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--fg);
-}
-
-.hamburger .bars { position: relative; }
-
-.hamburger .bars::before,
-.hamburger .bars::after {
-  content: "";
-  position: absolute;
-  left: 0;
-}
-
-.hamburger .bars::before { top: -5px; }
-.hamburger .bars::after { top: 5px; }
+.list-toggle:hover { border-color: var(--border-strong); }
+/* 開いているあいだは左の帯を塗る。**アイコンで状態を示す。**
+   絵が「いま一覧が出ているか」を持つので、押した先に何が起きるかが読める。
+   出し分けは aria-expanded に乗せてある（drawer.js が付け替えるので JS は増えない） */
+.list-toggle[aria-expanded="true"] .icon .pane { fill: currentColor; }
 
 /* 下段。**ボールの所在だけを置く帯。**
    上段と同じ行に混ぜない。混ぜると「どれから手をつけるか」が

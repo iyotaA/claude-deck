@@ -33,10 +33,9 @@
 
   <header class="topbar">
     <!-- 狭い画面でだけ出る。一覧を手前に引き出す -->
-    <button class="hamburger" id="list-toggle" type="button"
-            aria-expanded="false" aria-controls="list-pane" aria-label="セッション一覧を開く">
-      <span class="bars" aria-hidden="true"></span>
-    </button>
+    <!-- 一覧の開閉。絵（SVG）は main.js が差す（形は icons.js の1箇所で持つ） -->
+    <button class="list-toggle" id="list-toggle" type="button"
+            aria-expanded="false" aria-controls="list-pane" aria-label="セッション一覧を開く"></button>
     <!-- 題名は落とす。毎日開く画面なので、名前は一度覚えれば済む。
          前はここがバーでいちばん大きい字で、いちばん情報の少ないものが
          いちばん目立っていた。脇の印（SVG）は main.js が差す -->
