@@ -14,7 +14,7 @@
 import { el, shortModel } from './util.js';
 import { icon } from './icons.js';
 import { dom, store } from './store.js';
-import { setListOpen } from './drawer.js';
+import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
 import {
   block, readNote, hitRateNote, statTile, barList, shareBar, trendList, tableDetails,
@@ -485,7 +485,7 @@ function usageCard(row) {
     // 「一覧から消えたら選択を外す」（`selectedFrom === 'live'` のときだけ働く）に
     // 引っかかって、押した直後に先頭へ飛ぶ
     select(row.sessionId, 'usage');
-    setListOpen(false, dom.detail);
+    closeListAfterPick(dom.detail);
   });
   li.append(card);
   return li;

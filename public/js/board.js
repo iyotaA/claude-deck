@@ -22,7 +22,7 @@
  */
 import { el } from './util.js';
 import { dom, store, MODES, STATE_COLOR, syncQuery } from './store.js';
-import { setListOpen } from './drawer.js';
+import { closeListAfterPick } from './drawer.js';
 import { renderDetailIfNeeded } from './detail.js';
 import { loadDetail } from './session.js';
 import { buildCard, renderList } from './list.js';
@@ -157,7 +157,7 @@ export function setMode(mode, { sync = true } = {}) {
   if (board || usage) {
     // 引き出しを開けっぱなしにしない。一覧そのものが消えるので、
     // 開いたままだと中身の無い紙と膜だけが画面に残る
-    setListOpen(false);
+    closeListAfterPick();
     // 監視盤は毎秒の push でも描き直す（apply() が呼ぶ）が、数値は開いたときだけ。
     // 引くのは /api/usage（ログを全文読む）なので、見ているあいだ撃ち続けない
     if (board) renderBoard();

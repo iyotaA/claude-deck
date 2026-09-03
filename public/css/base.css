@@ -68,28 +68,38 @@ body {
   --insp-col: clamp(15rem, var(--insp-w), min(34rem, 34vw));
 }
 
-/* 読む面 ＋ 右端のレールの2列。幅は auto にしてボタン側で決める
+/* 一覧 ＋ 読む面 ＋ 右端のレール。幅は auto にしてボタン側で決める
    （数字を2箇所に焼き込まない）。
 
-   **一覧はこの列に居ない。** 引き出し（position: fixed）へ降ろしたので
-   in-flow の子から外れている。閉じているあいだ .insp も hidden なので、
-   grid の子は2つ・列も2つで釣り合う。
+   **一覧は列のまま。ただし畳める。** 畳むと列が 0 になり、幅が中央へ渡る。
+   オーバーレイで手前に出す形も試したが、開いているあいだ中央が触れなくなるのと、
+   閉じたときに右へ余白が残るのが具合が悪かった。列なら**開けば余白が埋まり、
+   畳めば読む面が広がる**。同時に触れるので膜も要らない。
 
-   一覧を列から降ろしたのは、作業台が「いまの作業をする場所」で、一覧は
-   「移るための道具」だから。道具に 27rem（最大 40rem）の常設列を与えていたのが
-   読む幅を狭めていた。実測で本文が全角 36 字まで潰れていた（1512px・右を開いた形） */
+   閉じているあいだ .insp は hidden なので、grid の子と列は釣り合ったまま。
+
+   **4通りを明示して書く。** .is-list-open .deck と .is-insp-open .deck は
+   どちらも (0,2,0) で、読む順で後のほうが勝ってしまう。
+   両方立っているときは (0,3,0) の側が要る（.is-board.is-insp-open と同じ形） */
 .deck {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 0 minmax(0, 1fr) auto;
   gap: 0;
   min-height: 0;
 }
 
+.is-list-open .deck {
+  grid-template-columns: var(--list-col) minmax(0, 1fr) auto;
+}
+
 /* インスペクタが開いたら、中央を削って右に場所を作る。
-   目印を .app に付けているのは .is-list-open と同じ流儀。
-   子は3つ（.detail-pane / .insp / .rail）・列も3つで釣り合う */
+   目印を .app に付けているのは .is-list-open と同じ流儀 */
 .is-insp-open .deck {
-  grid-template-columns: minmax(0, 1fr) var(--insp-col) auto;
+  grid-template-columns: 0 minmax(0, 1fr) var(--insp-col) auto;
+}
+
+.is-list-open.is-insp-open .deck {
+  grid-template-columns: var(--list-col) minmax(0, 1fr) var(--insp-col) auto;
 }
 
 /* 幅を変えるつまみ。列の境目にまたがらせる。

@@ -6,9 +6,9 @@
 
 /* ------------------------------------------------------------ 狭い窓向け */
 
-/* 引き出しと膜は list.css へ上げた（広い窓でも同じ形を使うため）。
-   ここに残すのは、狭い窓でだけ変えたいもの ―― 引き出しの幅と、掴む境目の非表示、
-   それにインスペクタをボトムシートへ落とすぶん */
+/* 背後を覆う膜。広い窓の一覧は畳める列（中央と同時に触れる）なので要らない。
+   出すのは、手前に重なる引き出しになる狭い窓だけ */
+.scrim { display: none; }
 
 /* 紙が出てくるときだけ動かす。閉じる側は JS が hidden を立てて即座に消える。
    transition ではなく animation にしてあるのはそのためで、display: none から
@@ -24,12 +24,11 @@
 @media (max-width: 860px) {
   /* レールの分だけ右に残して、残りを中央に全部渡す。
 
-     **効くのは .is-insp-open のほう。** 一覧を引き出しへ降ろしたので
-     base.css の .deck はもう2列で、そちらは書かなくても同じになった。
-     ただし .is-insp-open .deck（0,2,0）は base で3列なので、
-     狭い窓ではここで2列へ戻す（紙は中央に重ねるため列を持たせない）。
-     **.deck 単体も残す。** 消すと、あとで base の列を触ったときにここが
-     追随しないことに気づけない（並べて書いてあることが目印になる）。
+     **base の4通りを全部ここで2列へ落とす。** 狭い窓の一覧は列ではなく
+     手前に重なる引き出し（position: fixed）なので in-flow の子から外れる。
+     base の列（一覧ぶんの1列）が残ったままだと、開いた瞬間に空の列が居座って
+     中央がそのぶん狭くなる。紙も中央に重ねるので列を持たせない。
+     .is-list-open.is-insp-open は (0,3,0) 同士で、後に読まれるこちらが勝つ。
 
      **監視盤（.is-board）には手を出さない。** あちらは board.css の
      .is-board .deck（0,2,0）が、ここの .deck 単体（0,1,0）に詳細度で勝つ。
@@ -37,7 +36,9 @@
      .is-insp-open .deck（0,2,0）はこの勝負に関わらない。
      読む順ではなく詳細度で決まるので、board.css 側だけで足りる（実測） */
   .deck,
-  .is-insp-open .deck {
+  .is-list-open .deck,
+  .is-insp-open .deck,
+  .is-list-open.is-insp-open .deck {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: minmax(0, 1fr);
   }
@@ -89,12 +90,46 @@
   .insp-body { overscroll-behavior: contain; }
 
   /* 幅を変えるつまみは出さない。掴む境目そのものが無い
-     （一覧は引き出し、インスペクタは中央に重ねる紙）。
-     広い窓では引き出しの右端につまみが付いたままなので、消すのはここだけ */
+     （一覧は手前に重なる引き出し、インスペクタは中央に重ねる紙） */
   .splitter { display: none; }
 
-  /* 引き出しの幅だけ狭い窓向けに詰める。姿そのものは list.css が持つ。
-     ここは同じ詳細度（0,1,0）で後に読まれるので上書きできる。
-     広い窓の var(--list-col)（最大 40rem）だと画面をほぼ覆ってしまう */
-  .list-pane { width: min(88vw, 24rem); }
+  /* 狭い窓では一覧を列として畳めない。畳んでも中央に渡せる幅がそもそも足りず、
+     開けば中央が潰れる。ここだけは手前へ重ねる引き出しにする。
+
+     折り返しで高さが変わる上のバーごと覆う。中途半端に避けると位置が合わなくなる。
+     閉じている間は画面の外へ逃がすだけにして、visibility では隠さない
+     （変化が1フレームで確定せず、開いた直後に focus を受け付けない）。
+     見えていないカードへ Tab で入るのを防ぐのは drawer.js の inert に任せる */
+  .list-pane {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    width: min(88vw, 24rem);
+    border-right: 1px solid var(--border);
+    overscroll-behavior: contain;
+    transform: translateX(-100%);
+    transition: transform .18s ease;
+  }
+
+  /* 影は開いているときだけ。閉じていても影はにじむので、画面の左端に帯が出てしまう */
+  .is-list-open .list-pane {
+    box-shadow: var(--shadow);
+    transform: translateX(0);
+  }
+
+  /* 手前に重なるぶん、背面を止める。押せば閉じる口にもなる */
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgb(0 0 0 / 45%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s ease;
+  }
+
+  .is-list-open .scrim { opacity: 1; pointer-events: auto; }
 }
