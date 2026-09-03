@@ -30,6 +30,9 @@ import { buildCard, renderList } from './list.js';
 /** 数値モードに入ったときに呼ぶもの。main.js が showUsage を差す */
 let onUsage = null;
 
+/** 書庫モードに入ったときに呼ぶもの。main.js が showArchive を差す */
+let onArchive = null;
+
 /**
  * 列の並び。左から手をつける順（src/parse/state.mjs の STATE_RANK と同じ考え）。
  *
@@ -123,7 +126,7 @@ export function renderBoard() {
 /**
  * モードを切り替える。
  *
- * 押した状態の正は aria-pressed 1つ（.list-tabs と同じ流儀）。
+ * 押した状態の正は aria-pressed 1つ。旗を2箇所に持たない。
  * 開き方の指定を URL に残すので、監視盤や数値のままブックマークできる。
  *
  * 3つになったので「監視盤かどうか」の二値では書けない。
@@ -139,33 +142,40 @@ export function setMode(mode, { sync = true } = {}) {
   const changed = store.mode !== next;
   store.mode = next;
   const board = next === 'board';
+  const archive = next === 'archive';
   const usage = next === 'usage';
 
   // 目印は .app に付ける（.is-list-open と同じ流儀）。骨格の組み替えは
   // board.css の .is-board と usage.css の .is-usage が受け持つ
   dom.app.classList.toggle('is-board', board);
+  dom.app.classList.toggle('is-archive', archive);
   dom.app.classList.toggle('is-usage', usage);
   dom.modeWork.setAttribute('aria-pressed', String(next === 'work'));
   dom.modeBoard.setAttribute('aria-pressed', String(board));
+  dom.modeArchive.setAttribute('aria-pressed', String(archive));
   dom.modeUsage.setAttribute('aria-pressed', String(usage));
   dom.boardHead.hidden = !board;
   dom.board.hidden = !board;
+  dom.archiveHead.hidden = !archive;
+  dom.archive.hidden = !archive;
   dom.usageHead.hidden = !usage;
   dom.usage.hidden = !usage;
   if (sync) syncQuery();
 
-  if (board || usage) {
+  if (board || archive || usage) {
     // 引き出しを開けっぱなしにしない。一覧そのものが消えるので、
     // 開いたままだと中身の無い紙と膜だけが画面に残る
     closeListAfterPick();
-    // 監視盤は毎秒の push でも描き直す（apply() が呼ぶ）が、数値は開いたときだけ。
-    // 引くのは /api/usage（ログを全文読む）なので、見ているあいだ撃ち続けない
+    // 監視盤は毎秒の push でも描き直す（apply() が呼ぶ）が、書庫と数値は開いたときだけ。
+    // 書庫は /api/archive、数値は /api/usage を引く。どちらもファイルを開く窓口なので、
+    // 見ているあいだ撃ち続けない（書庫は検索語が変わったときだけ引き直す）
     if (board) renderBoard();
+    else if (archive) onArchive?.();
     else onUsage?.();
     return;
   }
 
-  // 監視盤と数値のあいだ、中央と左は描いていない（apply() が飛ばしている）ので、
+  // 監視盤・書庫・数値のあいだ、中央と左は描いていない（apply() が飛ばしている）ので、
   // 戻るときに追いつかせる。**替わったときだけ。** 起動時や押し直しでも払うと、
   // 作業台で「作業台」を押すたびに開いた <details> と打ちかけの文が消える
   if (!changed) return;
@@ -185,14 +195,19 @@ export function setMode(mode, { sync = true } = {}) {
  * @param {() => void} [opts.onUsage] 数値モードに入ったときに呼ぶもの。
  *   usage-tab.js の showUsage を差す（**こちらから import しない。**
  *   同じ層7 なので、向きを持たせずに済む形を選ぶ）
+ * @param {() => void} [opts.onArchive] 書庫モードに入ったときに呼ぶもの。
+ *   archive.js の showArchive を差す（onUsage と同じ理由）
  */
-export function initBoard({ onUsage: fn = null } = {}) {
+export function initBoard({ onUsage: fn = null, onArchive: fnArchive = null } = {}) {
   onUsage = fn;
+  onArchive = fnArchive;
   dom.modeWork.addEventListener('click', () => setMode('work'));
   dom.modeBoard.addEventListener('click', () => setMode('board'));
+  dom.modeArchive.addEventListener('click', () => setMode('archive'));
   dom.modeUsage.addEventListener('click', () => setMode('usage'));
   // 列に入らなかったぶんの逃げ道。作業台の一覧へ移すだけ
   dom.boardRest.addEventListener('click', () => setMode('work'));
-  // ?mode=board や ?mode=usage で開いたときのために1回当てる。起動時に URL は書き換えない
+  // ?mode=board / ?mode=archive / ?mode=usage で開いたときのために1回当てる。
+  // 起動時に URL は書き換えない
   setMode(store.mode, { sync: false });
 }

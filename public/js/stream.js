@@ -55,9 +55,11 @@ function apply(payload) {
   // あちらは毎秒の一覧がそのまま材料だが、こちらの材料は /api/usage（ログを全文読む）で、
   // 開いたときに1回だけ引く形にしてある。作業台へ戻るときに setMode('work') が追いつかせる
   if (store.mode === 'usage') return;
-  // 書庫を出しているあいだ #list には触らない。replaceChildren すると
-  // 見えていない一覧のスクロール位置が毎秒先頭へ飛ぶ
-  if (store.tab !== 'archive') renderList();
+  // 書庫のあいだも何も描かない。左の列ごと消えているので、replaceChildren すると
+  // 見えていない一覧のスクロール位置が毎秒先頭へ飛ぶ。
+  // 中身は開いたときに1回だけ引く（作業台へ戻るときに setMode('work') が追いつかせる）
+  if (store.mode === 'archive') return;
+  renderList();
   // 詳細は「見えているものが動いたとき」だけ作り直す。毎回作り直すと、
   // 開いた <details> とスクロール位置が2秒ごとに消える
   renderDetailIfNeeded();

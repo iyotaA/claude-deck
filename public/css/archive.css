@@ -1,0 +1,63 @@
+/* 書庫モード（過去のセッションを探して戻る画面）。
+ *
+ * 左の列のタブだったものを、モードとして画面いっぱいへ出したもの。
+ * 出すカードの項目が5つ（日付・大きさ・タイトル・置き場所・ブランチ）あるのに
+ * 27rem の列に押し込んでいて、置き場所も期間も絞る場所が無かった。
+ *
+ * ただし .deck の組み替えは読む順では決まらない。
+ * ここの `.is-archive .deck`（0,2,0）は narrow.css の `.is-insp-open .deck`（0,2,0）と
+ * 同じ詳細度で、あちらが後から読まれる。**(0,3,0) の側も並べて書く。**
+ * 書かないと、右の枠を開いたまま書庫へ移った人だけ列が戻る
+ * （board.css と usage.css がやっているのと同じ手当て）。
+ */
+
+.is-archive .deck,
+.is-archive.is-insp-open .deck {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.is-archive .list-pane,
+.is-archive .detail-pane,
+.is-archive .insp,
+.is-archive .rail { display: none; }
+
+/* 探す帯。狭い列に居たころは件数を次の行へ送っていた（list.css の `flex: 1 0 100%`）。
+   広い場所では同じ行の右端に置ける。**打ち切りの断りもここに出る**ので、
+   検索語のとなりから離しておく（読む順が「探した → 何件 → どこまで」になる） */
+.is-archive .archive-head { padding: .55rem .75rem; }
+
+.is-archive .archive-head #archive-count {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* 検索語だけが伸びる。絞り込みは中身の幅で置く */
+.is-archive .archive-q { flex: 1 1 20rem; }
+
+/* 結果。窓を広げた分だけ列が増える。19rem はタイトルが2行で収まる下限で、
+   これより狭めると3行になってカードの高さが揃わなくなる */
+.archive-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: .5rem;
+  margin: 0;
+  padding: .6rem;
+  overflow-y: auto;
+  min-height: 0;
+  list-style: none;
+  /* 件数が少ない日にカードが縦へ伸びないようにする */
+  align-content: start;
+  background: var(--bg-sunk);
+}
+
+/* `display: grid` は `[hidden]` の既定（0,1,0）に勝つので、消す指定を自分で書く */
+.archive-grid[hidden] { display: none; }
+
+/* 空・読み込み中・エラー・「続きを出す」は列をまたいで1本に伸ばす。
+   グリッドの1マスに入ると画面の左上へ小さく出て、見つけられない */
+.archive-grid > li.is-wide { grid-column: 1 / -1; }
+
+/* カードの中身は広い場所でも同じ形。**タイトルの行数に上限を付けない。**
+   探しに来た人が読むのはそこなので、省くと画面を広げた意味が消える */
+.archive-grid .card { height: 100%; }

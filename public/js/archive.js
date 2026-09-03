@@ -1,16 +1,22 @@
-/* 書庫（終了したものも含む全セッション）と、左のペインのタブ。
+/* 書庫（終了したものも含む全セッション）。
  *
- * 層7。タブを稼働中に戻すときに renderList（list.js）を呼ぶので、あちらより下に置く。
+ * 層7。押されたときに select（session.js）を呼ぶので、あちらより下に置く。
  *
- * 数値はここのタブだったが、モード（board.js の setMode）へ移した。
- * 出す中身がセッション1本のものではないので、選ぶ場所である左のペインに
- * 置く理由が無かった。この import が1本減っている。
+ * **左のペインのタブだったが、モードへ出した。** 数値を移したのと同じ引っ越しで、
+ * 理由はあちらと違う。こちらは中身がセッション1本のものだが、
+ * 出す項目が5つ（日付・大きさ・タイトル・置き場所・ブランチ）あるのに
+ * 27rem の列に押し込んでいて、置き場所も期間も絞る場所が無かった。
+ *
+ * モードの出し入れそのものは board.js の setMode が持つ。
+ * こちらは「出せと言われたら描く」だけで、`showArchive()` がその口
+ * （initBoard({ onUsage }) と同じ差し方。層7 どうしで向きを持たせずに済む）。
  */
 import { el, kb, shortStamp, stamp, agentTag } from './util.js';
-import { dom, store, syncQuery, ARCHIVE_SORTS, TABS } from './store.js';
-import { closeListAfterPick } from './drawer.js';
+import { dom, store, syncQuery, ARCHIVE_SORTS } from './store.js';
 import { select } from './session.js';
-import { renderList } from './list.js';
+
+/** カードを押されたあとの後始末。main.js が差す */
+let pick = null;
 
 /** 1ページの件数。サーバ側の上限は 50 */
 const ARCHIVE_PER = 30;
@@ -57,7 +63,8 @@ function buildArchiveCard(row) {
 
   card.addEventListener('click', () => {
     select(row.sessionId, 'archive');
-    closeListAfterPick(dom.detail);
+    // 押されたあと何をするかは外から差す。いまは作業台へ移る
+    pick?.();
   });
   li.append(card);
   return li;
@@ -84,13 +91,13 @@ function renderArchive() {
 
   // 空表示を4つに割る。ひとまとめにすると「まだ引いていない」と「0件だった」が同じ顔になる
   if (a.unavailable) {
-    const li = el('li');
+    const li = el('li', 'is-wide');
     li.append(el('div', 'empty', '書庫はまだ使えません（サーバ側が対応していません）'));
     dom.archive.append(li);
     return;
   }
   if (a.error) {
-    const li = el('li');
+    const li = el('li', 'is-wide');
     const box = el('div', 'empty', `書庫を読めませんでした: ${a.error}`);
     const retry = el('button', 'btn', 'もう一度試す');
     retry.type = 'button';
@@ -105,14 +112,14 @@ function renderArchive() {
   if (!a.loaded) {
     // 引いている途中だけ出す。押す前から空の枠を出すと「0件だった」に見える
     if (a.loading) {
-      const li = el('li');
+      const li = el('li', 'is-wide');
       li.append(el('div', 'empty', '書庫を読んでいます…'));
       dom.archive.append(li);
     }
     return;
   }
   if (a.rows.length === 0) {
-    const li = el('li');
+    const li = el('li', 'is-wide');
     const box = el('div', 'empty', a.q
       ? `「${a.q}」に当たるセッションがありません`
       : 'セッションのログが見つかりません');
@@ -128,7 +135,7 @@ function renderArchive() {
   for (const row of a.rows) dom.archive.append(buildArchiveCard(row));
 
   if (a.rows.length < a.total) {
-    const li = el('li');
+    const li = el('li', 'is-wide');
     const more = el('button', 'btn archive-more',
       `続きを出す（残り ${(a.total - a.rows.length).toLocaleString('ja-JP')} 件）`);
     more.type = 'button';
@@ -197,46 +204,29 @@ async function loadArchive({ append = false } = {}) {
 }
 
 /**
- * 左のペインを切り替える。
+ * 書庫を出す。board.js の setMode から呼ばれる。
  *
- * 書庫を出しているあいだも上のバーのまとめ（renderSummary）は動かし続ける。
- * あれが「誰かが待っている」の唯一の合図なので、ここで止めると質問を取りこぼす。
- *
- * 出し分けは hidden の付け外しだけでやる。作り直さないので、
- * 書庫の途中まで読んだ位置がタブを行き来しても残る。
- *
- * @param {'live'|'archive'} tab TABS のどれか。知らない値は 'live' に落とす
- * @param {object} [opts]
- * @param {boolean} [opts.sync] URL を書き戻すか。起動時だけ false にする
- *   （まだ ?session= を store に取り込んでいないので、書き戻すと指定が消える）
+ * 出し入れ（hidden の付け外し）は setMode 側が受け持つ。ここでやるのは中身だけ。
+ * **開くたびに引き直さない。** 一度読めていればそのまま描くので、
+ * 作業台と行き来しても、読んだ位置と検索語がそのまま残る。
  */
-export function setTab(tab, { sync = true } = {}) {
-  store.tab = TABS.has(tab) ? tab : 'live';
-  const now = store.tab;
-
-  // 出す側を1つ選んで、残りは全部隠す形にする。二値の三項に畳まないのは TABS と
-  // 同じ理由で、3つ目を足した日にこの行を書き換え忘れると黙って両方出る
-  dom.tabLive.setAttribute('aria-pressed', String(now === 'live'));
-  dom.tabArchive.setAttribute('aria-pressed', String(now === 'archive'));
-  dom.liveHead.hidden = now !== 'live';
-  dom.list.hidden = now !== 'live';
-  dom.archiveHead.hidden = now !== 'archive';
-  dom.archive.hidden = now !== 'archive';
-  if (sync) syncQuery();
-
-  if (now === 'live') {
-    // まだ一覧を受け取っていない起動直後は描かない。空表示が一瞬出るのを避ける
-    if (store.meta) renderList();
-    return;
-  }
+export function showArchive() {
   if (!store.archive.loaded && !store.archive.loading) loadArchive();
   else renderArchive();
 }
 
-/** タブの配線。store.tab は保存しないので、初期値は URL だけから決まる */
-export function initTabs() {
-  dom.tabLive.addEventListener('click', () => setTab('live'));
-  dom.tabArchive.addEventListener('click', () => setTab('archive'));
+/**
+ * 探す帯の配線。main.js から1回だけ呼ぶ。
+ *
+ * 初期値は URL だけから決まる（localStorage には残さない）。
+ *
+ * @param {object} [opts]
+ * @param {?function} [opts.onPick] カードを押されたあとの後始末。
+ *   main.js が `() => setMode('work')` を差す。**board.js を import しない**
+ *   （同じ層7 なので、向きを持たせずに済む形を選ぶ）
+ */
+export function initArchive({ onPick = null } = {}) {
+  pick = onPick;
 
   dom.archiveQ.value = store.archive.q ?? '';
   dom.archiveSort.value = store.archive.sort;
@@ -267,6 +257,4 @@ export function initTabs() {
     syncQuery();
     loadArchive();
   });
-
-  setTab(store.tab, { sync: false });
 }

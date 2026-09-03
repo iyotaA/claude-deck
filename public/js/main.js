@@ -61,7 +61,7 @@ import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
 import { renderDetail, renderDetailIfNeeded, initInspector } from './detail.js';
 import { renderList, renderRate } from './list.js';
-import { initTabs } from './archive.js';
+import { initArchive, showArchive } from './archive.js';
 import { showUsage, initUsageTab } from './usage-tab.js';
 import { initBoard, setMode } from './board.js';
 import { select, detailCache } from './session.js';
@@ -130,7 +130,11 @@ setListOpen(initialListOpen(), null, false);
 initZoom({ onChange: renderDetail });
 initInspector();
 initResize();
-initTabs();
+// 書庫の探す帯を配線してから initBoard に渡す。あちらの setMode は
+// ?mode=archive で開いたときに onArchive（= showArchive）をその場で呼ぶので、
+// 先に配線しておかないと検索欄の初期値が当たる前に引き始める。
+// 押されたあと作業台へ移す口も、ここで差す（archive.js は board.js を import しない）
+initArchive({ onPick: () => setMode('work') });
 // 数値モードの絞り込みを配線してから initBoard に渡す。あちらの setMode は
 // ?mode=usage で開いたときに onUsage（= showUsage）をその場で呼ぶので、
 // 先に配線しておかないと <select> の初期値が当たる前に引き始める
@@ -139,7 +143,7 @@ initUsageTab({ onPick: () => setMode('work') });
 // 押される前にモードが当たっていないと最初の1回が空振りする。
 // 数値モードの中身は usage-tab.js にあるので、出す口だけを差す
 // （board.js があちらを import すると、同じ層7 に向きが1本増える）
-initBoard({ onUsage: showUsage });
+initBoard({ onUsage: showUsage, onArchive: showArchive });
 initSettings();
 initUpdate();
 initRunForm();

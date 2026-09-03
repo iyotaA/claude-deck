@@ -28,16 +28,10 @@
 .list-pane > .splitter { display: none; }
 .is-list-open .list-pane > .splitter { display: block; }
 
-/* 稼働中と書庫の切り替え。押されているほうだけ下に線を1本引く。
-   面は塗らない（一覧のカードと同じ理由で、塗ると重さの差が読めなくなる） */
-.list-tabs {
-  display: flex;
-  align-items: center;
-  gap: .25rem;
-  padding: .35rem .5rem 0;
-  border-bottom: 1px solid var(--border);
-}
-
+/* 押されているものだけ下に線を1本引く。面は塗らない
+   （一覧のカードと同じ理由で、塗ると重さの差が読めなくなる）。
+   **左の列のタブは無くなったが、この形は上のバーのモードの札が借りている。**
+   定義そのものは残す（board.css の冒頭にその旨がある） */
 .tab {
   padding: .35rem .7rem .3rem;
   border: 0;
@@ -57,8 +51,8 @@
   border-bottom-color: var(--accent);
 }
 
-/* 閉じるボタンはタブ行の右端。書庫を出しているあいだも同じ位置に残る */
-.list-tabs .drawer-close { margin-left: auto; }
+/* 閉じるボタンは一覧の帯の右端。タブ行が無くなったので、この帯が受け持つ */
+#live-head .drawer-close { margin-left: auto; }
 
 .list-head {
   display: flex;

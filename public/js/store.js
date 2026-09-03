@@ -46,8 +46,8 @@ export const SUMMARY_ORDER = [
  *  ?tq=<語> … 時系列の検索語
  *  ?hide=<種類,種類> … 時系列で隠す種類。空で付けると「何も隠さない」になる
  *  ?nolive=1 … 自動更新をつながない
- *  ?mode=board|usage … 監視盤（列で見る）や数値（横断の集計）で開く
- *  ?tab=archive … 書庫（終了したものも含む全セッション）を開いた状態にする
+ *  ?mode=board|archive|usage … 監視盤（列で見る）・書庫（過去を探す）・数値（横断の集計）で開く
+ *  ?tab=archive … 書庫が左のペインのタブだった版の形。?mode=archive へ読み替える
  *  ?aq=<語> … 書庫の検索語
  *  ?asort=recent|oldest|size … 書庫の並び順
  *  ?dtab=log|agents … 詳細ペインの中央のどのタブを開くか
@@ -72,33 +72,27 @@ export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
  * 集合で持つ。三項演算子で二値に畳むと、3つ目を足した日に
  * 黙って 'work' へ落ちる形になる（実際に3つ目を足した）
  */
-export const MODES = new Set(['work', 'board', 'usage']);
+export const MODES = new Set(['work', 'board', 'archive', 'usage']);
 
 /**
  * 開くモードを決める。
  *
- * `?tab=usage` を拾うのは、数値が左のペインのタブだった版（0.3.0 で配った）の
- * URL が実在するため。**ここは読み替えを入れる。** INSPECTOR_TABS の側で
- * 入れなかったのは、あれがまだ誰にも配っていなかったからで、方針の違いではない。
+ * **配ったブックマークを切らない。** 左のペインのタブだった2つを、どちらもここで拾う。
+ *
+ *  - `?tab=usage` … 数値がタブだった版（0.3.0 で配った）
+ *  - `?tab=archive` … 書庫がタブだった版（0.9.1 まで）
+ *
+ * どちらも同じ形の引っ越しなので、読み替えも1箇所にまとめてある。
+ * `?tab=live` は作業台の既定なので拾わない（既定へ落ちれば済む）。
  */
 function initialMode() {
   const m = query.get('mode');
   if (MODES.has(m)) return m;
-  return query.get('tab') === 'usage' ? 'usage' : 'work';
+  const t = query.get('tab');
+  if (t === 'usage') return 'usage';
+  if (t === 'archive') return 'archive';
+  return 'work';
 }
-
-/**
- * 左のペインに出せるもの。知らない値は 'live' に落とす。
- *
- * 集合で持つのは、増やしたときに三項演算子を書き換えなくて済むようにするため。
- * 以前は `=== 'archive' ? 'archive' : 'live'` と書いてあり、
- * 3つ目を足したときに黙って 'live' へ落ちる形になっていた。
- *
- * 数値は 3つ目のタブだったが、モード（MODES）へ移した。
- * **2つに戻っても集合のままにする。** 三項に畳み直すと、次に足したときに
- * 同じ地雷（黙って 'live' へ落ちる）を踏み直すことになる
- */
-export const TABS = new Set(['live', 'archive']);
 
 /**
  * 詳細ペインの中央に出せるもの。知らない値は 'now' に落とす。
@@ -107,7 +101,7 @@ export const TABS = new Set(['live', 'archive']);
  * いま何を見ればいいのかが分からなくなっていたので、役目で割ってある。
  * 中央は「その作業をするのに要るもの」の3つだけ。残りは右のインスペクタへ寄せた。
  *
- * TABS と同じく集合で持つ。三項演算子で二値に畳むと、増やすたびに
+ * MODES と同じく集合で持つ。三項演算子で二値に畳むと、増やすたびに
  * 判定と syncQuery の2箇所を直すことになる
  */
 export const DETAIL_TABS = new Set(['now', 'log', 'out', 'agents']);
@@ -166,6 +160,7 @@ export const dom = {
   // 監視盤（board.js）。作業台とは別のモードなので、器も別に持つ
   modeWork: document.getElementById('mode-work'),
   modeBoard: document.getElementById('mode-board'),
+  modeArchive: document.getElementById('mode-archive'),
   modeUsage: document.getElementById('mode-usage'),
   boardHead: document.getElementById('board-head'),
   boardCount: document.getElementById('board-count'),
@@ -182,8 +177,6 @@ export const dom = {
   inspClose: document.getElementById('insp-close'),
   inspBody: document.getElementById('insp-body'),
   rail: document.getElementById('rail'),
-  tabLive: document.getElementById('tab-live'),
-  tabArchive: document.getElementById('tab-archive'),
   liveHead: document.getElementById('live-head'),
   archiveHead: document.getElementById('archive-head'),
   archive: document.getElementById('archive'),
@@ -351,14 +344,6 @@ export const store = {
    */
   mode: initialMode(),
   /**
-   * 左のペインに出しているもの。TABS のどれか。
-   *
-   * localStorage には残さない。書庫を開いたまま保存すると、次に開いたときに
-   * 「誰が待っているか」が見えない状態で始まってしまう。
-   * 固定したい人は ?tab=archive のようにブックマークする
-   */
-  tab: TABS.has(query.get('tab')) ? query.get('tab') : 'live',
-  /**
    * 詳細ペインの中央に出しているタブ。DETAIL_TABS のどれか。
    *
    * localStorage には残さない（tab と同じ理由）。
@@ -460,10 +445,12 @@ export function syncQuery() {
   // 既定（作業台）のときだけキーを落とす。tab と同じ扱い
   set('mode', store.mode === 'work' ? null : store.mode);
   // 既定（稼働中）のときだけキーを落とす。3値になったので三項では書かない
-  set('tab', store.tab === 'live' ? null : store.tab);
-  set('aq', store.tab === 'archive' ? store.archive.q : null);
+  // ?tab= はもう書かない。書庫が左のペインのタブだった名残で、いまはモードが正。
+  // 読むほう（initialMode）は残してある ―― 配ったブックマークを切らないため
+  params.delete('tab');
+  set('aq', store.mode === 'archive' ? store.archive.q : null);
   // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
-  set('asort', store.tab === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
+  set('asort', store.mode === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
   // 既定（いま）のときだけキーを落とす。tab と同じ扱い
   // 既定（経過）のときだけキーを落とす。既定が「いま」から替わったので、
   // これからは ?dtab=now が URL に載る
