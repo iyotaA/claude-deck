@@ -10,6 +10,7 @@ import { el, num } from '../util.js';
 import { mark } from '../perf.js';
 import { store, syncQuery } from '../store.js';
 import { KIND_LABELS, SIDECHAIN_LABELS, splitEdits } from './kinds.js';
+import { icon } from '../icons.js';
 import { filterTimeline, countKinds } from './search.js';
 import { rawUrlFor } from './blocks.js';
 import { timelineItem } from './item.js';
@@ -186,9 +187,14 @@ export function filterBar(all) {
   // 実測（489件のセッション）でチップが11枚出ていて、絞り込みの帯だけで
   // 常時見えているものの2割を占めていた。押す動機（特定の種類だけ見たい・隠したい）は
   // はっきりしているので、1手の向こうで足りる
-  const kindsBtn = el('button', 'btn', filterLabel(store.hiddenKinds));
+  const kindsBtn = el('button', 'btn tl-filter-btn');
   kindsBtn.type = 'button';
   kindsBtn.setAttribute('aria-pressed', String(kindsOpen));
+  // **文字は span に包む。** 隠す種類が変わるたびに書き換えるので、
+  // ボタンへ直に textContent を入れると絵（SVG）ごと消える
+  const kindsLabel = el('span', null, filterLabel(store.hiddenKinds));
+  // 押せば何か出ることを絵で示す。開くと 90 度回る（起こすフォームの畳みと同じ作法）
+  kindsBtn.append(icon('chevron', 13), kindsLabel);
   bar.append(kindsBtn);
 
   const kinds = el('div', 'tl-kinds');
@@ -226,7 +232,7 @@ export function filterBar(all) {
       // 畳んだときに読む文字なので、ここで追随させる。
       // これを忘れると、種類を隠したのに札が「絞り込み」のままになり、
       // 畳んだ人には何が隠れているのか分からなくなる
-      kindsBtn.textContent = filterLabel(store.hiddenKinds);
+      kindsLabel.textContent = filterLabel(store.hiddenKinds);
       // 残すのは URL（?hide=）だけ。localStorage に覚えさせない理由は initialHiddenKinds に書いた
       syncQuery();
       render({ reset: true });

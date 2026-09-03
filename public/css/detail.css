@@ -78,6 +78,22 @@
   color: var(--fg-muted);
 }
 
+/* 絵を持つボタンは flex にする。**理由が2つある。**
+
+   1つは間隔。base.css の `.icon { flex: none }` が示すとおり、アイコンは
+   flex コンテナの中に置く前提で作ってある。
+
+   もう1つが本題で、**`display: inline` の要素には `transform` が効かない。**
+   `<button>` の中の SVG は既定で inline なので、flex item にしないと
+   回転などの指定が黙って無視される（実測：`rotate(90deg)` が当たっているのに
+   `getComputedStyle` は `matrix(1,0,0,1,0,0)` を返していた）。
+   `run.css` の `.runform-fold-head` が動いていたのは、あれが display: flex だったから */
+.detail-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+
 .detail-actions {
   display: flex;
   flex-wrap: wrap;

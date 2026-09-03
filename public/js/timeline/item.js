@@ -8,6 +8,8 @@
  */
 import { el, dur, num, hms, markUp, marked, countHits } from '../util.js';
 import { labelOf } from './kinds.js';
+// 層0 のアイコン。timeline/ からも直に見てよい（icons.js は util.js しか見ない）
+import { icon } from '../icons.js';
 import { waitBadge } from './waits.js';
 import { bodyText, answerBlock, planBlock, rawBlock, whenNode } from './blocks.js';
 
@@ -112,6 +114,10 @@ export function timelineItem(item, ctx = {}) {
     // 一覧は panels.css の .files を借りる（右の「書き換えたファイル」と同じ顔）。
     // 借り元は 1列目に回数を入れるが、ここは行ごとにツールが違うのでツール名を入れる
     case 'edit': {
+      // 種類の名前に絵を添える。**14種のうちここだけ。**
+      // 芯の「どんな作業をしたか」に直答する行なので、流し読みで拾えるようにする。
+      // 増やすと「絵が並んでいるうちの1つ」になって、この行の意味が薄まる
+      kindRow.prepend(icon('pencil', 13));
       const ul = el('ul', 'files');
       for (const c of item.calls ?? []) {
         const li = el('li');
