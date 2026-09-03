@@ -46,7 +46,29 @@
   display: flex;
   flex-wrap: wrap;
   gap: .3rem;
+  /* 帯の中で行を分ける。札を押して出したとき、探す欄の下に回り込ませる */
+  flex: 1 0 100%;
 }
+
+/* **`display` を素で書いたので `[hidden]` を打ち消す。**
+   `[hidden]` のブラウザ既定（`display: none`）は詳細度 0,1,0 しか無く、
+   上の `.tl-kinds`（0,1,0）と同点で、後に読まれるこちらが勝ってしまう。
+   `run.css` の `.runform-danger` で同じ踏み方をしている */
+.tl-kinds[hidden] { display: none; }
+
+/* 畳みの札。開いたら chevron を 90 度回す。
+   `run.css` の `.runform-fold` と同じ作法にしてある
+   （動きを止める指定は base.css の頭で全体に効いている） */
+/* 絵を flex item にする。**inline のままだと transform が効かない**
+   （detail.css の .detail-actions .btn に詳しく書いた） */
+.tl-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+
+.tl-filter-btn .icon { transition: transform .12s; }
+.tl-filter-btn[aria-pressed="true"] .icon { transform: rotate(90deg); }
 
 /* 目次のチップと同じ丸み。押した状態は色ではなく濃さで表す（状態色と混ぜない） */
 .tl-chip {
@@ -257,6 +279,20 @@ mark {
   overflow-wrap: anywhere;
   max-height: 9rem;
   overflow-y: auto;
+}
+
+/* ファイルの書き換え（splitEdits が足跡から抜き出したもの）。
+
+   **種類の名前に色を付けない。** 既定（--fg-muted・太字）のままにすると、
+   足跡（--fg-faint・細字）より重く、判断（--accent / --warn / --hot）より軽い段に落ちる。
+   Claude が動かしたことであって、あなたが決めたことではないので、この段が正しい。
+
+   一覧は panels.css の .files を借りている。あちらの1列目は回数（2rem）だが、
+   ここはツール名（Edit / Write / NotebookEdit）が入るので広げて左へ寄せる */
+.tl[data-kind="edit"] .files .n {
+  min-width: 4.6rem;
+  text-align: left;
+  color: var(--fg-muted);
 }
 
 /* 足跡（ふつうのツール呼び出し）。行ごと沈める。

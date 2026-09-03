@@ -11,6 +11,23 @@ html, body {
   height: 100%;
 }
 
+/* スクロールバーを細くして、地に沈める。
+
+   溝は透明。既定の太い溝は、列や紙の境目と紛らわしい縦線になる。
+   つまみは --border-strong ―― 幅のつまみ（.splitter）の hover と同じ色で、
+   「掴んで動かせるもの」の濃さをそろえてある。
+
+   **2つの指定を分けて書く理由。** scrollbar-color は継承するので html で足りるが、
+   **scrollbar-width は継承しない**（実測：html にだけ書いたら #detail が auto のまま、
+   器の幅の差が 15px＝既定の太さだった）。スクロールする器は20箇所あって
+   これからも増えるので、1つずつ拾わずに * で敷く。
+
+   **標準のプロパティだけで書く。** ::-webkit-scrollbar は非標準で、
+   そちらを足すと同じ見た目を2通りに書くことになる（片方だけ直す日が来る）。
+   代わりに諦めているのが「つまみの hover で濃くする」で、標準にその指定は無い */
+html { scrollbar-color: var(--border-strong) transparent; }
+* { scrollbar-width: thin; }
+
 body {
   background: var(--bg-sunk);
   color: var(--fg);
@@ -54,7 +71,13 @@ body {
    インラインの変数を削るだけにしてある（両方に書くと片方が古くなる）。
 
    下限を 20rem → 16rem へ、上限を 27rem → 40rem へ広げた。
-   「ある程度」動かせることが要件なので、幅の範囲そのものは残す */
+   「ある程度」動かせることが要件なので、幅の範囲そのものは残す。
+
+   **--list-w / --list-col の意味が「列の幅」から「引き出しの幅」に変わった。**
+   一覧を列から降ろしたため。名前は変えていない（resize.js と localStorage の鍵が
+   この名前に紐づいていて、直すと保存済みの幅を読めなくなる）。
+   つまみも引き出しの右端に付いたままで、resize.js は1行も変えていない
+   （getBoundingClientRect().width を読む作りなので fixed でも正しい） */
 :root {
   --list-w: 27rem;
   --insp-w: 23rem;
@@ -62,18 +85,37 @@ body {
   --insp-col: clamp(15rem, var(--insp-w), min(34rem, 34vw));
 }
 
-/* 3列目は右端のレール。幅は auto にしてボタン側で決める（数字を2箇所に焼き込まない）。
-   閉じているあいだ .insp は hidden なので、grid の子は3つ・列も3つで釣り合う */
+/* 一覧 ＋ 読む面 ＋ 右端のレール。幅は auto にしてボタン側で決める
+   （数字を2箇所に焼き込まない）。
+
+   **一覧は列のまま。ただし畳める。** 畳むと列が 0 になり、幅が中央へ渡る。
+   オーバーレイで手前に出す形も試したが、開いているあいだ中央が触れなくなるのと、
+   閉じたときに右へ余白が残るのが具合が悪かった。列なら**開けば余白が埋まり、
+   畳めば読む面が広がる**。同時に触れるので膜も要らない。
+
+   閉じているあいだ .insp は hidden なので、grid の子と列は釣り合ったまま。
+
+   **4通りを明示して書く。** .is-list-open .deck と .is-insp-open .deck は
+   どちらも (0,2,0) で、読む順で後のほうが勝ってしまう。
+   両方立っているときは (0,3,0) の側が要る（.is-board.is-insp-open と同じ形） */
 .deck {
   display: grid;
-  grid-template-columns: var(--list-col) minmax(0, 1fr) auto;
+  grid-template-columns: 0 minmax(0, 1fr) auto;
   gap: 0;
   min-height: 0;
+}
+
+.is-list-open .deck {
+  grid-template-columns: var(--list-col) minmax(0, 1fr) auto;
 }
 
 /* インスペクタが開いたら、中央を削って右に場所を作る。
    目印を .app に付けているのは .is-list-open と同じ流儀 */
 .is-insp-open .deck {
+  grid-template-columns: 0 minmax(0, 1fr) var(--insp-col) auto;
+}
+
+.is-list-open.is-insp-open .deck {
   grid-template-columns: var(--list-col) minmax(0, 1fr) var(--insp-col) auto;
 }
 
@@ -165,9 +207,14 @@ body {
    縮まないようにするのだけがここの仕事（形は icons.js が持つ） */
 .icon { flex: none; }
 
-/* 一覧を引き出すボタン。広い画面では一覧が常に見えているので出さない */
-.hamburger {
-  display: none;
+/* 一覧を畳む・出す口。**常時出す。**
+   一覧が畳める列になったので、これと Ctrl+K が開閉の道になった。
+
+   **3本線（ハンバーガー）から替えた。** あれは「メニューを開く」の記号で、
+   左の列を畳む・出すことを示していない（押した先が読めない、という指摘を受けた）。
+   いまは画面の枠と左の帯で描いたサイドバーの記号で、帯の塗りが開閉を示す */
+.list-toggle {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 2.15rem;
@@ -178,30 +225,11 @@ body {
   background: var(--bg-elev);
 }
 
-.hamburger:hover { border-color: var(--border-strong); }
-
-/* 3本線は線1本＋擬似要素2本で作る。字形に頼るとフォントで太さが変わる */
-.hamburger .bars,
-.hamburger .bars::before,
-.hamburger .bars::after {
-  display: block;
-  width: 1.05rem;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--fg);
-}
-
-.hamburger .bars { position: relative; }
-
-.hamburger .bars::before,
-.hamburger .bars::after {
-  content: "";
-  position: absolute;
-  left: 0;
-}
-
-.hamburger .bars::before { top: -5px; }
-.hamburger .bars::after { top: 5px; }
+.list-toggle:hover { border-color: var(--border-strong); }
+/* 開いているあいだは左の帯を塗る。**アイコンで状態を示す。**
+   絵が「いま一覧が出ているか」を持つので、押した先に何が起きるかが読める。
+   出し分けは aria-expanded に乗せてある（drawer.js が付け替えるので JS は増えない） */
+.list-toggle[aria-expanded="true"] .icon .pane { fill: currentColor; }
 
 /* 下段。**ボールの所在だけを置く帯。**
    上段と同じ行に混ぜない。混ぜると「どれから手をつけるか」が

@@ -4,6 +4,7 @@
  * どちらもパネル（panel()）を使わないので、ここは util.js しか見ない。
  */
 import { el, stamp } from './util.js';
+import { icon } from './icons.js';
 
 /**
  * ターミナルの窓を前面に出す。
@@ -48,6 +49,8 @@ export function detailActions(row) {
   if (row.alive && row.pid) {
     const focus = el('button', 'btn', 'ターミナルを前面に');
     focus.type = 'button';
+    // 絵は文字の前。上のバーの「起こす」（icon('plus') を prepend）と同じ並び
+    focus.prepend(icon('front', 14));
     focus.addEventListener('click', async () => {
       focus.disabled = true;
       hint.textContent = '呼んでいます…';
@@ -61,6 +64,7 @@ export function detailActions(row) {
   if (row.sessionId) {
     const copy = el('button', 'btn', '再開コマンドをコピー');
     copy.type = 'button';
+    copy.prepend(icon('copy', 14));
     const command = row.cwd
       ? `cd "${row.cwd}"; claude --resume ${row.sessionId}`
       : `claude --resume ${row.sessionId}`;

@@ -9,18 +9,22 @@
  * 中央（TAB_DEFS）は「その作業をするのに要るもの」。どれか1つが必ず出ている。
  *
  *   いま … あなたの番 / この画面から起こした実行 / 続きを起こす
- *   経過 … 文脈の圧縮 / 時系列
+ *   経過 … 文脈の圧縮 / 時系列 / ここまで
+ *   成果 … 決めたこと / TODO / 書き換えたファイル
  *   調査 … サブエージェントの記録
  *
  * 右のインスペクタ（INSP_DEFS）は「作業しながら横目で見るもの」。既定では閉じている。
  *
  *   数値 … 何にトークンを使ったか
- *   成果 … 決めたこと / TODO / 書き換えたファイル
  *   状態 … セッションの状態
  *
- * 分けたのは、この3つを中央に混ぜると、数字を見るために作業の手元を隠すことになるため。
+ * 分けたのは、これを中央に混ぜると数字を見るために作業の手元を隠すことになるため。
  * 右なら中央と同時に見られる。**同時に開くのは1つだけ**にしてあるのは、
- * 3つ並べると元の縦棒に戻るから。
+ * 並べると元の縦棒に戻るから。
+ *
+ * **「成果」は右から中央へ戻した。** あれは芯の「どうなったのか」に答えるもので、
+ * 横目で見るものではない。レールを1押ししないと見えない場所に置いていたのをやめ、
+ * 要約（ここまで）を経過タブの終わりに、詳しくを成果タブに置く。
  *
  * **選んだタブのぶんだけ組む。** 全部組んで CSS で隠す形にはしない。
  * timelinePanel() は必ず Timeline.attach() を呼ぶので、隠した節点を掴んだままになり、
@@ -35,6 +39,7 @@ import { detailActions, summaryBlock } from './detail-head.js';
 import { waitingBlock } from './detail-wait.js';
 import {
   decisionsPanel, todoPanel, compactionPanel, timelinePanel, filesPanel, basicsPanel,
+  outcomeBlock,
 } from './detail-panels.js';
 import { agentsPanel } from './agents.js';
 import { isZoomed, toggleZoom, closeZoom } from './zoom.js';
@@ -45,15 +50,19 @@ import * as RunResume from './run-resume.js';
 import * as Timeline from './timeline/index.js';
 
 /**
- * 「いま」のタブに色を付ける状態。あなたの手が要るものだけ。
+ * 「いま」のタブに色を付ける状態。
+ *
+ * **答えないと1行も進まないもの（blocking）はここに無い。** あれはタブ帯より上に
+ * 出しているので、どのタブを見ていても本体が見えている。タブに色まで足すと、
+ * 同じことを2箇所で言うことになる。
+ *
+ * 残しているのは返信待ちだけ。あれは「いま」タブの中にあり、放置しても壊れないが、
+ * 別のタブを見ているあいだ手が要ることは伝えたい。
  *
  * running（Claude が動いている）には付けない。選んでいるタブの下線が --accent で、
  * 実行中の色（--calm）と同じ青なので、押されているのか色が付いているのか分からなくなる
  */
 const NOW_TONE = {
-  'needs-answer': 'is-hot',
-  'needs-plan-approval': 'is-hot',
-  'needs-approval': 'is-hot',
   'awaiting-reply': 'is-warn',
 };
 
@@ -71,10 +80,32 @@ const NOW_TONE = {
  * 立っているタブは、読めていなければ既存の取得中・失敗の表示へ倒す
  */
 export const TAB_DEFS = [
-  { id: 'now', label: 'いま' },
   { id: 'log', label: '経過', needsDetail: true, count: (c) => c.d?.digest.items.length ?? null },
+  // 数はファイルの件数。決めたことと TODO を足した合計にはしない（種類の違う3つを足した数は読めない）。
+  // ファイルにしたのは、芯の「どんな作業をしたか」の主指標で、いちばん動く数だから
+  { id: 'out', label: '成果', needsDetail: true, count: (c) => c.d?.digest.files.length ?? null },
+  { id: 'now', label: 'いま' },
   { id: 'agents', label: '調査', needsDetail: true, count: (c) => c.d?.subagents?.items?.length ?? null },
 ];
+
+/**
+ * いま実際に組むタブ。
+ *
+ * 既定は「経過」だが、あれは会話ログの全文が要る（needsDetail）。
+ * **この画面から起こした直後はログが1行も無い**ので、そのままだと
+ * 「ログを読んでいます…」しか出ない。実行の様子（いま）を出すほうが役に立つ。
+ *
+ * **store.detailTab は書き換えない。** URL に載っている指定と、
+ * ログが出たあとの戻り先を保つため。ログが届けば黙って「経過」へ戻る
+ *
+ * @param {object|null} d 詳細（読めていなければ null）
+ * @param {string|null} error 取れなかった理由（あれば失敗の表示へ倒す）
+ */
+function effectiveTab(d, error) {
+  const def = TAB_DEFS.find((t) => t.id === store.detailTab) ?? TAB_DEFS[0];
+  if (!def.needsDetail || d || error) return def;
+  return TAB_DEFS.find((t) => t.id === 'now') ?? def;
+}
 
 /**
  * 右のインスペクタの定義。並びがそのままレールの並び。id は store.inspector の値。
@@ -87,8 +118,11 @@ export const TAB_DEFS = [
  */
 export const INSP_DEFS = [
   { id: 'usage', label: '数値', title: '何にトークンを使ったか' },
-  { id: 'out', label: '成果', title: 'このセッションの成果', needsDetail: true },
-  { id: 'basics', label: '状態', title: 'セッションの状態' },
+  // **id は basics のまま。** ?insp=basics は v0.6.0 で配っているので、
+  // 名前を変えると配ったブックマークが切れる。替えるのは札と見出しだけ。
+  // 「状態」から替えたのは、いまの状態そのもの（あなたの番・返信待ち）は
+  // 帯とヘッダに出ていて、ここに残るのが困ったときに見る値だから
+  { id: 'basics', label: '診断', title: '困ったときに見る値' },
 ];
 
 /**
@@ -228,7 +262,9 @@ function tabBar(ctx) {
   for (const t of TAB_DEFS) {
     const b = el('button', 'detail-tab', t.label);
     b.type = 'button';
-    const on = store.detailTab === t.id;
+    // 押している印は**実際に組んだタブ**に付ける。store.detailTab で付けると、
+    // ログ待ちで「いま」へ倒しているあいだ、押されている札と中身が食い違う
+    const on = ctx.tab.id === t.id;
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
     // 「いま」だけは、別のタブを見ているあいだも手が要ることが分かるように色を付ける
     if (t.id === 'now' && NOW_TONE[ctx.row.state]) b.classList.add(NOW_TONE[ctx.row.state]);
@@ -268,13 +304,25 @@ function fillTab(stack, ctx) {
   const add = (node) => { if (node) stack.append(node); };
   const none = (text) => stack.append(el('p', 'tab-none', text));
 
-  switch (store.detailTab) {
+  switch (ctx.tab.id) {
     case 'log':
       // 圧縮を時系列の上に置く。どこで文脈が切れたかは、時系列の読み方そのものを変える
       add(compactionPanel(d));
       // timelinePanel は必ず節点を返す（Timeline.attach() を呼ぶのはここだけ）
       add(timelinePanel(d));
+      // 到達点は時系列の後ろ。並び順に関わらずここへ置く（時刻を持たない累積の集計なので、
+      // 時系列のどの位置とも対応しない）。onMore を差すのはここ（層3 から層4 を呼ばせない）
+      add(outcomeBlock(d, { onMore: () => setDetailTab('out') }));
       break;
+
+    case 'out': {
+      const before = stack.childElementCount;
+      add(decisionsPanel(d));
+      add(todoPanel(d));
+      add(filesPanel(d));
+      if (stack.childElementCount === before) none('まだ決めたこと・TODO・書き換えたファイルはありません');
+      break;
+    }
 
     case 'agents': {
       const p = agentsPanel(d.subagents, row.sessionId);
@@ -288,7 +336,9 @@ function fillTab(stack, ctx) {
       // if (d) の外なのは、起こした直後はまだ会話ログが1行も無いため
       // （ログが出るまで何も出ないと、押したのに何も起きていないように見える）
       const before = stack.childElementCount;
-      add(waitingBlock(row, d));
+      // 答えないと1行も進まない待ちは帯より上に出しているので、ここでは出さない。
+      // 出すと同じパネルが1画面に2枚並ぶ
+      if (row.blocking !== true) add(waitingBlock(row, d));
       add(RunView.runPanel(row.sessionId));
       add(RunResume.resumePanel(row));
       if (stack.childElementCount === before) none('いまあなたの手が要るものはありません');
@@ -320,7 +370,7 @@ function fillPending(stack, error) {
  * 右のインスペクタの中身を組んで stack へ積む。
  *
  * 中央の fillTab() と同じ作法（空なら1行だけ書く）。
- * 中央から移した3つなので、中身は移す前と同じものを出す
+ * 中身は移す前と同じものを出す（「成果」は中央のタブへ戻したので、ここには無い）
  *
  * @param {HTMLElement} stack 積む先
  * @param {{row: object, d: object|null}} ctx
@@ -331,15 +381,6 @@ function fillInsp(stack, ctx) {
   const none = (text) => stack.append(el('p', 'tab-none', text));
 
   switch (store.inspector) {
-    case 'out': {
-      const before = stack.childElementCount;
-      add(decisionsPanel(d));
-      add(todoPanel(d));
-      add(filesPanel(d));
-      if (stack.childElementCount === before) none('まだ決めたこと・TODO・書き換えたファイルはありません');
-      break;
-    }
-
     case 'basics':
       add(basicsPanel(row, d));
       break;
@@ -536,13 +577,22 @@ export function renderDetail() {
     if (summary) wrap.append(summary);
   }
 
-  const ctx = { row, d, error };
+  const ctx = { row, d, error, tab: effectiveTab(d, error) };
+
+  // **答えないと1行も進まない待ちは、タブ帯より上に出す。**
+  // 既定のタブを「経過」にしたので、ここに置かないと止まっていることが
+  // タブの向こうに隠れる。判断は row.blocking だけ（headingOf と同じ出どころ）
+  if (row.blocking === true) {
+    const wait = waitingBlock(row, d);
+    if (wait) wrap.append(wait);
+  }
+
   wrap.append(tabBar(ctx));
 
   const stack = el('div', 'stack');
-  const def = TAB_DEFS.find((t) => t.id === store.detailTab) ?? TAB_DEFS[0];
   // 全文が無いと何も組めないタブ。既存の取得中・失敗の表示へ倒す
-  if (def.needsDetail && !d) fillPending(stack, error);
+  // （effectiveTab が「いま」へ倒すのは d も error も無いときだけなので、ここは error のとき）
+  if (ctx.tab.needsDetail && !d) fillPending(stack, error);
   else fillTab(stack, ctx);
 
   wrap.append(stack);

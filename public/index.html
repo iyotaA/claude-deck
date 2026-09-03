@@ -33,10 +33,9 @@
 
   <header class="topbar">
     <!-- 狭い画面でだけ出る。一覧を手前に引き出す -->
-    <button class="hamburger" id="list-toggle" type="button"
-            aria-expanded="false" aria-controls="list-pane" aria-label="セッション一覧を開く">
-      <span class="bars" aria-hidden="true"></span>
-    </button>
+    <!-- 一覧の開閉。絵（SVG）は main.js が差す（形は icons.js の1箇所で持つ） -->
+    <button class="list-toggle" id="list-toggle" type="button"
+            aria-expanded="false" aria-controls="list-pane" aria-label="セッション一覧を開く"></button>
     <!-- 題名は落とす。毎日開く画面なので、名前は一度覚えれば済む。
          前はここがバーでいちばん大きい字で、いちばん情報の少ないものが
          いちばん目立っていた。脇の印（SVG）は main.js が差す -->
@@ -167,12 +166,17 @@
          入力欄を #detail の中に置くと renderDetail() の replaceChildren() で毎回消えるので、
          器はここに出して中身だけ差し替える（レールのボタンと同じ流儀） -->
     <section class="detail-pane" id="detail-pane" aria-label="セッションの詳細">
+      <!-- 中央の入力欄。**流れる箱より前に置く。**
+           答えないと進まない待ちをタブ帯より上へ出したので、読む場所（上）と
+           書く場所が離れていた。ここへ置くと「あなたの番 → すぐ下に入力欄」で隣り合う。
+
+           ペインの直下にあることは変えない。詳細ペインは 2秒ごとに丸ごと作り直されるので、
+           流れる箱の中へ入れると打ちかけの文が消える。
+           中身は detail.js が run-view.js / run-resume.js の節点を差し込む -->
+      <div class="composer" id="composer" hidden></div>
       <div class="detail-scroll" id="detail" tabindex="-1">
         <div class="detail-empty">左の一覧からセッションを選ぶと、ここに中身が出ます</div>
       </div>
-      <!-- 中央下の入力欄。どのタブを見ていても手が届く場所に置く。
-           中身は detail.js が run-view.js / run-resume.js の節点を差し込む -->
-      <div class="composer" id="composer" hidden></div>
     </section>
 
     <!-- 右のインスペクタ。作業しながら横目で見るもの（数値・成果・状態）をここへ寄せる。

@@ -339,11 +339,12 @@
 
 /* どのタブを見ていても手が届く場所。器は index.html に置いたまま、
    中身（run-view.js / run-resume.js の節点）だけを差し替える。
-   面は塗らず上の線1本で本体と分ける（状態色を面に使わないのと同じ作法）。
+   面は塗らず線1本で本体と分ける（状態色を面に使わないのと同じ作法）。
+   **線は下。** ペインの1行目（上端）へ移したので、区切る相手が下になった。
    display を書かないので、hidden はブラウザ既定のまま効く */
 .composer {
   padding: .7rem 1.3rem .8rem;
-  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   background: var(--bg);
 }
 

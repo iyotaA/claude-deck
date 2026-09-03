@@ -6,7 +6,8 @@
 
 /* ------------------------------------------------------------ 狭い窓向け */
 
-/* 背後を覆う膜。広い画面には引き出しが無いので、ここでは無効にしておく */
+/* 背後を覆う膜。広い窓の一覧は畳める列（中央と同時に触れる）なので要らない。
+   出すのは、手前に重なる引き出しになる狭い窓だけ */
 .scrim { display: none; }
 
 /* 紙が出てくるときだけ動かす。閉じる側は JS が hidden を立てて即座に消える。
@@ -22,8 +23,12 @@
    閉じているあいだは詳細が全面を使う */
 @media (max-width: 860px) {
   /* レールの分だけ右に残して、残りを中央に全部渡す。
-     .is-insp-open の方を並べて書くのは詳細度のため。
-     （0,2,0）なので、ここで .deck だけを書いても base.css の方が勝つ。
+
+     **base の4通りを全部ここで2列へ落とす。** 狭い窓の一覧は列ではなく
+     手前に重なる引き出し（position: fixed）なので in-flow の子から外れる。
+     base の列（一覧ぶんの1列）が残ったままだと、開いた瞬間に空の列が居座って
+     中央がそのぶん狭くなる。紙も中央に重ねるので列を持たせない。
+     .is-list-open.is-insp-open は (0,3,0) 同士で、後に読まれるこちらが勝つ。
 
      **監視盤（.is-board）には手を出さない。** あちらは board.css の
      .is-board .deck（0,2,0）が、ここの .deck 単体（0,1,0）に詳細度で勝つ。
@@ -31,7 +36,9 @@
      .is-insp-open .deck（0,2,0）はこの勝負に関わらない。
      読む順ではなく詳細度で決まるので、board.css 側だけで足りる（実測） */
   .deck,
-  .is-insp-open .deck {
+  .is-list-open .deck,
+  .is-insp-open .deck,
+  .is-list-open.is-insp-open .deck {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: minmax(0, 1fr);
   }
@@ -60,8 +67,9 @@
      上端を丸めて影を付けると、下から出てきたものに見える。border-left は広い画面で
      中央と切り分けるための線なので、狭い画面では上端へ移す。
 
-     入力欄（.composer）は中央の下端にあるので、開いているあいだは紙の下に隠れる。
-     段2 の入れ替え（中央ごと消す）と違って、閉じればそのまま戻ってくる。
+     入力欄（.composer）は中央の**上端**にあるので、下から出るこの紙とは重ならない。
+     下端にあった頃は開いているあいだ紙の下に隠れていた（閉じれば戻った）が、
+     いまは紙を開いたまま打てる。狭い窓では、そのぶん助かる。
 
      **z-index が要る。** 重なりの順は DOM の並びでは決まらない。中央の中にある
      タブの帯（.detail-tabs）が sticky ＋ z-index: 2 なので、印を付けない紙は
@@ -81,19 +89,17 @@
   /* 下まで読み切ったあと、そのまま背面が流れ出すのを止める */
   .insp-body { overscroll-behavior: contain; }
 
-  .hamburger,
-  .drawer-close { display: inline-flex; }
-
-  /* 幅を変えるつまみは出さない。狭い画面の一覧は列ではなく引き出し
-     （position: fixed ＋ z-index: 40）で、幅は width: min(88vw, 24rem) が決める。
-     つまり掴む境目そのものが無い。インスペクタも中央に重ねる紙なので同じ */
+  /* 幅を変えるつまみは出さない。掴む境目そのものが無い
+     （一覧は手前に重なる引き出し、インスペクタは中央に重ねる紙） */
   .splitter { display: none; }
 
-  /* 折り返しで高さが変わる上のバーごと覆う。中途半端に避けると位置が合わなくなる。
-     閉じている間は画面の外へ逃がすだけにして、visibility では隠さない。
-     visibility は変化が1フレームで確定せず、開いた直後は「隠れている」ままなので、
-     そのあいだ focus を受け付けない。見えていないカードへ Tab で入るのを防ぐのは
-     JS 側の inert に任せる（app.js の syncListInert） */
+  /* 狭い窓では一覧を列として畳めない。畳んでも中央に渡せる幅がそもそも足りず、
+     開けば中央が潰れる。ここだけは手前へ重ねる引き出しにする。
+
+     折り返しで高さが変わる上のバーごと覆う。中途半端に避けると位置が合わなくなる。
+     閉じている間は画面の外へ逃がすだけにして、visibility では隠さない
+     （変化が1フレームで確定せず、開いた直後に focus を受け付けない）。
+     見えていないカードへ Tab で入るのを防ぐのは drawer.js の inert に任せる */
   .list-pane {
     position: fixed;
     top: 0;
@@ -101,6 +107,7 @@
     left: 0;
     z-index: 40;
     width: min(88vw, 24rem);
+    border-right: 1px solid var(--border);
     overscroll-behavior: contain;
     transform: translateX(-100%);
     transition: transform .18s ease;
@@ -112,6 +119,7 @@
     transform: translateX(0);
   }
 
+  /* 手前に重なるぶん、背面を止める。押せば閉じる口にもなる */
   .scrim {
     display: block;
     position: fixed;

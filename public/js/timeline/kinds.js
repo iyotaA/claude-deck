@@ -75,10 +75,89 @@ export const KIND_LABELS = {
   // Claude 自身が書いた中間報告。機械的に抜き出した記録ではないので、語を分けておく
   recap: 'Claude の中間報告',
   elided: '省略',
+  // 足跡から抜き出したファイルの書き換え（splitEdits）。
+  // 足跡の直前に置くのは countKinds が宣言順でチップを並べるため。
+  // 「何をしたか」の側に寄せて、隠してある足跡と隣り合わせにする
+  edit: 'ファイルの書き換え',
   // ふつうのツール呼び出し。既定では隠している（HIDDEN_KINDS_DEFAULT）。
   // 絞り込みのチップにも同じ語が出るので、ここを直せば両方が変わる
   trace: '足跡',
 };
+
+/**
+ * ファイルを書き換えるツール。
+ *
+ * **`detail` の中身で判定しない。必ずツール名で割る。**
+ * `describeTool`（src/shared/tools.mjs）は Edit / Write / Read / NotebookEdit を
+ * 同じ枝で扱っていて、どれも `file_path` をそのまま `detail` に入れる。
+ * つまり「パスらしい文字列か」で見ると、読んだだけの Read が書き換えに化ける。
+ *
+ * MultiEdit は既定の枝に落ちるが、そちらも `file_path` を拾うので同じように出せる
+ */
+export const WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit']);
+
+/**
+ * 足跡から「ファイルの書き換え」を独立した種類として抜き出す。
+ *
+ * 書き換えは足跡（trace）の calls に混ざっていて、足跡は既定で隠れている。
+ * つまり **「どのファイルを書き換えたか」が既定では1件も画面に出ていない**。
+ * 実測したセッション（489件）では 44 件の書き換えが全部そこに埋まっていた。
+ *
+ * サーバ側に新しい kind を足さずに済むのは、`calls[].detail` にパスがもう入っているため。
+ *
+ * **形を trace と同じに保つ**（count / tools / calls）。こうしておくと
+ * search.js の searchableOf が calls[].tool と calls[].detail を既に舐めているので、
+ * 検索は1行も触らずにパスへ当たる。item.js の畳みも同じ材料で組める。
+ *
+ * 並びは元のまま。1つの足跡から2件に割れるときは書き換えを先に置く（そちらが読ませたい側）。
+ *
+ * `durationMs` は書き換え側に持たせない。あれは assistant 1行ぶんの所要で、
+ * 並列に呼んだ分を含むため、割った側の所要としては嘘になる。
+ * `wait`（前のやり取りからの間）は先に来る側にだけ残す（両方に付けると二重に出る）
+ *
+ * @param {Array<object>} items digest.items
+ * @returns {Array<object>} 同じ並びで、書き換えを含む足跡だけが2件に割れたもの
+ */
+export function splitEdits(items = []) {
+  const out = [];
+  for (const item of items) {
+    const calls = item?.calls;
+    if (item?.kind !== 'trace' || !Array.isArray(calls) || !calls.length) {
+      out.push(item);
+      continue;
+    }
+
+    const writes = calls.filter((c) => WRITE_TOOLS.has(c?.tool));
+    if (!writes.length) {
+      out.push(item);
+      continue;
+    }
+
+    const rest = calls.filter((c) => !WRITE_TOOLS.has(c?.tool));
+    const toolsOf = (list) => [...new Set(list.map((c) => c?.tool).filter(Boolean))];
+
+    out.push({
+      ...item,
+      kind: 'edit',
+      calls: writes,
+      count: writes.length,
+      tools: toolsOf(writes),
+      durationMs: null,
+    });
+
+    // 読むだけの呼び出しが残っていれば、足跡として元の場所に置く
+    if (rest.length) {
+      out.push({
+        ...item,
+        calls: rest,
+        count: rest.length,
+        tools: toolsOf(rest),
+        wait: null,
+      });
+    }
+  }
+  return out;
+}
 
 /**
  * サブエージェントのログでだけ意味が変わる種類。
@@ -105,13 +184,18 @@ export function labelOf(kind, ctx) {
 }
 
 /**
- * 「判断だけ」で残す種類。
+ * 「要点だけ」で残す種類。
  *
  * Claude の説明（say）を落とすと、自分が動かした所だけが縦に並ぶ。
  * 何十往復もしたセッションを思い出すときは、こちらのほうが速い。
+ *
+ * **edit（ファイルの書き換え）を入れている。** 思い出したいのは
+ * 「どう判断して、その結果どのファイルが変わったか」で、判断だけを残すと
+ * 後半が抜ける。読むだけの足跡（trace）は入れない。
  *
  * recap（Claude の中間報告）は入れない。自己申告であって自分の判断ではないため。
  */
 export const DECISION_KINDS = new Set([
   'prompt', 'answer', 'plan', 'denial', 'interrupt', 'slash', 'skill', 'agent', 'error', 'compact',
+  'edit',
 ]);

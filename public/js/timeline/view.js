@@ -9,7 +9,8 @@
 import { el, num } from '../util.js';
 import { mark } from '../perf.js';
 import { store, syncQuery } from '../store.js';
-import { KIND_LABELS, SIDECHAIN_LABELS } from './kinds.js';
+import { KIND_LABELS, SIDECHAIN_LABELS, splitEdits } from './kinds.js';
+import { icon } from '../icons.js';
 import { filterTimeline, countKinds } from './search.js';
 import { rawUrlFor } from './blocks.js';
 import { timelineItem } from './item.js';
@@ -17,17 +18,20 @@ import { timelineItem } from './item.js';
 /**
  * 最初に出す件数。
  *
- * 時系列は詳細のいちばん縦に長い場所で、下にあるサブエージェントの記録や
- * ファイルへ行くのに何度もスクロールすることになっていた。
- *
  * 件数で数えると短く見えるが、1行の高さがそろっていないので当てにならない。
- * 指示（prompt）は最大12行、Claude の説明は最大4行、省略の目印は1行。
- * 12 件にしたときの実測で目標の3倍の高さがあったので、4 件まで落とした。
+ * 一度 12 件にしたときは目標の3倍の高さがあり、4 件まで落とした経緯がある。
+ * そのときの1行は 指示 12行・Claude の説明 4行 で、実測すると4件で 666px あった。
+ *
+ * **行を短くしたので 12 へ戻す。** いまは 指示 4行・説明 1行・中間報告 2行。
+ * 1件が1〜2行に収まるので、12 件でようやく「どんな流れで来たか」が1画面に入る。
+ *
+ * **順番が大事。** 予算を絞る前にここを広げると、長い行を12件ぶん組むことになって
+ * 初回の描画が重くなる。触るときは item.js の予算とセットで見ること。
  *
  * 全件を前もって組むと初回の描画も重い（400件級のセッションがある）ので、
  * 窓を掛けて末尾のボタンで継ぎ足す形はそのまま残す
  */
-const TL_FIRST = 4;
+const TL_FIRST = 12;
 
 /**
  * 「続きを出す」1回で足す件数。
@@ -89,6 +93,35 @@ const TL_DEBOUNCE_MS = 120;
 let tlSearchTimer = null;
 
 /**
+ * 種類のチップを出しているか。
+ *
+ * **`localStorage` にも URL にも残さない。** 開くたび畳んだ状態から始める。
+ * 隠している種類そのものは `?hide=` が持っているので、状態は人へ渡せる。
+ *
+ * `<details>` を使わないのは、詳細ペインが 2秒ごとに丸ごと作り直されるため
+ * （`detailKeyOf()` が `contextTokens` を鍵に含む）。走っているセッションでは
+ * 開いた畳みが毎回閉じる
+ */
+let kindsOpen = false;
+
+/**
+ * 畳んだ札に書く文字。
+ *
+ * **中身を書く。** 「絞り込み」だけだと、押すまで何が起きているのか分からない。
+ * 既定では足跡を隠しているので、畳んだままでもそれが読める
+ *
+ * @param {Set<string>} hidden いま隠している種類
+ */
+function filterLabel(hidden) {
+  if (!hidden.size) return '絞り込み';
+  if (hidden.size === 1) {
+    const [k] = hidden;
+    return `絞り込み — ${KIND_LABELS[k] ?? k}を隠しています`;
+  }
+  return `絞り込み — ${num(hidden.size)} 種類を隠しています`;
+}
+
+/**
  * 時系列パネルの取っ手を差し替える。
  *
  * @param {object} ref
@@ -101,7 +134,9 @@ export function attach(ref) {
   tlRef = {
     host: ref.host,
     count: ref.count ?? null,
-    items: ref.items ?? [],
+    // 書き換えを足跡から抜き出してから持つ。**filterBar にも同じものを通す**
+    // （片方だけにすると、チップの件数と実際に出る行数が食い違う）
+    items: splitEdits(ref.items ?? []),
     dropped: ref.dropped ?? 0,
   };
 }
@@ -125,6 +160,9 @@ export function detach() {
  * @param {Array} all 間引き後の全 item。チップの並びと件数はここから作る
  */
 export function filterBar(all) {
+  // attach() と同じ派生を通す。ここを素の items のままにすると、
+  // 「ファイルの書き換え」のチップが出ないうえ、足跡の件数も割る前の数になる
+  const items = splitEdits(all ?? []);
   const bar = el('div', 'tl-filter');
 
   const q = el('input', 'tl-q');
@@ -145,8 +183,29 @@ export function filterBar(all) {
   });
   bar.append(q);
 
+  // 種類のチップは札の向こうへ畳む。**常時は「探す」だけ。**
+  // 実測（489件のセッション）でチップが11枚出ていて、絞り込みの帯だけで
+  // 常時見えているものの2割を占めていた。押す動機（特定の種類だけ見たい・隠したい）は
+  // はっきりしているので、1手の向こうで足りる
+  const kindsBtn = el('button', 'btn tl-filter-btn');
+  kindsBtn.type = 'button';
+  kindsBtn.setAttribute('aria-pressed', String(kindsOpen));
+  // **文字は span に包む。** 隠す種類が変わるたびに書き換えるので、
+  // ボタンへ直に textContent を入れると絵（SVG）ごと消える
+  const kindsLabel = el('span', null, filterLabel(store.hiddenKinds));
+  // 押せば何か出ることを絵で示す。開くと 90 度回る（起こすフォームの畳みと同じ作法）
+  kindsBtn.append(icon('chevron', 13), kindsLabel);
+  bar.append(kindsBtn);
+
   const kinds = el('div', 'tl-kinds');
-  for (const [kind, n] of countKinds(all)) {
+  kinds.hidden = !kindsOpen;
+  kindsBtn.addEventListener('click', () => {
+    kindsOpen = !kindsOpen;
+    kinds.hidden = !kindsOpen;
+    kindsBtn.setAttribute('aria-pressed', String(kindsOpen));
+  });
+
+  for (const [kind, n] of countKinds(items)) {
     // 省略はチップに出さない。自分で選ぶ種類ではなく、間引きの副産物だから。
     //
     // 目印の中身が隠している種類だけなら、目印も一緒に落としている（elidedAllHidden）。
@@ -170,6 +229,10 @@ export function filterBar(all) {
       if (store.hiddenKinds.has(kind)) store.hiddenKinds.delete(kind);
       else store.hiddenKinds.add(kind);
       paint();
+      // 畳んだときに読む文字なので、ここで追随させる。
+      // これを忘れると、種類を隠したのに札が「絞り込み」のままになり、
+      // 畳んだ人には何が隠れているのか分からなくなる
+      kindsLabel.textContent = filterLabel(store.hiddenKinds);
       // 残すのは URL（?hide=）だけ。localStorage に覚えさせない理由は initialHiddenKinds に書いた
       syncQuery();
       render({ reset: true });
@@ -273,6 +336,8 @@ export function render({ reset = false } = {}) {
  */
 export function renderPlain(items = []) {
   const box = el('div', 'timeline');
-  for (const item of items) box.append(timelineItem(item, { labels: SIDECHAIN_LABELS }));
+  // 子ログでも書き換えは抜き出す。サブエージェントに任せた作業でこそ
+  // 「何を触ったのか」が読みたい（親のログには結果しか残らない）
+  for (const item of splitEdits(items)) box.append(timelineItem(item, { labels: SIDECHAIN_LABELS }));
   return box;
 }

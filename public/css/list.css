@@ -2,13 +2,31 @@
 
 /* -------------------------------------------------------------- 一覧（左） */
 
+/* 一覧は列のまま。畳むと base.css の grid が幅を 0 にする。
+
+   **中身は幅 0 でも DOM に残る。** はみ出さないよう overflow: hidden を敷き、
+   見えていないカードへ Tab で入るのを防ぐのは drawer.js の inert に任せる
+   （CSS の visibility は変化が1フレームで確定せず、開いた直後に focus を受け付けない）。
+
+   枠線も畳んだときは消す。1px だけ残ると、閉じているのに縦線が1本立つ */
 .list-pane {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   background: var(--bg);
+  border-right: 0;
+  transition: border-color .18s ease;
+}
+
+.is-list-open .list-pane {
   border-right: 1px solid var(--border);
 }
+
+/* 畳んでいるあいだは掴む境目も無い。
+   .splitter は right: -3px で列の外へ出ているので、消さないと畳んだ位置に残る */
+.list-pane > .splitter { display: none; }
+.is-list-open .list-pane > .splitter { display: block; }
 
 /* 稼働中と書庫の切り替え。押されているほうだけ下に線を1本引く。
    面は塗らない（一覧のカードと同じ理由で、塗ると重さの差が読めなくなる） */
@@ -125,8 +143,10 @@
 }
 
 /* 引き出しを閉じるボタン。広い画面には引き出しが無いので出さない */
+/* 引き出しを閉じる口。**常時出す。** 引き出しが広い窓でも使われるようになったので、
+   狭い窓だけの飾りではなくなった */
 .drawer-close {
-  display: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 1.7rem;

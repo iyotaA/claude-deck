@@ -55,7 +55,7 @@
 import { query, dom, store } from './store.js';
 import { icon } from './icons.js';
 import { visibleRows } from './rows.js';
-import { initListDrawer } from './drawer.js';
+import { initListDrawer, setListOpen, initialListOpen } from './drawer.js';
 import { initZoom } from './zoom.js';
 import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
@@ -119,6 +119,10 @@ function initListKeys(listEl, from) {
 
 initTheme();
 initListDrawer();
+// 前に開いていた形で始める（既定は開く）。
+// **覚えさせない（remember: false）。** ここは復元であって人の操作ではないので、
+// 書き戻すと「読んだ値をそのまま書く」だけの無駄な往復になる
+setListOpen(initialListOpen(), null, false);
 // 拡大は帯のボタン・Esc・背面・× の4つで開閉する。どれで閉じても札が
 // 「縮小」のまま残らないよう、組み直しをこちらから差す（向きは 8 -> 2）。
 // 差すのは renderDetail のほう。renderDetailIfNeeded は中身が同じなら何もしないので、
@@ -180,6 +184,7 @@ subscribeRuns(() => {
 // 名前は title と aria-label が持つので、絵だけにしても意味は消えない。
 //
 // 「起こす」だけ 14px にする。文字と並ぶので、16px だと絵のほうが大きく見える
+dom.listToggle.append(icon('sidebar'));
 dom.brand.prepend(icon('deck'));
 dom.runformOpen.prepend(icon('plus', 14));
 dom.reload.append(icon('refresh'));

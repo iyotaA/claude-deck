@@ -110,19 +110,39 @@ export const TABS = new Set(['live', 'archive']);
  * TABS と同じく集合で持つ。三項演算子で二値に畳むと、増やすたびに
  * 判定と syncQuery の2箇所を直すことになる
  */
-export const DETAIL_TABS = new Set(['now', 'log', 'agents']);
+export const DETAIL_TABS = new Set(['now', 'log', 'out', 'agents']);
 
 /**
  * 右のインスペクタに出せるもの。知らない値は null（閉じた状態）に落とす。
  *
- * 中央と分けてあるのは、この3つが「作業しながら横目で見るもの」だから。
+ * 中央と分けてあるのは、これが「作業しながら横目で見るもの」だから。
  * 中央のタブに混ぜると、数字を見るために作業の手元（いま・経過）を隠すことになる。
  *
- * 中央から移したので `?dtab=usage` のような古い指定は DETAIL_TABS に無く、
- * 既定（いま）へ落ちる。**読み替えは入れない。** 段1 はまだ誰にも配っていないので、
- * 拾うべき古いブックマークが存在しない
+ * **「成果」（out）は中央のタブへ戻した。** あれは芯の「どうなったのか」に答えるもので、
+ * 横目で見るものではない。レールを1押ししないと見えない場所に置くのをやめた
  */
-export const INSPECTOR_TABS = new Set(['usage', 'out', 'basics']);
+export const INSPECTOR_TABS = new Set(['usage', 'basics']);
+
+/**
+ * 開く中央タブを決める。
+ *
+ * **既定は「経過」。** 前は「いま」だったが、止まっていないセッションでは
+ * あそこは1行（いまあなたの手が要るものはありません）しか出ない。
+ * いちばん見たい「どんな流れで・どんな判断で・どんな作業をしたか」が
+ * 既定で0クリックの位置に無かった。
+ *
+ * 止まっているときに待ちが埋もれないよう、答えないと進まないものは
+ * タブ帯より上へ出してある（detail.js の renderDetail）。
+ *
+ * `?insp=out` を拾うのは、成果が右のインスペクタだった版の URL が実在するため。
+ * **v0.6.0 で配っている**（`git tag --contains bedff48`）ので読み替えを入れる。
+ * 以前ここに「段1 はまだ誰にも配っていない」と書いてあったが、それは古くなっていた
+ */
+function initialDetailTab() {
+  const t = query.get('dtab');
+  if (DETAIL_TABS.has(t)) return t;
+  return query.get('insp') === 'out' ? 'out' : 'log';
+}
 
 export const dom = {
   app: document.getElementById('app'),
@@ -345,7 +365,7 @@ export const store = {
    * セッションを選び直しても戻さない。見たいものは人ごとに決まっていて、
    * セッションごとに変わるものではないため
    */
-  detailTab: DETAIL_TABS.has(query.get('dtab')) ? query.get('dtab') : 'now',
+  detailTab: initialDetailTab(),
   /**
    * 右のインスペクタ。INSPECTOR_TABS のどれか、または null で閉じている。
    *
@@ -445,7 +465,9 @@ export function syncQuery() {
   // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
   set('asort', store.tab === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
   // 既定（いま）のときだけキーを落とす。tab と同じ扱い
-  set('dtab', store.detailTab === 'now' ? null : store.detailTab);
+  // 既定（経過）のときだけキーを落とす。既定が「いま」から替わったので、
+  // これからは ?dtab=now が URL に載る
+  set('dtab', store.detailTab === 'log' ? null : store.detailTab);
   // 閉じているときはキーを付けない。null は set() が消してくれる
   set('insp', store.inspector);
 

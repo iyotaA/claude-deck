@@ -7,7 +7,7 @@ import { el, since, stamp, tokens, agentTag } from './util.js';
 import { dom, store, STATE_COLOR, QUIET_MODES, SUMMARY_ORDER } from './store.js';
 import { idleOf, headOf, visibleRows } from './rows.js';
 import { newestRateLimit, rateView } from './runs.js';
-import { setListOpen } from './drawer.js';
+import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
 
 /**
@@ -93,7 +93,7 @@ export function buildCard(row, onPick = null) {
     }
     // 引き出しは選ぶために開くもの。選び終わったら用済みなので閉じて詳細に場所を渡す。
     // 同じものを選び直したときも閉じたいので、select の中ではなくここに置く
-    setListOpen(false, dom.detail);
+    closeListAfterPick(dom.detail);
   });
   li.append(card);
   return li;

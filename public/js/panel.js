@@ -39,6 +39,7 @@ export const SEC = {
   resume: 'sec-resume',
   decisions: 'sec-decisions',
   todo: 'sec-todo',
+  outcome: 'sec-outcome',
   compact: 'sec-compact',
   timeline: 'sec-timeline',
   agents: 'sec-agents',

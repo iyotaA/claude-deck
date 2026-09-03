@@ -8,7 +8,7 @@
  */
 import { el, kb, shortStamp, stamp, agentTag } from './util.js';
 import { dom, store, syncQuery, ARCHIVE_SORTS, TABS } from './store.js';
-import { setListOpen } from './drawer.js';
+import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
 import { renderList } from './list.js';
 
@@ -57,7 +57,7 @@ function buildArchiveCard(row) {
 
   card.addEventListener('click', () => {
     select(row.sessionId, 'archive');
-    setListOpen(false, dom.detail);
+    closeListAfterPick(dom.detail);
   });
   li.append(card);
   return li;

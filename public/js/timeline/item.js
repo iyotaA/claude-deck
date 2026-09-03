@@ -8,6 +8,8 @@
  */
 import { el, dur, num, hms, markUp, marked, countHits } from '../util.js';
 import { labelOf } from './kinds.js';
+// 層0 のアイコン。timeline/ からも直に見てよい（icons.js は util.js しか見ない）
+import { icon } from '../icons.js';
 import { waitBadge } from './waits.js';
 import { bodyText, answerBlock, planBlock, rawBlock, whenNode } from './blocks.js';
 
@@ -45,17 +47,23 @@ export function timelineItem(item, ctx = {}) {
   body.append(kindRow);
 
   switch (item.kind) {
-    // 自分の指示は判断の記録そのものなので、Claude の説明より長く出す
+    // 頭出しの予算。**切っても1文字も失わない**（bodyText が全文を畳みに残す）。
+    //
+    // 実測（489件のセッション）で say が 185件・全体の 38% を占めていて、
+    // 時系列4行で 666px 使っていた。1件あたり平均 166px。
+    // ここを詰めると「流れ」が1画面に入る（窓を広げるのは TL_FIRST の側）。
+    //
+    // 差は残す。自分の指示は判断の記録そのものなので、Claude の説明より長く出す
     case 'prompt':
-      body.append(...bodyText(item.text, 900, 12, null, needle));
+      body.append(...bodyText(item.text, 300, 4, null, needle));
       break;
     case 'say':
-      body.append(...bodyText(item.text, 260, 4, item.fullLength, needle));
+      body.append(...bodyText(item.text, 120, 1, item.fullLength, needle));
       break;
     // Claude の自己申告。時系列でもその場で断ってから本文を出す
     case 'recap':
       body.append(el('p', 'note', 'Claude 自身が書いた中間報告です。機械的に抜き出した記録ではありません'));
-      body.append(...bodyText(item.text, 600, 8, item.fullLength, needle));
+      body.append(...bodyText(item.text, 240, 2, item.fullLength, needle));
       break;
     // 間引きで落ちた区間の目印。何が落ちたかまで出す（足跡だけの区間かどうかが読めるように）
     case 'elided': {
@@ -99,6 +107,35 @@ export function timelineItem(item, ctx = {}) {
     case 'slash':
       body.append(marked('div', 'tl-text', item.args ? `${item.command} ${item.args}` : item.command, needle));
       break;
+    // ファイルの書き換え。足跡から splitEdits が抜き出したもの。
+    // **畳まない。** 「どのファイルを触ったか」はこの画面がいちばん出したいことで、
+    // 足跡と同じように畳むと、抜き出した意味がなくなる。
+    //
+    // 一覧は panels.css の .files を借りる（右の「書き換えたファイル」と同じ顔）。
+    // 借り元は 1列目に回数を入れるが、ここは行ごとにツールが違うのでツール名を入れる
+    case 'edit': {
+      // 種類の名前に絵を添える。**14種のうちここだけ。**
+      // 芯の「どんな作業をしたか」に直答する行なので、流し読みで拾えるようにする。
+      // 増やすと「絵が並んでいるうちの1つ」になって、この行の意味が薄まる
+      kindRow.prepend(icon('pencil', 13));
+      const ul = el('ul', 'files');
+      for (const c of item.calls ?? []) {
+        const li = el('li');
+        li.append(marked('span', 'n', c.tool ?? '?', needle));
+        // detail は describeTool が入れた file_path そのもの。
+        // 末尾2階層だけ薄く出して、ファイル名を濃く残す（filesPanel と同じ切り方）
+        const parts = String(c.detail ?? '').split(/[\\/]/).filter(Boolean);
+        const name = parts.pop();
+        const box = el('span', 'p');
+        if (parts.length) box.append(el('span', 'dir', `${parts.slice(-2).join('/')}/`));
+        // パスが取れていない呼び出しもある。空欄にせず、取れていないことを書く
+        box.append(...markUp(name ?? '(パス不明)', needle));
+        li.append(box);
+        ul.append(li);
+      }
+      body.append(ul);
+      break;
+    }
     // 足跡。assistant の1行につき1件で、並列に呼んだ分は calls にまとまっている。
     // 既定では畳んでおく。1件ずつ広げると、ここだけで画面が埋まって判断の記録が流れる
     case 'trace': {
