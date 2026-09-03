@@ -2,13 +2,56 @@
 
 /* -------------------------------------------------------------- 一覧（左） */
 
+/* 一覧は列ではなく引き出し。**広い窓でも同じ。**
+   作業台は「いまの作業をする場所」で、一覧は「移るための道具」。
+   道具に常設の列を与えていたのが読む幅を狭めていた。
+
+   ここに書くのは詳細度の都合。base.css の `.list-pane, .insp { position: relative }`
+   （0,1,0）を同じ詳細度で上書きしたいので、後に読まれるこのファイルへ置く。
+   **`.deck >` で絞らない**（0,2,0 になると narrow.css の幅の上書きに勝ってしまう）。
+
+   閉じているあいだは画面の外へ逃がすだけで、visibility では隠さない。
+   あれは変化が1フレームで確定せず、開いた直後に focus を受け付けない。
+   見えていないカードへ Tab で入るのを防ぐのは drawer.js の inert に任せる */
 .list-pane {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  width: var(--list-col);
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--bg);
   border-right: 1px solid var(--border);
+  overscroll-behavior: contain;
+  transform: translateX(-100%);
+  transition: transform .18s ease;
 }
+
+/* 影は開いているときだけ。閉じていても影はにじむので、画面の左端に帯が出てしまう */
+.is-list-open .list-pane {
+  box-shadow: var(--shadow);
+  transform: translateX(0);
+}
+
+/* 背後を覆う膜。
+   **広い窓でも敷く。** 引き出しは z-index: 40 で中央に重なるので、膜が無いと
+   「開いているのに背面が押せて、押しても閉じない」状態になる。
+   敷いておけば背面クリックが閉じる口になり、開いていることも一目で分かる。
+   選んだら自分で引っ込む（setListOpen(false)）ので、覆っている時間は短い */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgb(0 0 0 / 45%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s ease;
+}
+
+.is-list-open .scrim { opacity: 1; pointer-events: auto; }
 
 /* 稼働中と書庫の切り替え。押されているほうだけ下に線を1本引く。
    面は塗らない（一覧のカードと同じ理由で、塗ると重さの差が読めなくなる） */
@@ -125,8 +168,10 @@
 }
 
 /* 引き出しを閉じるボタン。広い画面には引き出しが無いので出さない */
+/* 引き出しを閉じる口。**常時出す。** 引き出しが広い窓でも使われるようになったので、
+   狭い窓だけの飾りではなくなった */
 .drawer-close {
-  display: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 1.7rem;

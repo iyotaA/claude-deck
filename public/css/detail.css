@@ -30,7 +30,22 @@
   padding: 0 1.3rem 3rem;
 }
 
-.detail { padding-top: 1.1rem; }
+/* 読む幅の上限。
+
+   一覧を列から降ろしたので中央が全幅になった。上限が無いと 1512px の窓で
+   本文が全角 100 字を超える（実測換算）。66rem で 68 字に収まる。
+
+   **面の側に置く。字だけに掛けない**（数値画面で .usage-read に 46rem を
+   敷いたのと同じ考え方）。.detail-scroll には置かない ―― あちらは padding を
+   持つ箱で、sticky したタブ帯の負 margin がその幅を基準にしている。
+
+   **寄せは左。** margin-inline: auto にすると、右の紙を開閉するたびに行頭が
+   横へ動く。左寄せなら本文は1px も動かず、1500px 以上の窓では紙の開閉で
+   読む幅が変わらない（上限に当たるため）。右に空く場所は紙の予約席になる */
+.detail {
+  padding-top: 1.1rem;
+  max-width: 66rem;
+}
 
 .detail-empty {
   height: 100%;

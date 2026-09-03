@@ -24,7 +24,7 @@
 import { el, since } from './util.js';
 import { dom, store, STATE_COLOR } from './store.js';
 import { idleOf } from './rows.js';
-import { NARROW, setListOpen } from './drawer.js';
+import { setListOpen } from './drawer.js';
 import { openZoom } from './zoom.js';
 import { focusTerminal } from './detail-head.js';
 import { TAB_DEFS, INSP_DEFS, setDetailTab, setInspector } from './detail.js';
@@ -173,9 +173,9 @@ function buildAll() {
     });
   }
 
-  // 引き出しがあるのは狭い画面だけ。広い画面では一覧が常に見えているので、
-  // setListOpen を呼んでも drawer.js 側が何もしない（動かないものを項目にしない）
-  if (NARROW.matches) {
+  // 一覧は窓の広さに関わらず引き出しになったので、常に項目に出す。
+  // **三本線と並ぶ、一覧へ行く2本目の道**（前は狭い窓でしか出していなかった）
+  {
     const open = dom.app.classList.contains('is-list-open');
     out.push({
       group: '出す・畳む',

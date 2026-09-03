@@ -55,7 +55,7 @@
 import { query, dom, store } from './store.js';
 import { icon } from './icons.js';
 import { visibleRows } from './rows.js';
-import { initListDrawer } from './drawer.js';
+import { initListDrawer, setListOpen } from './drawer.js';
 import { initZoom } from './zoom.js';
 import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
@@ -119,6 +119,15 @@ function initListKeys(listEl, from) {
 
 initTheme();
 initListDrawer();
+// 何も選んでいなければ引き出しを開けておく。中央に出るのは
+// 「左の一覧からセッションを選ぶと、ここに中身が出ます」なので、
+// その一覧が畳まれたままだと、案内の指す先が画面に無いことになる。
+// ?session= で開いた人には出さない（読みに来ているので、道具は畳んだままでいい）。
+//
+// **store.selected ではなく URL を見る。** あちらの初期値は null で、
+// ?session= の値を入れるのは後から走る select() なので、ここでは必ず null になる
+// （実測：?session= 付きで開いても引き出しが出てしまった）
+if (!query.get('session')) setListOpen(true);
 // 拡大は帯のボタン・Esc・背面・× の4つで開閉する。どれで閉じても札が
 // 「縮小」のまま残らないよう、組み直しをこちらから差す（向きは 8 -> 2）。
 // 差すのは renderDetail のほう。renderDetailIfNeeded は中身が同じなら何もしないので、

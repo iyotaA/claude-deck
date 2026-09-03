@@ -85,6 +85,10 @@
 .zoom .is-wait .md { max-height: none; }
 .zoom .ask > pre { max-height: none; }
 
+/* 読む幅の上限も外す。拡大の器は 96rem あるので、66rem のまま運ぶと
+   広げた意味が薄れる。(0,2,0) で detail.css の .detail（0,1,0）に詳細度で勝つ */
+.zoom .detail { max-width: none; }
+
 /* 拡大しているあいだ、後ろの盤は隠す。
    .deck は「子の数と列の数が釣り合う」前提で組んであるので、中央のペインが
    1枚抜けると右のレールが中央の列へずれる。その姿が膜越しに透けて見える。
@@ -92,3 +96,12 @@
    **display: none にしない。** 中のスクロール位置を捨てるので、
    閉じたときに一覧が先頭へ飛ぶ */
 .is-zoom .deck { visibility: hidden; }
+
+/* 膜は .deck の外（.app 直下）にいるので、上の visibility では消えない。
+   引き出しを開いたまま拡大すると、拡大の器の後ろに膜だけが残る。
+   引き出し自体は .deck の子なので visibility を継いで消えている。
+
+   JS 側（openZoom で setListOpen(false)）でも直せるが、CSS で閉じるほうを採る。
+   あちらは「拡大を閉じたら引き出しも畳まれていた」という状態の変化が残り、
+   こちらは見た目だけ止めて状態に触らない */
+.is-zoom .scrim { display: none; }
