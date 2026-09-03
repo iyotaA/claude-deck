@@ -126,6 +126,14 @@ export const INSPECTOR_TABS = new Set(['usage', 'basics']);
 /**
  * 開く中央タブを決める。
  *
+ * **既定は「経過」。** 前は「いま」だったが、止まっていないセッションでは
+ * あそこは1行（いまあなたの手が要るものはありません）しか出ない。
+ * いちばん見たい「どんな流れで・どんな判断で・どんな作業をしたか」が
+ * 既定で0クリックの位置に無かった。
+ *
+ * 止まっているときに待ちが埋もれないよう、答えないと進まないものは
+ * タブ帯より上へ出してある（detail.js の renderDetail）。
+ *
  * `?insp=out` を拾うのは、成果が右のインスペクタだった版の URL が実在するため。
  * **v0.6.0 で配っている**（`git tag --contains bedff48`）ので読み替えを入れる。
  * 以前ここに「段1 はまだ誰にも配っていない」と書いてあったが、それは古くなっていた
@@ -133,7 +141,7 @@ export const INSPECTOR_TABS = new Set(['usage', 'basics']);
 function initialDetailTab() {
   const t = query.get('dtab');
   if (DETAIL_TABS.has(t)) return t;
-  return query.get('insp') === 'out' ? 'out' : 'now';
+  return query.get('insp') === 'out' ? 'out' : 'log';
 }
 
 export const dom = {
@@ -457,7 +465,9 @@ export function syncQuery() {
   // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
   set('asort', store.tab === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
   // 既定（いま）のときだけキーを落とす。tab と同じ扱い
-  set('dtab', store.detailTab === 'now' ? null : store.detailTab);
+  // 既定（経過）のときだけキーを落とす。既定が「いま」から替わったので、
+  // これからは ?dtab=now が URL に載る
+  set('dtab', store.detailTab === 'log' ? null : store.detailTab);
   // 閉じているときはキーを付けない。null は set() が消してくれる
   set('insp', store.inspector);
 
