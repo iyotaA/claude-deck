@@ -13,6 +13,7 @@ import { identity, stateFields } from './shape.mjs';
 import { summarize } from './summary.mjs';
 import { buildPlanLineage } from './plans.mjs';
 import { collectSubagents } from './subagent.mjs';
+import { errText } from '../shared/text.mjs';
 
 /**
  * @param {string} sessionId
@@ -56,7 +57,7 @@ export async function getSessionDetail(sessionId, now = Date.now()) {
   try {
     subagents = await collectSubagents(transcript?.file ?? null, sessionId, digest);
   } catch (err) {
-    subagents = { items: [], counts: null, readError: String(err?.message ?? err) };
+    subagents = { items: [], counts: null, readError: errText(err) };
   }
 
   const detail = {
@@ -91,7 +92,7 @@ export async function getSessionDetail(sessionId, now = Date.now()) {
   try {
     detail.summary = await summarize(detail);
   } catch (err) {
-    detail.summary = { source: 'error', reason: String(err?.message ?? err) };
+    detail.summary = { source: 'error', reason: errText(err) };
   }
 
   return detail;

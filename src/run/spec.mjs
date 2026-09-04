@@ -32,6 +32,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isSwitchOn } from '../shared/env.mjs';
+import { isPlainObject } from '../shared/objects.mjs';
 
 /**
  * 画面に出す権限モード。**危なくない順に並べる。** 画面の選択肢もこの順で出る。
@@ -510,7 +511,7 @@ const SWITCH_LABELS = Object.freeze({
  * @returns {{ok:true, next:object, changed:string[]}|{ok:false, reason:string}}
  */
 export function mergeSwitch(prev, patch) {
-  const src = (patch && typeof patch === 'object' && !Array.isArray(patch)) ? patch : null;
+  const src = (isPlainObject(patch)) ? patch : null;
   if (!src) return { ok: false, reason: '切り替える内容がありません' };
 
   const next = { ...prev };

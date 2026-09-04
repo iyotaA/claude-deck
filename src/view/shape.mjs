@@ -9,6 +9,7 @@
  *  - project の projectDir フォールバックが一覧にしか無かった
  */
 import { STATE_LABELS, ballOf, isBlocking } from '../parse/state.mjs';
+import { projectNameOf } from '../shared/text.mjs';
 
 /**
  * そのセッションの身元にあたる項目を組む。
@@ -30,7 +31,7 @@ export function identity({ registry, meta, sessionId, transcript }) {
     cwd,
     // cwd が取れないときは、ログの置き場所のフォルダ名で代える。
     // slugifyCwd は不可逆なのでパスには戻せないが、見出しには使える
-    project: cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() : transcript?.projectDir ?? null,
+    project: projectNameOf(cwd, transcript?.projectDir ?? null),
     title: meta.title ?? meta.lastPrompt ?? meta.lastUserPrompt ?? null,
     permissionMode: meta.permissionMode,
     mode: meta.mode,

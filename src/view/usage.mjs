@@ -15,6 +15,8 @@ import { indexTranscripts, readAll, readAllOnce } from '../read/transcript.mjs';
 import { listSubagents, readSubagentLog } from '../read/subagents.mjs';
 import { extractMeta } from '../parse/meta.mjs';
 import { buildUsage, percentile } from '../parse/usage.mjs';
+import { projectNameOf } from '../shared/text.mjs';
+import { createLru } from '../shared/lru.mjs';
 
 /**
  * 横断集計で開くファイルの上限。
@@ -97,43 +99,16 @@ const BASELINE_MIN = 3;
 /**
  * 集計結果だけを持つ専用の memo。
  *
- * **read/cache.mjs は使わない。** あちらは 240件の LRU で、
- * 全文（1本で最大 42MB）を載せると一覧の tail: memo が全部追い出される。
+ * **read/cache.mjs と同居させない。** 器（`createLru`）は同じものを使うが、
+ * store は別に持つ。あちらは 240件で、全文（1本で最大 42MB）を載せると
+ * 一覧の tail: memo が全部追い出される。
  * ここに入るのは数百バイトの数値の塊だけなので、300件持っても数MBに収まる。
  *
  * 印は既存と同じ `size:mtimeMs`。会話ログは追記しか起きないので、
  * 印が同じなら中身も同じと言い切れる。
  */
 const CACHE_MAX = 300;
-const cache = new Map();
-
-/**
- * memo から取る。取れたものは末尾へ動かして「最近使った」印にする。
- *
- * @param {string} key
- * @returns {object|undefined}
- */
-function memoGet(key) {
-  if (!cache.has(key)) return undefined;
-  const value = cache.get(key);
-  cache.delete(key);
-  cache.set(key, value);
-  return value;
-}
-
-/**
- * memo へ入れる。溢れたら、いちばん長く触っていないものから捨てる。
- *
- * @param {string} key
- * @param {object} value
- */
-function memoSet(key, value) {
-  cache.set(key, value);
-  if (cache.size > CACHE_MAX) {
-    // Map は挿入順を保つので、先頭がいちばん古く触ったもの
-    cache.delete(cache.keys().next().value);
-  }
-}
+const cache = createLru(CACHE_MAX);
 
 /**
  * ログ1本を読んで集計する。memo に載るのはここが返す形。
@@ -156,7 +131,7 @@ async function usageForTranscript(sessionId, transcript, { shared = false } = {}
   // 0 と不明を分ける原則を、キャッシュの印にも同じように当てる
   const key = log.size > 0 ? `${sessionId}:${log.size}:${log.mtimeMs}` : null;
   if (key) {
-    const hit = memoGet(key);
+    const hit = cache.get(key);
     if (hit) return hit;
   }
 
@@ -167,11 +142,11 @@ async function usageForTranscript(sessionId, transcript, { shared = false } = {}
     mtimeMs: log.mtimeMs || transcript.mtimeMs || null,
     projectDir: transcript.projectDir,
     // 一覧・書庫と同じ組み方。cwd が読めていればその末尾、駄目なら置き場所のフォルダ名
-    project: meta.cwd ? meta.cwd.split(/[\\/]/).filter(Boolean).pop() : transcript.projectDir,
+    project: projectNameOf(meta.cwd, transcript.projectDir),
     title: meta.title ?? meta.lastPrompt ?? meta.lastUserPrompt ?? null,
     usage: buildUsage(log.entries),
   };
-  if (key) memoSet(key, value);
+  if (key) cache.set(key, value);
   return value;
 }
 
@@ -202,7 +177,7 @@ async function subUsageFor(sessionId, transcriptFile) {
     .sort()
     .join('|');
   const key = `sub:${sessionId}:${mark}`;
-  const hit = memoGet(key);
+  const hit = cache.get(key);
   if (hit) return hit;
 
   const logs = await pooled(refs, READ_CONCURRENCY, (ref) =>
@@ -219,7 +194,7 @@ async function subUsageFor(sessionId, transcriptFile) {
   }
 
   const value = { ...foldSubUsage(parsed), agents: refs.length, truncated, readError: false };
-  memoSet(key, value);
+  cache.set(key, value);
   return value;
 }
 

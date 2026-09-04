@@ -91,6 +91,7 @@
  *   default, dontAsk, plan`）。**黙って詰まることは無い**
  */
 import { clip } from '../shared/text.mjs';
+import { isPlainObject } from '../shared/objects.mjs';
 
 /** broken のときに残す原文の見本の長さ。原因が分かればよいので短くてよい。 */
 const SAMPLE_MAX = 200;
@@ -288,7 +289,7 @@ function resultInfo(line) {
  * @returns {object} 揃った形（無いキーは null / 空配列）
  */
 function permissionInfo(requestId, req) {
-  const input = req.input && typeof req.input === 'object' && !Array.isArray(req.input)
+  const input = isPlainObject(req.input)
     ? req.input
     : null;
   return {
@@ -321,7 +322,7 @@ function controlResultInfo(res) {
     error: clip(res.error ?? res.message, RESULT_TEXT_MAX),
     // 中身は subtype ごとに違う（`set_permission_mode` なら `{mode}`）。
     // 解釈はここでしない。撃った側が自分の subtype に合わせて読む
-    response: res.response && typeof res.response === 'object' && !Array.isArray(res.response)
+    response: isPlainObject(res.response)
       ? res.response
       : null,
   };
@@ -519,7 +520,7 @@ export function classifyStreamLine(text) {
   }
 
   // 配列やリテラルが来ることは想定していないが、来たときに落ちない側へ倒す
-  if (!line || typeof line !== 'object' || Array.isArray(line)) {
+  if (!isPlainObject(line)) {
     return { ...base, sample: clip(text.trim(), SAMPLE_MAX) };
   }
 
@@ -568,7 +569,7 @@ export function classifyStreamLine(text) {
       return { ...base, ...common, kind: 'result', info: resultInfo(line) };
 
     case 'control_request': {
-      const req = line.request && typeof line.request === 'object' && !Array.isArray(line.request)
+      const req = isPlainObject(line.request)
         ? line.request
         : {};
       const requestId = str(line.request_id ?? line.requestId);
@@ -585,7 +586,7 @@ export function classifyStreamLine(text) {
     }
 
     case 'control_response': {
-      const res = line.response && typeof line.response === 'object' && !Array.isArray(line.response)
+      const res = isPlainObject(line.response)
         ? line.response
         : {};
       return { ...base, ...common, subtype: str(res.subtype), kind: 'control-result', info: controlResultInfo(res) };
@@ -709,7 +710,7 @@ export function encodeControlRequest(requestId, subtype, params) {
   if (!id) throw new TypeError('要求の request_id がありません');
   const sub = str(subtype);
   if (!sub) throw new TypeError('要求の subtype がありません');
-  const extra = params && typeof params === 'object' && !Array.isArray(params) ? params : {};
+  const extra = isPlainObject(params) ? params : {};
   const line = { type: 'control_request', request_id: id, request: { ...extra, subtype: sub } };
   return `${JSON.stringify(line)}\n`;
 }

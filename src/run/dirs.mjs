@@ -34,6 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readConfigFile, writeConfigFile } from '../shared/configfile.mjs';
 import { resolveCwd } from './spec.mjs';
+import { isPlainObject } from '../shared/objects.mjs';
 
 /**
  * 登録できる件数の上限。
@@ -212,8 +213,8 @@ export function removeRunDir(list, dir, { platform = process.platform } = {}) {
  * @returns {object} 書き戻す全体
  */
 export function mergeRunDirs(file, dirs) {
-  const base = file && typeof file === 'object' && !Array.isArray(file) ? file : {};
-  const run = base.run && typeof base.run === 'object' && !Array.isArray(base.run) ? base.run : {};
+  const base = isPlainObject(file) ? file : {};
+  const run = isPlainObject(base.run) ? base.run : {};
   return { ...base, run: { ...run, dirs: [...dirs] } };
 }
 

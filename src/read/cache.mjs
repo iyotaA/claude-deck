@@ -3,10 +3,15 @@
  *
  * 会話ログは追記しか起きないので、サイズと mtime が変わっていなければ
  * 前回のパース結果をそのまま使える。一覧を毎秒引いても重くならないための土台。
+ *
+ * **ここに全文を載せない。** 240 件しか持たないので、大きいログの中身で埋めると
+ * 一覧が使う tail の memo が全部押し出される。集計は `view/usage.mjs` が
+ * 自分の器（同じ `createLru`）を持っている。
  */
+import { createLru } from '../shared/lru.mjs';
 
 const MAX_ENTRIES = 240;
-const store = new Map();
+const store = createLru(MAX_ENTRIES);
 
 /**
  * stamp が前回と同じなら compute を呼ばずに前回の値を返す。
@@ -17,22 +22,10 @@ const store = new Map();
  */
 export async function memo(key, stamp, compute) {
   const hit = store.get(key);
-  if (hit && hit.stamp === stamp) {
-    // 参照されたものを末尾へ動かし、古いものから捨てられるようにする
-    store.delete(key);
-    store.set(key, hit);
-    return hit.value;
-  }
+  if (hit && hit.stamp === stamp) return hit.value;
 
   const value = await compute();
   store.set(key, { stamp, value });
-
-  while (store.size > MAX_ENTRIES) {
-    const oldest = store.keys().next();
-    if (oldest.done) break;
-    store.delete(oldest.value);
-  }
-
   return value;
 }
 

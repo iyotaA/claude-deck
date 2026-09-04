@@ -48,7 +48,7 @@ import {
   encodePermissionResponse,
   encodeUserLine,
 } from '../parse/stream.mjs';
-import { oneLine } from '../shared/text.mjs';
+import { errText, oneLine } from '../shared/text.mjs';
 import { LINE_MAX, claudeInfo, createLineSplitter, spawnClaude, stopClaude } from '../os/claude.mjs';
 import {
   PERMISSION_MODES, PROMPT_MAX, buildRunSpec, checkModel, checkPermissionMode, mergeSwitch,
@@ -289,7 +289,7 @@ export function createRunner({
         child.stdin.write(line);
       } catch (e) {
         if (!failed.includes(item.runId)) failed.push(item.runId);
-        extra.push(...ledger.fail(item.runId, `答えを送れませんでした（${String(e?.message ?? e)}）`, clock()));
+        extra.push(...ledger.fail(item.runId, `答えを送れませんでした（${errText(e)}）`, clock()));
       }
     }
 
@@ -414,7 +414,7 @@ export function createRunner({
 
     // 実行ファイルが無いときはここにしか来ない
     child.on('error', (e) => {
-      commit(ledger.fail(runId, String(e?.message ?? e), clock()));
+      commit(ledger.fail(runId, errText(e), clock()));
       detach(runId);
     });
 
@@ -454,7 +454,7 @@ export function createRunner({
       // 指示文は必ず stdin へ。argv には載せない
       child.stdin.write(encodeUserLine(text));
     } catch (e) {
-      const reason = `入力を送れませんでした（${String(e?.message ?? e)}）`;
+      const reason = `入力を送れませんでした（${errText(e)}）`;
       commit(ledger.fail(runId, reason, at));
       return { ok: false, status: 500, reason };
     }
