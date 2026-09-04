@@ -414,3 +414,53 @@ export function numStrict(n) {
   if (typeof n !== 'number' || !Number.isFinite(n)) return '—';
   return num(n);
 }
+
+/**
+ * 「何が文脈を食っているか」の節。詳細ペインと横断の両方が出す。
+ *
+ * **もとは同じものが2枚に書かれていた。** 棒の写像（`{label, value, sub}`）と
+ * 表の列・行の写像がバイト単位で一致していて、**JSDoc の本文まで同じ**だった。
+ *
+ * 違っていたのは4つだけなので、そこを引数で受ける。
+ *
+ * | | 詳細ペイン | 横断 |
+ * |---|---|---|
+ * | 説明の後半 | 「次から範囲や limit を絞れます」 | 「集めたセッションぶんを足しています」 |
+ * | 棒の本数 | 8 | 6 |
+ * | 表の見出し | 「全 N 件を表で見る」 | 「ツール N 件を表で見る」 |
+ * | 帰属できなかったぶんの注記 | 出す | 出さない（横断では母数が違って読めない） |
+ *
+ * **注記は畳まずに呼ぶ側で組んで渡す。** あれは「ツール以外」と「測れなかった回」の
+ * 2種類を状況で足し引きするもので、ここで分岐させると引数が増えるだけになる。
+ *
+ * @param {object[]} tools ツール別の集計（`tool` / `calls` / `tokens` / `avg` / `max`）
+ * @param {object} opts
+ * @param {string} opts.note 説明文
+ * @param {number} opts.bars 棒で出す本数
+ * @param {string} opts.tableLabel 表を開く札の文字
+ * @param {HTMLElement|null} [opts.extraNote] 棒と表のあいだに挟む注記
+ * @returns {HTMLElement|null} 1件も無ければ null（節ごと出さない）
+ */
+export function toolsBlock(tools, { note, bars, tableLabel, extraNote = null }) {
+  if (!tools.length) return null;
+
+  const box = block('何が文脈を食っているか');
+  box.append(el('p', 'note', note));
+
+  box.append(barList(tools.slice(0, bars).map((t) => ({
+    label: t.tool,
+    value: t.tokens,
+    sub: `${numStrict(t.calls)} 回`,
+  }))));
+
+  if (extraNote) box.append(extraNote);
+
+  box.append(tableDetails(
+    tableLabel,
+    ['ツール', '回数', '合計', '平均', '最大1回'],
+    tools.map((t) => [
+      t.tool, numStrict(t.calls), numStrict(t.tokens), numStrict(t.avg), numStrict(t.max),
+    ]),
+  ));
+  return box;
+}
