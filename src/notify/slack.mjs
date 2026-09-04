@@ -8,7 +8,7 @@
  * 応答の意味づけ（classifyResponse）だけを純関数として切り出してテストする。
  * 実際の POST はテストしない。read/ の薄い殻と同じ割り切り。
  */
-import { oneLine } from '../shared/text.mjs';
+import { errText, oneLine } from '../shared/text.mjs';
 import { scrubError } from './message.mjs';
 
 /** 送信のタイムアウト。server.mjs の 1500ms は localhost 向けで、社外 HTTPS には短い。 */
@@ -102,7 +102,7 @@ export async function postToSlack(url, text, { timeoutMs = TIMEOUT_MS, fetchImpl
     // 気づけるように一言添える（依存を増やせない以上、対応はできない）
     const raw = err?.name === 'TimeoutError'
       ? `${timeoutMs}ms 以内に応答がありませんでした`
-      : `送信できませんでした: ${err?.message ?? err}`;
+      : `送信できませんでした: ${errText(err)}`;
     return {
       ok: false,
       retry: true,

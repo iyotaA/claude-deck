@@ -43,6 +43,7 @@ import {
   resolvePortFile, hasPortFileFlag, writePortFile, removePortFile,
 } from './src/shared/portfile.mjs';
 import { sessionsDir, projectsDir, configDir } from './src/read/paths.mjs';
+import { errText } from './src/shared/text.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, 'public');
@@ -260,7 +261,7 @@ async function refresh(force = false) {
       broadcast('sessions', payload);
     }
   } catch (err) {
-    broadcast('error', { message: String(err?.message ?? err) });
+    broadcast('error', { message: errText(err) });
   } finally {
     refreshing = false;
     if (pendingRefresh) {
@@ -362,7 +363,7 @@ async function handleFocus(res, pid) {
     }
     sendJson(res, 200, await focusTerminal(pid));
   } catch (err) {
-    sendJson(res, 500, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 500, { ok: false, reason: errText(err) });
   }
 }
 
@@ -425,7 +426,7 @@ async function handleSaveSettings(req, res) {
   try {
     body = await readJsonBody(req);
   } catch (err) {
-    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 400, { ok: false, reason: errText(err) });
     return;
   }
 
@@ -440,7 +441,7 @@ async function handleSaveSettings(req, res) {
     // 書いたものを読み直して渡す。丸めや既定の反映を1箇所（config.mjs）に任せる
     notifier.applyConfig(loadNotifyConfig());
   } catch (err) {
-    sendJson(res, 500, { ok: false, reason: `設定を保存できませんでした: ${err?.message ?? err}` });
+    sendJson(res, 500, { ok: false, reason: `設定を保存できませんでした: ${errText(err)}` });
     return;
   }
 
@@ -457,7 +458,7 @@ async function handleTestNotify(res) {
     const r = await notifier.sendTest();
     sendJson(res, 200, { ...r, settings: notifier.settings() });
   } catch (err) {
-    sendJson(res, 500, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 500, { ok: false, reason: errText(err) });
   }
 }
 
@@ -603,7 +604,7 @@ function handleApplyUpdate(res) {
     child.unref();
   } catch (err) {
     applyGuardUntil = 0;
-    sendJson(res, 500, { ok: false, reason: `更新を始められませんでした: ${err?.message ?? err}` });
+    sendJson(res, 500, { ok: false, reason: `更新を始められませんでした: ${errText(err)}` });
     return;
   }
 
@@ -619,7 +620,7 @@ function handleApplyUpdate(res) {
     if (settled) return;
     settled = true;
     applyGuardUntil = 0;
-    sendJson(res, 500, { ok: false, reason: `更新を始められませんでした: ${err?.message ?? err}` });
+    sendJson(res, 500, { ok: false, reason: `更新を始められませんでした: ${errText(err)}` });
   });
 }
 
@@ -761,7 +762,7 @@ async function handleRunDirs(req, res) {
   try {
     body = await readJsonBody(req);
   } catch (err) {
-    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 400, { ok: false, reason: errText(err) });
     return;
   }
 
@@ -798,7 +799,7 @@ async function handleRunDirs(req, res) {
   try {
     saveRunDirs(next.dirs);
   } catch (err) {
-    sendJson(res, 500, { ok: false, reason: `保存できませんでした: ${err?.message ?? err}` });
+    sendJson(res, 500, { ok: false, reason: `保存できませんでした: ${errText(err)}` });
     return;
   }
 
@@ -878,7 +879,7 @@ async function handleRunStart(req, res) {
   try {
     body = await readJsonBody(req, RUN_BODY_MAX);
   } catch (err) {
-    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 400, { ok: false, reason: errText(err) });
     return;
   }
 
@@ -907,7 +908,7 @@ async function handleRunInput(req, res, runId) {
   try {
     body = await readJsonBody(req, RUN_BODY_MAX);
   } catch (err) {
-    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 400, { ok: false, reason: errText(err) });
     return;
   }
 
@@ -938,7 +939,7 @@ async function handleRunAnswer(req, res, runId) {
   try {
     body = await readJsonBody(req, ANSWER_BODY_MAX);
   } catch (err) {
-    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 400, { ok: false, reason: errText(err) });
     return;
   }
 
@@ -973,7 +974,7 @@ async function handleRunMode(req, res, runId) {
   try {
     body = await readJsonBody(req);
   } catch (err) {
-    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 400, { ok: false, reason: errText(err) });
     return;
   }
 
@@ -1007,7 +1008,7 @@ async function handleRunInterrupt(req, res, runId) {
   try {
     body = await readJsonBody(req);
   } catch (err) {
-    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 400, { ok: false, reason: errText(err) });
     return;
   }
 
@@ -1037,7 +1038,7 @@ async function handleRunStop(res, runId) {
     }
     sendJson(res, r.status, { ok: true, run: r.row, closed: r.closed ?? null });
   } catch (err) {
-    sendJson(res, 500, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 500, { ok: false, reason: errText(err) });
   }
 }
 
@@ -1059,7 +1060,7 @@ async function handleRunSwitch(req, res, runId) {
     // 入力と同じ上限を渡す
     body = await readJsonBody(req, RUN_BODY_MAX);
   } catch (err) {
-    sendJson(res, 400, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 400, { ok: false, reason: errText(err) });
     return;
   }
 
@@ -1072,7 +1073,7 @@ async function handleRunSwitch(req, res, runId) {
     }
     sendJson(res, r.status, { ok: true, run: r.row, changed: r.changed });
   } catch (err) {
-    sendJson(res, 500, { ok: false, reason: String(err?.message ?? err) });
+    sendJson(res, 500, { ok: false, reason: errText(err) });
   }
 }
 
@@ -1247,7 +1248,7 @@ const server = http.createServer((req, res) => {
     // 1回引いたときだけ「返信待ち」に見える、という食い違いが生まれる
     computeSessions().then(
       (payload) => sendJson(res, 200, withRuns(payload)),
-      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+      (err) => sendJson(res, 500, { error: errText(err) }),
     );
     return;
   }
@@ -1256,7 +1257,7 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/archive') {
     listArchive(parseArchiveQuery(url.searchParams)).then(
       (payload) => sendJson(res, 200, payload),
-      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+      (err) => sendJson(res, 500, { error: errText(err) }),
     );
     return;
   }
@@ -1268,7 +1269,7 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/usage') {
     listUsage(parseUsageQuery(url.searchParams)).then(
       (payload) => sendJson(res, 200, payload),
-      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+      (err) => sendJson(res, 500, { error: errText(err) }),
     );
     return;
   }
@@ -1283,7 +1284,7 @@ const server = http.createServer((req, res) => {
         if (!raw) sendJson(res, 404, { error: 'その行が見つかりません' });
         else sendJson(res, 200, raw);
       },
-      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+      (err) => sendJson(res, 500, { error: errText(err) }),
     );
     return;
   }
@@ -1300,7 +1301,7 @@ const server = http.createServer((req, res) => {
         if (!payload) sendJson(res, 404, { error: 'その記録が見つかりません' });
         else sendJson(res, 200, payload);
       },
-      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+      (err) => sendJson(res, 500, { error: errText(err) }),
     );
     return;
   }
@@ -1316,7 +1317,7 @@ const server = http.createServer((req, res) => {
         if (!payload) sendJson(res, 404, { error: 'そのセッションが見つかりません' });
         else sendJson(res, 200, payload);
       },
-      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+      (err) => sendJson(res, 500, { error: errText(err) }),
     );
     return;
   }
@@ -1332,7 +1333,7 @@ const server = http.createServer((req, res) => {
         if (!payload) sendJson(res, 404, { error: 'そのセッションが見つかりません' });
         else sendJson(res, 200, payload);
       },
-      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+      (err) => sendJson(res, 500, { error: errText(err) }),
     );
     return;
   }
@@ -1344,7 +1345,7 @@ const server = http.createServer((req, res) => {
         if (!detail) sendJson(res, 404, { error: 'そのセッションが見つかりません' });
         else sendJson(res, 200, detail);
       },
-      (err) => sendJson(res, 500, { error: String(err?.message ?? err) }),
+      (err) => sendJson(res, 500, { error: errText(err) }),
     );
     return;
   }
@@ -1569,7 +1570,7 @@ server.once('listening', () => {
         startedAt: Date.now(),
       });
     } catch (err) {
-      portFileError = err?.message ?? String(err);
+      portFileError = errText(err);
     }
   }
 

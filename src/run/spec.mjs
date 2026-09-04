@@ -32,6 +32,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isSwitchOn } from '../shared/env.mjs';
+import { isPlainObject } from '../shared/objects.mjs';
 
 /**
  * 画面に出す権限モード。**危なくない順に並べる。** 画面の選択肢もこの順で出る。
@@ -207,6 +208,28 @@ export function checkModel(raw) {
     return { ok: false, reason: 'モデルの指定が不正です' };
   }
   return { ok: true, model };
+}
+
+/**
+ * 指示文を確かめる。前後の空白は落とす。
+ *
+ * 起こすとき（`buildRunSpec`）・1行送るとき・切り替えるときの3箇所で同じ検証をしていた。
+ * **文言まで同じ**だったので、片方だけ上限を変えると
+ * 同じ長さの指示が窓口によって通ったり通らなかったりする形になっていた。
+ *
+ * `flagLike` は見ない。指示文は argv に乗らず stdin へ流すので、
+ * `-` 始まりでも旗と解釈される余地が無い。
+ *
+ * @param {*} raw 画面から来た指示文
+ * @returns {{ok:true, prompt:string}|{ok:false, reason:string}}
+ */
+export function checkPrompt(raw) {
+  const prompt = typeof raw === 'string' ? raw.trim() : '';
+  if (!prompt) return { ok: false, reason: '指示が空です' };
+  if (prompt.length > PROMPT_MAX) {
+    return { ok: false, reason: `指示が長すぎます（${PROMPT_MAX} 文字まで）` };
+  }
+  return { ok: true, prompt };
 }
 
 /**
@@ -414,11 +437,9 @@ export function buildRunSpec(input = {}, {
   const cwd = resolveCwd(src.cwd, { allowedDirs, platform });
   if (!cwd.ok) return { ok: false, reason: cwd.reason };
 
-  const prompt = typeof src.prompt === 'string' ? src.prompt.trim() : '';
-  if (!prompt) return { ok: false, reason: '指示が空です' };
-  if (prompt.length > PROMPT_MAX) {
-    return { ok: false, reason: `指示が長すぎます（${PROMPT_MAX} 文字まで）` };
-  }
+  const checkedPrompt = checkPrompt(src.prompt);
+  if (!checkedPrompt.ok) return { ok: false, reason: checkedPrompt.reason };
+  const prompt = checkedPrompt.prompt;
 
   // 起こすときだけ、空を既定へ倒してから確かめる
   const rawMode = str(src.permissionMode) || DEFAULT_PERMISSION_MODE;
@@ -510,7 +531,7 @@ const SWITCH_LABELS = Object.freeze({
  * @returns {{ok:true, next:object, changed:string[]}|{ok:false, reason:string}}
  */
 export function mergeSwitch(prev, patch) {
-  const src = (patch && typeof patch === 'object' && !Array.isArray(patch)) ? patch : null;
+  const src = (isPlainObject(patch)) ? patch : null;
   if (!src) return { ok: false, reason: '切り替える内容がありません' };
 
   const next = { ...prev };

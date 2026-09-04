@@ -25,6 +25,8 @@ import { indexTranscripts, readTail } from '../read/transcript.mjs';
 import { countSubagents } from '../read/subagents.mjs';
 import { skillIndex, skillIndexState } from '../read/skills.mjs';
 import { extractMeta } from '../parse/meta.mjs';
+import { projectNameOf } from '../shared/text.mjs';
+import { DAY_MS, getter, intOf, textOf } from './query.mjs';
 
 /** 深い検索で中身を読む上限。理由はファイル冒頭のコメントに書いてある。 */
 export const ARCHIVE_SCAN_MAX = 120;
@@ -33,33 +35,6 @@ const PER_DEFAULT = 30;
 const PER_MAX = 50;
 /** 並び順の候補。知らない値が来たら既定へ丸める（400 は返さない）。 */
 const SORTS = new Set(['recent', 'oldest', 'size']);
-/** 検索語と絞り込みの文字数上限。長すぎる語は意味を持たないので頭だけ見る。 */
-const TEXT_MAX = 200;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/**
- * 数値のパラメータを範囲に収める。
- *
- * 変な値で 400 を返さない。URL を手で書き換えて壊れるより、黙って既定へ丸めるほうが親切。
- *
- * @param {string|null} raw クエリの生の値
- * @param {number} fallback 取れなかったときの値
- * @param {number} min 下限
- * @param {number} max 上限
- */
-function intOf(raw, fallback, min, max) {
-  const n = Number.parseInt(raw ?? '', 10);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, n));
-}
-
-/** 文字列のパラメータ。空白だけなら null にする（「検索語なし」と同じ扱い） */
-function textOf(raw) {
-  const t = String(raw ?? '').trim();
-  if (!t) return null;
-  return t.slice(0, TEXT_MAX);
-}
 
 /**
  * クエリ文字列を、丸めた形の指定に直す。
@@ -70,7 +45,7 @@ function textOf(raw) {
  * @returns {{page:number, per:number, sort:string, q:string|null, deep:boolean, project:string|null, days:number|null}}
  */
 export function parseArchiveQuery(params) {
-  const get = (key) => (params && typeof params.get === 'function' ? params.get(key) : null);
+  const get = getter(params);
   const sortRaw = get('sort');
 
   return {
@@ -124,13 +99,17 @@ function matches(row, needle) {
 /**
  * 書庫の行を並べ替える。**知らない語は「新しい順」に倒す**（0件にしない）。
  *
+ * 名前に Archive が入っているのは、一覧側（`sessions.mjs` の `sortRows`）と
+ * 紛らわしかったため。あちらは状態の順（手をつけるべき順）で、こちらは
+ * 画面で選んだ並び順。同じ名前で中身が違うと、import を1行見ただけでは見分けられない。
+ *
  * `logSize` は取れないことがあるので、大きさ順では 0 に倒して末尾へ寄せる。
  *
  * @param {object[]} rows 並べ替える行
  * @param {string} sort `recent` / `oldest` / `size`
  * @returns {object[]} 新しい配列（元は触らない）
  */
-function sortRows(rows, sort) {
+function sortArchiveRows(rows, sort) {
   const sorted = [...rows];
   if (sort === 'oldest') sorted.sort((a, b) => a.mtimeMs - b.mtimeMs);
   else if (sort === 'size') sorted.sort((a, b) => (b.logSize ?? 0) - (a.logSize ?? 0));
@@ -148,7 +127,7 @@ function publicRow(row) {
     sessionId: row.sessionId,
     // cwd が読めていればその末尾。読んでいなければ置き場所のフォルダ名で代える。
     // slugifyCwd は不可逆なのでパスには戻せないが、見出しには使える
-    project: row.cwd ? row.cwd.split(/[\\/]/).filter(Boolean).pop() : row.projectDir,
+    project: projectNameOf(row.cwd, row.projectDir),
     projectDir: row.projectDir,
     title: row.title,
     cwd: row.cwd,
@@ -200,7 +179,7 @@ async function buildProjects(all) {
       const cwd = extractMeta(tail.entries ?? []).cwd;
       // 末尾のフォルダ名だけを出す。フルパスは画面の札に収まらないし、
       // 置き場所の絞り込みに要るのは「どのプロジェクトか」だけ
-      g.label = cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() : g.dir;
+      g.label = projectNameOf(cwd, g.dir);
     } catch {
       // 読めなくても候補からは落とさない。スラッグのままでも選べるほうがいい
       g.label = g.dir;
@@ -298,7 +277,7 @@ export async function listArchive(q, now = Date.now()) {
 
   if (needle && q.deep) {
     // 新しい順に上限まで読む。古いものから切るのは、探しているものが新しい側にある確率が高いため
-    const byRecent = sortRows(rows, 'recent');
+    const byRecent = sortArchiveRows(rows, 'recent');
     const scan = byRecent.slice(0, ARCHIVE_SCAN_MAX);
     scanLimited = byRecent.length > scan.length;
     await Promise.all(scan.map((r) => fillTitle(r)));
@@ -308,7 +287,7 @@ export async function listArchive(q, now = Date.now()) {
     rows = rows.filter((r) => matches(r, needle));
   }
 
-  rows = sortRows(rows, q.sort);
+  rows = sortArchiveRows(rows, q.sort);
 
   const total = rows.length;
   const pages = Math.max(1, Math.ceil(total / q.per));

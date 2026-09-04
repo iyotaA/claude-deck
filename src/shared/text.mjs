@@ -1,12 +1,16 @@
 /**
- * 表示用に文字列を詰める道具。
+ * 文字列の小道具。
  *
- * もとは sessions.mjs・digest.mjs・summary.mjs の3箇所に同じ処理があった。
- * 切り方が1文字ずれると一覧と詳細で表示が食い違うので、1本にまとめている。
+ * `oneLine` と `clip` はもとは sessions.mjs・digest.mjs・summary.mjs の3箇所に
+ * 同じ処理があった。切り方が1文字ずれると一覧と詳細で表示が食い違うので、1本にまとめている。
  *
- * どちらも非文字列を渡されたら null を返す。
+ * この2つは非文字列を渡されたら null を返す。
  * 読んでいるのは Claude Code の内部データで、想定した型が来るとは限らないため。
  * 呼ぶ側で型を確かめずに渡してよい形にしてある。
+ *
+ * **`os/` からは呼ばない。** `os/claude.mjs` と `os/focus.mjs` は
+ * プロジェクト内 import ゼロ（`node:` だけ）という約束にしてあるので、
+ * あちらの `String(e?.message ?? e)` は重複のまま残してある。
  */
 
 /**
@@ -37,4 +41,35 @@ export function clip(text, max) {
   const t = text.trim();
   if (!t) return null;
   return t.length > max ? `${t.slice(0, max)}…（以下省略）` : t;
+}
+
+/**
+ * 例外を表示用の1行にする。
+ *
+ * **投げられるものは Error とは限らない。** 文字列も undefined も来るので、
+ * `message` があればそれを、無ければ値そのものを文字列にする。
+ * 32 箇所に同じ式が散っていたのをここへ寄せた。
+ *
+ * @param {*} err catch が受け取った値
+ * @returns {string}
+ */
+export function errText(err) {
+  return String(err?.message ?? err);
+}
+
+/**
+ * 作業フォルダから、いちばん下のフォルダ名を取る。
+ *
+ * 区切りは `/` と `\` の両方を見る。Windows のパスと POSIX のパスが混ざるため。
+ *
+ * **取れなかったときに何を返すかは呼ぶ側で違う**（`projectDir` へ落とす・`null` にする）。
+ * だから既定値を持たせず、引数で受ける。
+ *
+ * @param {*} cwd 作業フォルダ
+ * @param {*} [fallback] 取れなかったときに返すもの
+ * @returns {*} フォルダ名、または fallback
+ */
+export function projectNameOf(cwd, fallback = null) {
+  if (typeof cwd !== 'string' || !cwd) return fallback;
+  return cwd.split(/[\\/]/).filter(Boolean).pop() ?? fallback;
 }

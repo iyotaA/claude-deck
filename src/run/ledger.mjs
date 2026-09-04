@@ -80,8 +80,9 @@
  */
 import { sameSessionId } from '../parse/stream.mjs';
 import { ballOf, isBlocking } from '../parse/state.mjs';
-import { clip, oneLine } from '../shared/text.mjs';
+import { clip, oneLine, projectNameOf } from '../shared/text.mjs';
 import { askKindOf, toRunEvents } from './event.mjs';
+import { isPlainObject } from '../shared/objects.mjs';
 
 /**
  * 同時に動かせる本数。
@@ -329,7 +330,7 @@ function safeJson(v) {
  * @returns {string|null} 出すものが無ければ null
  */
 function askBody(toolName, input) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  if (!isPlainObject(input)) return null;
 
   // プランは本文そのものが読みたいもの。Markdown のまま渡す（画面が mdView で描く）
   if (toolName === 'ExitPlanMode') return clip(input.plan, ASK_BODY_MAX);
@@ -461,7 +462,7 @@ export function buildQuestionInput(pending, choices) {
   const input = pending?.input;
   const src = Array.isArray(input?.questions) ? input.questions : null;
   if (!src || src.length === 0) return { ok: false, reason: 'この要求は選択肢では答えられません' };
-  if (!choices || typeof choices !== 'object' || Array.isArray(choices)) {
+  if (!isPlainObject(choices)) {
     return { ok: false, reason: '選んだ内容が読めません' };
   }
 
@@ -687,6 +688,25 @@ export function createRunLedger({
   }
 
   /**
+   * こちらから撃つ `control_request` を積む。
+   *
+   * 許可への追い撃ち（`set_permission_mode`）・値の入れ替え・割り込みの3箇所が
+   * 同じ形を生で書いていた。断る側（`queueDeny`）にはヘルパがあるのに
+   * 撃つ側だけ無く、非対称になっていた。
+   *
+   * **行は組まない。** 積むのは意図だけで、stdin へ書ける形にするのは
+   * `run/index.mjs` の `encodeOutbox` の仕事。
+   *
+   * @param {string} runId 実行の識別子
+   * @param {string} requestId こちらが振った番号。応答の突き合わせに使う
+   * @param {string} subtype `set_permission_mode` / `set_model` / `interrupt` など
+   * @param {object} params 向こうへ渡すパラメタ。**頼まれていないキーを足さない**
+   */
+  function queueControl(runId, requestId, subtype, params) {
+    outbox.push({ runId, kind: 'control-request', requestId, subtype, params });
+  }
+
+  /**
    * 抱えている未応答の要求を捨てる。
    *
    * **`outbox` には積まない。** 子がいない（もしくは畳むと決めた）ので書く先が無い。
@@ -731,7 +751,7 @@ export function createRunLedger({
       return [pushNote(run, `許可要求が ${pendingMax} 件を超えたので断りました`, now)];
     }
 
-    const input = info.input && typeof info.input === 'object' && !Array.isArray(info.input)
+    const input = isPlainObject(info.input)
       ? info.input
       : null;
     const kind = askKindOf(info.toolName ?? null);
@@ -1459,13 +1479,8 @@ export function createRunLedger({
         run.livePending.set(decision.thenRequestId, {
           kind: 'live', field: 'permissionMode', value: decision.then, at: now,
         });
-        outbox.push({
-          runId,
-          kind: 'control-request',
-          requestId: decision.thenRequestId,
-          subtype: LIVE_FIELDS.permissionMode.subtype,
-          params: { [LIVE_FIELDS.permissionMode.key]: decision.then },
-        });
+        queueControl(runId, decision.thenRequestId, LIVE_FIELDS.permissionMode.subtype,
+          { [LIVE_FIELDS.permissionMode.key]: decision.then });
         events.push(pushNote(run, `権限モードを ${decision.then} に替えています`, now));
       }
 
@@ -1529,13 +1544,7 @@ export function createRunLedger({
       for (const w of list) {
         const f = LIVE_FIELDS[w.field];
         run.livePending.set(w.requestId, { kind: 'live', field: w.field, value: w.value, at: now });
-        outbox.push({
-          runId,
-          kind: 'control-request',
-          requestId: w.requestId,
-          subtype: f.subtype,
-          params: { [f.key]: w.value },
-        });
+        queueControl(runId, w.requestId, f.subtype, { [f.key]: w.value });
         events.push(pushNote(run, `${f.label}を ${w.value} に替えています`, now));
       }
       return { ok: true, events };
@@ -1588,14 +1597,8 @@ export function createRunLedger({
       }
 
       run.livePending.set(requestId, { kind: 'interrupt', at: now });
-      outbox.push({
-        runId,
-        kind: 'control-request',
-        requestId,
-        subtype: 'interrupt',
-        // **頼まれていないキーを付けない。** 未知のキーを向こうがどう扱うかは読めない
-        params: cancelQueued ? { cancel_queued: true } : {},
-      });
+      // **頼まれていないキーを付けない。** 未知のキーを向こうがどう扱うかは読めない
+      queueControl(runId, requestId, 'interrupt', cancelQueued ? { cancel_queued: true } : {});
       return {
         ok: true,
         events: [pushNote(run, cancelQueued
@@ -2021,7 +2024,7 @@ function synthRow(run, now) {
     pid: run.pid ?? null,
     name: run.sessionId ? run.sessionId.slice(0, 8) : '不明',
     cwd,
-    project: cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() : null,
+    project: projectNameOf(cwd),
     // 指示文は台帳が持っていない（`rows()` に載せていない）。
     // 会話ログが出れば次の走査で本物の見出しに入れ替わる
     title: null,

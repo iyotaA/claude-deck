@@ -14,7 +14,12 @@ import { readRegistry } from '../read/registry.mjs';
 import { indexTranscripts, readAll, readAllOnce } from '../read/transcript.mjs';
 import { listSubagents, readSubagentLog } from '../read/subagents.mjs';
 import { extractMeta } from '../parse/meta.mjs';
-import { buildUsage, percentile } from '../parse/usage.mjs';
+import {
+  buildUsage, byModelRequests, bySkillIte, byToolTokens, percentile,
+} from '../parse/usage.mjs';
+import { projectNameOf } from '../shared/text.mjs';
+import { createLru } from '../shared/lru.mjs';
+import { DAY_MS, getter, intOf, textOf } from './query.mjs';
 
 /**
  * 横断集計で開くファイルの上限。
@@ -66,10 +71,6 @@ const SKILL_SERIES_MAX = 24;
  */
 const SKILL_TREND_MIN = 4;
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-/** モデル名の文字数上限。長すぎる値は意味を持たないので頭だけ見る。 */
-const TEXT_MAX = 200;
-
 /**
  * 「直近の中央値」を出すために開くセッションの数。
  *
@@ -97,43 +98,16 @@ const BASELINE_MIN = 3;
 /**
  * 集計結果だけを持つ専用の memo。
  *
- * **read/cache.mjs は使わない。** あちらは 240件の LRU で、
- * 全文（1本で最大 42MB）を載せると一覧の tail: memo が全部追い出される。
+ * **read/cache.mjs と同居させない。** 器（`createLru`）は同じものを使うが、
+ * store は別に持つ。あちらは 240件で、全文（1本で最大 42MB）を載せると
+ * 一覧の tail: memo が全部追い出される。
  * ここに入るのは数百バイトの数値の塊だけなので、300件持っても数MBに収まる。
  *
  * 印は既存と同じ `size:mtimeMs`。会話ログは追記しか起きないので、
  * 印が同じなら中身も同じと言い切れる。
  */
 const CACHE_MAX = 300;
-const cache = new Map();
-
-/**
- * memo から取る。取れたものは末尾へ動かして「最近使った」印にする。
- *
- * @param {string} key
- * @returns {object|undefined}
- */
-function memoGet(key) {
-  if (!cache.has(key)) return undefined;
-  const value = cache.get(key);
-  cache.delete(key);
-  cache.set(key, value);
-  return value;
-}
-
-/**
- * memo へ入れる。溢れたら、いちばん長く触っていないものから捨てる。
- *
- * @param {string} key
- * @param {object} value
- */
-function memoSet(key, value) {
-  cache.set(key, value);
-  if (cache.size > CACHE_MAX) {
-    // Map は挿入順を保つので、先頭がいちばん古く触ったもの
-    cache.delete(cache.keys().next().value);
-  }
-}
+const cache = createLru(CACHE_MAX);
 
 /**
  * ログ1本を読んで集計する。memo に載るのはここが返す形。
@@ -156,7 +130,7 @@ async function usageForTranscript(sessionId, transcript, { shared = false } = {}
   // 0 と不明を分ける原則を、キャッシュの印にも同じように当てる
   const key = log.size > 0 ? `${sessionId}:${log.size}:${log.mtimeMs}` : null;
   if (key) {
-    const hit = memoGet(key);
+    const hit = cache.get(key);
     if (hit) return hit;
   }
 
@@ -167,11 +141,11 @@ async function usageForTranscript(sessionId, transcript, { shared = false } = {}
     mtimeMs: log.mtimeMs || transcript.mtimeMs || null,
     projectDir: transcript.projectDir,
     // 一覧・書庫と同じ組み方。cwd が読めていればその末尾、駄目なら置き場所のフォルダ名
-    project: meta.cwd ? meta.cwd.split(/[\\/]/).filter(Boolean).pop() : transcript.projectDir,
+    project: projectNameOf(meta.cwd, transcript.projectDir),
     title: meta.title ?? meta.lastPrompt ?? meta.lastUserPrompt ?? null,
     usage: buildUsage(log.entries),
   };
-  if (key) memoSet(key, value);
+  if (key) cache.set(key, value);
   return value;
 }
 
@@ -202,7 +176,7 @@ async function subUsageFor(sessionId, transcriptFile) {
     .sort()
     .join('|');
   const key = `sub:${sessionId}:${mark}`;
-  const hit = memoGet(key);
+  const hit = cache.get(key);
   if (hit) return hit;
 
   const logs = await pooled(refs, READ_CONCURRENCY, (ref) =>
@@ -219,7 +193,7 @@ async function subUsageFor(sessionId, transcriptFile) {
   }
 
   const value = { ...foldSubUsage(parsed), agents: refs.length, truncated, readError: false };
-  memoSet(key, value);
+  cache.set(key, value);
   return value;
 }
 
@@ -277,7 +251,7 @@ export function foldSubUsage(list) {
       // 分母は**子ぶんの合計**。親の totals と混ぜない（別の節として出すため）
       share: ite > 0 ? r.ite / ite : null,
     }))
-    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill));
+    .sort(bySkillIte);
 
   return {
     requests,
@@ -431,18 +405,8 @@ export async function getSessionBaseline(sessionId) {
  * @param {number} min 下限
  * @param {number} max 上限
  */
-function intOf(raw, fallback, min, max) {
-  const n = Number.parseInt(raw ?? '', 10);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, n));
-}
 
 /** 文字列のパラメータ。空白だけなら null にする（「指定なし」と同じ扱い） */
-function textOf(raw) {
-  const t = String(raw ?? '').trim();
-  if (!t) return null;
-  return t.slice(0, TEXT_MAX);
-}
 
 /**
  * クエリ文字列を、丸めた形の指定に直す。
@@ -453,7 +417,7 @@ function textOf(raw) {
  * @returns {{limit: number, days: number|null, model: string|null}}
  */
 export function parseUsageQuery(params) {
-  const get = (key) => (params && typeof params.get === 'function' ? params.get(key) : null);
+  const get = getter(params);
 
   return {
     limit: intOf(get('limit'), LIMIT_DEFAULT, 1, USAGE_SCAN_MAX),
@@ -516,7 +480,7 @@ function mergeTools(list) {
 
   return [...byTool.values()]
     .map((r) => ({ ...r, avg: r.calls > 0 ? Math.round(r.tokens / r.calls) : null }))
-    .sort((a, b) => b.tokens - a.tokens || a.tool.localeCompare(b.tool))
+    .sort(byToolTokens)
     .slice(0, TOOLS_MAX);
 }
 
@@ -594,7 +558,7 @@ function mergeSkills(recs, totalIte) {
         trend: skillTrend(series),
       };
     })
-    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill));
+    .sort(bySkillIte);
 
   // ここでも切る。**実測でスキルは 24 種**あるので、SKILLS_MAX = 20 だと実際に当たる。
   // 黙って落とすと、画面の割合を全部足しても帰属率に届かない理由が消える
@@ -657,7 +621,7 @@ function mergeModels(list) {
   }
   const models = [...counts.entries()]
     .map(([model, requests]) => ({ model, requests }))
-    .sort((a, b) => b.requests - a.requests || a.model.localeCompare(b.model));
+    .sort(byModelRequests);
   return { model: models[0]?.model ?? null, models };
 }
 

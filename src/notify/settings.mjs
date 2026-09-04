@@ -11,6 +11,7 @@
 import { readConfigFile, writeConfigFile } from '../shared/configfile.mjs';
 import { ALLOWED, MAX_IDLE_MIN, MAX_REMIND_MIN, MAX_SETTLE_SEC } from './config.mjs';
 import { NOTIFY_STATES } from './watch.mjs';
+import { isPlainObject } from '../shared/objects.mjs';
 
 /**
  * 数値の項目。名前・上限・単位のラベルをここ1箇所で持つ。
@@ -35,7 +36,7 @@ const NUMBERS = [
  * @returns {{ok: true, patch: object}|{ok: false, error: string}}
  */
 export function validateSettings(body) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+  if (!isPlainObject(body)) {
     return { ok: false, error: '設定の形が違います' };
   }
 
@@ -85,7 +86,7 @@ export function validateSettings(body) {
 
   if ('states' in body) {
     const raw = body.states;
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    if (!isPlainObject(raw)) {
       return { ok: false, error: '通知する状態の形が違います' };
     }
     const states = {};
@@ -115,8 +116,8 @@ export function validateSettings(body) {
  * @returns {object} 書き戻す全体
  */
 export function mergeSettings(file, patch) {
-  const base = file && typeof file === 'object' && !Array.isArray(file) ? file : {};
-  const notify = base.notify && typeof base.notify === 'object' && !Array.isArray(base.notify)
+  const base = isPlainObject(file) ? file : {};
+  const notify = isPlainObject(base.notify)
     ? base.notify : {};
 
   const next = { ...notify, ...patch };
