@@ -7,9 +7,9 @@
  * 出す項目が5つ（日付・大きさ・タイトル・置き場所・ブランチ）あるのに
  * 27rem の列に押し込んでいて、置き場所も期間も絞る場所が無かった。
  *
- * モードの出し入れそのものは board.js の setMode が持つ。
+ * モードの出し入れそのものは mode.js の setMode が持つ。
  * こちらは「出せと言われたら描く」だけで、`showArchive()` がその口
- * （initBoard({ onUsage }) と同じ差し方。層7 どうしで向きを持たせずに済む）。
+ * （initMode({ onUsage }) と同じ差し方。層7 どうしで向きを持たせずに済む）。
  */
 import { el, kb, shortStamp, stamp, agentTag } from './util.js';
 import { dom, store, syncQuery, ARCHIVE_SORTS } from './store.js';
@@ -204,7 +204,7 @@ async function loadArchive({ append = false } = {}) {
 }
 
 /**
- * 書庫を出す。board.js の setMode から呼ばれる。
+ * 書庫を出す。mode.js の setMode から呼ばれる。
  *
  * 出し入れ（hidden の付け外し）は setMode 側が受け持つ。ここでやるのは中身だけ。
  * **開くたびに引き直さない。** 一度読めていればそのまま描くので、
@@ -222,7 +222,7 @@ export function showArchive() {
  *
  * @param {object} [opts]
  * @param {?function} [opts.onPick] カードを押されたあとの後始末。
- *   main.js が `() => setMode('work')` を差す。**board.js を import しない**
+ *   main.js が `() => setMode('work')` を差す。**mode.js を import しない**
  *   （同じ層7 なので、向きを持たせずに済む形を選ぶ）
  */
 export function initArchive({ onPick = null } = {}) {

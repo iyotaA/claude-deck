@@ -22,6 +22,34 @@ export const STATE_COLOR = {
 export const QUIET_MODES = new Set(['auto', 'default', 'normal', 'acceptEdits']);
 
 /**
+ * 一覧を区切る見出し。上から手をつける順（サーバ側の STATE_RANK と同じ考え）。
+ *
+ * **これは監視盤の COLUMNS をそのまま引き継いだもの。** あちらは4つの列への割り当てで、
+ * こちらは縦一覧への割り当て。材料（store.rows）も並び順も同じなので、
+ * 列を畳んで見出しに替えただけ。
+ *
+ * 状態ラベルの日本語を画面側に持たない決まりの**例外**になる。
+ * サーバが渡す `meta.stateLabels` は状態1つずつの名前で、
+ * 「あなたの番」のような**まとめた名前**は向こうに無い（監視盤の COLUMNS も同じ理由）。
+ * 状態が1つ増えたときは、どの見出しにも入らず末尾へ落ちる。消えはしない。
+ *
+ * `keepEmpty` は 0 件でも見出しを残すもの。**「あなたの番」だけ真にする。**
+ * ここを消すと「見ていない」と「無い」が同じ顔になる。
+ * 残り3つまで残すと、静かな日に空の見出しが4本並んで一覧の場所を食う。
+ */
+export const STATE_GROUPS = [
+  {
+    id: 'hot',
+    label: 'あなたの番',
+    states: ['needs-answer', 'needs-plan-approval', 'needs-approval'],
+    keepEmpty: true,
+  },
+  { id: 'run', label: '実行中', states: ['running'] },
+  { id: 'reply', label: '返信待ち', states: ['awaiting-reply'] },
+  { id: 'done', label: '終了', states: ['ended'] },
+];
+
+/**
  * 一覧の上に出すまとめ。並び順もこの順にする。
  *
  * ラベルの日本語はここに持たない。サーバが meta.stateLabels で渡してくる。
@@ -46,7 +74,8 @@ export const SUMMARY_ORDER = [
  *  ?tq=<語> … 時系列の検索語
  *  ?hide=<種類,種類> … 時系列で隠す種類。空で付けると「何も隠さない」になる
  *  ?nolive=1 … 自動更新をつながない
- *  ?mode=board|archive|usage … 監視盤（列で見る）・書庫（過去を探す）・数値（横断の集計）で開く
+ *  ?mode=archive|usage … 書庫（過去を探す）・数値（横断の集計）で開く
+ *  ?mode=board … 監視盤があった版の形。作業台へ送る
  *  ?tab=archive … 書庫が左のペインのタブだった版の形。?mode=archive へ読み替える
  *  ?aq=<語> … 書庫の検索語
  *  ?asort=recent|oldest|size … 書庫の並び順
@@ -61,9 +90,12 @@ export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
 /**
  * 画面のモード。知らない値は 'work' に落とす。
  *
- * 見る目的が3つある。「いまの作業」（作業台）・「どれから手をつけるか」（監視盤）・
+ * 見る目的が3つある。「いまの作業」（作業台）・「過去を探す」（書庫）・
  * 「何にトークンを使ったか」（数値）。同居させると同じ画面で場所を取り合うので、
  * モードとして分けている。
+ *
+ * **監視盤（board）は畳んだ。** 左の一覧とまったく同じ材料を列へ振り分けるだけで、
+ * 同じ問いに画面いっぱいを使っていた。列は一覧の状態の見出しが引き継いでいる。
  *
  * 数値がタブではなくモードなのは、**出す中身がセッション1本のものではない**から。
  * 左のペインは「どのセッションを選ぶか」の場所なので、そこに横断の集計を置くと、
@@ -72,7 +104,7 @@ export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
  * 集合で持つ。三項演算子で二値に畳むと、3つ目を足した日に
  * 黙って 'work' へ落ちる形になる（実際に3つ目を足した）
  */
-export const MODES = new Set(['work', 'board', 'archive', 'usage']);
+export const MODES = new Set(['work', 'archive', 'usage']);
 
 /**
  * 開くモードを決める。
@@ -81,8 +113,10 @@ export const MODES = new Set(['work', 'board', 'archive', 'usage']);
  *
  *  - `?tab=usage` … 数値がタブだった版（0.3.0 で配った）
  *  - `?tab=archive` … 書庫がタブだった版（0.9.1 まで）
+ *  - `?mode=board` … 監視盤。**作業台へ送る。** 書庫ではない。
+ *    あれは「どれから手をつけるか」の画面で、その役目は左の一覧の状態の見出しが
+ *    引き継いでいる。書庫（過去を探す）は問いがまるごと違う
  *
- * どちらも同じ形の引っ越しなので、読み替えも1箇所にまとめてある。
  * `?tab=live` は作業台の既定なので拾わない（既定へ落ちれば済む）。
  */
 function initialMode() {
@@ -157,15 +191,10 @@ export const dom = {
   reload: document.getElementById('reload'),
   themeToggle: document.getElementById('theme-toggle'),
   onlyLive: document.getElementById('only-live'),
-  // 監視盤（board.js）。作業台とは別のモードなので、器も別に持つ
+  // モードの札（mode.js）。骨格の組み替えは .app のクラスが受け持つ
   modeWork: document.getElementById('mode-work'),
-  modeBoard: document.getElementById('mode-board'),
   modeArchive: document.getElementById('mode-archive'),
   modeUsage: document.getElementById('mode-usage'),
-  boardHead: document.getElementById('board-head'),
-  boardCount: document.getElementById('board-count'),
-  boardRest: document.getElementById('board-rest'),
-  board: document.getElementById('board'),
   listPane: document.getElementById('list-pane'),
   listToggle: document.getElementById('list-toggle'),
   listClose: document.getElementById('list-close'),
@@ -340,7 +369,7 @@ export const store = {
    *
    * tab と同じく localStorage には残さない。監視盤や数値を開いたまま保存すると、
    * 次に開いたときに作業台へ戻る道が「押す」しか無い状態で始まってしまう。
-   * 固定したい人は ?mode=board のようにブックマークする
+   * 固定したい人は ?mode=archive のようにブックマークする
    */
   mode: initialMode(),
   /**

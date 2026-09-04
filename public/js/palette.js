@@ -30,7 +30,7 @@ import { focusTerminal } from './detail-head.js';
 import { TAB_DEFS, INSP_DEFS, setDetailTab, setInspector } from './detail.js';
 import { select } from './session.js';
 import { openRunForm } from './run-form.js';
-import { setMode } from './board.js';
+import { setMode } from './mode.js';
 
 // モードの札。**二値に畳まない。** 三項で「監視盤か作業台か」と書くと、
 // モードが1つ増えた日に文言と行き先の2箇所を直すことになる
@@ -38,8 +38,6 @@ import { setMode } from './board.js';
 const MODE_DEFS = [
   { id: 'work', label: '作業台', name: '作業台へ戻る', desc: 'いまの作業に集中する',
     hay: '作業台 モード work 作業' },
-  { id: 'board', label: '監視盤', name: '監視盤へ移る', desc: '待っているものを列で見る',
-    hay: '監視盤 モード board 列 盤' },
   { id: 'archive', label: '書庫', name: '書庫へ移る', desc: '終わったものも含めて過去を探す',
     hay: '書庫 モード archive 過去 探す 検索 アーカイブ' },
   { id: 'usage', label: '数値', name: '数値へ移る', desc: '何にトークンを使ったかを横断で見る',
@@ -88,7 +86,7 @@ function buildAll() {
         select(row.sessionId, 'live');
         // 作業台の外から選んだときは作業台へ移す。監視盤も数値も中央を消しているので、
         // 移さないと「選んだのに何も起きない」に見える。
-        // **'board' と名指しで比べない。** モードが増えるたびにここを直すことになる
+        // **モードを名指しで比べない。** 増えるたびにここを直すことになる
         if (store.mode !== 'work') setMode('work');
       },
     });

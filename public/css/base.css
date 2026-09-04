@@ -97,7 +97,7 @@ body {
 
    **4通りを明示して書く。** .is-list-open .deck と .is-insp-open .deck は
    どちらも (0,2,0) で、読む順で後のほうが勝ってしまう。
-   両方立っているときは (0,3,0) の側が要る（.is-board.is-insp-open と同じ形） */
+   両方立っているときは (0,3,0) の側が要る（.is-archive.is-insp-open と同じ形） */
 .deck {
   display: grid;
   grid-template-columns: 0 minmax(0, 1fr) auto;

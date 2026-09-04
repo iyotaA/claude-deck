@@ -7,7 +7,7 @@
  * **中身は1つも組み直さない。** zoom.js が .detail-pane を節点ごと運んでくるので、
  * ここに書くのは器と、高さの上限を外す2行だけ。
  *
- * <link> は board.css の次・narrow.css の前に置く（narrow.css は必ず最後）。
+ * <link> は archive.css の次・narrow.css の前に置く（narrow.css は必ず最後）。
  */
 
 .zoom {

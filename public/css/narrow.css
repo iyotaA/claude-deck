@@ -30,11 +30,11 @@
      中央がそのぶん狭くなる。紙も中央に重ねるので列を持たせない。
      .is-list-open.is-insp-open は (0,3,0) 同士で、後に読まれるこちらが勝つ。
 
-     **監視盤（.is-board）には手を出さない。** あちらは board.css の
-     .is-board .deck（0,2,0）が、ここの .deck 単体（0,1,0）に詳細度で勝つ。
+     **書庫（.is-archive）には手を出さない。** あちらは archive.css の
+     .is-archive .deck（0,2,0）が、ここの .deck 単体（0,1,0）に詳細度で勝つ。
      セレクタリストは1つずつ独立に詳細度を持つので、隣に並んでいる
      .is-insp-open .deck（0,2,0）はこの勝負に関わらない。
-     読む順ではなく詳細度で決まるので、board.css 側だけで足りる（実測） */
+     読む順ではなく詳細度で決まるので、archive.css 側だけで足りる（実測） */
   .deck,
   .is-list-open .deck,
   .is-insp-open .deck,

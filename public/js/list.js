@@ -4,7 +4,7 @@
  * setListOpen が drawer.js に居るのは、main.js に置くとここと循環するため。
  */
 import { el, since, stamp, tokens, agentTag } from './util.js';
-import { dom, store, STATE_COLOR, QUIET_MODES, SUMMARY_ORDER } from './store.js';
+import { dom, store, STATE_COLOR, QUIET_MODES, SUMMARY_ORDER, STATE_GROUPS } from './store.js';
 import { idleOf, headOf, visibleRows } from './rows.js';
 import { newestRateLimit, rateView } from './runs.js';
 import { closeListAfterPick } from './drawer.js';
@@ -13,8 +13,8 @@ import { select } from './session.js';
 /**
  * 一覧の1枚。
  *
- * **監視盤（board.js）も同じものを借りる。** 見た目を新しく作らないための export で、
- * 違うのは押されたあとの後始末だけなので、そこだけ差し替えられる形にしてある。
+ * **書庫（archive.js）も、押されたあとの後始末だけを差し替えて借りられる形にしてある。**
+ * 見た目を新しく作らないための export（借り手は監視盤だったが、あれは畳んだ）。
  *
  * @param {object} row 一覧の行
  * @param {?function} onPick 押されたあとの後始末。既定（null）は引き出しを畳む
@@ -86,7 +86,7 @@ export function buildCard(row, onPick = null) {
 
   card.addEventListener('click', () => {
     select(row.sessionId);
-    // 後始末を借り手が持っているならそちらへ渡す（監視盤は作業台へ移る）
+    // 後始末を借り手が持っているならそちらへ渡す（書庫は作業台へ移る）
     if (onPick) {
       onPick(row);
       return;
@@ -99,6 +99,47 @@ export function buildCard(row, onPick = null) {
   return li;
 }
 
+/**
+ * 状態の見出しと、その配下のカードを1かたまりにする。
+ *
+ * 見出しの形は監視盤の列の頭（`.col-head`）から借りている。点・名前・件数の並びも
+ * 太さも同じで、違うのは横に置くか縦に置くかだけ。
+ *
+ * **かたまりで包むのは sticky のため。** 見出しをカードと同じ高さに並べると、
+ * 貼り付く範囲が一覧の全体になり、**4本の見出しが上端で積み重なる**（実測）。
+ * 内側の `<ul>` に入れておけば、次のかたまりが来たときに前の見出しを押し出す。
+ *
+ * @param {object} group STATE_GROUPS の1つ（`label` と `states` を使う）
+ * @param {object[]} rows そこに入る行
+ * @returns {HTMLElement} `<li>` に入れたかたまり
+ */
+function buildGroup(group, rows) {
+  const li = el('li', 'group');
+  // 色は状態から引く。見出しのために新しい色を作らない
+  li.style.setProperty('--state-color', STATE_COLOR[group.states[0]] ?? 'var(--off)');
+
+  const head = el('div', 'group-head');
+  head.append(el('span', 'state'), el('span', null, group.label));
+  // 0 のときも 0 と書く。数を消すと「見ていない」と「無い」が同じに見える
+  head.append(el('span', 'n', String(rows.length)));
+  li.append(head);
+
+  const body = el('ul', 'group-body');
+  for (const row of rows) body.append(buildCard(row));
+  li.append(body);
+  return li;
+}
+
+/**
+ * 一覧を組む。
+ *
+ * **並べ替えない。** store.rows はサーバ側が STATE_RANK と idleMs で並べたものなので、
+ * 上から読めば手をつける順になる。見出しは「状態が変わる位置」に差し込むだけで、
+ * 比較器を画面側に持たない（監視盤が列へ振り分けていたのと同じ考え）。
+ *
+ * どの見出しにも入らない状態は末尾へまとめる。**黙って落とさない。**
+ * サーバ側が状態を1つ足した日に、一覧から行が消えるほうが困る。
+ */
 export function renderList() {
   const rows = visibleRows();
   dom.list.replaceChildren();
@@ -110,7 +151,24 @@ export function renderList() {
       : 'セッションが見つかりません'));
     dom.list.append(li);
   } else {
-    for (const row of rows) dom.list.append(buildCard(row));
+    // 見出しごとに仕分ける。順番は STATE_GROUPS が決める
+    const bins = new Map(STATE_GROUPS.map((g) => [g.id, []]));
+    const rest = [];
+    for (const row of rows) {
+      const g = STATE_GROUPS.find((x) => x.states.includes(row.state));
+      if (g) bins.get(g.id).push(row);
+      else rest.push(row);
+    }
+
+    for (const g of STATE_GROUPS) {
+      const list = bins.get(g.id);
+      // 空の見出しは畳む。ただし「あなたの番」だけは 0 でも残す
+      if (list.length === 0 && !g.keepEmpty) continue;
+      dom.list.append(buildGroup(g, list));
+    }
+    if (rest.length) {
+      dom.list.append(buildGroup({ label: 'そのほか', states: ['unknown'] }, rest));
+    }
   }
 
   const live = store.rows.filter((r) => r.alive).length;
@@ -199,8 +257,7 @@ export function renderRate() {
 /**
  * 経過時間の表示だけを進める。作り直さないのでスクロール位置が動かない。
  *
- * 引く先に監視盤（dom.board）も入れる。あちらのカードも同じ buildCard なので、
- * 見る場所を広げれば1秒ごとの更新がそのまま効く
+ * 引く先は一覧だけでよい。書庫のカードは終わったものなので経過時間が動かない
  */
 export function refreshTimes() {
   // 枠の使用率も時間で見え方が変わる（但し書きが増える・空く時刻を跨ぐ）。
@@ -208,7 +265,7 @@ export function refreshTimes() {
   renderRate();
 
   const byId = new Map(store.rows.map((r) => [r.sessionId, r]));
-  const cards = [...dom.list.querySelectorAll('.card'), ...dom.board.querySelectorAll('.card')];
+  const cards = dom.list.querySelectorAll('.card');
   for (const node of cards) {
     const row = byId.get(node.dataset.sessionId);
     if (!row) continue;

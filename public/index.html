@@ -24,7 +24,6 @@
 <link rel="stylesheet" href="css/ask.css">
 <link rel="stylesheet" href="css/markdown.css">
 <link rel="stylesheet" href="css/palette.css">
-<link rel="stylesheet" href="css/board.css">
 <link rel="stylesheet" href="css/archive.css">
 <link rel="stylesheet" href="css/zoom.css">
 <link rel="stylesheet" href="css/narrow.css">
@@ -48,7 +47,6 @@
          上下キーをカードの移動に使っている。同じ画面に矢印キーの契約を2つ置かない -->
     <div class="modes" role="group" aria-label="画面のモード">
       <button class="tab" id="mode-work" type="button" aria-pressed="true">作業台</button>
-      <button class="tab" id="mode-board" type="button" aria-pressed="false">監視盤</button>
       <button class="tab" id="mode-archive" type="button" aria-pressed="false">書庫</button>
       <button class="tab" id="mode-usage" type="button" aria-pressed="false">数値</button>
     </div>
@@ -95,17 +93,7 @@
   </header>
 
   <div class="deck">
-    <!-- 監視盤。.deck の中に置く。.app 直下には置けない（grid-template-rows が
-         2行しか宣言していないので、3つ目の子を足すと高さの配分が崩れる）。
-         説明の帯は .list-head を借りる（クラス単体のセレクタなので、ここでも効く） -->
-    <div class="list-head board-head" id="board-head" hidden>
-      ボールの所在。左から順に手をつける
-      <span class="note-small">押すと、そのセッションの作業台に入ります</span>
-      <button class="btn board-rest" id="board-rest" type="button" hidden></button>
-      <span class="n" id="board-count">0</span>
-    </div>
-    <div class="board" id="board" hidden></div>
-    <!-- 書庫（終了したものも含む全セッション）。監視盤・数値と同じくモードなので
+    <!-- 書庫（終了したものも含む全セッション）。数値と同じくモードなので
          .deck の中に置く。**左の列から出した。** 出すカードの項目が5つあるのに
          27rem の列に押し込んでいて、置き場所も期間も絞る場所が無かった。
          探す帯は .list-head を借りる（クラス単体のセレクタなのでここでも効く）。
@@ -124,7 +112,7 @@
       <span id="archive-count"></span>
     </div>
     <ul class="archive-grid" id="archive" hidden></ul>
-    <!-- 数値（横断）。監視盤と同じくモードなので、.deck の中に置く（.app 直下には
+    <!-- 数値（横断）。書庫と同じくモードなので、.deck の中に置く（.app 直下には
          置けない。grid-template-rows が2行しか宣言していないため）。
          ログを全文読む一番重い窓口なので、開いたときに1回だけ引く。
          モデルの選択肢は応答から組むので、ここには「すべて」だけを置く -->
@@ -159,7 +147,7 @@
       <ul class="list" id="list"></ul>
 
       <!-- 幅を変えるつまみ。列の境目にまたがるが、絶対配置なので上の並びには入らない。
-           狭い画面（引き出し）と監視盤・書庫・数値モードでは出ない（前者は narrow.css、
+           狭い画面（引き出し）と書庫・数値モードでは出ない（前者は narrow.css、
            後者は .list-pane ごと消えるので自動的に消える） -->
       <button class="splitter" id="split-list" type="button"
               aria-label="一覧の幅を変える。矢印キーでも動かせる（Home で既定に戻る）"></button>

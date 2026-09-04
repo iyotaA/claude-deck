@@ -30,7 +30,7 @@ import { dom } from './store.js';
  * そちらの経路で札が「縮小」のまま残る。
  *
  * ここから detail.js を import しないのは層の向き（2 -> 4 は逆流）。
- * initBoard({ onUsage }) や subscribeRuns(fn) と同じ差し方にしてある。
+ * initMode({ onUsage }) や subscribeRuns(fn) と同じ差し方にしてある。
  */
 let changed = () => {};
 
