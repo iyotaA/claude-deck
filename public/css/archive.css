@@ -130,7 +130,14 @@
 
 /* カードの中身は広い場所でも同じ形。**タイトルの行数に上限を付けない。**
    探しに来た人が読むのはそこなので、省くと画面を広げた意味が消える */
-.archive-grid .card { height: 100%; }
+.archive-grid .card {
+  height: 100%;
+  /* 高さを揃えるために 100% を敷くが、**中身まで引き伸ばさない。**
+     .card は grid なので、既定のままだと余った縦を各行へ分けてしまい、
+     札や数の**字の下だけに隙間が空く**（実測で最大 14px）。
+     上へ詰めて、余りは下にまとめて残す */
+  align-content: start;
+}
 
 /* スキルの索引を作っている最中。**選べないことを形で伝える。**
    薄くするだけでなく、押せないもの（disabled）にしてある ―― 空の候補を
@@ -153,6 +160,8 @@
 .card-stats {
   display: flex;
   flex-wrap: wrap;
+  /* 器が伸ばされたときに数だけ上へ寄るのを止める（.card-meta と同じ理由） */
+  align-items: center;
   gap: .1rem .7rem;
   margin-top: .1rem;
   padding-top: .35rem;

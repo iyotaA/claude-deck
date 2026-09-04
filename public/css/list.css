@@ -345,9 +345,16 @@
   white-space: nowrap;
 }
 
+/* カードの下段（置き場所・ブランチ・スキル・サブエージェント）。
+
+   **`align-items` を既定（stretch）のままにしない。** 枠を持つ札（.tag）は
+   上下の border 2px ぶん背が高く、枠の無い置き場所（.path）はそのぶん引き伸ばされる。
+   中の文字は上へ寄るので、**その1つだけ字の下に隙間が空いて見える**（実測で 1.5px）。
+   中央に揃えれば、伸ばさずに並ぶ */
 .card-meta {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: .3rem .5rem;
   font-size: .74rem;
   color: var(--fg-faint);
