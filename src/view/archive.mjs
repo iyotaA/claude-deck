@@ -23,6 +23,7 @@
  */
 import { indexTranscripts, readTail } from '../read/transcript.mjs';
 import { countSubagents } from '../read/subagents.mjs';
+import { skillIndex, skillIndexState } from '../read/skills.mjs';
 import { extractMeta } from '../parse/meta.mjs';
 
 /** 深い検索で中身を読む上限。理由はファイル冒頭のコメントに書いてある。 */
@@ -79,6 +80,9 @@ export function parseArchiveQuery(params) {
     q: textOf(get('q')),
     deep: get('deep') === '1',
     project: textOf(get('project')),
+    // スキルは索引（read/skills.mjs）から引く。末尾 64KB には1件も写らないので、
+    // ここだけ別の出どころになる
+    skill: textOf(get('skill')),
     // 既定は期間で絞らない。書庫は「古いものを見に戻る」場所なので、上限を持たせる意味がない
     days: get('days') === null ? null : intOf(get('days'), null, 1, 3650),
   };
@@ -144,8 +148,84 @@ function publicRow(row) {
     mtimeMs: row.mtimeMs,
     // まだ読んでいない行では null のまま。「使っていない」ではなく「見ていない」
     subagentCount: row.subagentCount,
+    // 索引から引いたもの。索引がまだ無ければ null（同じく「見ていない」）
+    skills: row.skills,
     read: row.read,
   };
+}
+
+/**
+ * 置き場所の候補を作る。画面の絞り込みが選ぶ形なので、候補はサーバが渡す。
+ *
+ * ── 表示名をどう出すか ─────────────────────────────────────
+ *
+ * 索引がタダで持っているのは `projectDir`（スラッグ）だけで、これは不可逆。
+ * `C--Users-wwaiyota-ClaudeWookspace-sandbox-claude-deck` の `-` は
+ * 区切りかフォルダ名の一部かを**区別できない**（`claude-deck` がまさにそれ）。
+ * だから機械的な整形では元のフォルダ名に戻せない。
+ *
+ * そこで**グループごとに、いちばん新しい1本だけ末尾を読む**。cwd が取れれば
+ * その末尾のフォルダ名を出し、読めなければスラッグのまま出す（0 と不明を分けるのと同じ）。
+ * 読むのは種類の数だけ（実測 445 本に対して 19 種）で、`readTail` は memo に乗るので
+ * 2回目以降はほぼタダ。書庫は開いたときだけ引く窓口なので、毎秒には載らない。
+ *
+ * @param {object[]} all 絞り込む前の全行
+ * @returns {Promise<object[]>} 件数の多い順。`{ dir, label, n }`
+ */
+async function buildProjects(all) {
+  /** @type {Map<string, {dir: string, n: number, newest: object}>} */
+  const byDir = new Map();
+  for (const r of all) {
+    const cur = byDir.get(r.projectDir);
+    if (!cur) byDir.set(r.projectDir, { dir: r.projectDir, n: 1, newest: r });
+    else {
+      cur.n++;
+      if (r.mtimeMs > cur.newest.mtimeMs) cur.newest = r;
+    }
+  }
+
+  const list = [...byDir.values()];
+  await Promise.all(list.map(async (g) => {
+    try {
+      const tail = await readTail(g.newest.file);
+      const cwd = extractMeta(tail.entries ?? []).cwd;
+      // 末尾のフォルダ名だけを出す。フルパスは画面の札に収まらないし、
+      // 置き場所の絞り込みに要るのは「どのプロジェクトか」だけ
+      g.label = cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() : g.dir;
+    } catch {
+      // 読めなくても候補からは落とさない。スラッグのままでも選べるほうがいい
+      g.label = g.dir;
+    }
+  }));
+
+  // 多い順。同数なら名前順にして、引くたびに並びが揺れないようにする
+  list.sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, 'ja'));
+  return list.map((g) => ({ dir: g.dir, label: g.label, n: g.n }));
+}
+
+/**
+ * スキルの候補を作る。
+ *
+ * 置き場所（`buildProjects`）と違ってファイルを開かない。材料は索引だけで、
+ * それは立ち上げの裏で作ってある（`read/skills.mjs`）。
+ *
+ * **索引がまだ無いときは空を返す。** ここで作りに行くと、
+ * 立ち上げ直後の1回だけ 6 秒かかる窓口ができる。まだ無いことは
+ * `meta.skillIndex` で画面へ伝わるので、あちらが「作成中」と出す。
+ *
+ * @param {object[]} all 絞り込む前の全行
+ * @returns {{skill: string, n: number}[]} 使った本数の多い順
+ */
+function buildSkills(all) {
+  const count = new Map();
+  for (const r of all) {
+    if (!Array.isArray(r.skills)) continue;
+    for (const s of r.skills) count.set(s, (count.get(s) ?? 0) + 1);
+  }
+  // 多い順。同数なら名前順にして、引くたびに並びが揺れないようにする
+  return [...count.entries()]
+    .map(([skill, n]) => ({ skill, n }))
+    .sort((a, b) => b.n - a.n || a.skill.localeCompare(b.skill));
 }
 
 /**
@@ -156,6 +236,9 @@ function publicRow(row) {
  */
 export async function listArchive(q, now = Date.now()) {
   const index = await indexTranscripts();
+  // 索引は**作りには行かない。** まだできていなければ空で進む。
+  // ここで待たせると、立ち上げ直後の1回だけ 6 秒かかる窓口ができる
+  const skills = skillIndex();
 
   const all = [];
   for (const [sessionId, rec] of index) {
@@ -171,6 +254,10 @@ export async function listArchive(q, now = Date.now()) {
       // 索引がタダで持ってきた印。これが false なら数えに行かない
       hasSessionDir: rec.hasSessionDir === true,
       subagentCount: null,
+      // 索引にあれば配列、無ければ null。ファイルは開かない（索引は立ち上げの裏で作る）
+      skills: Array.isArray(skills.entries[sessionId]?.skills)
+        ? skills.entries[sessionId].skills
+        : null,
       read: false,
     });
   }
@@ -182,7 +269,18 @@ export async function listArchive(q, now = Date.now()) {
   }
   if (q.project) {
     const p = q.project.toLowerCase();
-    rows = rows.filter((r) => r.projectDir.toLowerCase().includes(p));
+    // 画面は選ぶ形なので、渡ってくるのは正確なスラッグ。**完全一致を先に見る。**
+    // 短いスラッグが長いスラッグの一部になっている環境で、部分一致だけだと
+    // 選んだ覚えのない置き場所まで混ざる。
+    // 当たらなければ今までどおり部分一致へ落とす（`?project=` を手で書くぶんのため）
+    const exact = rows.filter((r) => r.projectDir.toLowerCase() === p);
+    rows = exact.length ? exact : rows.filter((r) => r.projectDir.toLowerCase().includes(p));
+  }
+
+  if (q.skill) {
+    // 索引が無い（まだ作っている）あいだは絞れない。**全件を返さない。**
+    // 絞ったつもりで全部出ると、選んだ覚えのないものを見ることになる
+    rows = rows.filter((r) => Array.isArray(r.skills) && r.skills.includes(q.skill));
   }
 
   const needle = q.q ? q.q.toLowerCase() : null;
@@ -215,6 +313,12 @@ export async function listArchive(q, now = Date.now()) {
   await Promise.all(need.map((r) => fillTitle(r)));
   scanned += need.length;
 
+  // 置き場所の候補。**絞り込む前の全行から作る。**
+  // 期間で絞ったあとの行から作ると、期間を変えるたびに候補が消えて選び直せなくなる
+  const projects = await buildProjects(all);
+  // スキルの候補も同じ考えで、絞り込む前の全行から。索引にあるものだけが出る
+  const skillOptions = buildSkills(all);
+
   return {
     rows: shown.map(publicRow),
     total,
@@ -227,6 +331,12 @@ export async function listArchive(q, now = Date.now()) {
     meta: {
       now,
       indexed: all.length,
+      // 画面の絞り込みが選ぶ形なので、候補はこちらが渡す
+      projects,
+      skills: skillOptions,
+      // 索引がまだできていないことを画面へ伝える。**黙って空の候補を出さない**
+      // （使っていないのか、まだ読めていないのかが区別できなくなる）
+      skillIndex: skillIndexState(),
       // 何件のファイルを開いたか。打ち切ったかどうかも正直に返す
       scanned,
       scanLimited,

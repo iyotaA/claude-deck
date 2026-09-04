@@ -85,8 +85,8 @@ body {
   --insp-col: clamp(15rem, var(--insp-w), min(34rem, 34vw));
 }
 
-/* 一覧 ＋ 読む面 ＋ 右端のレール。幅は auto にしてボタン側で決める
-   （数字を2箇所に焼き込まない）。
+/* 左端のレール ＋ 一覧 ＋ 読む面 ＋ 右端のレール。
+   レールの幅は auto にしてボタン側で決める（数字を2箇所に焼き込まない）。
 
    **一覧は列のまま。ただし畳める。** 畳むと列が 0 になり、幅が中央へ渡る。
    オーバーレイで手前に出す形も試したが、開いているあいだ中央が触れなくなるのと、
@@ -97,26 +97,26 @@ body {
 
    **4通りを明示して書く。** .is-list-open .deck と .is-insp-open .deck は
    どちらも (0,2,0) で、読む順で後のほうが勝ってしまう。
-   両方立っているときは (0,3,0) の側が要る（.is-board.is-insp-open と同じ形） */
+   両方立っているときは (0,3,0) の側が要る（.is-archive.is-insp-open と同じ形） */
 .deck {
   display: grid;
-  grid-template-columns: 0 minmax(0, 1fr) auto;
+  grid-template-columns: auto 0 minmax(0, 1fr) auto;
   gap: 0;
   min-height: 0;
 }
 
 .is-list-open .deck {
-  grid-template-columns: var(--list-col) minmax(0, 1fr) auto;
+  grid-template-columns: auto var(--list-col) minmax(0, 1fr) auto;
 }
 
 /* インスペクタが開いたら、中央を削って右に場所を作る。
    目印を .app に付けているのは .is-list-open と同じ流儀 */
 .is-insp-open .deck {
-  grid-template-columns: 0 minmax(0, 1fr) var(--insp-col) auto;
+  grid-template-columns: auto 0 minmax(0, 1fr) var(--insp-col) auto;
 }
 
 .is-list-open.is-insp-open .deck {
-  grid-template-columns: var(--list-col) minmax(0, 1fr) var(--insp-col) auto;
+  grid-template-columns: auto var(--list-col) minmax(0, 1fr) var(--insp-col) auto;
 }
 
 /* 幅を変えるつまみ。列の境目にまたがらせる。
@@ -213,8 +213,14 @@ body {
    **3本線（ハンバーガー）から替えた。** あれは「メニューを開く」の記号で、
    左の列を畳む・出すことを示していない（押した先が読めない、という指摘を受けた）。
    いまは画面の枠と左の帯で描いたサイドバーの記号で、帯の塗りが開閉を示す */
+/* 一覧の開閉（狭い窓だけ）。
+
+   **広い窓では出さない。** あちらは左端のレールが開閉を持つので、
+   同じことをする口が上のバーと左端の2つ並ぶ。
+   狭い窓ではレールを消してある（3本目の縦帯を置くと読む面が削れる）ので、
+   引き出しの入り口はここだけになる ―― narrow.css が inline-flex へ戻す */
 .list-toggle {
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
   width: 2.15rem;

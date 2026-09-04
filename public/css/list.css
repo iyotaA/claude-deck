@@ -28,16 +28,10 @@
 .list-pane > .splitter { display: none; }
 .is-list-open .list-pane > .splitter { display: block; }
 
-/* 稼働中と書庫の切り替え。押されているほうだけ下に線を1本引く。
-   面は塗らない（一覧のカードと同じ理由で、塗ると重さの差が読めなくなる） */
-.list-tabs {
-  display: flex;
-  align-items: center;
-  gap: .25rem;
-  padding: .35rem .5rem 0;
-  border-bottom: 1px solid var(--border);
-}
-
+/* 押されているものだけ下に線を1本引く。面は塗らない
+   （一覧のカードと同じ理由で、塗ると重さの差が読めなくなる）。
+   **左の列のタブは無くなったが、この形は上のバーのモードの札が借りている。**
+   定義そのものは残す（下の .modes .tab がそれを借りる） */
 .tab {
   padding: .35rem .7rem .3rem;
   border: 0;
@@ -57,8 +51,26 @@
   border-bottom-color: var(--accent);
 }
 
-/* 閉じるボタンはタブ行の右端。書庫を出しているあいだも同じ位置に残る */
-.list-tabs .drawer-close { margin-left: auto; }
+/* 上のバーのモードの札。この形（.tab）を借りるが、帯の高さに合わせて
+   上下の余白だけ詰める。**定義元の隣に置く。** もとは board.css に居て、
+   監視盤を畳んだときファイルごと消えかけた（札の余白が戻って帯の高さが跳ねる） */
+.modes {
+  display: flex;
+  gap: .1rem;
+}
+
+.modes .tab {
+  padding: .2rem .6rem .15rem;
+}
+
+/* 閉じる口は一覧の帯の右端。**広い窓では出さない。**
+   あちらは左のレールが開閉を持つので、同じことをする口が2つ並ぶ。
+   狭い窓（引き出し）だけは残す ―― 手前に重なっている紙を閉じる口が要る
+   （narrow.css が出す） */
+#live-head .drawer-close {
+  display: none;
+  margin-left: auto;
+}
 
 .list-head {
   display: flex;
@@ -174,11 +186,65 @@
   gap: .4rem;
 }
 
+/* 状態のかたまり。見出し1本と、その配下のカード。
+
+   **かたまりで包むのは sticky のため。** 見出しをカードと同じ高さに並べると
+   貼り付く範囲が一覧の全体になり、4本の見出しが上端で積み重なる（実測）。
+   内側の <ul> に入れておけば、次のかたまりが来たときに前の見出しを押し出す */
+.group,
+.group-body {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+
+.group-body {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* 見出し。監視盤の列の頭（.col-head）を縦一覧へ持ってきた形で、
+   点・名前・件数の並びも太さも同じ。違うのは横に置くか縦に置くかだけ。
+
+   **上に貼り付ける。** 長い一覧を送っても、いまどの状態を見ているかが残る。
+   面（--bg）を敷くのは見た目のためではなく、sticky で下のカードが透けないため。
+   左右の負 margin は、面を列の幅いっぱいへ広げるため（カードだけ内側に残す）。
+
+   押せないものなので枠も面のピルも持たない（.tally と同じ扱い） */
+.group-head {
+  position: sticky;
+  top: -.5rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  margin: 0 -.5rem;
+  padding: .35rem .85rem .3rem;
+  background: var(--bg);
+  color: var(--state-color, var(--fg));
+  font-size: .74rem;
+  font-weight: 700;
+}
+
+/* 件数は右端で桁をそろえる。縦に並ぶ数は、揃っていないと比べられない */
+.group-head .n {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  color: var(--fg-faint);
+}
+
+/* 点は .state の ::before がそのまま描く。**ここで自前に描かない**
+   （背景で丸を置くと、疑似要素の点と重なって二重になる）。
+   色は li に置いた --state-color を .state が継いで currentColor に流す */
+
 /* hidden 属性で消えるのはブラウザ既定の [hidden] { display: none } によるもので、
    作者側が display を1つ書いた時点で必ず負ける（詳細度ではなく出どころの優先順）。
    上の flex がそれに当たるので、消えるほうを明示して書き直す。
-   タブの切り替えは hidden の付け外しだけでやっているため、これが無いと
-   稼働中と書庫の両方が縦に積まれたまま出る */
+   モードの出し入れは hidden の付け外しだけでやっているため、これが無いと
+   書庫の探す帯と数値の帯が、作業台にいるあいだも出たままになる */
 .list[hidden],
 .list-head[hidden] { display: none; }
 
@@ -285,9 +351,16 @@
   white-space: nowrap;
 }
 
+/* カードの下段（置き場所・ブランチ・スキル・サブエージェント）。
+
+   **`align-items` を既定（stretch）のままにしない。** 枠を持つ札（.tag）は
+   上下の border 2px ぶん背が高く、枠の無い置き場所（.path）はそのぶん引き伸ばされる。
+   中の文字は上へ寄るので、**その1つだけ字の下に隙間が空いて見える**（実測で 1.5px）。
+   中央に揃えれば、伸ばさずに並ぶ */
 .card-meta {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: .3rem .5rem;
   font-size: .74rem;
   color: var(--fg-faint);
@@ -325,12 +398,17 @@
   color: var(--bg);
 }
 
-/* サブエージェントを使った印。状態色（hot / warn / calm / done）は使わない。
-   あれは「どれから手をつけるか」を示す色なので、別の意味を混ぜると読めなくなる。
-   輪郭と文字を1段濃くするだけで、並んだタグの中から目に留まる */
+/* サブエージェントを使った印。**--done（緑）を当てる。**
+
+   状態色に手を出さない決まりは残っているが、一覧が「どれから手をつけるか」に
+   使っているのは hot / warn / calm / off の4つで、--done はそこに入っていない
+   （終了は --off。STATE_COLOR を見よ）。だから判断の色とは混ざらない。
+
+   前は輪郭と文字を1段濃くするだけだったが、隣に並ぶスキル（--accent）や
+   ブランチ（既定の輪郭）と見分けが付かなかった。色そのものを変える */
 .tag.is-agents {
-  border-color: var(--border-strong);
-  color: var(--fg);
+  border-color: var(--done);
+  color: var(--done);
 }
 
 .empty {

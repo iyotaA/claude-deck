@@ -1,0 +1,191 @@
+/* 書庫モード（過去のセッションを探して戻る画面）。
+ *
+ * 左の列のタブだったものを、モードとして画面いっぱいへ出したもの。
+ * 出すカードの項目が5つ（日付・大きさ・タイトル・置き場所・ブランチ）あるのに
+ * 27rem の列に押し込んでいて、置き場所も期間も絞る場所が無かった。
+ *
+ * ただし .deck の組み替えは読む順では決まらない。
+ * ここの `.is-archive .deck`（0,2,0）は narrow.css の `.is-insp-open .deck`（0,2,0）と
+ * 同じ詳細度で、あちらが後から読まれる。**(0,3,0) の側も並べて書く。**
+ * 書かないと、右の枠を開いたまま書庫へ移った人だけ列が戻る
+ * （usage.css がやっているのと同じ手当て。畳んだ board.css も同じ形だった）。
+ */
+
+.is-archive .deck,
+.is-archive.is-insp-open .deck {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.is-archive .list-pane,
+.is-archive .detail-pane,
+.is-archive .insp,
+.is-archive .rail { display: none; }
+
+/* 探す帯。狭い列に居たころは件数を次の行へ送っていた（list.css の `flex: 1 0 100%`）。
+   広い場所では同じ行の右端に置ける。**打ち切りの断りもここに出る**ので、
+   検索語のとなりから離しておく（読む順が「探した → 何件 → どこまで」になる） */
+.is-archive .archive-head { padding: .55rem .75rem; }
+
+.is-archive .archive-head #archive-count {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* 検索語だけが伸びる。絞り込みは中身の幅で置く */
+.is-archive .archive-field.is-q { flex: 1 1 20rem; }
+
+/* 絵と欄を1つの枠に収める。枠は外側が持ち、中の入力と選択は枠を持たない。
+   **絵は絞り込みの札にだけ置く。** 横に4つ並ぶものは形で見分けられると速い */
+.archive-field {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .25rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg-faint);
+}
+
+.archive-field:focus-within { border-color: var(--accent); }
+
+/* 中身は枠を外して、外側の枠に任せる。二重の枠にすると押せる範囲が読めなくなる。
+
+   **`background: none` にしない。** 面まで透明にすると、`<select>` を開いたときの
+   ドロップダウン（ブラウザが描くネイティブの一覧）の地も透明になり、
+   **暗いほうの配色で真っ白に出る**（実測）。枠と同じ色を実体で置く ―― 外側と
+   同じ `--bg-elev` なので見た目は変わらないが、あちらには色が伝わる */
+.archive-field .archive-q,
+.archive-field select {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+
+/* ドロップダウンの1行ずつにも直に置く。上の `background` だけでは足りない環境がある
+   （選択肢の地は `<select>` から必ずしも継がない） */
+.archive-field select option {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+
+.archive-field .archive-q:focus-visible,
+.archive-field select:focus-visible { outline: none; }
+
+/* 絞り込みを外す口。**1つでも掛けているときだけ出す。**
+   常に出していると、何も絞っていないのに外す口があることになる。
+
+   **絞り込みの札と形を変える。** 前は同じ角丸・同じ枠の色で横に並んでいて、
+   「もう1つの絞り込み」に見えた（実際に紛らわしいと言われた）。
+   ここは押すと状態が変わる唯一のもので、性質がまるごと違う。
+
+   分ける手は3つ重ねてある ―― ピル型（押せるものの形）・--accent の色・絵だけ。
+   絞り込みの札は四角い枠 ＋ 灰の輪郭 ＋ 絵と文字なので、どの手掛かりでも見分く */
+.archive-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .25rem;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border-radius: 999px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.archive-clear:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.archive-clear[hidden] { display: none; }
+
+/* 結果。窓を広げた分だけ列が増える。19rem はタイトルが2行で収まる下限で、
+   これより狭めると3行になってカードの高さが揃わなくなる */
+.archive-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: .5rem;
+  margin: 0;
+  padding: .6rem;
+  overflow-y: auto;
+  min-height: 0;
+  list-style: none;
+  /* 件数が少ない日にカードが縦へ伸びないようにする */
+  align-content: start;
+  background: var(--bg-sunk);
+}
+
+/* `display: grid` は `[hidden]` の既定（0,1,0）に勝つので、消す指定を自分で書く */
+.archive-grid[hidden] { display: none; }
+
+/* 空・読み込み中・エラー・「続きを出す」は列をまたいで1本に伸ばす。
+   グリッドの1マスに入ると画面の左上へ小さく出て、見つけられない */
+.archive-grid > li.is-wide { grid-column: 1 / -1; }
+
+/* カードの中身は広い場所でも同じ形。**タイトルの行数に上限を付けない。**
+   探しに来た人が読むのはそこなので、省くと画面を広げた意味が消える */
+.archive-grid .card {
+  height: 100%;
+  /* 高さを揃えるために 100% を敷くが、**中身まで引き伸ばさない。**
+     .card は grid なので、既定のままだと余った縦を各行へ分けてしまい、
+     札や数の**字の下だけに隙間が空く**（実測で最大 14px）。
+     上へ詰めて、余りは下にまとめて残す */
+  align-content: start;
+}
+
+/* スキルの索引を作っている最中。**選べないことを形で伝える。**
+   薄くするだけでなく、押せないもの（disabled）にしてある ―― 空の候補を
+   選べる状態で出すと、使っていないのか読めていないのかが区別できない */
+.archive-field.is-waiting {
+  opacity: .6;
+  border-style: dashed;
+}
+
+.archive-field select:disabled {
+  color: var(--fg-faint);
+  cursor: default;
+}
+
+/* カードの数値。作業台の右の枠に出している4つを、1行へ畳んだもの。
+
+   **札（.tag）と同じ形にしない。** あちらは「何であるか」を言うもので、
+   こちらは数。並べて置くと、どちらも同じ重さの飾りに見える。
+   枠を持たず、上に細い区切り線を1本引いて「別の段」だと示す */
+.card-stats {
+  display: flex;
+  flex-wrap: wrap;
+  /* 器が伸ばされたときに数だけ上へ寄るのを止める（.card-meta と同じ理由） */
+  align-items: center;
+  gap: .1rem .7rem;
+  margin-top: .1rem;
+  padding-top: .35rem;
+  border-top: 1px solid var(--border);
+  font-size: .68rem;
+}
+
+/* まだ届いていないあいだ。**0 を書かない。**
+   高さだけ先に取っておくと、届いたときにカードの背が動かない */
+.card-stats.is-waiting {
+  min-height: 1.1rem;
+  border-top-style: dashed;
+}
+
+.card-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .25rem;
+}
+
+.card-stat .k { color: var(--fg-faint); }
+
+.card-stat .v {
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}

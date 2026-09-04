@@ -22,6 +22,34 @@ export const STATE_COLOR = {
 export const QUIET_MODES = new Set(['auto', 'default', 'normal', 'acceptEdits']);
 
 /**
+ * 一覧を区切る見出し。上から手をつける順（サーバ側の STATE_RANK と同じ考え）。
+ *
+ * **これは監視盤の COLUMNS をそのまま引き継いだもの。** あちらは4つの列への割り当てで、
+ * こちらは縦一覧への割り当て。材料（store.rows）も並び順も同じなので、
+ * 列を畳んで見出しに替えただけ。
+ *
+ * 状態ラベルの日本語を画面側に持たない決まりの**例外**になる。
+ * サーバが渡す `meta.stateLabels` は状態1つずつの名前で、
+ * 「あなたの番」のような**まとめた名前**は向こうに無い（監視盤の COLUMNS も同じ理由）。
+ * 状態が1つ増えたときは、どの見出しにも入らず末尾へ落ちる。消えはしない。
+ *
+ * `keepEmpty` は 0 件でも見出しを残すもの。**「あなたの番」だけ真にする。**
+ * ここを消すと「見ていない」と「無い」が同じ顔になる。
+ * 残り3つまで残すと、静かな日に空の見出しが4本並んで一覧の場所を食う。
+ */
+export const STATE_GROUPS = [
+  {
+    id: 'hot',
+    label: 'あなたの番',
+    states: ['needs-answer', 'needs-plan-approval', 'needs-approval'],
+    keepEmpty: true,
+  },
+  { id: 'run', label: '実行中', states: ['running'] },
+  { id: 'reply', label: '返信待ち', states: ['awaiting-reply'] },
+  { id: 'done', label: '終了', states: ['ended'] },
+];
+
+/**
  * 一覧の上に出すまとめ。並び順もこの順にする。
  *
  * ラベルの日本語はここに持たない。サーバが meta.stateLabels で渡してくる。
@@ -46,10 +74,14 @@ export const SUMMARY_ORDER = [
  *  ?tq=<語> … 時系列の検索語
  *  ?hide=<種類,種類> … 時系列で隠す種類。空で付けると「何も隠さない」になる
  *  ?nolive=1 … 自動更新をつながない
- *  ?mode=board|usage … 監視盤（列で見る）や数値（横断の集計）で開く
- *  ?tab=archive … 書庫（終了したものも含む全セッション）を開いた状態にする
+ *  ?mode=archive|usage … 書庫（過去を探す）・数値（横断の集計）で開く
+ *  ?mode=board … 監視盤があった版の形。作業台へ送る
+ *  ?tab=archive … 書庫が左のペインのタブだった版の形。?mode=archive へ読み替える
  *  ?aq=<語> … 書庫の検索語
  *  ?asort=recent|oldest|size … 書庫の並び順
+ *  ?aproj=<置き場所> … 書庫の絞り込み（サーバ側の projectDir。スラッグをそのまま）
+ *  ?askill=<スキル名> … 書庫の絞り込み（サーバ側の索引から引く）
+ *  ?adays=7|30|90|365 … 書庫の絞り込み（何日ぶんを見るか）
  *  ?dtab=log|agents … 詳細ペインの中央のどのタブを開くか
  *  ?insp=usage|out|basics … 右のインスペクタをどのタブで開くか（付けなければ閉じた状態）
  */
@@ -59,11 +91,22 @@ export const query = new URLSearchParams(location.search);
 export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
 
 /**
+ * 書庫の期間の刻み。**画面に置いた <option> と同じ並びにする。**
+ *
+ * サーバは 1〜3650 日を受けるので、増やすのはこことフォームの2箇所だけで済む。
+ * 集合で持つのは MODES と同じ理由（知らない値が黙って通らないように）。
+ */
+export const ARCHIVE_DAYS = new Set(['7', '30', '90', '365']);
+
+/**
  * 画面のモード。知らない値は 'work' に落とす。
  *
- * 見る目的が3つある。「いまの作業」（作業台）・「どれから手をつけるか」（監視盤）・
+ * 見る目的が3つある。「いまの作業」（作業台）・「過去を探す」（書庫）・
  * 「何にトークンを使ったか」（数値）。同居させると同じ画面で場所を取り合うので、
  * モードとして分けている。
+ *
+ * **監視盤（board）は畳んだ。** 左の一覧とまったく同じ材料を列へ振り分けるだけで、
+ * 同じ問いに画面いっぱいを使っていた。列は一覧の状態の見出しが引き継いでいる。
  *
  * 数値がタブではなくモードなのは、**出す中身がセッション1本のものではない**から。
  * 左のペインは「どのセッションを選ぶか」の場所なので、そこに横断の集計を置くと、
@@ -72,33 +115,29 @@ export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
  * 集合で持つ。三項演算子で二値に畳むと、3つ目を足した日に
  * 黙って 'work' へ落ちる形になる（実際に3つ目を足した）
  */
-export const MODES = new Set(['work', 'board', 'usage']);
+export const MODES = new Set(['work', 'archive', 'usage']);
 
 /**
  * 開くモードを決める。
  *
- * `?tab=usage` を拾うのは、数値が左のペインのタブだった版（0.3.0 で配った）の
- * URL が実在するため。**ここは読み替えを入れる。** INSPECTOR_TABS の側で
- * 入れなかったのは、あれがまだ誰にも配っていなかったからで、方針の違いではない。
+ * **配ったブックマークを切らない。** 左のペインのタブだった2つを、どちらもここで拾う。
+ *
+ *  - `?tab=usage` … 数値がタブだった版（0.3.0 で配った）
+ *  - `?tab=archive` … 書庫がタブだった版（0.9.1 まで）
+ *  - `?mode=board` … 監視盤。**作業台へ送る。** 書庫ではない。
+ *    あれは「どれから手をつけるか」の画面で、その役目は左の一覧の状態の見出しが
+ *    引き継いでいる。書庫（過去を探す）は問いがまるごと違う
+ *
+ * `?tab=live` は作業台の既定なので拾わない（既定へ落ちれば済む）。
  */
 function initialMode() {
   const m = query.get('mode');
   if (MODES.has(m)) return m;
-  return query.get('tab') === 'usage' ? 'usage' : 'work';
+  const t = query.get('tab');
+  if (t === 'usage') return 'usage';
+  if (t === 'archive') return 'archive';
+  return 'work';
 }
-
-/**
- * 左のペインに出せるもの。知らない値は 'live' に落とす。
- *
- * 集合で持つのは、増やしたときに三項演算子を書き換えなくて済むようにするため。
- * 以前は `=== 'archive' ? 'archive' : 'live'` と書いてあり、
- * 3つ目を足したときに黙って 'live' へ落ちる形になっていた。
- *
- * 数値は 3つ目のタブだったが、モード（MODES）へ移した。
- * **2つに戻っても集合のままにする。** 三項に畳み直すと、次に足したときに
- * 同じ地雷（黙って 'live' へ落ちる）を踏み直すことになる
- */
-export const TABS = new Set(['live', 'archive']);
 
 /**
  * 詳細ペインの中央に出せるもの。知らない値は 'now' に落とす。
@@ -107,7 +146,7 @@ export const TABS = new Set(['live', 'archive']);
  * いま何を見ればいいのかが分からなくなっていたので、役目で割ってある。
  * 中央は「その作業をするのに要るもの」の3つだけ。残りは右のインスペクタへ寄せた。
  *
- * TABS と同じく集合で持つ。三項演算子で二値に畳むと、増やすたびに
+ * MODES と同じく集合で持つ。三項演算子で二値に畳むと、増やすたびに
  * 判定と syncQuery の2箇所を直すことになる
  */
 export const DETAIL_TABS = new Set(['now', 'log', 'out', 'agents']);
@@ -163,14 +202,10 @@ export const dom = {
   reload: document.getElementById('reload'),
   themeToggle: document.getElementById('theme-toggle'),
   onlyLive: document.getElementById('only-live'),
-  // 監視盤（board.js）。作業台とは別のモードなので、器も別に持つ
+  // モードの札（mode.js）。骨格の組み替えは .app のクラスが受け持つ
   modeWork: document.getElementById('mode-work'),
-  modeBoard: document.getElementById('mode-board'),
+  modeArchive: document.getElementById('mode-archive'),
   modeUsage: document.getElementById('mode-usage'),
-  boardHead: document.getElementById('board-head'),
-  boardCount: document.getElementById('board-count'),
-  boardRest: document.getElementById('board-rest'),
-  board: document.getElementById('board'),
   listPane: document.getElementById('list-pane'),
   listToggle: document.getElementById('list-toggle'),
   listClose: document.getElementById('list-close'),
@@ -182,15 +217,22 @@ export const dom = {
   inspClose: document.getElementById('insp-close'),
   inspBody: document.getElementById('insp-body'),
   rail: document.getElementById('rail'),
-  tabLive: document.getElementById('tab-live'),
-  tabArchive: document.getElementById('tab-archive'),
+  // 左端のレール（一覧の開閉）。中身は drawer.js が1回だけ組む
+  railLeft: document.getElementById('rail-left'),
   liveHead: document.getElementById('live-head'),
   archiveHead: document.getElementById('archive-head'),
   archive: document.getElementById('archive'),
   archiveQ: document.getElementById('archive-q'),
   archiveDeep: document.getElementById('archive-deep'),
   archiveSort: document.getElementById('archive-sort'),
+  archiveProject: document.getElementById('archive-project'),
+  archiveSkill: document.getElementById('archive-skill'),
+  archiveSkillField: document.getElementById('archive-skill-field'),
+  archiveDays: document.getElementById('archive-days'),
+  archiveClear: document.getElementById('archive-clear'),
   archiveCount: document.getElementById('archive-count'),
+  // 拡大モーダルの「作業台で開く」。書庫から開いたときだけ出す
+  zoomWork: document.getElementById('zoom-work'),
   // 横断の数値。usage-tab.js だけが使う
   usageHead: document.getElementById('usage-head'),
   usageNav: document.getElementById('usage-nav'),
@@ -347,17 +389,9 @@ export const store = {
    *
    * tab と同じく localStorage には残さない。監視盤や数値を開いたまま保存すると、
    * 次に開いたときに作業台へ戻る道が「押す」しか無い状態で始まってしまう。
-   * 固定したい人は ?mode=board のようにブックマークする
+   * 固定したい人は ?mode=archive のようにブックマークする
    */
   mode: initialMode(),
-  /**
-   * 左のペインに出しているもの。TABS のどれか。
-   *
-   * localStorage には残さない。書庫を開いたまま保存すると、次に開いたときに
-   * 「誰が待っているか」が見えない状態で始まってしまう。
-   * 固定したい人は ?tab=archive のようにブックマークする
-   */
-  tab: TABS.has(query.get('tab')) ? query.get('tab') : 'live',
   /**
    * 詳細ペインの中央に出しているタブ。DETAIL_TABS のどれか。
    *
@@ -383,6 +417,26 @@ export const store = {
     pages: 1,
     q: (query.get('aq') ?? '').trim() || null,
     sort: ARCHIVE_SORTS.has(query.get('asort')) ? query.get('asort') : 'recent',
+    /** 置き場所の絞り込み。サーバ側の projectDir（スラッグ）をそのまま持つ */
+    project: (query.get('aproj') ?? '').trim() || null,
+    /** 何日ぶんを見るか。知らない値は「絞らない」へ落とす（400 は返さない側に合わせる） */
+    days: ARCHIVE_DAYS.has(query.get('adays')) ? query.get('adays') : null,
+    /** 使ったスキルの絞り込み。サーバ側の索引から引く */
+    skill: (query.get('askill') ?? '').trim() || null,
+    /** 置き場所の候補。サーバが meta.projects で渡してくる */
+    projects: [],
+    /** スキルの候補。サーバが meta.skills で渡してくる */
+    skills: [],
+    /**
+     * カードに出す数値。sessionId -> 1本ぶんの集計（取れなければ null）。
+     *
+     * 一覧（/api/archive）には載らない。**載せられない**ので別の窓口から遅れて引く
+     * （一覧は末尾 64KB しか読まないが、集計は先頭から積まないと出せない）。
+     * Map なので「まだ引いていない（undefined）」と「引いたが取れなかった（null）」を分けられる
+     */
+    usage: new Map(),
+    /** 索引の様子（meta.skillIndex）。まだ作っている最中かをここで見る */
+    skillIndex: null,
     deep: false,
     meta: null,
     loading: false,
@@ -460,10 +514,15 @@ export function syncQuery() {
   // 既定（作業台）のときだけキーを落とす。tab と同じ扱い
   set('mode', store.mode === 'work' ? null : store.mode);
   // 既定（稼働中）のときだけキーを落とす。3値になったので三項では書かない
-  set('tab', store.tab === 'live' ? null : store.tab);
-  set('aq', store.tab === 'archive' ? store.archive.q : null);
+  // ?tab= はもう書かない。書庫が左のペインのタブだった名残で、いまはモードが正。
+  // 読むほう（initialMode）は残してある ―― 配ったブックマークを切らないため
+  params.delete('tab');
+  set('aq', store.mode === 'archive' ? store.archive.q : null);
   // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
-  set('asort', store.tab === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
+  set('asort', store.mode === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
+  set('aproj', store.mode === 'archive' ? store.archive.project : null);
+  set('askill', store.mode === 'archive' ? store.archive.skill : null);
+  set('adays', store.mode === 'archive' ? store.archive.days : null);
   // 既定（いま）のときだけキーを落とす。tab と同じ扱い
   // 既定（経過）のときだけキーを落とす。既定が「いま」から替わったので、
   // これからは ?dtab=now が URL に載る

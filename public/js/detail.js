@@ -32,6 +32,7 @@
  */
 import { el, num } from './util.js';
 import { mark } from './perf.js';
+import { icon } from './icons.js';
 import { dom, store, syncQuery, STATE_COLOR } from './store.js';
 import { headOf, detailErrorNow } from './rows.js';
 import { panel } from './panel.js';
@@ -117,12 +118,12 @@ function effectiveTab(d, error) {
  * 開いた先で何を見ているのかを言い直す
  */
 export const INSP_DEFS = [
-  { id: 'usage', label: '数値', title: '何にトークンを使ったか' },
+  { id: 'usage', label: '数値', icon: 'chart', title: '何にトークンを使ったか' },
   // **id は basics のまま。** ?insp=basics は v0.6.0 で配っているので、
   // 名前を変えると配ったブックマークが切れる。替えるのは札と見出しだけ。
   // 「状態」から替えたのは、いまの状態そのもの（あなたの番・返信待ち）は
   // 帯とヘッダに出ていて、ここに残るのが困ったときに見る値だから
-  { id: 'basics', label: '診断', title: '困ったときに見る値' },
+  { id: 'basics', label: '診断', icon: 'info', title: '困ったときに見る値' },
 ];
 
 /**
@@ -472,7 +473,12 @@ export function initInspector() {
     b.dataset.insp = t.id;
     b.disabled = true;
     b.setAttribute('aria-pressed', 'false');
-    b.append(el('span', 'rail-label', t.label));
+    // **絵だけにする。** 縦のレールに字を積むと1文字ずつ折り返すか、
+    // レールそのものを広げることになる。名前は title と aria-label に残るので、
+    // 触れば出るし読み上げにも乗る（上のバーの補助3つと同じ流儀）
+    b.append(icon(t.icon, 17));
+    b.title = `${t.label} — ${t.title}`;
+    b.setAttribute('aria-label', b.title);
     b.addEventListener('click', () => setInspector(t.id));
     dom.rail.append(b);
   }

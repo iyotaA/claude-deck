@@ -30,11 +30,11 @@
      中央がそのぶん狭くなる。紙も中央に重ねるので列を持たせない。
      .is-list-open.is-insp-open は (0,3,0) 同士で、後に読まれるこちらが勝つ。
 
-     **監視盤（.is-board）には手を出さない。** あちらは board.css の
-     .is-board .deck（0,2,0）が、ここの .deck 単体（0,1,0）に詳細度で勝つ。
+     **書庫（.is-archive）には手を出さない。** あちらは archive.css の
+     .is-archive .deck（0,2,0）が、ここの .deck 単体（0,1,0）に詳細度で勝つ。
      セレクタリストは1つずつ独立に詳細度を持つので、隣に並んでいる
      .is-insp-open .deck（0,2,0）はこの勝負に関わらない。
-     読む順ではなく詳細度で決まるので、board.css 側だけで足りる（実測） */
+     読む順ではなく詳細度で決まるので、archive.css 側だけで足りる（実測） */
   .deck,
   .is-list-open .deck,
   .is-insp-open .deck,
@@ -58,6 +58,16 @@
   .insp { grid-area: 1 / 1; }
 
   .rail { grid-area: 1 / 2; }
+
+  /* **左のレールは狭い窓では出さない。** ここは2列しか無いので、
+     3本目の縦帯を置くと読む面がそのぶん削れる。
+     開閉の口は上のバーのハンバーガー（.list-toggle）が受け持つ */
+  .rail.is-left { display: none; }
+
+  .list-toggle { display: inline-flex; }
+
+  /* 引き出しは手前に重なるので、中から閉じる口が要る */
+  #live-head .drawer-close { display: inline-flex; }
 
   /* **膜を出さない。** 引き出しは一覧を選ぶための一時的な寄り道なので背面を止めるが、
      こちらは中央の時系列と見比べながら読むもの。膜を敷くとレール（z-index を持たない）が

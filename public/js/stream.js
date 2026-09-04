@@ -8,7 +8,7 @@ import { visibleRows } from './rows.js';
 import { renderList, renderSummary, refreshTimes } from './list.js';
 import { loadDetail } from './session.js';
 import { renderDetailIfNeeded } from './detail.js';
-import { renderBoard } from './board.js';
+import { isZoomed } from './zoom.js';
 
 const initialSession = query.get('session');
 let firstApply = true;
@@ -44,20 +44,24 @@ function apply(payload) {
   syncQuery();
   // まとめは書庫を出しているあいだも動かす。「誰かが待っている」の唯一の合図なので
   renderSummary();
-  // 監視盤のあいだは中央も左も消えている。描いても誰も見ないうえ、詳細を引くのは
-  // サーバー側の全文読みなので、見えないもののために毎2秒撃たない。
-  // 作業台へ戻るときに setMode('work') が3つとも追いつかせる
-  if (store.mode === 'board') {
-    renderBoard();
+  // 作業台でないあいだは**何も描かない。** 中央も左も消えているうえ、
+  // 書庫（/api/archive）も数値（/api/usage）もファイルを開く窓口なので、
+  // 見えないもののために毎2秒撃たない。左の一覧に触ると、見えていない
+  // スクロール位置が毎秒先頭へ飛ぶ。
+  // 作業台へ戻るときに setMode('work') が3つとも追いつかせる。
+  //
+  // **例外はモーダルで詳細を開いているあいだ。** 書庫に出るのはほとんど
+  // 終わったセッションだが、動いている最中のものも混ざる。開いて見ているものが
+  // 古いまま止まるのは、見えないものを描かない話とは別なので、そこだけ通す。
+  // 旗は増やさない ―― 節点がどこに居るか（isZoomed）で決まる
+  if (store.mode !== 'work') {
+    if (isZoomed()) {
+      renderDetailIfNeeded();
+      loadDetail(store.selected, { silent: true });
+    }
     return;
   }
-  // 数値モードのあいだも同じ。監視盤と違って**ここでは何も描かない。**
-  // あちらは毎秒の一覧がそのまま材料だが、こちらの材料は /api/usage（ログを全文読む）で、
-  // 開いたときに1回だけ引く形にしてある。作業台へ戻るときに setMode('work') が追いつかせる
-  if (store.mode === 'usage') return;
-  // 書庫を出しているあいだ #list には触らない。replaceChildren すると
-  // 見えていない一覧のスクロール位置が毎秒先頭へ飛ぶ
-  if (store.tab !== 'archive') renderList();
+  renderList();
   // 詳細は「見えているものが動いたとき」だけ作り直す。毎回作り直すと、
   // 開いた <details> とスクロール位置が2秒ごとに消える
   renderDetailIfNeeded();

@@ -635,7 +635,7 @@
    左のペインは「どのセッションを選ぶか」の場所なので、そこに横断の集計を置くと、
    選ぶための場所に、選んでいるものと関係のない数字が出ることになる。
 
-   作りは board.css の .is-board（監視盤）と同じで、目印は <div id="app"> に付く。
+   作りは archive.css の .is-archive（書庫）と同じで、目印は <div id="app"> に付く。
    中身を .deck の中に置いているのも同じ理由（.app の grid-template-rows が2行しか
    宣言していないので、3つ目の in-flow な子を置くと高さの配り方が崩れる）。
    だから行は auto（ヘッダ）＋ minmax(0,1fr)（器）の2つを自分で宣言する。
@@ -644,7 +644,7 @@
    `.deck, .is-insp-open .deck` というセレクタリストで、リストの各項は
    それぞれ独立に詳細度を持つ。あとから読まれる .is-insp-open .deck（0,2,0）は
    ここの .is-usage .deck（0,2,0）に**読む順で勝つ**ので、(0,3,0) の側を書かないと、
-   右の枠を開いたまま数値へ移った人だけ列が戻る。board.css が同じ組み方をしている。
+   右の枠を開いたまま数値へ移った人だけ列が戻る。archive.css が同じ組み方をしている。
 
    **@media で囲まない。** タブだった頃は、狭い画面の引き出し（.list-pane を
    position: fixed で外へ出す作り）を壊さないよう 861px 以上に閉じ込めていた。
@@ -656,7 +656,7 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-/* .is-board が使っている display での消し方に合わせる（hidden ではない）*/
+/* .is-archive が使っている display での消し方に合わせる（hidden ではない）*/
 .is-usage .list-pane,
 .is-usage .detail-pane,
 .is-usage .insp,

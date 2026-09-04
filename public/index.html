@@ -24,7 +24,7 @@
 <link rel="stylesheet" href="css/ask.css">
 <link rel="stylesheet" href="css/markdown.css">
 <link rel="stylesheet" href="css/palette.css">
-<link rel="stylesheet" href="css/board.css">
+<link rel="stylesheet" href="css/archive.css">
 <link rel="stylesheet" href="css/zoom.css">
 <link rel="stylesheet" href="css/narrow.css">
 </head>
@@ -42,10 +42,12 @@
     <h1 class="brand" id="brand">ClaudeDeck</h1>
     <!-- 見る目的が2つあるので、モードで分ける。同居させると「どれから手をつけるか」と
          「いまの作業」が同じ画面で場所を取り合う（それが組み替えの発端そのもの）。
-         押した状態は aria-pressed で表す（.list-tabs と同じ理由。role="tab" は使わない） -->
+         押した状態は aria-pressed で表す。**role="tab" は使わない。**
+         正式なタブは矢印キーでタブ間を移動する約束が付くが、下の一覧が
+         上下キーをカードの移動に使っている。同じ画面に矢印キーの契約を2つ置かない -->
     <div class="modes" role="group" aria-label="画面のモード">
       <button class="tab" id="mode-work" type="button" aria-pressed="true">作業台</button>
-      <button class="tab" id="mode-board" type="button" aria-pressed="false">監視盤</button>
+      <button class="tab" id="mode-archive" type="button" aria-pressed="false">書庫</button>
       <button class="tab" id="mode-usage" type="button" aria-pressed="false">数値</button>
     </div>
     <div class="topbar-actions">
@@ -91,17 +93,70 @@
   </header>
 
   <div class="deck">
-    <!-- 監視盤。.deck の中に置く。.app 直下には置けない（grid-template-rows が
-         2行しか宣言していないので、3つ目の子を足すと高さの配分が崩れる）。
-         説明の帯は .list-head を借りる（クラス単体のセレクタなので、ここでも効く） -->
-    <div class="list-head board-head" id="board-head" hidden>
-      ボールの所在。左から順に手をつける
-      <span class="note-small">押すと、そのセッションの作業台に入ります</span>
-      <button class="btn board-rest" id="board-rest" type="button" hidden></button>
-      <span class="n" id="board-count">0</span>
+    <!-- 左端のレール。一覧の開閉だけを持つ。中身は drawer.js が組む
+         （右のレールを detail.js が組むのと同じ流儀で、並びと語彙を1箇所に置く）。
+
+         **右のレールと同じ形にしてある。** 開閉の口が上のバー（ハンバーガー）と
+         一覧の帯（×）に散っていて、しかも右の「数値・診断」とは作法が違った。
+         レールなら、書庫や数値のあいだは .rail ごと消えるので、
+         一覧が無い画面に開閉ボタンだけが残ることもない -->
+    <nav class="rail is-left" id="rail-left" aria-label="セッション一覧を開く"></nav>
+    <!-- 書庫（終了したものも含む全セッション）。数値と同じくモードなので
+         .deck の中に置く。**左の列から出した。** 出すカードの項目が5つあるのに
+         27rem の列に押し込んでいて、置き場所も期間も絞る場所が無かった。
+         探す帯は .list-head を借りる（クラス単体のセレクタなのでここでも効く）。
+         絞り込みの札は archive.js が組む（候補が応答から決まるため。器だけ置く） -->
+    <div class="list-head archive-head" id="archive-head" hidden>
+      <!-- 検索欄。絵（虫めがね）は archive.js が差す。
+           打つ前に「ここが検索欄」と分かる合図が、いままで placeholder しか無かった -->
+      <span class="archive-field is-q">
+        <input class="archive-q" id="archive-q" type="search"
+               placeholder="ID・置き場所で探す" aria-label="書庫を検索">
+      </span>
+      <!-- 置き場所。**候補はサーバが渡す**（meta.projects）。
+           スラッグは不可逆なので、表示名は向こうが代表1本を読んで作る -->
+      <span class="archive-field">
+        <select id="archive-project" aria-label="置き場所で絞り込む">
+          <option value="">すべての置き場所</option>
+        </select>
+      </span>
+      <!-- スキル。**候補の出どころが他と違う。** 末尾 64KB には1件も写らないので、
+           サーバが立ち上げの裏で作る索引（read/skills.mjs）から引く。
+           索引がまだできていないあいだは、この札だけ薄くして「作成中」と出す -->
+      <span class="archive-field" id="archive-skill-field">
+        <select id="archive-skill" aria-label="使ったスキルで絞り込む">
+          <option value="">すべてのスキル</option>
+        </select>
+      </span>
+      <!-- 期間。サーバは 1〜3650 日を受けるので、刻みは後から増やせる -->
+      <span class="archive-field">
+        <select id="archive-days" aria-label="期間で絞り込む">
+          <option value="">期間を絞らない</option>
+          <option value="7">7日</option>
+          <option value="30">30日</option>
+          <option value="90">90日</option>
+          <option value="365">1年</option>
+        </select>
+      </span>
+      <span class="archive-field">
+        <select id="archive-sort" aria-label="書庫の並び順">
+          <option value="recent">新しい順</option>
+          <option value="oldest">古い順</option>
+          <option value="size">大きい順</option>
+        </select>
+      </span>
+      <!-- 既定はファイルを開かない検索。タイトルまで探すのは押されたときだけ -->
+      <label><input type="checkbox" id="archive-deep"> 中身も探す</label>
+      <!-- 絞り込みを1つでも掛けているときだけ出す。押すと全部外す。
+           **絵だけにする。** 隣の絞り込みと同じ形だと「もう1つの絞り込み」に見える。
+           名前は title と aria-label に残るので、触れば出るし読み上げにも乗る -->
+      <button class="btn archive-clear" id="archive-clear" type="button" hidden
+              title="絞り込みを外す" aria-label="絞り込みを外す"></button>
+      <!-- どこまで探せたかも、ここに出す。件数の脇に小さく出すだけだと打ち切りに気づけない -->
+      <span id="archive-count"></span>
     </div>
-    <div class="board" id="board" hidden></div>
-    <!-- 数値（横断）。監視盤と同じくモードなので、.deck の中に置く（.app 直下には
+    <ul class="archive-grid" id="archive" hidden></ul>
+    <!-- 数値（横断）。書庫と同じくモードなので、.deck の中に置く（.app 直下には
          置けない。grid-template-rows が2行しか宣言していないため）。
          ログを全文読む一番重い窓口なので、開いたときに1回だけ引く。
          モデルの選択肢は応答から組むので、ここには「すべて」だけを置く -->
@@ -124,39 +179,19 @@
     </div>
     <div class="usage-pane" id="usage" hidden></div>
     <section class="list-pane" id="list-pane" aria-label="セッション一覧">
-      <!-- role="tab" は使わない。正式なタブは矢印キーでタブ間を移動する約束が付くが、
-           この下の一覧が上下キーをカードの移動に使っている。同じペインに矢印キーの
-           契約を2つ置くほうが害が大きいので、押した状態は aria-pressed で表す -->
-      <div class="list-tabs">
-        <button class="tab" id="tab-live" type="button" aria-pressed="true">稼働中</button>
-        <button class="tab" id="tab-archive" type="button" aria-pressed="false">書庫</button>
-        <!-- 引き出しのときだけ出る。開いている間はハンバーガーが下に隠れるため。
-             タブ行に置くのは、書庫を出しているあいだも閉じられるようにするため -->
-        <button class="drawer-close" id="list-close" type="button" aria-label="一覧を閉じる">&#215;</button>
-      </div>
-
+      <!-- タブは外した。書庫はモード（.deck の直下）へ出したので、ここに出せるものは
+           稼働中の一覧ひとつしか無い。**閉じるボタンはこの帯へ移した。**
+           前はタブ行に置いていたが、その行ごと消えるため -->
       <div class="list-head" id="live-head">
         <label><input type="checkbox" id="only-live"> 稼働中だけ</label>
         <span id="list-count"></span>
+        <!-- 引き出しのときだけ出る。開いている間はハンバーガーが下に隠れるため -->
+        <button class="drawer-close" id="list-close" type="button" aria-label="一覧を閉じる">&#215;</button>
       </div>
       <ul class="list" id="list"></ul>
 
-      <div class="list-head archive-head" id="archive-head" hidden>
-        <input class="archive-q" id="archive-q" type="search"
-               placeholder="ID・置き場所で探す" aria-label="書庫を検索">
-        <!-- 既定はファイルを開かない検索。タイトルまで探すのは押されたときだけ -->
-        <label><input type="checkbox" id="archive-deep"> 中身も探す</label>
-        <select id="archive-sort" aria-label="書庫の並び順">
-          <option value="recent">新しい順</option>
-          <option value="oldest">古い順</option>
-          <option value="size">大きい順</option>
-        </select>
-        <span id="archive-count"></span>
-      </div>
-      <ul class="list" id="archive" hidden></ul>
-
       <!-- 幅を変えるつまみ。列の境目にまたがるが、絶対配置なので上の並びには入らない。
-           狭い画面（引き出し）と監視盤・数値モードでは出ない（前者は narrow.css、
+           狭い画面（引き出し）と書庫・数値モードでは出ない（前者は narrow.css、
            後者は .list-pane ごと消えるので自動的に消える） -->
       <button class="splitter" id="split-list" type="button"
               aria-label="一覧の幅を変える。矢印キーでも動かせる（Home で既定に戻る）"></button>
@@ -221,7 +256,7 @@
        節を分けると、足のボタンを「いま開いている節に効くもの」だけに絞れる -->
   <div class="settings-split">
 
-    <!-- role="tab" は使わない（.list-tabs と同じ理由。矢印キーの契約が付く）。
+    <!-- role="tab" は使わない（上のモードの札と同じ理由。矢印キーの契約が付く）。
          押した状態は aria-pressed で表す。アイコンは main.js ではなく
          settings.js が差す（この3つはここでしか使わない） -->
     <div class="settings-nav" id="settings-nav" role="group" aria-label="設定の節">
@@ -466,6 +501,9 @@
 <dialog class="zoom" id="zoom" aria-label="セッションの詳細（拡大）">
   <div class="settings-head">
     <h2>いま見ているセッション</h2>
+    <!-- 書庫から開いたときだけ出す。**移るかどうかは押した人が決める。**
+         勝手に作業台へ飛ばすと、探していた結果がその場で消える -->
+    <button class="btn zoom-work" id="zoom-work" type="button" hidden>作業台で開く</button>
     <button class="settings-x" id="zoom-close" type="button" aria-label="拡大をやめる">&#215;</button>
   </div>
   <div class="zoom-body" id="zoom-body"></div>

@@ -17,19 +17,19 @@
  *   層4  detail.js
  *   層5  session.js
  *   層6  list.js
- *   層7  archive.js / usage-tab.js / board.js / stream.js / settings.js /
+ *   層7  archive.js / usage-tab.js / mode.js / stream.js / settings.js /
  *        update.js / run-form.js / palette.js
  *   層8  このファイル
  *
  * 数値は2つに分かれている。1本ぶんが usage-panel.js（層3・詳細ペイン）、
  * 横断が usage-tab.js（層7・モードの1つ）。絵の部品（usage-chart.js）だけを共有する。
- * 層7 の中の向きは3本。palette.js → run-form.js / stream.js → board.js /
- * palette.js → board.js。どれも片方向で、逆を足すと循環になる。
+ * 層7 の中の向きは3本。palette.js → run-form.js / stream.js → mode.js /
+ * palette.js → mode.js。どれも片方向で、逆を足すと循環になる。
  * usage-tab.js は誰からも import されない（呼ぶのはこのファイルだけ）。
- * board.js の setMode が数値モードを出す口は initBoard({ onUsage }) で差してある。
+ * mode.js の setMode が書庫と数値を出す口は initMode({ onArchive, onUsage }) で差してある。
  * palette.js は層7 のいちばん下流で、誰からも import されない（呼ぶのはこのファイルだけ）。
  *
- * board.js（監視盤）が層7 なのは list.js（層6）から buildCard を借りているため。
+ * mode.js が層7 なのは list.js（層6）の renderList を呼ぶため。
  * 見た目を新しく作らないための借用で、向きはこちらが正しい。
  *
  * timeline/ の中も6枚で層をなしているが、外から見るときは index.js の1枚として扱う。
@@ -56,14 +56,14 @@ import { query, dom, store } from './store.js';
 import { icon } from './icons.js';
 import { visibleRows } from './rows.js';
 import { initListDrawer, setListOpen, initialListOpen } from './drawer.js';
-import { initZoom } from './zoom.js';
+import { initZoom, openZoom } from './zoom.js';
 import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
 import { renderDetail, renderDetailIfNeeded, initInspector } from './detail.js';
 import { renderList, renderRate } from './list.js';
-import { initTabs } from './archive.js';
+import { initArchive, showArchive } from './archive.js';
 import { showUsage, initUsageTab } from './usage-tab.js';
-import { initBoard, setMode } from './board.js';
+import { initMode, setMode } from './mode.js';
 import { select, detailCache } from './session.js';
 import { setLive, fetchOnce, connect } from './stream.js';
 import { initSettings } from './settings.js';
@@ -127,19 +127,26 @@ setListOpen(initialListOpen(), null, false);
 // 「縮小」のまま残らないよう、組み直しをこちらから差す（向きは 8 -> 2）。
 // 差すのは renderDetail のほう。renderDetailIfNeeded は中身が同じなら何もしないので、
 // 札だけを付け替えたいこの用には効かない
-initZoom({ onChange: renderDetail });
+// 「作業台で開く」の行き先もここで差す（zoom.js は層2 なので mode.js を import しない）
+initZoom({ onChange: renderDetail, onOpenInWork: () => setMode('work') });
 initInspector();
 initResize();
-initTabs();
-// 数値モードの絞り込みを配線してから initBoard に渡す。あちらの setMode は
+// 書庫の探す帯を配線してから initMode に渡す。あちらの setMode は
+// ?mode=archive で開いたときに onArchive（= showArchive）をその場で呼ぶので、
+// 先に配線しておかないと検索欄の初期値が当たる前に引き始める。
+// 押されたあとの後始末も、ここで差す（archive.js は mode.js も zoom.js も import しない）。
+// **書庫にいたまま詳細を出す。** 作業台へ飛ばすと、探していた結果がその場で消える。
+// 中身は組み直さず、詳細ペインの節点をモーダルへ運ぶだけ（理由は zoom.js の冒頭）
+initArchive({ onPick: () => openZoom() });
+// 数値モードの絞り込みを配線してから initMode に渡す。あちらの setMode は
 // ?mode=usage で開いたときに onUsage（= showUsage）をその場で呼ぶので、
 // 先に配線しておかないと <select> の初期値が当たる前に引き始める
 initUsageTab({ onPick: () => setMode('work') });
-// パレットより前に置く。あちらは board.js の setMode を呼ぶので、
+// パレットより前に置く。あちらは mode.js の setMode を呼ぶので、
 // 押される前にモードが当たっていないと最初の1回が空振りする。
 // 数値モードの中身は usage-tab.js にあるので、出す口だけを差す
-// （board.js があちらを import すると、同じ層7 に向きが1本増える）
-initBoard({ onUsage: showUsage });
+// （mode.js があちらを import すると、同じ層7 に向きが1本増える）
+initMode({ onUsage: showUsage, onArchive: showArchive });
 initSettings();
 initUpdate();
 initRunForm();
