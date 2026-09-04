@@ -68,6 +68,32 @@ static class Paper
     }
 
     /// <summary>
+    /// 紙に載せる理由の長さ。
+    ///
+    /// update.json と startup.json で同じ値を使う。前は両方が自分で持っていて、
+    /// 片方に「もう片方と揃えてある」と書いてあった。**揃える義務があるなら1つにする。**
+    /// </summary>
+    public const int ERROR_MAX = 300;
+
+    /// <summary>
+    /// 長すぎる文字列を切る。
+    ///
+    /// 紙に載るのは人が読むためのものなので、長さより「途中で切れたと分かること」が要る。
+    /// 切り口がサロゲートペアの途中なら1文字戻す（半端な片割れを残すと化ける）。
+    /// </summary>
+    /// <param name="text">元の文字列。null 可。</param>
+    /// <param name="max">残す長さ。</param>
+    /// <returns>切った文字列。元が null なら null。</returns>
+    public static string? Clip(string? text, int max)
+    {
+        if (text is null || text.Length <= max) return text;
+
+        var end = max;
+        if (char.IsHighSurrogate(text[end - 1])) end--;
+        return text[..end] + "…";
+    }
+
+    /// <summary>
     /// 紙に押す時刻（Unix ミリ秒）。
     ///
     /// 読む側（Node）が Date として扱うので、紙ごとに刻み方が違うと困る。

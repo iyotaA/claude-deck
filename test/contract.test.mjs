@@ -30,8 +30,8 @@ import { VIA_LAUNCHER, VIA_MANUAL } from '../src/shared/portclaim.mjs';
 import { configFilePath } from '../src/shared/configfile.mjs';
 import { resolvePortFile } from '../src/shared/portfile.mjs';
 import { ratePath } from '../src/run/rate.mjs';
-import { updateStatePath } from '../src/update/state.mjs';
-import { startupStatePath } from '../src/startup/state.mjs';
+import { UPDATE_LABELS, updateStatePath } from '../src/update/state.mjs';
+import { LEGACY_LABELS, STARTUP_LABELS, startupStatePath } from '../src/startup/state.mjs';
 import { skillIndexPath } from '../src/read/skills.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -97,6 +97,29 @@ function has(text, token) {
 
 /** 環境変数を1つも持たない env。紙の場所の解決を既定へ倒すために使う。 */
 const NO_ENV = {};
+
+/**
+ * C# の `switch` 式から、左辺に並んでいる字を集める。
+ *
+ * 状態の語は C# が書いて Node が読む。**表そのものは共有できない**（別言語なので）。
+ * だから「C# が書きうる語が、Node のラベル表に全部あるか」だけを見る。
+ * 片側で語を足す・改名するとここが落ちる。
+ *
+ * @param {string} rel リポジトリ直下からの相対パス
+ * @param {string} name `Describe` などのメソッド名
+ * @returns {string[]} switch の左辺に並んだ字
+ */
+function switchArms(rel, name) {
+  const cs = code(rel);
+  const at = cs.indexOf(`string ${name}(`);
+  assert.notEqual(at, -1, `${rel} に ${name} が無い`);
+
+  // メソッドの本体だけ見る。閉じ括弧（`};`）までを switch 式の範囲とする
+  const body = cs.slice(at, cs.indexOf('};', at));
+  const arms = [...body.matchAll(/"([a-z-]+)"\s*=>/g)].map((m) => m[1]);
+  assert.ok(arms.length > 0, `${rel} の ${name} から語を1つも拾えなかった`);
+  return arms;
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/health のフィールド
@@ -331,4 +354,97 @@ test('server.mjs から public への向きが変わっていない', () => {
   const server = code('server.mjs');
   assert.ok(server.includes("'public'") || server.includes('./public'), '静的配信の根が変わっている');
   assert.ok(fs.existsSync(path.join(ROOT, 'public', 'index.html')), 'public/index.html が無い');
+});
+
+// ---------------------------------------------------------------------------
+// 既定のポート
+// ---------------------------------------------------------------------------
+//
+// 3つの言語に同じ数が焼いてある。共有する手立てが無いので、
+// ここで同時に変わったことを見る。
+//
+// server.mjs だけ変えると、ランチャは古い番号を探しに行って
+// 「動いていない」と判断し、二重に立てようとして10秒で諦める。
+// 旧方式の自動起動（PowerShell）は違う番号を案内する。
+// どちらも例外は出ない。
+
+test('既定のポートは3箇所で同じ。server.mjs だけ変えない', () => {
+  const server = code('server.mjs').match(/DEFAULT_PORT\s*=\s*(\d+)/);
+  assert.ok(server, 'server.mjs から DEFAULT_PORT を読めない');
+  const port = server[1];
+
+  const cs = code('launcher/ServerProcess.cs').match(/DEFAULT_PORT\s*=\s*(\d+)/);
+  assert.ok(cs, 'ServerProcess.cs から DEFAULT_PORT を読めない');
+  assert.equal(cs[1], port, `ランチャの既定ポートが server.mjs（${port}）と違う`);
+
+  // PowerShell 側は定数にしていないので、素の数として探す。
+  // 拾えるのは「Port = <数>」の形だけ
+  const ps = code('scripts/autostart.ps1').match(/Port\s*=\s*(\d+)\s*;/);
+  assert.ok(ps, 'autostart.ps1 から既定ポートを読めない');
+  assert.equal(ps[1], port, `旧方式の自動起動の既定ポートが server.mjs（${port}）と違う`);
+});
+
+// ---------------------------------------------------------------------------
+// 紙に書く状態の語
+// ---------------------------------------------------------------------------
+//
+// C# が書いて Node が読む。Node 側は知らない語が来ても状態そのものは通すので、
+// **落ちない代わりに画面が「状態が分かりません」になるだけ**で終わる。
+// いちばん静かな壊れ方なので、ここで語の集合を突き合わせる。
+//
+// 逆向き（Node にあって C# に無い）は見ない。
+// idle / stale / unknown は Node が自分で足すもので、C# は書かない。
+
+test('更新の状態語は、C# が書きうるぶんを Node のラベル表が全部持っている', () => {
+  for (const word of switchArms('launcher/Updates.cs', 'Describe')) {
+    assert.ok(
+      word in UPDATE_LABELS,
+      `C# が書く状態 '${word}' が UPDATE_LABELS に無い。画面が「状態が分かりません」になる`,
+    );
+  }
+});
+
+test('自動起動の状態語も、C# と Node で食い違っていない', () => {
+  for (const word of switchArms('launcher/Startup.cs', 'Describe')) {
+    assert.ok(word in STARTUP_LABELS, `C# が書く状態 '${word}' が STARTUP_LABELS に無い`);
+  }
+  for (const word of switchArms('launcher/Startup.cs', 'DescribeLegacy')) {
+    assert.ok(word in LEGACY_LABELS, `C# が書く旧方式の様子 '${word}' が LEGACY_LABELS に無い`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 文字コードの約束
+// ---------------------------------------------------------------------------
+//
+// この2つは**書いた本人の環境では絶対に気づけない。**
+// 手元のコンソールが UTF-8 なら .cmd に日本語を足しても動くし、
+// pwsh (7) しか使っていなければ BOM を外した .ps1 も通る。
+// 壊れるのは配った先の、古い powershell.exe や shift-jis のコンソールでだけ。
+
+test('ClaudeDeck.cmd は ASCII のみ。日本語を足さない', () => {
+  // cmd.exe は解析時のコンソールコードページでバッチを読む。
+  // shift-jis の環境に日本語があると、解析そのものが壊れて
+  // 「ダブルクリックしても何も起きない」になる。
+  // 日本語のメッセージは chcp 65001 の後に node 側から出す
+  const cmd = fs.readFileSync(path.join(ROOT, 'ClaudeDeck.cmd'));
+  const at = cmd.findIndex((b) => b > 0x7e || (b < 0x09 && b !== 0x00));
+  assert.equal(at, -1, `ClaudeDeck.cmd の ${at} バイト目が ASCII の外（0x${cmd[at]?.toString(16)}）`);
+});
+
+test('.ps1 は UTF-8 BOM 付きで保存する', () => {
+  // 旧 powershell.exe (5.1) は BOM が無いと OS の既定コードページで読む。
+  // 日本語コメントが化けて構文解析まで壊れる。pwsh (7) は通るので気づきにくい。
+  // BOM は git が触らない（改行を変換しても残る）ので、中身の性質として見てよい
+  const dir = path.join(ROOT, 'scripts');
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.ps1'));
+  assert.ok(files.length > 0, 'scripts/ に .ps1 が1つも無い');
+
+  for (const file of files) {
+    const head = fs.readFileSync(path.join(dir, file)).subarray(0, 3);
+    assert.deepEqual(
+      [...head], [0xef, 0xbb, 0xbf],
+      `scripts/${file} に UTF-8 BOM が無い（旧 powershell.exe で構文ごと壊れる）`,
+    );
+  }
 });

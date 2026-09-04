@@ -200,9 +200,7 @@ static class Program
         var state = await Updates.CheckAsync(force: true);
 
         Console.WriteLine(Updates.Describe(state.State));
-        Console.WriteLine($"  いまの版: {state.Current}");
-        if (state.Available is not null) Console.WriteLine($"  新しい版: {state.Available}");
-        if (state.Error is not null) Console.WriteLine($"  理由    : {state.Error}");
+        WriteUpdateDetail(state);
         Console.WriteLine($"  記録    : {Paths.UpdateFile}");
 
         // 確認そのものができなかったときだけ 0 以外を返す。「最新だった」は失敗ではない
@@ -342,9 +340,7 @@ static class Program
         else
         {
             Console.WriteLine($"  {Updates.Describe(update.State)}");
-            Console.WriteLine($"  いまの版: {update.Current}");
-            if (update.Available is not null) Console.WriteLine($"  新しい版: {update.Available}");
-            if (update.Error is not null) Console.WriteLine($"  理由    : {update.Error}");
+            WriteUpdateDetail(update);
         }
 
         Console.WriteLine();
@@ -359,6 +355,21 @@ static class Program
         }
 
         return ExitCode.OK;
+    }
+
+    /// <summary>
+    /// 更新の紙の中身を出す。--check-update と --status で同じ形にする。
+    ///
+    /// 寄せてあるのは行数のためではなく、**どの項目をどのラベルで出すか**のため。
+    /// 紙に項目が増えた日に、片方だけ直って2つの出力が食い違うのを防ぐ。
+    /// 状態の1行目は呼ぶ側が書く（--status は字下げが1段深い）。
+    /// </summary>
+    /// <param name="state">出す紙の中身。</param>
+    static void WriteUpdateDetail(Updates.UpdateState state)
+    {
+        Console.WriteLine($"  いまの版: {state.Current}");
+        if (state.Available is not null) Console.WriteLine($"  新しい版: {state.Available}");
+        if (state.Error is not null) Console.WriteLine($"  理由    : {state.Error}");
     }
 
     static int NotImplemented(string command)

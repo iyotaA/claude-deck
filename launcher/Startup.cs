@@ -34,9 +34,6 @@ static class Startup
     /// <summary>無効にした後の名前。消さずに残すので、利用者が戻せる。</summary>
     const string DISABLED_NAME = "ClaudeDeck.lnk.disabled";
 
-    /// <summary>紙に載せる理由の長さ。update.json と揃えてある。</summary>
-    const int ERROR_MAX = 300;
-
     /// <summary>登録する中身。窓は出さない（ログオン直後に人は見ていない）。</summary>
     static string Command => $"\"{Paths.LauncherExe}\" --background";
 
@@ -201,7 +198,7 @@ static class Startup
         catch (Exception ex)
         {
             Log.Line($"自動起動を登録できませんでした: {ex.Message}");
-            return ("foreign", Clip(ex.Message, ERROR_MAX));
+            return ("foreign", Paper.Clip(ex.Message, Paper.ERROR_MAX));
         }
     }
 
@@ -223,7 +220,7 @@ static class Startup
         catch (Exception ex)
         {
             Log.Line($"自動起動の登録を読めませんでした: {ex.Message}");
-            return ("foreign", Clip(ex.Message, ERROR_MAX));
+            return ("foreign", Paper.Clip(ex.Message, Paper.ERROR_MAX));
         }
 
         // 無いものは足さない。自分で外した人の選択を毎回ひっくり返さない
@@ -409,16 +406,4 @@ static class Startup
         }
     }
 
-    /// <summary>長すぎる文字列を切る。切り口がサロゲートペアの途中なら1文字戻す。</summary>
-    /// <param name="text">元の文字列。null 可。</param>
-    /// <param name="max">残す長さ。</param>
-    /// <returns>切った文字列。元が null なら null。</returns>
-    static string? Clip(string? text, int max)
-    {
-        if (text is null || text.Length <= max) return text;
-
-        var end = max;
-        if (char.IsHighSurrogate(text[end - 1])) end--;
-        return text[..end] + "…";
-    }
 }
