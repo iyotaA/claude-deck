@@ -79,6 +79,8 @@ export const SUMMARY_ORDER = [
  *  ?tab=archive … 書庫が左のペインのタブだった版の形。?mode=archive へ読み替える
  *  ?aq=<語> … 書庫の検索語
  *  ?asort=recent|oldest|size … 書庫の並び順
+ *  ?aproj=<置き場所> … 書庫の絞り込み（サーバ側の projectDir。スラッグをそのまま）
+ *  ?adays=7|30|90|365 … 書庫の絞り込み（何日ぶんを見るか）
  *  ?dtab=log|agents … 詳細ペインの中央のどのタブを開くか
  *  ?insp=usage|out|basics … 右のインスペクタをどのタブで開くか（付けなければ閉じた状態）
  */
@@ -86,6 +88,14 @@ export const query = new URLSearchParams(location.search);
 
 /** 書庫の並び順。サーバ側（view/archive.mjs の SORTS）と同じ語を使う */
 export const ARCHIVE_SORTS = new Set(['recent', 'oldest', 'size']);
+
+/**
+ * 書庫の期間の刻み。**画面に置いた <option> と同じ並びにする。**
+ *
+ * サーバは 1〜3650 日を受けるので、増やすのはこことフォームの2箇所だけで済む。
+ * 集合で持つのは MODES と同じ理由（知らない値が黙って通らないように）。
+ */
+export const ARCHIVE_DAYS = new Set(['7', '30', '90', '365']);
 
 /**
  * 画面のモード。知らない値は 'work' に落とす。
@@ -212,6 +222,9 @@ export const dom = {
   archiveQ: document.getElementById('archive-q'),
   archiveDeep: document.getElementById('archive-deep'),
   archiveSort: document.getElementById('archive-sort'),
+  archiveProject: document.getElementById('archive-project'),
+  archiveDays: document.getElementById('archive-days'),
+  archiveClear: document.getElementById('archive-clear'),
   archiveCount: document.getElementById('archive-count'),
   // 横断の数値。usage-tab.js だけが使う
   usageHead: document.getElementById('usage-head'),
@@ -397,6 +410,12 @@ export const store = {
     pages: 1,
     q: (query.get('aq') ?? '').trim() || null,
     sort: ARCHIVE_SORTS.has(query.get('asort')) ? query.get('asort') : 'recent',
+    /** 置き場所の絞り込み。サーバ側の projectDir（スラッグ）をそのまま持つ */
+    project: (query.get('aproj') ?? '').trim() || null,
+    /** 何日ぶんを見るか。知らない値は「絞らない」へ落とす（400 は返さない側に合わせる） */
+    days: ARCHIVE_DAYS.has(query.get('adays')) ? query.get('adays') : null,
+    /** 置き場所の候補。サーバが meta.projects で渡してくる */
+    projects: [],
     deep: false,
     meta: null,
     loading: false,
@@ -480,6 +499,8 @@ export function syncQuery() {
   set('aq', store.mode === 'archive' ? store.archive.q : null);
   // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
   set('asort', store.mode === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
+  set('aproj', store.mode === 'archive' ? store.archive.project : null);
+  set('adays', store.mode === 'archive' ? store.archive.days : null);
   // 既定（いま）のときだけキーを落とす。tab と同じ扱い
   // 既定（経過）のときだけキーを落とす。既定が「いま」から替わったので、
   // これからは ?dtab=now が URL に載る

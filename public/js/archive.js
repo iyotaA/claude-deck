@@ -12,7 +12,8 @@
  * （initMode({ onUsage }) と同じ差し方。層7 どうしで向きを持たせずに済む）。
  */
 import { el, kb, shortStamp, stamp, agentTag } from './util.js';
-import { dom, store, syncQuery, ARCHIVE_SORTS } from './store.js';
+import { icon } from './icons.js';
+import { dom, store, syncQuery, ARCHIVE_SORTS, ARCHIVE_DAYS } from './store.js';
 import { select } from './session.js';
 
 /** カードを押されたあとの後始末。main.js が差す */
@@ -82,6 +83,7 @@ function renderArchiveCount() {
   // どこまで中身を読んだかを正直に出す。打ち切っていれば「全部を探せていない」と分かる
   if (a.meta?.scanLimited) parts.push(`中身は新しい ${a.meta.scanMax} 件まで`);
   dom.archiveCount.textContent = parts.join(' / ');
+  dom.archiveClear.hidden = !hasFilter();
 }
 
 function renderArchive() {
@@ -167,6 +169,8 @@ async function loadArchive({ append = false } = {}) {
   params.set('sort', a.sort);
   if (a.q) params.set('q', a.q);
   if (a.deep) params.set('deep', '1');
+  if (a.project) params.set('project', a.project);
+  if (a.days) params.set('days', a.days);
 
   try {
     const res = await fetch(`/api/archive?${params.toString()}`, { cache: 'no-store' });
@@ -191,6 +195,13 @@ async function loadArchive({ append = false } = {}) {
     a.page = data.page ?? 1;
     a.pages = data.pages ?? 1;
     a.meta = data.meta ?? null;
+    // 候補は絞り込む前の全行から作られるので、絞っても減らない。
+    // **空で上書きしない。** 古いサーバは projects を返さないので、
+    // 受け取れた日の候補をそのまま残す（0 と不明を分けるのと同じ）
+    if (Array.isArray(data.meta?.projects)) {
+      a.projects = data.meta.projects;
+      renderProjects();
+    }
     a.loaded = true;
   } catch (err) {
     if (token !== archiveToken) return;
@@ -201,6 +212,41 @@ async function loadArchive({ append = false } = {}) {
       renderArchive();
     }
   }
+}
+
+/**
+ * 置き場所の候補を組み直す。
+ *
+ * **選んでいた値は残す。** 引き直すたびに作り直すので、
+ * 素朴に replaceChildren すると選択が「すべての置き場所」へ戻る。
+ */
+function renderProjects() {
+  const a = store.archive;
+  const keep = a.project;
+  const all = el('option', null, 'すべての置き場所');
+  all.value = '';
+  const opts = [all];
+  for (const p of a.projects) {
+    // 件数も出す。「そこに何本あるか」が分かると、選ぶ前に見当が付く
+    const o = el('option', null, `${p.label}（${p.n}）`);
+    o.value = p.dir;
+    opts.push(o);
+  }
+  // 選んでいた置き場所が候補に無いとき（URL を手で書いたぶん）も選べるようにする。
+  // 黙って「すべて」へ戻すと、絞れているのに欄が「すべて」を指す食い違いになる
+  if (keep && !a.projects.some((p) => p.dir === keep)) {
+    const o = el('option', null, keep);
+    o.value = keep;
+    opts.push(o);
+  }
+  dom.archiveProject.replaceChildren(...opts);
+  dom.archiveProject.value = keep ?? '';
+}
+
+/** 絞り込みを1つでも掛けているか。外す札の出し入れに使う */
+function hasFilter() {
+  const a = store.archive;
+  return Boolean(a.q || a.project || a.days || a.deep || a.sort !== 'recent');
 }
 
 /**
@@ -231,6 +277,18 @@ export function initArchive({ onPick = null } = {}) {
   dom.archiveQ.value = store.archive.q ?? '';
   dom.archiveSort.value = store.archive.sort;
   dom.archiveDeep.checked = store.archive.deep;
+  dom.archiveDays.value = store.archive.days ?? '';
+  // 候補はまだ届いていない。選んでいた値だけ先に入れておく（届いたら組み直す）
+  renderProjects();
+
+  // 絵は絞り込みの札にだけ差す。**カードの中には置かない。**
+  // 横に3つ並ぶものは形で見分けられると速いが、項目が5つあるカードに足すと
+  // 読む量が増えるだけで、探す速さは上がらない
+  dom.archiveQ.closest('.archive-field').prepend(icon('search', 14));
+  dom.archiveProject.closest('.archive-field').prepend(icon('folder', 14));
+  dom.archiveDays.closest('.archive-field').prepend(icon('clock', 14));
+  dom.archiveSort.closest('.archive-field').prepend(icon('sort', 14));
+  dom.archiveClear.prepend(icon('x', 13));
 
   dom.archiveQ.addEventListener('input', () => {
     const next = dom.archiveQ.value.trim() || null;
@@ -254,6 +312,39 @@ export function initArchive({ onPick = null } = {}) {
   dom.archiveSort.addEventListener('change', () => {
     const v = dom.archiveSort.value;
     store.archive.sort = ARCHIVE_SORTS.has(v) ? v : 'recent';
+    syncQuery();
+    loadArchive();
+  });
+
+  // 置き場所。空文字は「すべて」なので null に倒す（サーバへ project= を送らない）
+  dom.archiveProject.addEventListener('change', () => {
+    store.archive.project = dom.archiveProject.value || null;
+    syncQuery();
+    loadArchive();
+  });
+
+  // 期間。知らない値は「絞らない」へ落とす（サーバ側が黙って丸めるのと同じ扱い）
+  dom.archiveDays.addEventListener('change', () => {
+    const v = dom.archiveDays.value;
+    store.archive.days = ARCHIVE_DAYS.has(v) ? v : null;
+    syncQuery();
+    loadArchive();
+  });
+
+  // 全部外す。**並び順も戻す。** 「絞り込みを外す」を押したのに
+  // 大きい順のままだと、外れていないように見える
+  dom.archiveClear.addEventListener('click', () => {
+    const a = store.archive;
+    a.q = null;
+    a.project = null;
+    a.days = null;
+    a.deep = false;
+    a.sort = 'recent';
+    dom.archiveQ.value = '';
+    dom.archiveProject.value = '';
+    dom.archiveDays.value = '';
+    dom.archiveSort.value = 'recent';
+    dom.archiveDeep.checked = false;
     syncQuery();
     loadArchive();
   });

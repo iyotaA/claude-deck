@@ -99,15 +99,40 @@
          探す帯は .list-head を借りる（クラス単体のセレクタなのでここでも効く）。
          絞り込みの札は archive.js が組む（候補が応答から決まるため。器だけ置く） -->
     <div class="list-head archive-head" id="archive-head" hidden>
-      <input class="archive-q" id="archive-q" type="search"
-             placeholder="ID・置き場所で探す" aria-label="書庫を検索">
+      <!-- 検索欄。絵（虫めがね）は archive.js が差す。
+           打つ前に「ここが検索欄」と分かる合図が、いままで placeholder しか無かった -->
+      <span class="archive-field is-q">
+        <input class="archive-q" id="archive-q" type="search"
+               placeholder="ID・置き場所で探す" aria-label="書庫を検索">
+      </span>
+      <!-- 置き場所。**候補はサーバが渡す**（meta.projects）。
+           スラッグは不可逆なので、表示名は向こうが代表1本を読んで作る -->
+      <span class="archive-field">
+        <select id="archive-project" aria-label="置き場所で絞り込む">
+          <option value="">すべての置き場所</option>
+        </select>
+      </span>
+      <!-- 期間。サーバは 1〜3650 日を受けるので、刻みは後から増やせる -->
+      <span class="archive-field">
+        <select id="archive-days" aria-label="期間で絞り込む">
+          <option value="">期間を絞らない</option>
+          <option value="7">7日</option>
+          <option value="30">30日</option>
+          <option value="90">90日</option>
+          <option value="365">1年</option>
+        </select>
+      </span>
+      <span class="archive-field">
+        <select id="archive-sort" aria-label="書庫の並び順">
+          <option value="recent">新しい順</option>
+          <option value="oldest">古い順</option>
+          <option value="size">大きい順</option>
+        </select>
+      </span>
       <!-- 既定はファイルを開かない検索。タイトルまで探すのは押されたときだけ -->
       <label><input type="checkbox" id="archive-deep"> 中身も探す</label>
-      <select id="archive-sort" aria-label="書庫の並び順">
-        <option value="recent">新しい順</option>
-        <option value="oldest">古い順</option>
-        <option value="size">大きい順</option>
-      </select>
+      <!-- 絞り込みを1つでも掛けているときだけ出す。押すと全部外す -->
+      <button class="btn archive-clear" id="archive-clear" type="button" hidden>絞り込みを外す</button>
       <!-- どこまで探せたかも、ここに出す。件数の脇に小さく出すだけだと打ち切りに気づけない -->
       <span id="archive-count"></span>
     </div>

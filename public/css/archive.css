@@ -33,7 +33,48 @@
 }
 
 /* 検索語だけが伸びる。絞り込みは中身の幅で置く */
-.is-archive .archive-q { flex: 1 1 20rem; }
+.is-archive .archive-field.is-q { flex: 1 1 20rem; }
+
+/* 絵と欄を1つの枠に収める。枠は外側が持ち、中の入力と選択は枠を持たない。
+   **絵は絞り込みの札にだけ置く。** 横に4つ並ぶものは形で見分けられると速い */
+.archive-field {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .25rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg-faint);
+}
+
+.archive-field:focus-within { border-color: var(--accent); }
+
+/* 中身は枠を外して、外側の枠に任せる。二重の枠にすると押せる範囲が読めなくなる */
+.archive-field .archive-q,
+.archive-field select {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+}
+
+.archive-field .archive-q:focus-visible,
+.archive-field select:focus-visible { outline: none; }
+
+/* 絞り込みを外す札。**1つでも掛けているときだけ出す。**
+   常に出していると、何も絞っていないのに外す口があることになる */
+.archive-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  padding: .25rem .5rem;
+  font-size: .76rem;
+}
+
+.archive-clear[hidden] { display: none; }
 
 /* 結果。窓を広げた分だけ列が増える。19rem はタイトルが2行で収まる下限で、
    これより狭めると3行になってカードの高さが揃わなくなる */

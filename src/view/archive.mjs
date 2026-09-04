@@ -149,6 +149,55 @@ function publicRow(row) {
 }
 
 /**
+ * 置き場所の候補を作る。画面の絞り込みが選ぶ形なので、候補はサーバが渡す。
+ *
+ * ── 表示名をどう出すか ─────────────────────────────────────
+ *
+ * 索引がタダで持っているのは `projectDir`（スラッグ）だけで、これは不可逆。
+ * `C--Users-wwaiyota-ClaudeWookspace-sandbox-claude-deck` の `-` は
+ * 区切りかフォルダ名の一部かを**区別できない**（`claude-deck` がまさにそれ）。
+ * だから機械的な整形では元のフォルダ名に戻せない。
+ *
+ * そこで**グループごとに、いちばん新しい1本だけ末尾を読む**。cwd が取れれば
+ * その末尾のフォルダ名を出し、読めなければスラッグのまま出す（0 と不明を分けるのと同じ）。
+ * 読むのは種類の数だけ（実測 445 本に対して 19 種）で、`readTail` は memo に乗るので
+ * 2回目以降はほぼタダ。書庫は開いたときだけ引く窓口なので、毎秒には載らない。
+ *
+ * @param {object[]} all 絞り込む前の全行
+ * @returns {Promise<object[]>} 件数の多い順。`{ dir, label, n }`
+ */
+async function buildProjects(all) {
+  /** @type {Map<string, {dir: string, n: number, newest: object}>} */
+  const byDir = new Map();
+  for (const r of all) {
+    const cur = byDir.get(r.projectDir);
+    if (!cur) byDir.set(r.projectDir, { dir: r.projectDir, n: 1, newest: r });
+    else {
+      cur.n++;
+      if (r.mtimeMs > cur.newest.mtimeMs) cur.newest = r;
+    }
+  }
+
+  const list = [...byDir.values()];
+  await Promise.all(list.map(async (g) => {
+    try {
+      const tail = await readTail(g.newest.file);
+      const cwd = extractMeta(tail.entries ?? []).cwd;
+      // 末尾のフォルダ名だけを出す。フルパスは画面の札に収まらないし、
+      // 置き場所の絞り込みに要るのは「どのプロジェクトか」だけ
+      g.label = cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() : g.dir;
+    } catch {
+      // 読めなくても候補からは落とさない。スラッグのままでも選べるほうがいい
+      g.label = g.dir;
+    }
+  }));
+
+  // 多い順。同数なら名前順にして、引くたびに並びが揺れないようにする
+  list.sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, 'ja'));
+  return list.map((g) => ({ dir: g.dir, label: g.label, n: g.n }));
+}
+
+/**
  * 書庫の一覧を作る。
  *
  * @param {object} q parseArchiveQuery の戻り
@@ -182,7 +231,12 @@ export async function listArchive(q, now = Date.now()) {
   }
   if (q.project) {
     const p = q.project.toLowerCase();
-    rows = rows.filter((r) => r.projectDir.toLowerCase().includes(p));
+    // 画面は選ぶ形なので、渡ってくるのは正確なスラッグ。**完全一致を先に見る。**
+    // 短いスラッグが長いスラッグの一部になっている環境で、部分一致だけだと
+    // 選んだ覚えのない置き場所まで混ざる。
+    // 当たらなければ今までどおり部分一致へ落とす（`?project=` を手で書くぶんのため）
+    const exact = rows.filter((r) => r.projectDir.toLowerCase() === p);
+    rows = exact.length ? exact : rows.filter((r) => r.projectDir.toLowerCase().includes(p));
   }
 
   const needle = q.q ? q.q.toLowerCase() : null;
@@ -215,6 +269,10 @@ export async function listArchive(q, now = Date.now()) {
   await Promise.all(need.map((r) => fillTitle(r)));
   scanned += need.length;
 
+  // 置き場所の候補。**絞り込む前の全行から作る。**
+  // 期間で絞ったあとの行から作ると、期間を変えるたびに候補が消えて選び直せなくなる
+  const projects = await buildProjects(all);
+
   return {
     rows: shown.map(publicRow),
     total,
@@ -227,6 +285,8 @@ export async function listArchive(q, now = Date.now()) {
     meta: {
       now,
       indexed: all.length,
+      // 画面の絞り込みが選ぶ形なので、候補はこちらが渡す
+      projects,
       // 何件のファイルを開いたか。打ち切ったかどうかも正直に返す
       scanned,
       scanLimited,
