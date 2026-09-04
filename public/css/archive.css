@@ -8,7 +8,7 @@
  * ここの `.is-archive .deck`（0,2,0）は narrow.css の `.is-insp-open .deck`（0,2,0）と
  * 同じ詳細度で、あちらが後から読まれる。**(0,3,0) の側も並べて書く。**
  * 書かないと、右の枠を開いたまま書庫へ移った人だけ列が戻る
- * （board.css と usage.css がやっているのと同じ手当て）。
+ * （usage.css がやっているのと同じ手当て。畳んだ board.css も同じ形だった）。
  */
 
 .is-archive .deck,
