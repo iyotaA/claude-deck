@@ -50,14 +50,26 @@
 
 .archive-field:focus-within { border-color: var(--accent); }
 
-/* 中身は枠を外して、外側の枠に任せる。二重の枠にすると押せる範囲が読めなくなる */
+/* 中身は枠を外して、外側の枠に任せる。二重の枠にすると押せる範囲が読めなくなる。
+
+   **`background: none` にしない。** 面まで透明にすると、`<select>` を開いたときの
+   ドロップダウン（ブラウザが描くネイティブの一覧）の地も透明になり、
+   **暗いほうの配色で真っ白に出る**（実測）。枠と同じ色を実体で置く ―― 外側と
+   同じ `--bg-elev` なので見た目は変わらないが、あちらには色が伝わる */
 .archive-field .archive-q,
 .archive-field select {
   flex: 1;
   min-width: 0;
   padding: 0;
   border: 0;
-  background: none;
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+
+/* ドロップダウンの1行ずつにも直に置く。上の `background` だけでは足りない環境がある
+   （選択肢の地は `<select>` から必ずしも継がない） */
+.archive-field select option {
+  background: var(--bg-elev);
   color: var(--fg);
 }
 
