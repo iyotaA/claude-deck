@@ -57,6 +57,11 @@ function buildArchiveCard(row) {
   const meta = el('div', 'card-meta');
   if (row.project) meta.append(el('span', 'path', row.project));
   if (row.gitBranch && row.gitBranch !== 'HEAD') meta.append(el('span', 'tag', row.gitBranch));
+  // 索引にあれば出す。**絞った結果「なぜこれが出たか」が読める。**
+  // 一覧のカード（list.js）と同じ形の札を借りる
+  for (const skill of row.skills ?? []) {
+    meta.append(el('span', 'tag is-skill', `/${skill}`));
+  }
   // まだ読んでいない行では null なので何も出ない。中身を読んだ行にだけ付く
   const agents = agentTag(row.subagentCount);
   if (agents) meta.append(agents);
@@ -170,6 +175,7 @@ async function loadArchive({ append = false } = {}) {
   if (a.q) params.set('q', a.q);
   if (a.deep) params.set('deep', '1');
   if (a.project) params.set('project', a.project);
+  if (a.skill) params.set('skill', a.skill);
   if (a.days) params.set('days', a.days);
 
   try {
@@ -201,6 +207,11 @@ async function loadArchive({ append = false } = {}) {
     if (Array.isArray(data.meta?.projects)) {
       a.projects = data.meta.projects;
       renderProjects();
+    }
+    if (Array.isArray(data.meta?.skills)) {
+      a.skills = data.meta.skills;
+      a.skillIndex = data.meta.skillIndex ?? null;
+      renderSkills();
     }
     a.loaded = true;
   } catch (err) {
@@ -243,10 +254,45 @@ function renderProjects() {
   dom.archiveProject.value = keep ?? '';
 }
 
+/**
+ * スキルの候補を組み直す。
+ *
+ * 置き場所（renderProjects）と同じ形だが、**索引がまだできていないことがある。**
+ * そのときは選べなくして「作成中」と出す。黙って空の候補を出すと、
+ * スキルを使っていないのか、まだ読めていないのかが区別できない。
+ */
+function renderSkills() {
+  const a = store.archive;
+  const st = a.skillIndex;
+  // built が false のあいだは選ばせない。**候補が0件でも「作成中」とは限らない**ので、
+  // 出どころ（索引の様子）で決める。0 と不明を分けるのと同じ
+  const ready = st ? st.built === true : a.skills.length > 0;
+
+  const keep = a.skill;
+  const head = el('option', null, ready ? 'すべてのスキル' : 'スキルの索引を作っています…');
+  head.value = '';
+  const opts = [head];
+  for (const s of a.skills) {
+    const o = el('option', null, `${s.skill}（${s.n}）`);
+    o.value = s.skill;
+    opts.push(o);
+  }
+  // 索引に無いスキルを URL で指定されたぶんも選べるようにする（renderProjects と同じ）
+  if (keep && !a.skills.some((s) => s.skill === keep)) {
+    const o = el('option', null, keep);
+    o.value = keep;
+    opts.push(o);
+  }
+  dom.archiveSkill.replaceChildren(...opts);
+  dom.archiveSkill.value = keep ?? '';
+  dom.archiveSkill.disabled = !ready;
+  dom.archiveSkillField.classList.toggle('is-waiting', !ready);
+}
+
 /** 絞り込みを1つでも掛けているか。外す札の出し入れに使う */
 function hasFilter() {
   const a = store.archive;
-  return Boolean(a.q || a.project || a.days || a.deep || a.sort !== 'recent');
+  return Boolean(a.q || a.project || a.skill || a.days || a.deep || a.sort !== 'recent');
 }
 
 /**
@@ -280,12 +326,15 @@ export function initArchive({ onPick = null } = {}) {
   dom.archiveDays.value = store.archive.days ?? '';
   // 候補はまだ届いていない。選んでいた値だけ先に入れておく（届いたら組み直す）
   renderProjects();
+  renderSkills();
 
   // 絵は絞り込みの札にだけ差す。**カードの中には置かない。**
   // 横に3つ並ぶものは形で見分けられると速いが、項目が5つあるカードに足すと
   // 読む量が増えるだけで、探す速さは上がらない
   dom.archiveQ.closest('.archive-field').prepend(icon('search', 14));
   dom.archiveProject.closest('.archive-field').prepend(icon('folder', 14));
+  // スキルは作業の道具なので、起こすフォームの「最初の指示」と同じ絵を借りる
+  dom.archiveSkillField.prepend(icon('pencil', 14));
   dom.archiveDays.closest('.archive-field').prepend(icon('clock', 14));
   dom.archiveSort.closest('.archive-field').prepend(icon('sort', 14));
   dom.archiveClear.prepend(icon('x', 13));
@@ -316,6 +365,13 @@ export function initArchive({ onPick = null } = {}) {
     loadArchive();
   });
 
+  // スキル。索引ができるまでは disabled なので、押せた時点で候補は届いている
+  dom.archiveSkill.addEventListener('change', () => {
+    store.archive.skill = dom.archiveSkill.value || null;
+    syncQuery();
+    loadArchive();
+  });
+
   // 置き場所。空文字は「すべて」なので null に倒す（サーバへ project= を送らない）
   dom.archiveProject.addEventListener('change', () => {
     store.archive.project = dom.archiveProject.value || null;
@@ -337,11 +393,13 @@ export function initArchive({ onPick = null } = {}) {
     const a = store.archive;
     a.q = null;
     a.project = null;
+    a.skill = null;
     a.days = null;
     a.deep = false;
     a.sort = 'recent';
     dom.archiveQ.value = '';
     dom.archiveProject.value = '';
+    dom.archiveSkill.value = '';
     dom.archiveDays.value = '';
     dom.archiveSort.value = 'recent';
     dom.archiveDeep.checked = false;

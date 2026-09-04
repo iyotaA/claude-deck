@@ -16,6 +16,7 @@ import { spawn } from 'node:child_process';
 import { listSessions, sortRows, summarizeRows } from './src/view/sessions.mjs';
 import { getSessionDetail } from './src/view/detail.mjs';
 import { listArchive, parseArchiveQuery } from './src/view/archive.mjs';
+import { buildSkillIndex, skillIndexState } from './src/read/skills.mjs';
 import { getRawEntry } from './src/view/entry.mjs';
 import { getSubagentDetail } from './src/view/subagent.mjs';
 import { getSessionBaseline, getSessionUsage, listUsage, parseUsageQuery } from './src/view/usage.mjs';
@@ -1426,6 +1427,10 @@ const server = http.createServer((req, res) => {
       // こちらは丸ごと。自動起動には専用の窓口が無いので、短くすると見る手段が消える。
       // 設定の画面もここから1行を組む
       startup: readStartup(),
+      // スキルの索引。**裏で走るものは見えるようにしておく。**
+      // 書庫の画面は /api/archive の meta から同じものを読むが、
+      // 画面を開かずに「索引ができているか」を確かめる手段がここしか無い
+      skillIndex: skillIndexState(),
     });
     return;
   }
@@ -1553,6 +1558,12 @@ server.once('listening', () => {
   // 掴めなくてもダッシュボードとしては動くので、待たないし致命扱いにもしない。
   // probeClaude は必ず解決するが、約束どおり受け皿は付けておく
   probeClaude().catch(() => {});
+
+  // スキルの索引を裏で作る。**待たない。** 全ログを1回舐めるので実測 6 秒かかり、
+  // ここで待つと画面が出るまで固まる。できるまでのあいだ書庫はスキルで絞れないが、
+  // そのことは /api/archive の meta.skillIndex で画面へ伝わる。
+  // 2回目以降は、大きさと更新時刻が変わったものだけ読み直す（ふつうは一瞬）
+  buildSkillIndex().catch(() => {});
 
   refresh(true);
   if (!noOpen) openBrowser(url);

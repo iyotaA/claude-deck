@@ -112,6 +112,14 @@
           <option value="">すべての置き場所</option>
         </select>
       </span>
+      <!-- スキル。**候補の出どころが他と違う。** 末尾 64KB には1件も写らないので、
+           サーバが立ち上げの裏で作る索引（read/skills.mjs）から引く。
+           索引がまだできていないあいだは、この札だけ薄くして「作成中」と出す -->
+      <span class="archive-field" id="archive-skill-field">
+        <select id="archive-skill" aria-label="使ったスキルで絞り込む">
+          <option value="">すべてのスキル</option>
+        </select>
+      </span>
       <!-- 期間。サーバは 1〜3650 日を受けるので、刻みは後から増やせる -->
       <span class="archive-field">
         <select id="archive-days" aria-label="期間で絞り込む">

@@ -114,3 +114,16 @@
 /* カードの中身は広い場所でも同じ形。**タイトルの行数に上限を付けない。**
    探しに来た人が読むのはそこなので、省くと画面を広げた意味が消える */
 .archive-grid .card { height: 100%; }
+
+/* スキルの索引を作っている最中。**選べないことを形で伝える。**
+   薄くするだけでなく、押せないもの（disabled）にしてある ―― 空の候補を
+   選べる状態で出すと、使っていないのか読めていないのかが区別できない */
+.archive-field.is-waiting {
+  opacity: .6;
+  border-style: dashed;
+}
+
+.archive-field select:disabled {
+  color: var(--fg-faint);
+  cursor: default;
+}

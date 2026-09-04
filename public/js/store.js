@@ -80,6 +80,7 @@ export const SUMMARY_ORDER = [
  *  ?aq=<語> … 書庫の検索語
  *  ?asort=recent|oldest|size … 書庫の並び順
  *  ?aproj=<置き場所> … 書庫の絞り込み（サーバ側の projectDir。スラッグをそのまま）
+ *  ?askill=<スキル名> … 書庫の絞り込み（サーバ側の索引から引く）
  *  ?adays=7|30|90|365 … 書庫の絞り込み（何日ぶんを見るか）
  *  ?dtab=log|agents … 詳細ペインの中央のどのタブを開くか
  *  ?insp=usage|out|basics … 右のインスペクタをどのタブで開くか（付けなければ閉じた状態）
@@ -223,6 +224,8 @@ export const dom = {
   archiveDeep: document.getElementById('archive-deep'),
   archiveSort: document.getElementById('archive-sort'),
   archiveProject: document.getElementById('archive-project'),
+  archiveSkill: document.getElementById('archive-skill'),
+  archiveSkillField: document.getElementById('archive-skill-field'),
   archiveDays: document.getElementById('archive-days'),
   archiveClear: document.getElementById('archive-clear'),
   archiveCount: document.getElementById('archive-count'),
@@ -414,8 +417,14 @@ export const store = {
     project: (query.get('aproj') ?? '').trim() || null,
     /** 何日ぶんを見るか。知らない値は「絞らない」へ落とす（400 は返さない側に合わせる） */
     days: ARCHIVE_DAYS.has(query.get('adays')) ? query.get('adays') : null,
+    /** 使ったスキルの絞り込み。サーバ側の索引から引く */
+    skill: (query.get('askill') ?? '').trim() || null,
     /** 置き場所の候補。サーバが meta.projects で渡してくる */
     projects: [],
+    /** スキルの候補。サーバが meta.skills で渡してくる */
+    skills: [],
+    /** 索引の様子（meta.skillIndex）。まだ作っている最中かをここで見る */
+    skillIndex: null,
     deep: false,
     meta: null,
     loading: false,
@@ -500,6 +509,7 @@ export function syncQuery() {
   // 既定の並び順はキーを付けない。URL を短く保ち、既定が変わったときに古い指定が残らないため
   set('asort', store.mode === 'archive' && store.archive.sort !== 'recent' ? store.archive.sort : null);
   set('aproj', store.mode === 'archive' ? store.archive.project : null);
+  set('askill', store.mode === 'archive' ? store.archive.skill : null);
   set('adays', store.mode === 'archive' ? store.archive.days : null);
   // 既定（いま）のときだけキーを落とす。tab と同じ扱い
   // 既定（経過）のときだけキーを落とす。既定が「いま」から替わったので、

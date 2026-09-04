@@ -23,6 +23,7 @@
  */
 import { indexTranscripts, readTail } from '../read/transcript.mjs';
 import { countSubagents } from '../read/subagents.mjs';
+import { skillIndex, skillIndexState } from '../read/skills.mjs';
 import { extractMeta } from '../parse/meta.mjs';
 
 /** 深い検索で中身を読む上限。理由はファイル冒頭のコメントに書いてある。 */
@@ -79,6 +80,9 @@ export function parseArchiveQuery(params) {
     q: textOf(get('q')),
     deep: get('deep') === '1',
     project: textOf(get('project')),
+    // スキルは索引（read/skills.mjs）から引く。末尾 64KB には1件も写らないので、
+    // ここだけ別の出どころになる
+    skill: textOf(get('skill')),
     // 既定は期間で絞らない。書庫は「古いものを見に戻る」場所なので、上限を持たせる意味がない
     days: get('days') === null ? null : intOf(get('days'), null, 1, 3650),
   };
@@ -144,6 +148,8 @@ function publicRow(row) {
     mtimeMs: row.mtimeMs,
     // まだ読んでいない行では null のまま。「使っていない」ではなく「見ていない」
     subagentCount: row.subagentCount,
+    // 索引から引いたもの。索引がまだ無ければ null（同じく「見ていない」）
+    skills: row.skills,
     read: row.read,
   };
 }
@@ -198,6 +204,31 @@ async function buildProjects(all) {
 }
 
 /**
+ * スキルの候補を作る。
+ *
+ * 置き場所（`buildProjects`）と違ってファイルを開かない。材料は索引だけで、
+ * それは立ち上げの裏で作ってある（`read/skills.mjs`）。
+ *
+ * **索引がまだ無いときは空を返す。** ここで作りに行くと、
+ * 立ち上げ直後の1回だけ 6 秒かかる窓口ができる。まだ無いことは
+ * `meta.skillIndex` で画面へ伝わるので、あちらが「作成中」と出す。
+ *
+ * @param {object[]} all 絞り込む前の全行
+ * @returns {{skill: string, n: number}[]} 使った本数の多い順
+ */
+function buildSkills(all) {
+  const count = new Map();
+  for (const r of all) {
+    if (!Array.isArray(r.skills)) continue;
+    for (const s of r.skills) count.set(s, (count.get(s) ?? 0) + 1);
+  }
+  // 多い順。同数なら名前順にして、引くたびに並びが揺れないようにする
+  return [...count.entries()]
+    .map(([skill, n]) => ({ skill, n }))
+    .sort((a, b) => b.n - a.n || a.skill.localeCompare(b.skill));
+}
+
+/**
  * 書庫の一覧を作る。
  *
  * @param {object} q parseArchiveQuery の戻り
@@ -205,6 +236,9 @@ async function buildProjects(all) {
  */
 export async function listArchive(q, now = Date.now()) {
   const index = await indexTranscripts();
+  // 索引は**作りには行かない。** まだできていなければ空で進む。
+  // ここで待たせると、立ち上げ直後の1回だけ 6 秒かかる窓口ができる
+  const skills = skillIndex();
 
   const all = [];
   for (const [sessionId, rec] of index) {
@@ -220,6 +254,10 @@ export async function listArchive(q, now = Date.now()) {
       // 索引がタダで持ってきた印。これが false なら数えに行かない
       hasSessionDir: rec.hasSessionDir === true,
       subagentCount: null,
+      // 索引にあれば配列、無ければ null。ファイルは開かない（索引は立ち上げの裏で作る）
+      skills: Array.isArray(skills.entries[sessionId]?.skills)
+        ? skills.entries[sessionId].skills
+        : null,
       read: false,
     });
   }
@@ -237,6 +275,12 @@ export async function listArchive(q, now = Date.now()) {
     // 当たらなければ今までどおり部分一致へ落とす（`?project=` を手で書くぶんのため）
     const exact = rows.filter((r) => r.projectDir.toLowerCase() === p);
     rows = exact.length ? exact : rows.filter((r) => r.projectDir.toLowerCase().includes(p));
+  }
+
+  if (q.skill) {
+    // 索引が無い（まだ作っている）あいだは絞れない。**全件を返さない。**
+    // 絞ったつもりで全部出ると、選んだ覚えのないものを見ることになる
+    rows = rows.filter((r) => Array.isArray(r.skills) && r.skills.includes(q.skill));
   }
 
   const needle = q.q ? q.q.toLowerCase() : null;
@@ -272,6 +316,8 @@ export async function listArchive(q, now = Date.now()) {
   // 置き場所の候補。**絞り込む前の全行から作る。**
   // 期間で絞ったあとの行から作ると、期間を変えるたびに候補が消えて選び直せなくなる
   const projects = await buildProjects(all);
+  // スキルの候補も同じ考えで、絞り込む前の全行から。索引にあるものだけが出る
+  const skillOptions = buildSkills(all);
 
   return {
     rows: shown.map(publicRow),
@@ -287,6 +333,10 @@ export async function listArchive(q, now = Date.now()) {
       indexed: all.length,
       // 画面の絞り込みが選ぶ形なので、候補はこちらが渡す
       projects,
+      skills: skillOptions,
+      // 索引がまだできていないことを画面へ伝える。**黙って空の候補を出さない**
+      // （使っていないのか、まだ読めていないのかが区別できなくなる）
+      skillIndex: skillIndexState(),
       // 何件のファイルを開いたか。打ち切ったかどうかも正直に返す
       scanned,
       scanLimited,
