@@ -20,7 +20,8 @@
  * その時点では open がまだ true。あそこを基準にすると、閉じる途中に組み直した札が
  * 「縮小」のまま残る）。2箇所に持てば必ず片方が古くなる。
  */
-import { dom, store } from './store.js';
+import { store } from './store.js';
+import { dom } from './dom.js';
 import { closeOnBackdrop } from './modal.js';
 
 /**

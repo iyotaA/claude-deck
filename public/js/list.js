@@ -4,7 +4,8 @@
  * setListOpen が drawer.js に居るのは、main.js に置くとここと循環するため。
  */
 import { el, since, stamp, tokens, agentTag } from './util.js';
-import { dom, store, STATE_COLOR, QUIET_MODES, SUMMARY_ORDER, STATE_GROUPS } from './store.js';
+import { store, STATE_COLOR, QUIET_MODES, SUMMARY_ORDER, STATE_GROUPS } from './store.js';
+import { dom } from './dom.js';
 import { idleOf, headOf, visibleRows } from './rows.js';
 import { newestRateLimit, rateView } from './runs.js';
 import { closeListAfterPick } from './drawer.js';

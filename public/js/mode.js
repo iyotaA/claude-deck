@@ -11,7 +11,8 @@
  * どちらも initMode({ onArchive, onUsage }) で外から差す
  * （同じ層7 どうしなので、向きを持たせずに済む形を選ぶ）。
  */
-import { dom, store, MODES, syncQuery } from './store.js';
+import { store, MODES, syncQuery } from './store.js';
+import { dom } from './dom.js';
 import { closeListAfterPick } from './drawer.js';
 import { renderDetailIfNeeded } from './detail.js';
 import { loadDetail } from './session.js';

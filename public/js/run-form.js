@@ -19,7 +19,7 @@
 import { el } from './util.js';
 import { icon } from './icons.js';
 import { EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
-import { dom } from './store.js';
+import { dom } from './dom.js';
 import { select } from './session.js';
 import { getJson, postJson } from './api.js';
 import { fillSelect } from './form-kit.js';

@@ -14,7 +14,7 @@
  * 監視盤・数値モードと狭い画面には効かない。あちらは `.deck` の列を丸ごと
  * 上書きしていて変数を見ないし、つまみ自体も CSS で消えている。
  */
-import { dom } from './store.js';
+import { dom } from './dom.js';
 
 /** 矢印キー1回で動かす px。Shift を押していれば4倍 */
 const STEP = 16;

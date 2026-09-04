@@ -33,7 +33,8 @@
 import { el, num } from './util.js';
 import { mark } from './perf.js';
 import { icon } from './icons.js';
-import { dom, store, syncQuery, STATE_COLOR } from './store.js';
+import { store, syncQuery, STATE_COLOR } from './store.js';
+import { dom } from './dom.js';
 import { headOf, detailErrorNow } from './rows.js';
 import { panel } from './panel.js';
 import { detailActions, summaryBlock } from './detail-head.js';

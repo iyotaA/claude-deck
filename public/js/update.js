@@ -18,7 +18,8 @@
  * 例外が1つだけある。サーバが古くて /api/update そのものが無いとき（404）。
  * そのときはサーバに判断させようが無いので、画面側で 'outdated' を組む。
  */
-import { query, dom, store } from './store.js';
+import { query, store } from './store.js';
+import { dom } from './dom.js';
 import { stamp } from './util.js';
 import { postJson } from './api.js';
 

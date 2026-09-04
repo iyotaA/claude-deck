@@ -13,7 +13,8 @@
  */
 import { el, shortModel } from './util.js';
 import { icon } from './icons.js';
-import { dom, store } from './store.js';
+import { store } from './store.js';
+import { dom } from './dom.js';
 import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaPath } from './card.js';

@@ -14,7 +14,8 @@
 import { el, kb, shortStamp, stamp, agentTag } from './util.js';
 import { icon } from './icons.js';
 import { tokensStrict, pctStrict } from './usage-chart.js';
-import { dom, store, syncQuery, ARCHIVE_SORTS, ARCHIVE_DAYS } from './store.js';
+import { store, syncQuery, ARCHIVE_SORTS, ARCHIVE_DAYS } from './store.js';
+import { dom } from './dom.js';
 import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaBranch, metaPath } from './card.js';
 

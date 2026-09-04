@@ -22,7 +22,8 @@
  * <form> で囲まない（入力欄で Enter を押した瞬間に閉じる）。
  */
 import { el, since } from './util.js';
-import { dom, store, STATE_COLOR } from './store.js';
+import { store, STATE_COLOR } from './store.js';
+import { dom } from './dom.js';
 import { idleOf } from './rows.js';
 import { setListOpen } from './drawer.js';
 import { openZoom } from './zoom.js';

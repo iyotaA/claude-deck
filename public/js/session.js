@@ -4,7 +4,8 @@
  * detailErrorNow は rows.js 側に置いてある。描画側と取得側の両方が使うため、
  * どちらかに置くと2つが互いを import することになる。
  */
-import { dom, store, syncQuery } from './store.js';
+import { store, syncQuery } from './store.js';
+import { dom } from './dom.js';
 import { rowOf } from './rows.js';
 import { renderDetailIfNeeded } from './detail.js';
 

@@ -52,7 +52,8 @@
  *
  * 'use strict' は書かない。module は常に strict で動く。
  */
-import { query, dom, store } from './store.js';
+import { query, store } from './store.js';
+import { dom } from './dom.js';
 import { icon } from './icons.js';
 import { visibleRows } from './rows.js';
 import { initListDrawer, setListOpen, initialListOpen } from './drawer.js';
