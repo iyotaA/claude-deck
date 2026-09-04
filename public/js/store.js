@@ -83,7 +83,9 @@ export const SUMMARY_ORDER = [
  *  ?askill=<スキル名> … 書庫の絞り込み（サーバ側の索引から引く）
  *  ?adays=7|30|90|365 … 書庫の絞り込み（何日ぶんを見るか）
  *  ?dtab=log|agents … 詳細ペインの中央のどのタブを開くか
- *  ?insp=usage|out|basics … 右のインスペクタをどのタブで開くか（付けなければ閉じた状態）
+ *  ?insp=usage|basics … 右のインスペクタをどのタブで開くか（付けなければ閉じた状態）
+ *                       `?insp=out` だけは中央タブの「成果」へ読み替える
+ *                       （成果が右のインスペクタだった版の URL が実在するため。initialDetailTab）
  */
 export const query = new URLSearchParams(location.search);
 
@@ -274,7 +276,8 @@ export const dom = {
   startupError: document.getElementById('startup-error'),
   startupHow: document.getElementById('startup-how'),
   // セッションを起こすフォーム。run-form.js だけが使う。
-  // URL には持たせない（syncQuery が触るのは session / only / tq / hide / tab / aq / asort だけ）
+  // **URL には持たせない**（syncQuery の一覧に入れていない）。
+  // 書きかけの指示文がアドレス欄に出るし、共有した URL でフォームが開く意味も無い
   runformOpen: document.getElementById('runform-open'),
   runform: document.getElementById('runform'),
   runformClose: document.getElementById('runform-close'),
@@ -492,7 +495,8 @@ export const store = {
  * pushState は使わない。検索欄は1文字ごとにここを通るので、履歴が入力の回数だけ積まれ、
  * 戻るボタンが使えなくなる。replaceState なら今のアドレスだけが差し替わる。
  *
- * 触るキーは session / only / tq / hide / mode / tab / aq / asort / dtab / insp だけ。
+ * 触るキーは session / only / tq / hide / mode / aq / asort / aproj / askill / adays / dtab / insp。
+ * ほかに tab を消しに行くだけの行が1つある（書庫が左のペインのタブだった名残）。
  * theme と nolive は「開くときの指定」なので、こちらから書き換えない
  */
 export function syncQuery() {
@@ -523,7 +527,6 @@ export function syncQuery() {
   set('aproj', store.mode === 'archive' ? store.archive.project : null);
   set('askill', store.mode === 'archive' ? store.archive.skill : null);
   set('adays', store.mode === 'archive' ? store.archive.days : null);
-  // 既定（いま）のときだけキーを落とす。tab と同じ扱い
   // 既定（経過）のときだけキーを落とす。既定が「いま」から替わったので、
   // これからは ?dtab=now が URL に載る
   set('dtab', store.detailTab === 'log' ? null : store.detailTab);

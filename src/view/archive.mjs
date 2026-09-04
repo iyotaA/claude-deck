@@ -121,6 +121,15 @@ function matches(row, needle) {
   return fields.some((f) => typeof f === 'string' && f.toLowerCase().includes(needle));
 }
 
+/**
+ * 書庫の行を並べ替える。**知らない語は「新しい順」に倒す**（0件にしない）。
+ *
+ * `logSize` は取れないことがあるので、大きさ順では 0 に倒して末尾へ寄せる。
+ *
+ * @param {object[]} rows 並べ替える行
+ * @param {string} sort `recent` / `oldest` / `size`
+ * @returns {object[]} 新しい配列（元は触らない）
+ */
 function sortRows(rows, sort) {
   const sorted = [...rows];
   if (sort === 'oldest') sorted.sort((a, b) => a.mtimeMs - b.mtimeMs);

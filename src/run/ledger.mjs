@@ -5,7 +5,7 @@
  * fs も spawn も触らず、**時刻は必ず外から `now` で受ける。**
  * だから「いつ止めるか」「いつ失敗と見なすか」の全分岐を `node:test` で通せる。
  *
- * 実際に子プロセスを起こして殺すのは `run/index.mjs`（薄い殻）の仕事。
+ * 実際に子プロセスを起こして殺すのは `run/index.mjs` の仕事。
  * こちらが決めて、あちらが手を動かす。`parseUpdateState`（判断）と
  * `loadUpdateState`（I/O）を分けたのと同じ形。
  *
@@ -1115,8 +1115,7 @@ export function createRunLedger({
         switchRequested: false,
         /** @type {Map<string, object>} requestId → 未応答の要求 */
         pending: new Map(),
-        /** @type {object|null} こちらが撃った `set_permission_mode` の控え。受理されるまで持つ */
-        // 撃った要求の控え。`Map<requestId, {kind, ..., at}>`。
+        /** @type {Map<string, object>} requestId → 撃った要求の控え。`{kind, ..., at}` */
         // **受理されるまで持つ**（受理を待たずに書き換えないため）。
         //
         // `kind` は `'live'`（値の入れ替え。`field` と `value` を持つ）か
@@ -1131,8 +1130,6 @@ export function createRunLedger({
         slashCommands: null,
         /** @type {number|null} そのターンで考えた量（累計）。畳んだ結果だけを持つ */
         thinking: null,
-        /** @type {object|null} 直近の枠の使用率。`{fiveHour, sevenDay, resetsAt, at}` */
-
         /** @type {string|null} 子が stderr へ吐いた直近の1行。失敗していなくても持つ */
         lastStderr: null,
         // `droppedLines` は**長すぎて捨てた行の数**。殻（`run/index.mjs`）から入れてもらう。

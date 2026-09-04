@@ -559,7 +559,6 @@ function renderModelOptions() {
   sel.value = u.model ?? '';
 }
 
-/** 数値モードの中身を描き直す */
 /**
  * 節を切り替える。**器の data-sec を書き替えるだけ。**
  *
@@ -603,6 +602,7 @@ function renderUsageNav(d) {
   }
 }
 
+/** 数値モードの中身を描き直す */
 function renderUsage() {
   const u = store.usageTab;
   dom.usage.replaceChildren();

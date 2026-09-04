@@ -41,6 +41,7 @@ export function stampOf(stat) {
   return `${stat.size}:${stat.mtimeMs}`;
 }
 
+/** memo を空にする。テストと、印が当てにならなくなったときのため。 */
 export function clearCache() {
   store.clear();
 }
