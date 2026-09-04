@@ -545,6 +545,13 @@ details.rejected .label { color: var(--fg); }
   border-left: 1px solid var(--border);
 }
 
+/* 左端のレール（一覧の開閉）。右のレールと同じ形・同じ大きさにする。
+   **境目の線だけ向きを返す。** 右は左辺に、左は右辺に引く */
+.rail.is-left {
+  border-left: 0;
+  border-right: 1px solid var(--border);
+}
+
 .rail-btn {
   display: flex;
   flex-direction: column;

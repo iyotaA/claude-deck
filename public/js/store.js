@@ -217,6 +217,8 @@ export const dom = {
   inspClose: document.getElementById('insp-close'),
   inspBody: document.getElementById('insp-body'),
   rail: document.getElementById('rail'),
+  // 左端のレール（一覧の開閉）。中身は drawer.js が1回だけ組む
+  railLeft: document.getElementById('rail-left'),
   liveHead: document.getElementById('live-head'),
   archiveHead: document.getElementById('archive-head'),
   archive: document.getElementById('archive'),

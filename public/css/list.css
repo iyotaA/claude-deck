@@ -63,8 +63,14 @@
   padding: .2rem .6rem .15rem;
 }
 
-/* 閉じるボタンは一覧の帯の右端。タブ行が無くなったので、この帯が受け持つ */
-#live-head .drawer-close { margin-left: auto; }
+/* 閉じる口は一覧の帯の右端。**広い窓では出さない。**
+   あちらは左のレールが開閉を持つので、同じことをする口が2つ並ぶ。
+   狭い窓（引き出し）だけは残す ―― 手前に重なっている紙を閉じる口が要る
+   （narrow.css が出す） */
+#live-head .drawer-close {
+  display: none;
+  margin-left: auto;
+}
 
 .list-head {
   display: flex;

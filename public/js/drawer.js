@@ -12,6 +12,7 @@
  * 押されたときに setListOpen(false) を呼ぶため。main.js に置くと
  * list.js -> main.js -> list.js の循環になって立ち上がらない。
  */
+import { el } from './util.js';
 import { dom } from './store.js';
 
 /** 開閉を覚えておく鍵。「見たいときだけ開く」運用なので、次に開いたときも同じ形にする */
@@ -54,6 +55,13 @@ export function setListOpen(open, moveFocusTo = null, remember = true) {
   dom.app.classList.toggle('is-list-open', open);
   dom.listToggle.setAttribute('aria-expanded', String(open));
   dom.listToggle.setAttribute('aria-label', open ? 'セッション一覧を閉じる' : 'セッション一覧を開く');
+  // 左のレールも同じ状態を映す。**旗を2つ持たない** ―― 正は .app のクラス1つで、
+  // ここは見た目を合わせるだけ（右のレールの aria-pressed と同じ流儀）
+  if (dom.railList) {
+    dom.railList.setAttribute('aria-pressed', String(open));
+    dom.railList.title = open ? 'セッション一覧を閉じる' : 'セッション一覧を開く';
+    dom.railList.setAttribute('aria-label', dom.railList.title);
+  }
   syncListInert();
 
   if (remember) localStorage.setItem(LIST_OPEN_KEY, open ? '1' : '0');
@@ -102,6 +110,20 @@ export function initialListOpen() {
 }
 
 export function initListDrawer() {
+  // 左端のレール。**右のレール（detail.js の initInspector）と同じ形で組む。**
+  // 開閉の口が上のバーと一覧の帯に散っていて、右の「数値・診断」とは作法が違った。
+  // ここへ寄せると、書庫や数値のあいだは .rail ごと消えるので、
+  // 一覧が無い画面に開閉ボタンだけが残ることもない
+  const railBtn = el('button', 'rail-btn');
+  railBtn.type = 'button';
+  railBtn.append(el('span', 'rail-label', '一覧'));
+  railBtn.addEventListener('click', () => {
+    setListOpen(!dom.app.classList.contains('is-list-open'), railBtn);
+  });
+  dom.railLeft.append(railBtn);
+  // 押した状態の正は aria-pressed 1つ。setListOpen が付け替える
+  dom.railList = railBtn;
+
   dom.listToggle.addEventListener('click', () => {
     const open = !dom.app.classList.contains('is-list-open');
     setListOpen(open, dom.listToggle);
