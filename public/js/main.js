@@ -52,7 +52,7 @@
  *
  * 'use strict' は書かない。module は常に strict で動く。
  */
-import { query, store } from './store.js';
+import { query, store, LS } from './store.js';
 import { dom } from './dom.js';
 import { icon } from './icons.js';
 import { visibleRows } from './rows.js';
@@ -78,7 +78,7 @@ function initTheme() {
     document.documentElement.setAttribute('data-theme', forced);
   }
 
-  const saved = forced ? null : localStorage.getItem('claude-deck.theme');
+  const saved = forced ? null : localStorage.getItem(LS.theme);
   if (saved === 'dark' || saved === 'light') {
     document.documentElement.setAttribute('data-theme', saved);
   } else if (!forced) {
@@ -91,7 +91,7 @@ function initTheme() {
       || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     const next = now === 'dark' ? 'light' : 'dark';
     root.setAttribute('data-theme', next);
-    localStorage.setItem('claude-deck.theme', next);
+    localStorage.setItem(LS.theme, next);
   });
 }
 
@@ -158,7 +158,7 @@ initListKeys(dom.archive, 'archive');
 dom.onlyLive.checked = store.onlyLive;
 dom.onlyLive.addEventListener('change', () => {
   store.onlyLive = dom.onlyLive.checked;
-  localStorage.setItem('claude-deck.onlyLive', store.onlyLive ? '1' : '0');
+  localStorage.setItem(LS.onlyLive, store.onlyLive ? '1' : '0');
   renderList();
   // 絞り込みで選んでいた行が消えたら、見えている先頭に移す
   const visible = visibleRows();

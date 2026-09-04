@@ -12,6 +12,29 @@
  */
 import { initialHiddenKinds, hideQueryValue } from './timeline/kinds.js';
 
+/**
+ * `localStorage` の鍵。
+ *
+ * **読む側と書く側が別のファイルに居る。** ここ（層1）が読み、
+ * `main.js`（層8）と `detail-panels.js`（層3）が書く。
+ * import の向きが無いのに状態を共有しているので、鍵を直書きすると
+ * **片方だけ改名した日に黙って既定へ戻る**（エラーも出ない）。
+ *
+ * ここに無い鍵が2つある。どちらも読み書きが1ファイルの中で完結しているので、
+ * そちらはローカルの定数のままにしてある。
+ *
+ * - `drawer.js` の `LIST_OPEN_KEY`（一覧の開閉）
+ * - `update.js` の `SEEN_KEY`（見た更新）
+ *
+ * 幅（`resize.js`）は `SIDES` の表が鍵ごと持っている。
+ */
+export const LS = Object.freeze({
+  onlyLive: 'claude-deck.onlyLive',
+  newestFirst: 'claude-deck.newestFirst',
+  onlyDecisions: 'claude-deck.onlyDecisions',
+  theme: 'claude-deck.theme',
+});
+
 export const STATE_COLOR = {
   'needs-answer': 'var(--hot)',
   'needs-plan-approval': 'var(--hot)',
@@ -233,10 +256,10 @@ export const store = {
   usageBaseline: null,
   /** サーバから来た「今」。経過時間はこれを基準に進める */
   now: Date.now(),
-  onlyLive: localStorage.getItem('claude-deck.onlyLive') === '1',
+  onlyLive: localStorage.getItem(LS.onlyLive) === '1',
   // 時系列は既定で新しい順。切り替えたあと開いても、いま何が起きているかが上に出る
-  newestFirst: localStorage.getItem('claude-deck.newestFirst') !== '0',
-  onlyDecisions: query.get('only') === '1' || localStorage.getItem('claude-deck.onlyDecisions') === '1',
+  newestFirst: localStorage.getItem(LS.newestFirst) !== '0',
+  onlyDecisions: query.get('only') === '1' || localStorage.getItem(LS.onlyDecisions) === '1',
   /**
    * 時系列をいま何件まで出しているか。
    *
