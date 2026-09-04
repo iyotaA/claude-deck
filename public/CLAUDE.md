@@ -16,7 +16,11 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 拡張子は `.js` のままにする。`.mjs` を `public/` に置くと `server.mjs` の `MIME` に無く、
 `octet-stream` で返るのでブラウザが module として読まない。
 
-`public/js/` は 33枚 ＋ `timeline/` 7枚。**import は上から下へ一方向にだけ流す。**
+`public/js/` の下に平置き ＋ `timeline/` の1フォルダ。**import は上から下へ一方向にだけ流す。**
+
+**枚数はここに書かない。** 前は「31枚」「33枚」と書いていて、どちらも実態とずれていた
+（数える記述はファイルを1枚足すたびに腐る）。下の表が全部を並べているので、
+数が知りたければそれを数える。
 逆向きに import したくなったら、置き場所が間違っている。
 
 | 層 | ファイル | 役割 |
@@ -26,12 +30,17 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 | 0 | `md.js` | Markdown のパーサ。文字列を受けてブロックの並びを返す（**DOM を触らない**） |
 | 0 | `icons.js` | アイコンの形。`util.js` だけ見る。口は `icon(name, size)` の1つ |
 | 0 | `timeline/kinds.js` | 時系列の語彙。種類のラベルと、隠す種類の既定 |
-| 1 | `store.js` | 画面側の状態・DOM 参照・URL クエリの同期 |
+| 0 | `api.js` | 窓口を叩く（`getJson` / `postJson` / `reasonOf`）。`content-type` と `no-store` をここに閉じる |
+| 0 | `form-kit.js` | 設定モーダルの作法で欄を組む（`fillSelect` / `gridRow`） |
+| 0 | `modal.js` | `<dialog>` の背面クリック（`closeOnBackdrop`） |
+| 1 | `dom.js` | 画面の節点の索引（102 個）。**起動時に決まって二度と変わらない** |
+| 1 | `store.js` | 画面側の状態・URL クエリの同期・`localStorage` の鍵（`LS`） |
 | 1 | `panel.js` | 詳細ペインの共通部品（器・見出し・折りたたみ） |
 | 1 | `detail-head.js` | 詳細ペインの頭。パネルより前に出るもの |
 | 1 | `usage-chart.js` | 数値の絵と数字（`svgEl`・横棒・スパークライン・`tokensStrict`・差の文字） |
 | 1 | `md-view.js` | パーサの結果を節点へ。口は2つ（`mdBlocks(blocks)` / `mdView(text)`） |
 | 2 | `rows.js` | 一覧の行の導出 |
+| 2 | `card.js` | セッションのカードの定型（器・見出し・札の締め）。`store` を見るのでここ |
 | 2 | `drawer.js` | 一覧の開閉（広い窓は畳める列・狭い窓は引き出し） |
 | 2 | `zoom.js` | 詳細ペインの拡大（`<dialog>` へ**節点ごと移す**。中身は組み直さない） |
 | 2 | `resize.js` | 作業台の左右の幅（つまみのドラッグ）。**上下限は持たない** |
@@ -72,19 +81,31 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 `WAIT_GUIDE` を知らなくてよい）。`run-view.js` とは向きを作らず、`RUN_OVER` をあえて重複させている
 （`run-resume.js` と同じ線）。
 
-層7 の中の向きは3本。`palette.js` → `run-form.js` ／ `stream.js` → `mode.js` ／
-`palette.js` → `mode.js`。どれも片方向で、逆を足すと循環になる。
+層7 の中の向きは2本。`palette.js` → `run-form.js` ／ `palette.js` → `mode.js`。
+どちらも片方向で、逆を足すと循環になる。
+（ここには長く「`stream.js` → `mode.js`」も並べてあったが、その import は存在しない。
+`mode.js` を見ているのは `palette.js` と `main.js` の2つだけ）
 `usage-tab.js` と `archive.js` は誰からも import されない（呼ぶのは `main.js` だけ）。
 書庫と数値を出す口は `initMode({ onArchive, onUsage })` で外から差す。
 `mode.js` があちらを直に import すると、同じ層の中に向きが1本増える。
 `palette.js` は層7 のいちばん下流で、誰からも import されない（呼ぶのは `main.js` だけ）。
 
-`archive.js` が層7 なのは `list.js`（層6）から `buildCard` を借りているため。
-**見た目を新しく作らない**ための借用で、向きはこちらが正しい（監視盤も同じ借り方をしていた）。
+`archive.js` が層7 なのは `session.js`（層5）を見ているため。
+
+**カードは `list.js` から借りていない。** ここには長く「`buildCard` を借りている」と
+書いてあったが、実際には `archive.js` が独自に組んでいた。3つ（一覧・書庫・数値）を
+並べて分かったのは、借りられなかった理由のほう ―― 上段に出すもの・札・押したあとが
+**問いごとに違う**（状態／日時と大きさ／消費）。
+いまは定型だけを `card.js`（層2）に置いて、「何を出すか」は各自が持つ。
 
 `timeline/` の中も同じで、`kinds` `waits` → `search` → `blocks` → `item` → `view` → `index` の順。
 **`timeline/` の中のファイルを、外から直に import しない。** 呼びたくなったら `index.js` の口に足すか、
-そもそも時系列の仕事かを考え直す。例外は `kinds.js` だけで、`store.js` が直に見る。
+そもそも時系列の仕事かを考え直す。
+
+例外は `kinds.js` で、**2箇所が直に見ている。**
+`store.js` は循環を切るため（`index` → `view` → `store` になる）。
+`detail-panels.js` は `splitEdits` を使うためで、あれは `index.js` の口に無い
+（時系列の語彙だが、パネル側でも同じ分け方が要る）。
 
 **循環を切っている所が4つある。動かすと立ち上がらない。**
 
@@ -419,7 +440,7 @@ Markdown 化する前の同じ操作が 28.3〜34.5ms。**この操作は元か�
 - **答えないと1行も進まない待ち（`row.blocking`）はタブ帯より上に出す。** 既定が「経過」なので、ここに置かないと止まっていることがタブの向こうに隠れる。返信待ち（blocking でない）は「いま」タブに残す。**両方に出さない**（同じパネルが1画面に2枚並ぶ）
 - **時系列の本文予算（`item.js`）と `TL_FIRST`（`view.js`）はセットで触る。** 予算を絞る前に窓を広げると、長い行を12件ぶん組むことになって初回の描画が重くなる。いまは 指示 300字4行・Claude 120字1行・中間報告 240字2行 で、窓が 12 件（実測で初回 9.3〜14.9ms・1行あたり 123px）
 - **`?insp=out` は `?dtab=out` へ読み替える。** 成果は右の紙から中央のタブへ戻したが、あの URL は v0.6.0 で配っている（`git tag --contains bedff48`）。`?insp=basics` のほうは **id を `basics` のまま**にしてあるので読み替えが要らない（札と見出しだけ「診断」へ替えた）
-- **`timeline/` の中のファイルを外から直に import しない。** 口は `timeline/index.js` の1枚に絞る。例外は `kinds.js`（層0の語彙）だけで、`index.js` を経由させると `index` → `view` → `store` → `index` の循環になる
+- **`timeline/` の中のファイルを外から直に import しない。** 口は `timeline/index.js` の1枚に絞る。例外は `kinds.js`（層0の語彙）で、`store.js`（`index.js` を経由させると `index` → `view` → `store` → `index` の循環になる）と `detail-panels.js`（`splitEdits` が `index.js` の口に無い）の2箇所が直に見ている
 - **選択式の質問の submit を質問ごとに置かない。** 1枚のカードに全問を縦に並べて submit は1つ。質問ごとに置くと「1問目だけ送った」という**サーバー側に存在しない状態**を画面が作れる
 - **要求カードを `<form>` で囲まない。** 囲むと `textarea` の Enter が送信になる。「進める」を Enter で誤爆させるのがこの画面でいちばん危ない操作なので、送信は Ctrl+Enter だけにする（`run-form.js` の判定と同じ作法）
 - **`choices` の鍵は質問文ではなく番号（`q.key`）。** 台帳は質問文を 200 字で切って画面へ渡すので、切れた文字列を鍵にすると長い質問が永久に答えられなくなる。同じ質問文が2回来ても外れない

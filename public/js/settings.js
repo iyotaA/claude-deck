@@ -23,7 +23,8 @@
  */
 import { el } from './util.js';
 import { icon } from './icons.js';
-import { dom, store, SUMMARY_ORDER } from './store.js';
+import { store, SUMMARY_ORDER } from './store.js';
+import { dom } from './dom.js';
 import { getJson, postJson } from './api.js';
 import { closeOnBackdrop } from './modal.js';
 

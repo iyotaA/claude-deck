@@ -11,9 +11,10 @@
  * 詳細ペインの数値パネル（`usage-panel.js`）とは別物。
  * あちらは開いている1本、こちらは横断。絵の部品（層1の `usage-chart.js`）だけを共有する。
  */
-import { el, shortModel } from './util.js';
+import { el, shortModel, num } from './util.js';
 import { icon } from './icons.js';
-import { dom, store } from './store.js';
+import { store } from './store.js';
+import { dom } from './dom.js';
 import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaPath } from './card.js';
@@ -511,8 +512,8 @@ function renderUsageCount() {
     return;
   }
   const m = u.data.meta ?? {};
-  const parts = [`${u.data.sessions.toLocaleString('ja-JP')} 本`];
-  if (typeof m.indexed === 'number') parts.push(`ログ ${m.indexed.toLocaleString('ja-JP')} 本`);
+  const parts = [`${num(u.data.sessions)} 本`];
+  if (typeof m.indexed === 'number') parts.push(`ログ ${num(m.indexed)} 本`);
   // 書庫（archive.js）は scanMax をそのまま出しているが、あちらは上限＝実際に読む数。
   // こちらは上で本数を選べるので、上限と読んだ数が食い違う
   if (m.scanLimited) parts.push(`中身は新しい ${numStrict(m.scanned)} 本まで`);

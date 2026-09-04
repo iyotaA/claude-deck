@@ -55,8 +55,8 @@ export function bodyText(text, limit, maxLines, fullLength = null, needle = null
   // 字数は素の本文のまま数える（fullLength がそちらの物差しで作られているため）
   const clipped = typeof fullLength === 'number' && fullLength > t.length;
   const label = clipped
-    ? `全 ${fullLength.toLocaleString('ja-JP')} 字（このうち ${t.length.toLocaleString('ja-JP')} 字まで表示）`
-    : `全文（${t.length.toLocaleString('ja-JP')}字）`;
+    ? `全 ${num(fullLength)} 字（このうち ${num(t.length)} 字まで表示）`
+    : `全文（${num(t.length)}字）`;
   // 検索語が頭出しに無く、続きの中にあるときは開いた状態で出す。
   // 閉じたまま出すと「一致した行なのに、見ても語が見つからない」ことになる。
   // 数えるのは描いたあとの文字（blocksText）。素の文字列を数えると、

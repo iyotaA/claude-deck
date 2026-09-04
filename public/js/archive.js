@@ -11,10 +11,11 @@
  * こちらは「出せと言われたら描く」だけで、`showArchive()` がその口
  * （initMode({ onUsage }) と同じ差し方。層7 どうしで向きを持たせずに済む）。
  */
-import { el, kb, shortStamp, stamp, agentTag } from './util.js';
+import { el, kb, shortStamp, stamp, agentTag, num } from './util.js';
 import { icon } from './icons.js';
 import { tokensStrict, pctStrict } from './usage-chart.js';
-import { dom, store, syncQuery, ARCHIVE_SORTS, ARCHIVE_DAYS } from './store.js';
+import { store, syncQuery, ARCHIVE_SORTS, ARCHIVE_DAYS } from './store.js';
+import { dom } from './dom.js';
 import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaBranch, metaPath } from './card.js';
 
@@ -92,7 +93,7 @@ function renderArchiveCount() {
     dom.archiveCount.textContent = '';
     return;
   }
-  const parts = [`${a.total.toLocaleString('ja-JP')} 件`];
+  const parts = [`${num(a.total)} 件`];
   if (a.rows.length < a.total) parts.push(`${a.rows.length} 件表示`);
   // どこまで中身を読んだかを正直に出す。打ち切っていれば「全部を探せていない」と分かる
   if (a.meta?.scanLimited) parts.push(`中身は新しい ${a.meta.scanMax} 件まで`);
@@ -153,7 +154,7 @@ function renderArchive() {
   if (a.rows.length < a.total) {
     const li = el('li', 'is-wide');
     const more = el('button', 'btn archive-more',
-      `続きを出す（残り ${(a.total - a.rows.length).toLocaleString('ja-JP')} 件）`);
+      `続きを出す（残り ${num(a.total - a.rows.length)} 件）`);
     more.type = 'button';
     more.disabled = a.loading;
     more.addEventListener('click', () => loadArchive({ append: true }));

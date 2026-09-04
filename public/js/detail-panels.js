@@ -9,8 +9,8 @@
  * 中央タブに割ったときに目次ごと外した。タブと役目が重なるうえ、
  * タブの数は選んでいないタブのぶんも要るので、パネルの戻り値からは取れない。
  */
-import { el, since, stamp, shortModel, fact, num } from './util.js';
-import { store, syncQuery } from './store.js';
+import { el, since, stamp, shortModel, fact, num, kb } from './util.js';
+import { store, syncQuery, LS } from './store.js';
 import { idleOf } from './rows.js';
 import { panel, SEC, toggle } from './panel.js';
 import * as Timeline from './timeline/index.js';
@@ -118,7 +118,7 @@ export function timelinePanel(d) {
   // そのぶん、ボタン自身の見た目（押した状態・並び順の文字）はここで書き換える
   const onlyBtn = toggle('判断だけ', store.onlyDecisions, () => {
     store.onlyDecisions = !store.onlyDecisions;
-    localStorage.setItem('claude-deck.onlyDecisions', store.onlyDecisions ? '1' : '0');
+    localStorage.setItem(LS.onlyDecisions, store.onlyDecisions ? '1' : '0');
     // 開き方を人に渡せるようにする（?only=1）
     syncQuery();
     onlyBtn.setAttribute('aria-pressed', String(store.onlyDecisions));
@@ -127,7 +127,7 @@ export function timelinePanel(d) {
   });
   const orderBtn = toggle(store.newestFirst ? '新しい順' : '古い順', false, () => {
     store.newestFirst = !store.newestFirst;
-    localStorage.setItem('claude-deck.newestFirst', store.newestFirst ? '1' : '0');
+    localStorage.setItem(LS.newestFirst, store.newestFirst ? '1' : '0');
     orderBtn.textContent = store.newestFirst ? '新しい順' : '古い順';
     // 逆から出すことになるので、窓の続きは意味を持たない
     Timeline.render({ reset: true });
@@ -256,7 +256,7 @@ export function basicsPanel(row, d) {
   fact(dl, '判定の根拠', row.stateReason);
   dl.append(el('dt', null, '最後の動きから'), idleNode);
   fact(dl, '登録簿の status', row.statusRaw);
-  fact(dl, '文脈の量', row.contextTokens ? `${row.contextTokens.toLocaleString('ja-JP')} tokens` : null);
+  fact(dl, '文脈の量', row.contextTokens ? `${num(row.contextTokens)} tokens` : null);
   if (d) fact(dl, 'やり取りの回数', `${d.digest.stats.turns} 往復 / ツール ${d.digest.stats.toolCalls} 回`);
   basics.body.append(dl);
 
@@ -275,7 +275,7 @@ export function basicsPanel(row, d) {
   fact(id, 'セッションID', row.sessionId);
   if (row.startedAt) fact(id, '開始', stamp(row.startedAt));
   if (d) {
-    fact(id, 'ログの大きさ', `${Math.round(d.log.size / 1024).toLocaleString('ja-JP')} KB / ${d.log.entries} 行`);
+    fact(id, 'ログの大きさ', `${kb(d.log.size)} / ${d.log.entries} 行`);
     if (d.log.parseErrors) fact(id, '読めなかった行', `${d.log.parseErrors} 行`);
   }
   if (id.childElementCount > 0) basics.body.append(id);

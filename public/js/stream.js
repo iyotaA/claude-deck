@@ -3,7 +3,8 @@
  * 層7。apply() が「1回の更新で何を描き直すか」を決めている場所なので、
  * 描き直す先（list / detail / session）をすべて見る。
  */
-import { query, dom, store, syncQuery } from './store.js';
+import { query, store, syncQuery } from './store.js';
+import { dom } from './dom.js';
 import { visibleRows } from './rows.js';
 import { renderList, renderSummary, refreshTimes } from './list.js';
 import { loadDetail } from './session.js';

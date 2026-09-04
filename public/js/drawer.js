@@ -14,10 +14,23 @@
  */
 import { el } from './util.js';
 import { icon } from './icons.js';
-import { dom } from './store.js';
+import { dom } from './dom.js';
 
 /** 開閉を覚えておく鍵。「見たいときだけ開く」運用なので、次に開いたときも同じ形にする */
 const LIST_OPEN_KEY = 'claude-deck.listOpen';
+
+/**
+ * 左のレールの開閉ボタン。**`initListDrawer()` が組むまで null。**
+ *
+ * もとは `store.js` の `dom` へ後から差していた（`dom.railList = railBtn`）。
+ * あちらは 102 個の節点を1つのオブジェクトリテラルで固定して持つ器で、
+ * **外から生えるキーが1つあると「画面の節点の全一覧」として読めなくなる。**
+ *
+ * ここに置いても `setListOpen()` が先に呼ばれ得ることは変わらないので、
+ * 下のガードは残る。**変わるのは「なぜ null がありうるか」が読める場所。**
+ * `store.js` を見ても分からなかったものが、同じファイルの中で完結する。
+ */
+let railBtn = null;
 
 /**
  * 手前に重なる形か。CSS のメディアクエリと同じ値にする。
@@ -58,10 +71,13 @@ export function setListOpen(open, moveFocusTo = null, remember = true) {
   dom.listToggle.setAttribute('aria-label', open ? 'セッション一覧を閉じる' : 'セッション一覧を開く');
   // 左のレールも同じ状態を映す。**旗を2つ持たない** ―― 正は .app のクラス1つで、
   // ここは見た目を合わせるだけ（右のレールの aria-pressed と同じ流儀）
-  if (dom.railList) {
-    dom.railList.setAttribute('aria-pressed', String(open));
-    dom.railList.title = open ? 'セッション一覧を閉じる' : 'セッション一覧を開く';
-    dom.railList.setAttribute('aria-label', dom.railList.title);
+  // **まだ組んでいないことがある。** レールを組むのは initListDrawer() で、
+  // main.js の初期化はそこへ辿り着く前にも setListOpen() を通る
+  // （覚えている開閉を当てるため）。だから存在を確かめてから触る
+  if (railBtn) {
+    railBtn.setAttribute('aria-pressed', String(open));
+    railBtn.title = open ? 'セッション一覧を閉じる' : 'セッション一覧を開く';
+    railBtn.setAttribute('aria-label', railBtn.title);
   }
   syncListInert();
 
@@ -121,7 +137,7 @@ export function initListDrawer() {
   // 開閉の口が上のバーと一覧の帯に散っていて、右の「数値・診断」とは作法が違った。
   // ここへ寄せると、書庫や数値のあいだは .rail ごと消えるので、
   // 一覧が無い画面に開閉ボタンだけが残ることもない
-  const railBtn = el('button', 'rail-btn');
+  railBtn = el('button', 'rail-btn');
   railBtn.type = 'button';
   // 右のレールと同じく絵だけ。形は上のバーのハンバーガーと同じ sidebar を借りる
   // （同じことをする口なので、別の形にすると覚え直しになる）
@@ -130,8 +146,6 @@ export function initListDrawer() {
     setListOpen(!dom.app.classList.contains('is-list-open'), railBtn);
   });
   dom.railLeft.append(railBtn);
-  // 押した状態の正は aria-pressed 1つ。setListOpen が付け替える
-  dom.railList = railBtn;
 
   dom.listToggle.addEventListener('click', () => {
     const open = !dom.app.classList.contains('is-list-open');
