@@ -21,6 +21,7 @@
 import { el, fact } from './util.js';
 import { panel, SEC } from './panel.js';
 import { runFor, EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
+import { getJson } from './api.js';
 
 /** これに入っていれば、その run はもう終わっている（`run-view.js` と同じ語彙）。 */
 const RUN_OVER = new Set(['stopped', 'failed', 'done']);
@@ -65,9 +66,7 @@ async function loadOptions() {
   if (optionsAsked) return;
   optionsAsked = true;
   try {
-    const res = await fetch('/api/runs/options', { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    options = await res.json();
+    options = await getJson('/api/runs/options');
     if (ui) applyOptions();
   } catch {
     // 引けなくても続きは起こせる。欄を出さないだけにする。

@@ -28,6 +28,7 @@ import { panel, SEC } from './panel.js';
 import {
   runFor, EFFORT_LABELS, MODEL_FREE, modelOptions, modelPick, modelValue,
 } from './runs.js';
+import { getJson } from './api.js';
 
 /**
  * 状態に応じたパネルの色。
@@ -993,9 +994,7 @@ async function loadOptions() {
   if (optionsAsked) return;
   optionsAsked = true;
   try {
-    const res = await fetch('/api/runs/options', { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    runOptions = await res.json();
+    runOptions = await getJson('/api/runs/options');
     fillSwitch();
   } catch {
     // 取れなくても送る・止めるは動く。切り替えの節を出さないだけにして、引き直さない

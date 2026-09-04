@@ -21,6 +21,7 @@ import { icon } from './icons.js';
 import { EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
 import { dom } from './store.js';
 import { select } from './session.js';
+import { getJson } from './api.js';
 
 /** 開いたときに引いた選択肢。閉じても捨てないが、開くたびに引き直す */
 let options = null;
@@ -164,9 +165,7 @@ function fillOptions(o) {
 
 async function loadOptions() {
   try {
-    const res = await fetch('/api/runs/options', { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    fillOptions(await res.json());
+    fillOptions(await getJson('/api/runs/options'));
   } catch (err) {
     options = null;
     dom.runformStart.disabled = true;

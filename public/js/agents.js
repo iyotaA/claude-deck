@@ -6,6 +6,7 @@
 import { el, hms, dur, num, kb, mb } from './util.js';
 import { panel, SEC } from './panel.js';
 import * as Timeline from './timeline/index.js';
+import { getJson } from './api.js';
 
 /**
  * サブエージェントの状態の日本語。
@@ -98,9 +99,8 @@ function agentRow(a, sessionId) {
     loading = true;
     body.replaceChildren(el('div', 'loading', '記録を読んでいます…'));
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/subagents/${encodeURIComponent(a.agentId)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await getJson(
+        `/api/sessions/${encodeURIComponent(sessionId)}/subagents/${encodeURIComponent(a.agentId)}`);
       const nodes = [];
       if (data.log?.truncated) {
         nodes.push(el('div', 'note', 'ログが大きいので先頭だけ読んでいます。最終報告は親のログ側に入っています'));

@@ -24,6 +24,7 @@
 import { el } from './util.js';
 import { icon } from './icons.js';
 import { dom, store, SUMMARY_ORDER } from './store.js';
+import { getJson } from './api.js';
 
 /**
  * 状態ごとの但し書き。
@@ -214,9 +215,7 @@ async function post(path, body) {
 /** いまの設定を引いて画面へ入れる。 */
 async function load() {
   try {
-    const res = await fetch('/api/settings/notify');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    fill(await res.json());
+    fill(await getJson('/api/settings/notify'));
   } catch (err) {
     say(`設定を読めませんでした（${err.message}）`, 'bad');
   }
@@ -288,9 +287,7 @@ function fillDirs(d, error) {
  */
 async function loadDirs() {
   try {
-    const res = await fetch('/api/settings/rundirs');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    fillDirs(await res.json());
+    fillDirs(await getJson('/api/settings/rundirs'));
   } catch (err) {
     fillDirs(null, err.message);
   }
@@ -409,9 +406,7 @@ function fillStartup(s) {
  */
 async function loadStartup() {
   try {
-    const res = await fetch('/api/health');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const body = await res.json();
+    const body = await getJson('/api/health');
     fillStartup(body?.startup ?? null);
   } catch {
     fillStartup(null);
