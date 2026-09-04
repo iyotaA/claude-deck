@@ -490,6 +490,9 @@
 <dialog class="zoom" id="zoom" aria-label="セッションの詳細（拡大）">
   <div class="settings-head">
     <h2>いま見ているセッション</h2>
+    <!-- 書庫から開いたときだけ出す。**移るかどうかは押した人が決める。**
+         勝手に作業台へ飛ばすと、探していた結果がその場で消える -->
+    <button class="btn zoom-work" id="zoom-work" type="button" hidden>作業台で開く</button>
     <button class="settings-x" id="zoom-close" type="button" aria-label="拡大をやめる">&#215;</button>
   </div>
   <div class="zoom-body" id="zoom-body"></div>

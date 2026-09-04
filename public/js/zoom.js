@@ -20,7 +20,7 @@
  * その時点では open がまだ true。あそこを基準にすると、閉じる途中に組み直した札が
  * 「縮小」のまま残る）。2箇所に持てば必ず片方が古くなる。
  */
-import { dom } from './store.js';
+import { dom, store } from './store.js';
 
 /**
  * 開閉したことを外へ知らせる口。main.js が renderDetail を差す。
@@ -33,6 +33,14 @@ import { dom } from './store.js';
  * initMode({ onUsage }) や subscribeRuns(fn) と同じ差し方にしてある。
  */
 let changed = () => {};
+
+/**
+ * 「作業台で開く」を押されたときに呼ぶもの。main.js が差す。
+ *
+ * ここから mode.js を import しない（層2 -> 層7 は逆流）。
+ * initMode({ onArchive }) と同じ差し方にしてある。
+ */
+let toWork = () => {};
 
 /** 拡大しているか。旗を持たず、節点がどこに居るかで決める */
 export function isZoomed() {
@@ -63,6 +71,9 @@ function restoreScroll(top) {
  */
 export function openZoom() {
   if (isZoomed()) return;
+  // 書庫から開いたときだけ「作業台で開く」を出す。作業台で拡大しているあいだは
+  // もうそこに居るので、押す先が無い
+  dom.zoomWork.hidden = store.mode !== 'archive';
   const top = dom.detail.scrollTop;
   dom.zoomBody.append(dom.detailPane);
   dom.app.classList.add('is-zoom');
@@ -112,8 +123,16 @@ export function toggleZoom() {
  *
  * @param {{onChange?: () => void}} hooks 開閉したあとに詳細を組み直す口
  */
-export function initZoom({ onChange } = {}) {
+export function initZoom({ onChange, onOpenInWork } = {}) {
   if (onChange) changed = onChange;
+  if (onOpenInWork) toWork = onOpenInWork;
+
+  // 閉じてから移る。**順番を逆にしない。** 先にモードを替えると、
+  // 詳細ペインが dialog の中に居るまま作業台の骨格へ切り替わり、中央が空で出る
+  dom.zoomWork.addEventListener('click', () => {
+    closeZoom();
+    toWork();
+  });
 
   // **'cancel' と 'close' の両方で受ける。**
   // 仕様の上では Esc は 'cancel' -> 'close' の順に来ることになっているが、

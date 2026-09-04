@@ -56,7 +56,7 @@ import { query, dom, store } from './store.js';
 import { icon } from './icons.js';
 import { visibleRows } from './rows.js';
 import { initListDrawer, setListOpen, initialListOpen } from './drawer.js';
-import { initZoom } from './zoom.js';
+import { initZoom, openZoom } from './zoom.js';
 import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
 import { renderDetail, renderDetailIfNeeded, initInspector } from './detail.js';
@@ -127,14 +127,17 @@ setListOpen(initialListOpen(), null, false);
 // 「縮小」のまま残らないよう、組み直しをこちらから差す（向きは 8 -> 2）。
 // 差すのは renderDetail のほう。renderDetailIfNeeded は中身が同じなら何もしないので、
 // 札だけを付け替えたいこの用には効かない
-initZoom({ onChange: renderDetail });
+// 「作業台で開く」の行き先もここで差す（zoom.js は層2 なので mode.js を import しない）
+initZoom({ onChange: renderDetail, onOpenInWork: () => setMode('work') });
 initInspector();
 initResize();
 // 書庫の探す帯を配線してから initMode に渡す。あちらの setMode は
 // ?mode=archive で開いたときに onArchive（= showArchive）をその場で呼ぶので、
 // 先に配線しておかないと検索欄の初期値が当たる前に引き始める。
-// 押されたあと作業台へ移す口も、ここで差す（archive.js は mode.js を import しない）
-initArchive({ onPick: () => setMode('work') });
+// 押されたあとの後始末も、ここで差す（archive.js は mode.js も zoom.js も import しない）。
+// **書庫にいたまま詳細を出す。** 作業台へ飛ばすと、探していた結果がその場で消える。
+// 中身は組み直さず、詳細ペインの節点をモーダルへ運ぶだけ（理由は zoom.js の冒頭）
+initArchive({ onPick: () => openZoom() });
 // 数値モードの絞り込みを配線してから initMode に渡す。あちらの setMode は
 // ?mode=usage で開いたときに onUsage（= showUsage）をその場で呼ぶので、
 // 先に配線しておかないと <select> の初期値が当たる前に引き始める

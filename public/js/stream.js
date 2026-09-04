@@ -8,6 +8,7 @@ import { visibleRows } from './rows.js';
 import { renderList, renderSummary, refreshTimes } from './list.js';
 import { loadDetail } from './session.js';
 import { renderDetailIfNeeded } from './detail.js';
+import { isZoomed } from './zoom.js';
 
 const initialSession = query.get('session');
 let firstApply = true;
@@ -47,8 +48,19 @@ function apply(payload) {
   // 書庫（/api/archive）も数値（/api/usage）もファイルを開く窓口なので、
   // 見えないもののために毎2秒撃たない。左の一覧に触ると、見えていない
   // スクロール位置が毎秒先頭へ飛ぶ。
-  // 作業台へ戻るときに setMode('work') が3つとも追いつかせる
-  if (store.mode !== 'work') return;
+  // 作業台へ戻るときに setMode('work') が3つとも追いつかせる。
+  //
+  // **例外はモーダルで詳細を開いているあいだ。** 書庫に出るのはほとんど
+  // 終わったセッションだが、動いている最中のものも混ざる。開いて見ているものが
+  // 古いまま止まるのは、見えないものを描かない話とは別なので、そこだけ通す。
+  // 旗は増やさない ―― 節点がどこに居るか（isZoomed）で決まる
+  if (store.mode !== 'work') {
+    if (isZoomed()) {
+      renderDetailIfNeeded();
+      loadDetail(store.selected, { silent: true });
+    }
+    return;
+  }
   renderList();
   // 詳細は「見えているものが動いたとき」だけ作り直す。毎回作り直すと、
   // 開いた <details> とスクロール位置が2秒ごとに消える

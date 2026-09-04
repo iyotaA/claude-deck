@@ -229,6 +229,8 @@ export const dom = {
   archiveDays: document.getElementById('archive-days'),
   archiveClear: document.getElementById('archive-clear'),
   archiveCount: document.getElementById('archive-count'),
+  // 拡大モーダルの「作業台で開く」。書庫から開いたときだけ出す
+  zoomWork: document.getElementById('zoom-work'),
   // 横断の数値。usage-tab.js だけが使う
   usageHead: document.getElementById('usage-head'),
   usageNav: document.getElementById('usage-nav'),

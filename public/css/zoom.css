@@ -105,3 +105,15 @@
    あちらは「拡大を閉じたら引き出しも畳まれていた」という状態の変化が残り、
    こちらは見た目だけ止めて状態に触らない */
 .is-zoom .scrim { display: none; }
+
+/* 「作業台で開く」。書庫から開いたときだけ出る。
+   **閉じる × の左に置く。** 右端は閉じる口の指定席で、そこを動かすと
+   拡大のたびに押す位置を探し直すことになる。
+   `.settings-head` は flex で h2 が伸びるので、並びはそのままで収まる */
+.zoom-work {
+  margin-left: auto;
+  font-size: .78rem;
+  white-space: nowrap;
+}
+
+.zoom-work[hidden] { display: none; }
