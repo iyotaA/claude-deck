@@ -20,6 +20,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { errText } from '../shared/text.mjs';
 import { readAll, readHead } from './transcript.mjs';
 
 /**
@@ -81,7 +82,7 @@ export async function listSubagents(transcriptFile, sessionId) {
     // 1件もサブエージェントを使っていないセッションではディレクトリ自体が無い。
     // それは「読めなかった」ではないので、断り書きを出さずに空で返す
     if (err?.code === 'ENOENT') return { refs: [], readError: null };
-    return { refs: [], readError: String(err?.message ?? err) };
+    return { refs: [], readError: errText(err) };
   }
 
   const refs = [];

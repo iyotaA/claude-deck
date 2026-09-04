@@ -25,6 +25,7 @@ import { indexTranscripts, readTail } from '../read/transcript.mjs';
 import { countSubagents } from '../read/subagents.mjs';
 import { skillIndex, skillIndexState } from '../read/skills.mjs';
 import { extractMeta } from '../parse/meta.mjs';
+import { projectNameOf } from '../shared/text.mjs';
 
 /** 深い検索で中身を読む上限。理由はファイル冒頭のコメントに書いてある。 */
 export const ARCHIVE_SCAN_MAX = 120;
@@ -148,7 +149,7 @@ function publicRow(row) {
     sessionId: row.sessionId,
     // cwd が読めていればその末尾。読んでいなければ置き場所のフォルダ名で代える。
     // slugifyCwd は不可逆なのでパスには戻せないが、見出しには使える
-    project: row.cwd ? row.cwd.split(/[\\/]/).filter(Boolean).pop() : row.projectDir,
+    project: projectNameOf(row.cwd, row.projectDir),
     projectDir: row.projectDir,
     title: row.title,
     cwd: row.cwd,
@@ -200,7 +201,7 @@ async function buildProjects(all) {
       const cwd = extractMeta(tail.entries ?? []).cwd;
       // 末尾のフォルダ名だけを出す。フルパスは画面の札に収まらないし、
       // 置き場所の絞り込みに要るのは「どのプロジェクトか」だけ
-      g.label = cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() : g.dir;
+      g.label = projectNameOf(cwd, g.dir);
     } catch {
       // 読めなくても候補からは落とさない。スラッグのままでも選べるほうがいい
       g.label = g.dir;

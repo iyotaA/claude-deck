@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appDataFile } from './appdata.mjs';
+import { isPlainObject } from './objects.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 /** 環境変数がどれも無いときの控え。アプリ直下に置く */
@@ -49,7 +50,7 @@ export function readConfigFile(env = process.env) {
   try {
     const file = JSON.parse(fs.readFileSync(configFilePath(env), 'utf8'));
     // 配列や数値が来たら「読めなかった」と同じ扱いにする（節を足す先が無い）
-    return file && typeof file === 'object' && !Array.isArray(file) ? file : null;
+    return isPlainObject(file) ? file : null;
   } catch {
     return null;
   }

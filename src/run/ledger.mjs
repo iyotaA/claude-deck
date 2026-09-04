@@ -80,8 +80,9 @@
  */
 import { sameSessionId } from '../parse/stream.mjs';
 import { ballOf, isBlocking } from '../parse/state.mjs';
-import { clip, oneLine } from '../shared/text.mjs';
+import { clip, oneLine, projectNameOf } from '../shared/text.mjs';
 import { askKindOf, toRunEvents } from './event.mjs';
+import { isPlainObject } from '../shared/objects.mjs';
 
 /**
  * 同時に動かせる本数。
@@ -329,7 +330,7 @@ function safeJson(v) {
  * @returns {string|null} 出すものが無ければ null
  */
 function askBody(toolName, input) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  if (!isPlainObject(input)) return null;
 
   // プランは本文そのものが読みたいもの。Markdown のまま渡す（画面が mdView で描く）
   if (toolName === 'ExitPlanMode') return clip(input.plan, ASK_BODY_MAX);
@@ -461,7 +462,7 @@ export function buildQuestionInput(pending, choices) {
   const input = pending?.input;
   const src = Array.isArray(input?.questions) ? input.questions : null;
   if (!src || src.length === 0) return { ok: false, reason: 'この要求は選択肢では答えられません' };
-  if (!choices || typeof choices !== 'object' || Array.isArray(choices)) {
+  if (!isPlainObject(choices)) {
     return { ok: false, reason: '選んだ内容が読めません' };
   }
 
@@ -731,7 +732,7 @@ export function createRunLedger({
       return [pushNote(run, `許可要求が ${pendingMax} 件を超えたので断りました`, now)];
     }
 
-    const input = info.input && typeof info.input === 'object' && !Array.isArray(info.input)
+    const input = isPlainObject(info.input)
       ? info.input
       : null;
     const kind = askKindOf(info.toolName ?? null);
@@ -2021,7 +2022,7 @@ function synthRow(run, now) {
     pid: run.pid ?? null,
     name: run.sessionId ? run.sessionId.slice(0, 8) : '不明',
     cwd,
-    project: cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() : null,
+    project: projectNameOf(cwd),
     // 指示文は台帳が持っていない（`rows()` に載せていない）。
     // 会話ログが出れば次の走査で本物の見出しに入れ替わる
     title: null,

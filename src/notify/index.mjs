@@ -13,6 +13,7 @@
  */
 import { loadNotifyConfig } from './config.mjs';
 import { createNotifyWatch } from './watch.mjs';
+import { errText } from '../shared/text.mjs';
 import { buildText, scrubError } from './message.mjs';
 import { postToSlack, TIMEOUT_MS } from './slack.mjs';
 
@@ -121,7 +122,7 @@ export function createNotifier({
     try {
       items = watch.takeReady(now);
     } catch (err) {
-      stop(`通知の内部で問題が起きました: ${err?.message ?? err}`);
+      stop(`通知の内部で問題が起きました: ${errText(err)}`);
       return;
     }
 
@@ -163,7 +164,7 @@ export function createNotifier({
       failed += 1;
       failStreak += 1;
       lastErrorAt = now;
-      lastError = `送信で例外が出ました: ${err?.message ?? err}`;
+      lastError = `送信で例外が出ました: ${errText(err)}`;
       if (failStreak >= FAIL_LIMIT) stop(lastError);
     } finally {
       sending = false;
@@ -340,7 +341,7 @@ export function createNotifier({
       failed += 1;
       lastErrorAt = now;
       // 例外の文言には URL が埋め込まれ得る。返す前に必ず伏せる
-      lastError = scrubError(`送信で例外が出ました: ${err?.message ?? err}`, config.url);
+      lastError = scrubError(`送信で例外が出ました: ${errText(err)}`, config.url);
       return { ok: false, reason: lastError };
     } finally {
       sending = false;

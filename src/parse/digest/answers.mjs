@@ -35,6 +35,7 @@
  */
 import { clip, oneLine } from '../../shared/text.mjs';
 import { LIMIT } from './limits.mjs';
+import { isPlainObject } from '../../shared/objects.mjs';
 
 /**
  * 却下されたときに機械的に入る英文。
@@ -112,7 +113,7 @@ function chosenFromText(question, text) {
 export function pickAnswers(input, result) {
   const text = typeof result?.text === 'string' ? result.text : '';
   const dict = result?.structured?.answers;
-  const hasDict = Boolean(dict) && typeof dict === 'object' && !Array.isArray(dict);
+  const hasDict = isPlainObject(dict);
   const out = [];
 
   for (const q of input?.questions ?? []) {
