@@ -9,11 +9,16 @@ import assert from 'node:assert/strict';
 
 import { classifyStreamLine } from '../src/parse/stream.mjs';
 import {
-  createRunLedger, isChildDone, isRunOver, mergeRuns, quietFor,
-  RUN_STATE_LABELS, RUN_MAX, STALL_MS, ASK_BODY_MAX, PENDING_MAX, PERMISSION_TIMEOUT_MS,
-  buildQuestionInput, LIVE_FIELDS, LIVE_ACK_TIMEOUT_MS, INTERRUPT_CAP, CANCEL_QUEUED_CAP,
+  createRunLedger, isChildDone, isRunOver, quietFor,
+  RUN_STATE_LABELS, RUN_MAX, STALL_MS, PENDING_MAX, PERMISSION_TIMEOUT_MS,
+  LIVE_FIELDS, LIVE_ACK_TIMEOUT_MS, INTERRUPT_CAP, CANCEL_QUEUED_CAP,
   SLASH_MAX,
 } from '../src/run/ledger.mjs';
+// 要求カードの組み立ては run/ask.mjs へ切り出した。
+// カードの中身は台帳の入口（feed → rows）経由で見ているが、
+// この2つだけは直に呼ぶので、あちらから取る
+import { ASK_BODY_MAX, buildQuestionInput } from '../src/run/ask.mjs';
+import { mergeRuns } from '../src/run/merge.mjs';
 import {
   sysInit, sAssistant, sResult, sPermission, sQuestion, sControlResponse, S_ID,
 } from './helpers.mjs';

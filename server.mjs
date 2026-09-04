@@ -26,7 +26,7 @@ import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
 import { loadNotifyConfig } from './src/notify/config.mjs';
 import { validateSettings, writeSettings } from './src/notify/settings.mjs';
 import { createRunner } from './src/run/index.mjs';
-import { mergeRuns } from './src/run/ledger.mjs';
+import { mergeRuns } from './src/run/merge.mjs';
 import {
   allowedModes, runDirsFromEnv, BYPASS_MODE, DEFAULT_PERMISSION_MODE, PERMISSION_MODE_LABELS,
   EFFORTS, DEFAULT_BUDGET_USD, BUDGET_MIN_USD, BUDGET_MAX_USD, PROMPT_MAX, checkModel,

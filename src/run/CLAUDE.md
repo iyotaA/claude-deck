@@ -188,6 +188,8 @@ CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.ex
 | `spec.mjs` | 起こしてよいか。どの argv を組むか | 無し |
 | `event.mjs` | 流れてきた1行を、画面に出せる出来事へどう畳むか | 無し |
 | `ledger.mjs` | いつ状態が変わるか。何を覚えて何を捨てるか | 無し（時刻も `now` で受ける） |
+| `ask.mjs` | 許可要求をどう見せるか。選んだ札から `updatedInput` をどう組むか | 無し（**状態も触らない**） |
+| `merge.mjs` | 起こした実行を一覧へどう混ぜるか | 無し（**データの向きが逆**。外から来た行を加工する） |
 | `dirs.mjs` | 登録してよいフォルダか。重複と上限 | `%LOCALAPPDATA%\ClaudeDeck\config.json` |
 | `rate.mjs` | 何も決めない。紙の形が読めるかだけ見る | `%LOCALAPPDATA%\ClaudeDeck\rate.json` |
 | `index.mjs` | どの順で手を動かすか。断る理由と HTTP の番号 | `os/claude.mjs` 経由だけ |
@@ -229,7 +231,7 @@ CLAUDE_DECK_CLAUDE_BIN → PATH を走査 → %USERPROFILE%\.local\bin\claude.ex
 
 ### 一覧への合流
 
-`ledger.mjs` の `mergeRuns()`。**`parse/state.mjs` の規則は1行も変えない。**
+`merge.mjs` の `mergeRuns()`。**`parse/state.mjs` の規則は1行も変えない。**
 headless でも紙は書かれるが `status` のキーが無いので、`deriveState` は末尾の行だけで決める。
 走っている最中でも「返信待ち」に見えるのはそのため（上の実測）。
 台帳が知っている本当の状態を、あとから重ねて直す。
