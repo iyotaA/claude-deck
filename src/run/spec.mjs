@@ -211,6 +211,28 @@ export function checkModel(raw) {
 }
 
 /**
+ * 指示文を確かめる。前後の空白は落とす。
+ *
+ * 起こすとき（`buildRunSpec`）・1行送るとき・切り替えるときの3箇所で同じ検証をしていた。
+ * **文言まで同じ**だったので、片方だけ上限を変えると
+ * 同じ長さの指示が窓口によって通ったり通らなかったりする形になっていた。
+ *
+ * `flagLike` は見ない。指示文は argv に乗らず stdin へ流すので、
+ * `-` 始まりでも旗と解釈される余地が無い。
+ *
+ * @param {*} raw 画面から来た指示文
+ * @returns {{ok:true, prompt:string}|{ok:false, reason:string}}
+ */
+export function checkPrompt(raw) {
+  const prompt = typeof raw === 'string' ? raw.trim() : '';
+  if (!prompt) return { ok: false, reason: '指示が空です' };
+  if (prompt.length > PROMPT_MAX) {
+    return { ok: false, reason: `指示が長すぎます（${PROMPT_MAX} 文字まで）` };
+  }
+  return { ok: true, prompt };
+}
+
+/**
  * セッション ID の形をしているか。
  *
  * @param {*} v 何か
@@ -415,11 +437,9 @@ export function buildRunSpec(input = {}, {
   const cwd = resolveCwd(src.cwd, { allowedDirs, platform });
   if (!cwd.ok) return { ok: false, reason: cwd.reason };
 
-  const prompt = typeof src.prompt === 'string' ? src.prompt.trim() : '';
-  if (!prompt) return { ok: false, reason: '指示が空です' };
-  if (prompt.length > PROMPT_MAX) {
-    return { ok: false, reason: `指示が長すぎます（${PROMPT_MAX} 文字まで）` };
-  }
+  const checkedPrompt = checkPrompt(src.prompt);
+  if (!checkedPrompt.ok) return { ok: false, reason: checkedPrompt.reason };
+  const prompt = checkedPrompt.prompt;
 
   // 起こすときだけ、空を既定へ倒してから確かめる
   const rawMode = str(src.permissionMode) || DEFAULT_PERMISSION_MODE;

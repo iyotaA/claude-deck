@@ -14,9 +14,12 @@ import { readRegistry } from '../read/registry.mjs';
 import { indexTranscripts, readAll, readAllOnce } from '../read/transcript.mjs';
 import { listSubagents, readSubagentLog } from '../read/subagents.mjs';
 import { extractMeta } from '../parse/meta.mjs';
-import { buildUsage, percentile } from '../parse/usage.mjs';
+import {
+  buildUsage, byModelRequests, bySkillIte, byToolTokens, percentile,
+} from '../parse/usage.mjs';
 import { projectNameOf } from '../shared/text.mjs';
 import { createLru } from '../shared/lru.mjs';
+import { DAY_MS, getter, intOf, textOf } from './query.mjs';
 
 /**
  * 横断集計で開くファイルの上限。
@@ -67,10 +70,6 @@ const SKILL_SERIES_MAX = 24;
  * （「差が無い」と「比べられない」は別物）。
  */
 const SKILL_TREND_MIN = 4;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-/** モデル名の文字数上限。長すぎる値は意味を持たないので頭だけ見る。 */
-const TEXT_MAX = 200;
 
 /**
  * 「直近の中央値」を出すために開くセッションの数。
@@ -252,7 +251,7 @@ export function foldSubUsage(list) {
       // 分母は**子ぶんの合計**。親の totals と混ぜない（別の節として出すため）
       share: ite > 0 ? r.ite / ite : null,
     }))
-    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill));
+    .sort(bySkillIte);
 
   return {
     requests,
@@ -406,18 +405,8 @@ export async function getSessionBaseline(sessionId) {
  * @param {number} min 下限
  * @param {number} max 上限
  */
-function intOf(raw, fallback, min, max) {
-  const n = Number.parseInt(raw ?? '', 10);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, n));
-}
 
 /** 文字列のパラメータ。空白だけなら null にする（「指定なし」と同じ扱い） */
-function textOf(raw) {
-  const t = String(raw ?? '').trim();
-  if (!t) return null;
-  return t.slice(0, TEXT_MAX);
-}
 
 /**
  * クエリ文字列を、丸めた形の指定に直す。
@@ -428,7 +417,7 @@ function textOf(raw) {
  * @returns {{limit: number, days: number|null, model: string|null}}
  */
 export function parseUsageQuery(params) {
-  const get = (key) => (params && typeof params.get === 'function' ? params.get(key) : null);
+  const get = getter(params);
 
   return {
     limit: intOf(get('limit'), LIMIT_DEFAULT, 1, USAGE_SCAN_MAX),
@@ -491,7 +480,7 @@ function mergeTools(list) {
 
   return [...byTool.values()]
     .map((r) => ({ ...r, avg: r.calls > 0 ? Math.round(r.tokens / r.calls) : null }))
-    .sort((a, b) => b.tokens - a.tokens || a.tool.localeCompare(b.tool))
+    .sort(byToolTokens)
     .slice(0, TOOLS_MAX);
 }
 
@@ -569,7 +558,7 @@ function mergeSkills(recs, totalIte) {
         trend: skillTrend(series),
       };
     })
-    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill));
+    .sort(bySkillIte);
 
   // ここでも切る。**実測でスキルは 24 種**あるので、SKILLS_MAX = 20 だと実際に当たる。
   // 黙って落とすと、画面の割合を全部足しても帰属率に届かない理由が消える
@@ -632,7 +621,7 @@ function mergeModels(list) {
   }
   const models = [...counts.entries()]
     .map(([model, requests]) => ({ model, requests }))
-    .sort((a, b) => b.requests - a.requests || a.model.localeCompare(b.model));
+    .sort(byModelRequests);
   return { model: models[0]?.model ?? null, models };
 }
 

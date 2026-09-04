@@ -311,7 +311,7 @@ function attributeTools(requests, sizes) {
       avg: r.calls > 0 ? Math.round(r.tokens / r.calls) : null,
       max: Math.round(r.max),
     }))
-    .sort((a, b) => b.tokens - a.tokens || a.tool.localeCompare(b.tool))
+    .sort(byToolTokens)
     .slice(0, TOOLS_MAX);
 
   return { tools, unattributed: { negativeCount, noToolTokens: Math.round(noToolTokens) } };
@@ -422,7 +422,7 @@ function attributeSkills(requests) {
       // runs は必ず1以上（区間があるから記録がある）ので、ここは 0 で割らない
       avg: Math.round(r.ite / r.runs),
     }))
-    .sort((a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill));
+    .sort(bySkillIte);
 
   // 切ったぶんも黙って落とさず、件数と量で返す
   // （画面に出る割合の合計が 100% に届かない理由の一部になる）
@@ -471,6 +471,26 @@ function collectCompactions(entries, sidechain) {
 
   return { count, dropped };
 }
+
+/**
+ * 表の並べ方。**1本ぶんと横断で同じものを使う。**
+ *
+ * 横断側（`view/usage.mjs`）がやっているのは「セッションを跨いで足す」ことだけで、
+ * 並べ方まで変える理由が無い。同じ式を両方に書くと、片方だけ直された日に
+ * 詳細と横断で順位が食い違う。`percentile` と同じ扱いでここから配る。
+ *
+ * 第二キーに名前を置いてあるのは、同点のときに**引くたび並びが揺れない**ようにするため
+ * （`Array.prototype.sort` の安定性は入力の順に依存するので、そこに頼らない）。
+ */
+
+/** ツール別。消費の多い順、同点ならツール名順。 */
+export const byToolTokens = (a, b) => b.tokens - a.tokens || a.tool.localeCompare(b.tool);
+
+/** スキル別。増分の多い順、同点ならスキル名順。 */
+export const bySkillIte = (a, b) => b.ite - a.ite || a.skill.localeCompare(b.skill);
+
+/** モデル別。要求の多い順、同点ならモデル名順。 */
+export const byModelRequests = (a, b) => b.requests - a.requests || a.model.localeCompare(b.model);
 
 /**
  * 昇順に並んだ配列から百分位を取る。
@@ -527,7 +547,7 @@ function modelBreakdown(requests) {
   }
   const models = [...counts.entries()]
     .map(([model, n]) => ({ model, requests: n }))
-    .sort((a, b) => b.requests - a.requests || a.model.localeCompare(b.model));
+    .sort(byModelRequests);
   return { model: models[0]?.model ?? null, models };
 }
 
