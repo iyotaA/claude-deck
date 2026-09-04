@@ -380,6 +380,34 @@ Node 18 以降はプロセスごと終わる。画面が死ぬだけでなく通
 - **`ClaudeDeck.cmd` は ASCII のみ。** `cmd.exe` は解析時のコンソールコードページで読むため、日本語を置くと shift-jis 環境で壊れる。日本語のメッセージは node 側から出す
 - **0 と「不明」を分ける。** 取れなかったものを 0 と書かない。キャッシュの目印にも同じで、`logSize` が `0` なら「不明」として必ず取り直す（スキルの索引の `isFresh` も同じ扱い）
 
+### 名前を変えられないもの（凍結）
+
+上の一覧が「作りの約束」なのに対し、こちらは**名前そのもの**の話。
+**破っても何のエラーも出ない。** 黙って更新が止まるか、設定が消える。
+
+固定しているのは `test/contract.test.mjs`。**壊した理由と直し方はそこのコメントにある。**
+
+| 何 | 破ったときに起きること |
+|---|---|
+| `GET /api/health` の `ok` `version` `configDir` `clients` `startedBy` | ランチャが「動いていない」と判断して二重起動を試み、10秒で諦める |
+| `POST /api/quit` | 更新の前にサーバーを止められず、`node.exe` がファイルを掴んだまま差し替えが転ぶ。**画面からは一度も叩かれない外部専用の窓口** |
+| `--no-open` `--port-file` `--restarted` `--wait-pid` `--apply-update` `--background` | **旧版のランチャが新版を `--restarted` で起こす。** 新版が受けなくなると更新の直後にサーバーが立たない |
+| `CLAUDE_DECK_LAUNCHER` / `CLAUDE_DECK_PORT` | 更新ボタンが永久に押せない／開いたままの窓が復帰しない |
+| `manual` / `launcher` の語 | 相乗りの判断が黙って無効化（実測で踏んだ。原因を掴むのに `netstat` からプロセスの親まで辿った） |
+| `%LOCALAPPDATA%\ClaudeDeck\` の紙6つの**ファイル名** | 旧ファイルが**永久に残る**。消すコードを誰も持っていない |
+| `config.json` の既存キー名 | **移行コードが1行も無い。** Slack の Webhook と「起こしてよいフォルダ」が黙って消える |
+| `update.json` の `requested` / `prevPort` | 更新のあとの版の照合と、窓の復帰が死ぬ |
+| `$PACK_ID` / `$REPO_URL` / `$MAIN_EXE`（`scripts/release.ps1`） | **いま使っている人の手元で、更新が二度と当たらなくなる** |
+
+**足すのは安全。** `config.json` は未知のキーを保持する（`mergeSettings` / `mergeRunDirs`）し、
+`update.json` と `startup.json` は知らない状態語を通してラベルだけ落とす。
+
+**`src/` と `public/` の中は自由に動かしてよい。**
+更新は `current\` フォルダを丸ごと差し替えるので、消したファイルは新しい版に残らない。
+ただし `scripts/release.ps1` の `$APP_INCLUDE` は**トップレベルの名前だけ**の許可リストなので、
+中の改名はそこに現れない。実行時にしか壊れない相対パス3本
+（`os/focus.mjs` → `scripts/focus.ps1`、`shared/appinfo.mjs` → `package.json`、`server.mjs` → `public`）だけは手で確かめる。
+
 ## コードの書き方
 
 - ESM（`"type": "module"`）。拡張子は `.mjs`
