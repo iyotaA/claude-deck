@@ -73,7 +73,7 @@ export async function loadDetail(sessionId, { silent = false } = {}) {
     const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { cache: 'no-store' });
     if (!res.ok) {
       // サーバは理由を日本語で返してくる。HTTP 404 より読める文言になるので、あればそれを出す
-      const reason = await res.json().then((j) => j?.error).catch(() => null);
+      const reason = await res.json().then((j) => j?.reason ?? j?.error).catch(() => null);
       throw new Error(reason ?? `HTTP ${res.status}`);
     }
     const data = await res.json();
@@ -157,8 +157,14 @@ export async function loadUsage(sessionId) {
     if (res.status === 404) {
       // 404 は2通りある。セッションが無い（サーバーが理由を JSON で返す）と、
       // 窓口が無い（静的配信まで落ちるので JSON ではない）。後者だけ諦める
+      //
+      // **`reason` と `error` の両方を見る。** サーバーの断りは `{ok:false, reason}` に
+      // 揃えたが、更新の途中では「画面は新しく、サーバーは古い」状態が実在する。
+      // 古い側は `{error}` を返すので、片方だけ見ると理由が読めず
+      // 「窓口ごと無い」と誤判定して数値を永久に諦める。
+      // **外してよいのは、古い版が手元から消えたと言い切れるようになってから。**
       const body = await res.json().catch(() => null);
-      if (!body?.error) usageUnavailable = true;
+      if (!body?.reason && !body?.error) usageUnavailable = true;
       if (token !== usageToken || store.selected !== sessionId) return;
       store.usage = null;
       store.usageError = null;
@@ -168,7 +174,7 @@ export async function loadUsage(sessionId) {
     }
 
     if (!res.ok) {
-      const reason = await res.json().then((j) => j?.error).catch(() => null);
+      const reason = await res.json().then((j) => j?.reason ?? j?.error).catch(() => null);
       throw new Error(reason ?? `HTTP ${res.status}`);
     }
 
@@ -235,7 +241,7 @@ export async function loadUsageBaseline(sessionId) {
       // 数値側と同じ切り分け。JSON で理由が返るならセッションが無いだけ、
       // 返らないなら窓口ごと無い（サーバーが古い）
       const body = await res.json().catch(() => null);
-      if (!body?.error) baselineUnavailable = true;
+      if (!body?.reason && !body?.error) baselineUnavailable = true;
       if (token !== baselineToken || store.selected !== sessionId) return;
       store.usageBaseline = null;
       renderDetailIfNeeded();

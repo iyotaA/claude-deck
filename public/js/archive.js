@@ -205,7 +205,7 @@ async function loadArchive({ append = false } = {}) {
       return;
     }
     if (!res.ok) {
-      const reason = await res.json().then((j) => j?.error).catch(() => null);
+      const reason = await res.json().then((j) => j?.reason ?? j?.error).catch(() => null);
       throw new Error(reason ?? `HTTP ${res.status}`);
     }
     const data = await res.json();
