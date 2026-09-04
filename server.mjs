@@ -380,6 +380,30 @@ async function handleFocus(res, pid) {
  * @param {number} [limit] 受け取るバイト数の上限
  * @returns {Promise<object>} 本文が空なら {}
  */
+/**
+ * 非同期に組む応答を1本返す。GET の窓口8本が同じ形だった。
+ *
+ * **失敗の受け皿を必ず持つ。** `.catch()` の無い async を呼ぶと
+ * unhandled rejection で Node がプロセスごと落とす（実測で `GET /%ZZ` の1発で死んだ）。
+ * ここを通せば、窓口を1本足すたびに受け皿を書き忘れる道が無くなる。
+ *
+ * **断りの形は POST 側と揃える**（`{ok:false, reason}`）。
+ * 以前はここだけ `{error}` で、窓口によってキーが違っていた。
+ *
+ * @param {object} res レスポンス
+ * @param {Promise<object|null>} promise 応答の中身。null を返したら「無い」とみなす
+ * @param {string|null} [notFound] null が返ったときの断り文。無ければ null をそのまま 200 で返す
+ */
+function serveAsync(res, promise, notFound = null) {
+  promise.then(
+    (payload) => {
+      if (!payload && notFound) sendJson(res, 404, { ok: false, reason: notFound });
+      else sendJson(res, 200, payload);
+    },
+    (err) => sendJson(res, 500, { ok: false, reason: errText(err) }),
+  );
+}
+
 function readJsonBody(req, limit = BODY_MAX) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -865,6 +889,42 @@ function liveSessionIds() {
 }
 
 /**
+ * 走っている run を動かす窓口の定型。
+ *
+ * `input` / `answer` / `mode` / `interrupt` の4本が完全に同型だった。
+ * 違うのは**本文の上限**と、**台帳のどの口を呼ぶか**の2つだけ。
+ *
+ * **どの窓口でも応答の前に `pushRunRows()` を通す。** 答えれば許可待ちが消え、
+ * 撃てば `switching` や `interrupting` が立つ。押した窓だけが知っている状態を作らない。
+ *
+ * **`start` と `switch` はここを通さない。** あちらは成功時に `runId` を返したり、
+ * 起こしてよいフォルダを渡したりと固有の事情がある。畳むために引数を増やすと、
+ * この関数を読んでも何が起きるか分からなくなる。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ * @param {number} limit 本文の上限（窓口ごとに違う。全体を上げない）
+ * @param {(body: object) => object} call 台帳を動かす。断り方も status ごと返す
+ */
+async function runWrite(req, res, limit, call) {
+  let body;
+  try {
+    body = await readJsonBody(req, limit);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: errText(err) });
+    return;
+  }
+
+  const r = call(body);
+  pushRunRows();
+  if (!r.ok) {
+    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
+    return;
+  }
+  sendJson(res, r.status, { ok: true, run: r.row });
+}
+
+/**
  * セッションを1本起こす。
  *
  * 断る理由が5つある（掴めていない 503 / 指定が不正 400 / もう動いている 409 /
@@ -903,22 +963,9 @@ async function handleRunStart(req, res) {
  * @param {object} res レスポンス
  * @param {string} runId 実行の識別子
  */
-async function handleRunInput(req, res, runId) {
-  let body;
-  try {
-    body = await readJsonBody(req, RUN_BODY_MAX);
-  } catch (err) {
-    sendJson(res, 400, { ok: false, reason: errText(err) });
-    return;
-  }
-
-  const r = runner.input(runId, body?.prompt ?? body?.text);
-  pushRunRows();
-  if (!r.ok) {
-    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
-    return;
-  }
-  sendJson(res, r.status, { ok: true, run: r.row });
+function handleRunInput(req, res, runId) {
+  return runWrite(req, res, RUN_BODY_MAX,
+    (body) => runner.input(runId, body?.prompt ?? body?.text));
 }
 
 /**
@@ -934,23 +981,9 @@ async function handleRunInput(req, res, runId) {
  * @param {object} res レスポンス
  * @param {string} runId 実行の識別子
  */
-async function handleRunAnswer(req, res, runId) {
-  let body;
-  try {
-    body = await readJsonBody(req, ANSWER_BODY_MAX);
-  } catch (err) {
-    sendJson(res, 400, { ok: false, reason: errText(err) });
-    return;
-  }
-
-  const r = runner.answer(runId, body?.requestId, body);
-  // 答えると許可待ちが消えるので、一覧の行も変わる
-  pushRunRows();
-  if (!r.ok) {
-    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
-    return;
-  }
-  sendJson(res, r.status, { ok: true, run: r.row });
+function handleRunAnswer(req, res, runId) {
+  return runWrite(req, res, ANSWER_BODY_MAX,
+    (body) => runner.answer(runId, body?.requestId, body));
 }
 
 /**
@@ -969,23 +1002,8 @@ async function handleRunAnswer(req, res, runId) {
  * @param {object} res レスポンス
  * @param {string} runId 実行の識別子
  */
-async function handleRunMode(req, res, runId) {
-  let body;
-  try {
-    body = await readJsonBody(req);
-  } catch (err) {
-    sendJson(res, 400, { ok: false, reason: errText(err) });
-    return;
-  }
-
-  const r = runner.setLive(runId, body);
-  // 撃った時点で行の `switching` が変わる。押した窓以外にも「切り替え中」を出す
-  pushRunRows();
-  if (!r.ok) {
-    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
-    return;
-  }
-  sendJson(res, r.status, { ok: true, run: r.row });
+function handleRunMode(req, res, runId) {
+  return runWrite(req, res, BODY_MAX, (body) => runner.setLive(runId, body));
 }
 
 /**
@@ -1003,23 +1021,8 @@ async function handleRunMode(req, res, runId) {
  * @param {object} res レスポンス
  * @param {string} runId 実行の識別子
  */
-async function handleRunInterrupt(req, res, runId) {
-  let body;
-  try {
-    body = await readJsonBody(req);
-  } catch (err) {
-    sendJson(res, 400, { ok: false, reason: errText(err) });
-    return;
-  }
-
-  const r = runner.interrupt(runId, body);
-  // 撃った時点で行の `interrupting` が変わる。押した窓以外にも「割り込み中」を出す
-  pushRunRows();
-  if (!r.ok) {
-    sendJson(res, r.status, { ok: false, reason: r.reason, run: r.row ?? null });
-    return;
-  }
-  sendJson(res, r.status, { ok: true, run: r.row });
+function handleRunInterrupt(req, res, runId) {
+  return runWrite(req, res, BODY_MAX, (body) => runner.interrupt(runId, body));
 }
 
 /**
@@ -1206,6 +1209,17 @@ function handleWrite(req, res, pathname, url) {
 
 const watchers = [];
 
+/**
+ * 畳むときに止めるタイマ。
+ *
+ * **`unref()` だけでは足りない。** あれは「これが理由でプロセスを生かし続けない」
+ * という意味で、止める指示ではない。`server.close()` を待っているあいだも動き続けるので、
+ * 畳んでいる最中に一覧の引き直しや通知の送信が走る。
+ * 窓ごとのタイマ（SSE の tick と ping）は `close` で消しているが、
+ * こちらは持ち主がいないので配列に控えておく
+ */
+const timers = [];
+
 /** 変更を検知したら一覧を作り直す。失敗しても致命ではない（ポーリングが残る）。 */
 function watch(dir, recursive) {
   try {
@@ -1227,7 +1241,9 @@ function watch(dir, recursive) {
 function startWatching() {
   const okSessions = watch(sessionsDir, false);
   const okProjects = watch(projectsDir, true);
-  setInterval(() => queueRefresh(0), POLL_MS).unref?.();
+  const poll = setInterval(() => queueRefresh(0), POLL_MS);
+  poll.unref?.();
+  timers.push(poll);
   return { okSessions, okProjects };
 }
 
@@ -1246,19 +1262,13 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/sessions') {
     // SSE と同じものを返す。ここで合流を通さないと、押し出しでは実行中に見えるのに
     // 1回引いたときだけ「返信待ち」に見える、という食い違いが生まれる
-    computeSessions().then(
-      (payload) => sendJson(res, 200, withRuns(payload)),
-      (err) => sendJson(res, 500, { error: errText(err) }),
-    );
+    serveAsync(res, computeSessions().then(withRuns));
     return;
   }
 
   // 書庫。一覧と違って毎秒引かれるものではないので、その場で作って返す（push はしない）
   if (pathname === '/api/archive') {
-    listArchive(parseArchiveQuery(url.searchParams)).then(
-      (payload) => sendJson(res, 200, payload),
-      (err) => sendJson(res, 500, { error: errText(err) }),
-    );
+    serveAsync(res, listArchive(parseArchiveQuery(url.searchParams)));
     return;
   }
 
@@ -1267,10 +1277,7 @@ const server = http.createServer((req, res) => {
   // ログを全文読むので、一番重い窓口。上限（USAGE_SCAN_MAX）で切って、
   // 切ったことは meta.scanLimited で正直に返す
   if (pathname === '/api/usage') {
-    listUsage(parseUsageQuery(url.searchParams)).then(
-      (payload) => sendJson(res, 200, payload),
-      (err) => sendJson(res, 500, { error: errText(err) }),
-    );
+    serveAsync(res, listUsage(parseUsageQuery(url.searchParams)));
     return;
   }
 
@@ -1279,12 +1286,10 @@ const server = http.createServer((req, res) => {
   // 読み手が順序を気にしないで済むよう、具体的なほうを手前に置く
   const entryMatch = /^\/api\/sessions\/([\w.-]{1,80})\/entry\/([\w-]{1,80})$/.exec(pathname);
   if (entryMatch) {
-    getRawEntry(entryMatch[1], entryMatch[2], { agentId: url.searchParams.get('agent') }).then(
-      (raw) => {
-        if (!raw) sendJson(res, 404, { error: 'その行が見つかりません' });
-        else sendJson(res, 200, raw);
-      },
-      (err) => sendJson(res, 500, { error: errText(err) }),
+    serveAsync(
+      res,
+      getRawEntry(entryMatch[1], entryMatch[2], { agentId: url.searchParams.get('agent') }),
+      'その行が見つかりません',
     );
     return;
   }
@@ -1296,13 +1301,7 @@ const server = http.createServer((req, res) => {
   // 理由は view/subagent.mjs の getSubagentDetail の JSDoc に書いてある
   const agentMatch = /^\/api\/sessions\/([\w.-]{1,80})\/subagents\/([\w-]{1,64})$/.exec(pathname);
   if (agentMatch) {
-    getSubagentDetail(agentMatch[1], agentMatch[2]).then(
-      (payload) => {
-        if (!payload) sendJson(res, 404, { error: 'その記録が見つかりません' });
-        else sendJson(res, 200, payload);
-      },
-      (err) => sendJson(res, 500, { error: errText(err) }),
-    );
+    serveAsync(res, getSubagentDetail(agentMatch[1], agentMatch[2]), 'その記録が見つかりません');
     return;
   }
 
@@ -1312,13 +1311,7 @@ const server = http.createServer((req, res) => {
   // 混ぜると数値の表示そのものが遅くなる。画面は先に数値を出し、遅れて差を書き足す
   const baselineMatch = /^\/api\/sessions\/([\w.-]{1,80})\/usage\/baseline$/.exec(pathname);
   if (baselineMatch) {
-    getSessionBaseline(baselineMatch[1]).then(
-      (payload) => {
-        if (!payload) sendJson(res, 404, { error: 'そのセッションが見つかりません' });
-        else sendJson(res, 200, payload);
-      },
-      (err) => sendJson(res, 500, { error: errText(err) }),
-    );
+    serveAsync(res, getSessionBaseline(baselineMatch[1]), 'そのセッションが見つかりません');
     return;
   }
 
@@ -1328,25 +1321,13 @@ const server = http.createServer((req, res) => {
   // ここに集計を足すと、数値を見ない人まで詳細を開く速度が落ちる
   const usageMatch = /^\/api\/sessions\/([\w.-]{1,80})\/usage$/.exec(pathname);
   if (usageMatch) {
-    getSessionUsage(usageMatch[1]).then(
-      (payload) => {
-        if (!payload) sendJson(res, 404, { error: 'そのセッションが見つかりません' });
-        else sendJson(res, 200, payload);
-      },
-      (err) => sendJson(res, 500, { error: errText(err) }),
-    );
+    serveAsync(res, getSessionUsage(usageMatch[1]), 'そのセッションが見つかりません');
     return;
   }
 
   const detailMatch = /^\/api\/sessions\/([\w.-]{1,80})$/.exec(pathname);
   if (detailMatch) {
-    getSessionDetail(detailMatch[1]).then(
-      (detail) => {
-        if (!detail) sendJson(res, 404, { error: 'そのセッションが見つかりません' });
-        else sendJson(res, 200, detail);
-      },
-      (err) => sendJson(res, 500, { error: errText(err) }),
-    );
+    serveAsync(res, getSessionDetail(detailMatch[1]), 'そのセッションが見つかりません');
     return;
   }
 
@@ -1415,7 +1396,7 @@ const server = http.createServer((req, res) => {
   const runMatch = /^\/api\/runs\/([\w-]{1,64})$/.exec(pathname);
   if (runMatch) {
     const run = runner.get(runMatch[1]);
-    if (!run) sendJson(res, 404, { error: 'その実行は見つかりません' });
+    if (!run) sendJson(res, 404, { ok: false, reason: 'その実行は見つかりません' });
     else sendJson(res, 200, run);
     return;
   }
@@ -1588,7 +1569,9 @@ server.once('listening', () => {
   // 深いリンクに使う。ポートはずれることがあるので、決まってから渡す
   notifier.setBaseUrl(url);
   // 送信は refresh() とは別の時計で回す。flush は refresh を呼ばず、待たない
-  setInterval(() => { notifier.flush(); }, FLUSH_MS).unref();
+  const flush = setInterval(() => { notifier.flush(); }, FLUSH_MS);
+  flush.unref();
+  timers.push(flush);
 
   // claude CLI を1回だけ探して版を読む。結果は /api/health の claude に出る。
   // 掴めなくてもダッシュボードとしては動くので、待たないし致命扱いにもしない。
@@ -1663,6 +1646,7 @@ function shutdown(code = 0) {
   for (const w of watchers) {
     try { w.close(); } catch { /* すでに閉じている */ }
   }
+  for (const t of timers) clearInterval(t);
 
   // 起こした子を畳みにいく。**待たない。**
   // `stopClaude` の3段（stdin を閉じる → taskkill /T → taskkill /T /F）は最長5秒かかるが、
