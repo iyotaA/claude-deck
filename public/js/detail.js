@@ -549,12 +549,21 @@ export function renderDetail() {
     if (!store.selected) {
       dom.detail.append(el('div', 'detail-empty', '左の一覧からセッションを選ぶと、ここに中身が出ます'));
     } else if (error) {
+      // **通常の経路と同じ器（.detail）で包む。**
+      // 上の余白（1.1rem）と読む幅の上限をあちらが持っているので、
+      // 素で置くと上のバーに貼り付いて（実測で隙間 1px）、幅も版面を無視して端まで伸びる。
+      //
+      // 隣の2つを包まないのは持ちものが違うから。
+      // `.detail-empty` は `height: 100%` で中央に寄せる（包むと親の高さが
+      // 中身なりになって効かない）。`.loading` は自前で padding: 1.5rem を持つ
+      const wrap = el('div', 'detail');
       const p = panel('このセッションは開けませんでした');
       p.body.append(el('p', 'note', error));
       const id = el('p', 'note', 'セッションID ');
       id.append(el('span', 'mono', store.selected));
       p.body.append(id);
-      dom.detail.append(p.section);
+      wrap.append(p.section);
+      dom.detail.append(wrap);
     } else {
       dom.detail.append(el('div', 'loading', 'ログを読んでいます…'));
     }
