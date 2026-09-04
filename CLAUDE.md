@@ -379,9 +379,9 @@ Node 18 以降はプロセスごと終わる。画面が死ぬだけでなく通
 - **`async` の窓口を `.catch()` 無しで呼ばない。** 拾われなかった拒否は Node 18 以降でプロセスを殺す。実測で `GET /%ZZ` の1発が `serveStatic` の `decodeURIComponent` からサーバーを落としていた。GET は門番を通らないので、他所のページの `<img src>` だけで撃てる（詳しくは「落ちない口の作り方」）
 - **`ClaudeDeck/` を `.gitignore` から外さない。** リポジトリは public。`appdata.mjs` は `LOCALAPPDATA` も `XDG_STATE_HOME` も `HOME` も無いときアプリ直下へ倒れるので、そこに落ちる `config.json`（**生の Webhook URL 入り**）が `git add -A` で公開リポジトリに乗る
 - **`innerHTML` を使わない。** ログ本文をそのまま画面に出すので、必ず `textContent` で入れる
-- **`.ps1` は UTF-8 BOM 付きで保存する。** 旧 `powershell.exe` (5.1) は BOM が無いと OS の既定コードページで読み、日本語コメントが化けて構文解析まで壊れる。`pwsh` (7) は通るので気づきにくい
+- **`.ps1` は UTF-8 BOM 付きで保存する。** 旧 `powershell.exe` (5.1) は BOM が無いと OS の既定コードページで読み、日本語コメントが化けて構文解析まで壊れる。`pwsh` (7) は通るので気づきにくい（`test/contract.test.mjs` が見ている）
 - **改行は `.gitattributes` が決める。** 既定は LF、`.cmd` と `.ps1` だけ CRLF。手元の `core.autocrlf` に関わらずこちらが勝つので、設定を揃えてもらう必要は無い。BOM は git が触らないので、改行を変換しても残る
-- **`ClaudeDeck.cmd` は ASCII のみ。** `cmd.exe` は解析時のコンソールコードページで読むため、日本語を置くと shift-jis 環境で壊れる。日本語のメッセージは node 側から出す
+- **`ClaudeDeck.cmd` は ASCII のみ。** `cmd.exe` は解析時のコンソールコードページで読むため、日本語を置くと shift-jis 環境で壊れる。日本語のメッセージは node 側から出す（`test/contract.test.mjs` が見ている）
 - **0 と「不明」を分ける。** 取れなかったものを 0 と書かない。キャッシュの目印にも同じで、`logSize` が `0` なら「不明」として必ず取り直す（スキルの索引の `isFresh` も同じ扱い）
 
 ### 名前を変えられないもの（凍結）
@@ -398,6 +398,8 @@ Node 18 以降はプロセスごと終わる。画面が死ぬだけでなく通
 | `--no-open` `--port-file` `--restarted` `--wait-pid` `--apply-update` `--background` | **旧版のランチャが新版を `--restarted` で起こす。** 新版が受けなくなると更新の直後にサーバーが立たない |
 | `CLAUDE_DECK_LAUNCHER` / `CLAUDE_DECK_PORT` | 更新ボタンが永久に押せない／開いたままの窓が復帰しない |
 | `manual` / `launcher` の語 | 相乗りの判断が黙って無効化（実測で踏んだ。原因を掴むのに `netstat` からプロセスの親まで辿った） |
+| 既定のポート **4317**（`server.mjs` / `ServerProcess.cs` / `autostart.ps1` の3箇所） | ランチャが古い番号を探して「動いていない」と判断し、二重に立てようとして10秒で諦める。旧方式の自動起動は違う番号を案内する |
+| 紙に書く**状態の語**（更新9つ・自動起動4つ＋旧方式4つ） | C# が書いて Node がラベルを引く。改名すると画面が「状態が分かりません」になるだけで、どこにもエラーが出ない |
 | `%LOCALAPPDATA%\ClaudeDeck\` の紙6つの**ファイル名** | 旧ファイルが**永久に残る**。消すコードを誰も持っていない |
 | `config.json` の既存キー名 | **移行コードが1行も無い。** Slack の Webhook と「起こしてよいフォルダ」が黙って消える |
 | `update.json` の `requested` / `prevPort` | 更新のあとの版の照合と、窓の復帰が死ぬ |

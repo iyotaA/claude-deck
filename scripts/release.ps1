@@ -151,9 +151,22 @@ function Invoke-Tool([string]$FilePath, [string[]]$ToolArgs, [string[]]$Secrets 
   }
 }
 
-function Assert-Tool([string]$Name, [string]$Hint) {
-  if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
-    Stop-Release "$Name が見つかりません。$Hint"
+# 道具と、無かったときの案内。
+#
+# 案内文を呼び出しごとに書くと、3箇所に同じ URL が散る（実際そうなっていた）。
+# 入れ方が変わった日に直すのは1箇所でいい。
+$TOOL_HINTS = @{
+  'dotnet' = 'https://dotnet.microsoft.com/download から SDK 10 以降を入れてください'
+  'vpk'    = 'dotnet tool install -g vpk'
+  'gh'     = 'https://cli.github.com から入れて gh auth login を済ませてください'
+}
+
+# 要る道具が揃っているか。1つでも欠けたらそこで止める
+function Assert-Tools([string[]]$Names) {
+  foreach ($name in $Names) {
+    if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
+      Stop-Release "$name が見つかりません。$($TOOL_HINTS[$name])"
+    }
   }
 }
 
@@ -474,28 +487,24 @@ switch ($Action) {
     Invoke-FetchNode
   }
   'stage' {
-    Assert-Tool 'dotnet' 'https://dotnet.microsoft.com/download から SDK 10 以降を入れてください'
+    Assert-Tools @('dotnet')
     Invoke-FetchNode
     Invoke-Stage $version
   }
   'pack' {
-    Assert-Tool 'dotnet' 'https://dotnet.microsoft.com/download から SDK 10 以降を入れてください'
-    Assert-Tool 'vpk' 'dotnet tool install -g vpk'
+    Assert-Tools @('dotnet', 'vpk')
     Invoke-FetchNode
     Invoke-Stage $version
     Invoke-Pack $version
     Show-Output
   }
   'upload' {
-    Assert-Tool 'vpk' 'dotnet tool install -g vpk'
-    Assert-Tool 'gh' 'https://cli.github.com から入れて gh auth login を済ませてください'
+    Assert-Tools @('vpk', 'gh')
     Assert-ReadyToUpload $version
     Invoke-Upload $version
   }
   'all' {
-    Assert-Tool 'dotnet' 'https://dotnet.microsoft.com/download から SDK 10 以降を入れてください'
-    Assert-Tool 'vpk' 'dotnet tool install -g vpk'
-    Assert-Tool 'gh' 'https://cli.github.com から入れて gh auth login を済ませてください'
+    Assert-Tools @('dotnet', 'vpk', 'gh')
     # 先に確認する。作ってから断られるより、作る前に断られるほうがよい
     Assert-ReadyToUpload $version
     Invoke-FetchNode

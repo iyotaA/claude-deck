@@ -50,9 +50,6 @@ static class Updates
     /// <summary>更新の説明を載せる上限。画面の帯に出すだけなので長さは要らない。</summary>
     const int NOTES_MAX = 2000;
 
-    /// <summary>失敗の理由を載せる上限。</summary>
-    const int ERROR_MAX = 300;
-
     /// <summary>InnerException を辿る深さの上限。参照が輪になっていても止まるように。</summary>
     const int CAUSE_DEPTH = 5;
 
@@ -150,7 +147,7 @@ static class Updates
             var target = info.TargetFullRelease;
             var state = Make("available", now,
                 available: target?.Version?.ToString(),
-                notes: Clip(target?.NotesMarkdown, NOTES_MAX));
+                notes: Paper.Clip(target?.NotesMarkdown, NOTES_MAX));
 
             Log.Line($"新しい版があります: {state.Available ?? "(版が読めない)"}");
             return Save(previous, state);
@@ -161,7 +158,7 @@ static class Updates
             // 分けておくと、画面で書き分けられる（片方は待てば直る、片方は直らない）
             var state = IsNetworkTrouble(ex) ? "unreachable" : "failed";
             Log.Line($"更新を確認できませんでした（{state}）: {ex.GetType().Name}: {ex.Message}");
-            return Save(previous, Make(state, now, error: Clip(ex.Message, ERROR_MAX)));
+            return Save(previous, Make(state, now, error: Paper.Clip(ex.Message, Paper.ERROR_MAX)));
         }
     }
 
@@ -244,7 +241,7 @@ static class Updates
 
             var target = info.TargetFullRelease;
             requested = target?.Version?.ToString();
-            var notes = Clip(target?.NotesMarkdown, NOTES_MAX);
+            var notes = Paper.Clip(target?.NotesMarkdown, NOTES_MAX);
             Log.Line($"取り寄せます: {requested ?? "(版が読めない)"}");
 
             previous = Save(previous, Make("downloading", Now(),
@@ -278,7 +275,7 @@ static class Updates
             var state = IsNetworkTrouble(ex) ? "unreachable" : "failed";
             Log.Line($"入れ替えに失敗しました（{state}）: {ex.GetType().Name}: {ex.Message}");
             Save(previous, Make(state, Now(),
-                requested: requested, error: Clip(ex.Message, ERROR_MAX), prevPort: stoppedPort));
+                requested: requested, error: Paper.Clip(ex.Message, Paper.ERROR_MAX), prevPort: stoppedPort));
 
             if (stopped) await RecoverAsync(stoppedPort);
             return ExitCode.UPDATE_FAILED;
@@ -551,16 +548,4 @@ static class Updates
         return false;
     }
 
-    /// <summary>長すぎる文字列を切る。切り口がサロゲートペアの途中なら1文字戻す。</summary>
-    /// <param name="text">元の文字列。null 可。</param>
-    /// <param name="max">残す長さ。</param>
-    /// <returns>切った文字列。元が null なら null。</returns>
-    static string? Clip(string? text, int max)
-    {
-        if (text is null || text.Length <= max) return text;
-
-        var end = max;
-        if (char.IsHighSurrogate(text[end - 1])) end--;
-        return text[..end] + "…";
-    }
 }
