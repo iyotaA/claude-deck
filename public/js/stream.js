@@ -9,6 +9,7 @@ import { renderList, renderSummary, refreshTimes } from './list.js';
 import { loadDetail } from './session.js';
 import { renderDetailIfNeeded } from './detail.js';
 import { isZoomed } from './zoom.js';
+import { getJson } from './api.js';
 
 const initialSession = query.get('session');
 let firstApply = true;
@@ -87,9 +88,7 @@ export function setLive(state, label) {
 
 export async function fetchOnce() {
   try {
-    const res = await fetch('/api/sessions', { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    apply(await res.json());
+    apply(await getJson('/api/sessions'));
     return true;
   } catch (err) {
     setLive('off', `取得できません（${err.message}）`);

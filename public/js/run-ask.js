@@ -41,6 +41,7 @@ import { mdView } from './md-view.js';
 import { bodyText } from './timeline/index.js';
 import { panel, SEC } from './panel.js';
 import { runFor } from './runs.js';
+import { postJson } from './api.js';
 
 /**
  * 子がもういない状態。
@@ -125,13 +126,9 @@ async function send(ctx, body) {
   ctx.msg.dataset.tone = '';
 
   try {
-    const res = await fetch(`/api/runs/${encodeURIComponent(ctx.runId)}/answer`, {
-      method: 'POST',
-      // 付け忘れると書き込み口の門番に断られる
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ requestId: ctx.askId, ...body }),
-    });
-    const data = await res.json().catch(() => null);
+    const { res, data } = await postJson(
+      `/api/runs/${encodeURIComponent(ctx.runId)}/answer`,
+      { requestId: ctx.askId, ...body });
     // 返ってくるまでに別の要求へ移っていることがある
     if (sending !== ctx.askId) return;
 

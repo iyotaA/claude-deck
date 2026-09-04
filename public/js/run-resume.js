@@ -21,6 +21,7 @@
 import { el, fact } from './util.js';
 import { panel, SEC } from './panel.js';
 import { runFor, EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
+import { getJson, postJson } from './api.js';
 
 /** これに入っていれば、その run はもう終わっている（`run-view.js` と同じ語彙）。 */
 const RUN_OVER = new Set(['stopped', 'failed', 'done']);
@@ -65,9 +66,7 @@ async function loadOptions() {
   if (optionsAsked) return;
   optionsAsked = true;
   try {
-    const res = await fetch('/api/runs/options', { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    options = await res.json();
+    options = await getJson('/api/runs/options');
     if (ui) applyOptions();
   } catch {
     // 引けなくても続きは起こせる。欄を出さないだけにする。
@@ -313,13 +312,7 @@ async function start() {
   setBusy(true);
   say('起こしています…');
   try {
-    const res = await fetch('/api/runs', {
-      // 付け忘れると書き込み口の門番に断られる
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(collect(text)),
-    });
-    const data = await res.json().catch(() => null);
+    const { res, data } = await postJson('/api/runs', collect(text));
     // 返ってくるまでに別のセッションへ移っていることがある。
     // そのまま書くと**他人の詳細ペイン**のメッセージ欄と入力欄を書き換えることになる
     if (!ui || ui.sessionId !== runId) return;

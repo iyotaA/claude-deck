@@ -5,6 +5,7 @@
  */
 import { el, stamp } from './util.js';
 import { icon } from './icons.js';
+import { postJson } from './api.js';
 
 /**
  * ターミナルの窓を前面に出す。
@@ -20,14 +21,8 @@ import { icon } from './icons.js';
  */
 export async function focusTerminal(pid) {
   try {
-    // content-type は必須。書き込み口の門番がここを見て、
-    // 他所のページからの <form> による送信を弾いている（src/shared/origin.mjs）
-    const res = await fetch(`/api/focus?pid=${encodeURIComponent(pid)}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-    });
-    const data = await res.json();
-    if (!data.ok) return `出せません: ${data.reason}`;
+    const { data } = await postJson(`/api/focus?pid=${encodeURIComponent(pid)}`);
+    if (!data?.ok) return `出せません: ${data?.reason ?? '応答が読めません'}`;
     // 窓は前に出るがタブは選べない。出たつもりで待たせないよう、そこは正直に書く
     if (data.tabbed) return `${data.app} を前面に出しました。タブの切り替えは手動でどうぞ`;
     return `前面に出しました（${data.detail ?? ''}）`;
