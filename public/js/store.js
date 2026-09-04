@@ -425,6 +425,14 @@ export const store = {
     projects: [],
     /** スキルの候補。サーバが meta.skills で渡してくる */
     skills: [],
+    /**
+     * カードに出す数値。sessionId -> 1本ぶんの集計（取れなければ null）。
+     *
+     * 一覧（/api/archive）には載らない。**載せられない**ので別の窓口から遅れて引く
+     * （一覧は末尾 64KB しか読まないが、集計は先頭から積まないと出せない）。
+     * Map なので「まだ引いていない（undefined）」と「引いたが取れなかった（null）」を分けられる
+     */
+    usage: new Map(),
     /** 索引の様子（meta.skillIndex）。まだ作っている最中かをここで見る */
     skillIndex: null,
     deep: false,

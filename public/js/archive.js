@@ -13,14 +13,22 @@
  */
 import { el, kb, shortStamp, stamp, agentTag } from './util.js';
 import { icon } from './icons.js';
+import { tokensStrict, pctStrict } from './usage-chart.js';
 import { dom, store, syncQuery, ARCHIVE_SORTS, ARCHIVE_DAYS } from './store.js';
 import { select } from './session.js';
 
 /** カードを押されたあとの後始末。main.js が差す */
 let pick = null;
 
-/** 1ページの件数。サーバ側の上限は 50 */
-const ARCHIVE_PER = 30;
+/**
+ * 1ページの件数。サーバ側の上限は 50。
+ *
+ * **カードに数値を出したぶん背が伸びたので減らしてある。**
+ * 30 のままだと、4列の窓で 8 行ぶん送らないと最後まで見えない。
+ * ここを増やすときは、下の loadUsage が並列に叩く本数もそのまま増えることに注意
+ * （実測: 30 件を並列で約 1 秒。逐次だと 5.4 秒かかる）
+ */
+const ARCHIVE_PER = 20;
 /** 検索欄のデバウンス。打つたびに引くと 1 文字ごとにファイルを読ませることになる */
 const ARCHIVE_DEBOUNCE_MS = 200;
 
@@ -66,6 +74,13 @@ function buildArchiveCard(row) {
   const agents = agentTag(row.subagentCount);
   if (agents) meta.append(agents);
   if (meta.childElementCount > 0) card.append(meta);
+
+  // 数値の器。**空のまま置いておく。** 中身は別の窓口（/api/sessions/:id/usage）から
+  // 遅れて届く。ここで待つと、探した結果が出るまでが遅くなる
+  const stats = el('div', 'card-stats');
+  stats.dataset.usageFor = row.sessionId ?? '';
+  fillStats(stats, store.archive.usage.get(row.sessionId));
+  card.append(stats);
 
   card.addEventListener('click', () => {
     select(row.sessionId, 'archive');
@@ -214,6 +229,8 @@ async function loadArchive({ append = false } = {}) {
       renderSkills();
     }
     a.loaded = true;
+    // 数値は別の窓口から遅れて埋める。**ここで待たない**
+    loadUsage(a.rows);
   } catch (err) {
     if (token !== archiveToken) return;
     a.error = err.message;
@@ -223,6 +240,71 @@ async function loadArchive({ append = false } = {}) {
       renderArchive();
     }
   }
+}
+
+/** 数値の4つ。作業台の右の枠（usage-panel.js）と同じ順・同じ出どころにする */
+const STAT_DEFS = [
+  { key: 'ite', label: '実消費', of: (u) => tokensStrict(u?.totals?.ite) },
+  { key: 'ctx', label: '文脈', of: (u) => tokensStrict(u?.context?.last) },
+  { key: 'hit', label: '命中', of: (u) => pctStrict(u?.cache?.hitRate) },
+  { key: 'cmp', label: '圧縮', of: (u) => (typeof u?.compact?.count === 'number' ? `${u.compact.count}回` : '—') },
+];
+
+/**
+ * カードの数値を埋める。
+ *
+ * **まだ届いていないときは点線の器だけを置く。** 「0」と書かない ―― 使っていないのと
+ * まだ読めていないのが同じ顔になる（`tokensStrict` を使うのも同じ理由で、
+ * `util.js` の `tokens()` は 0 と不明を同じに見せる）。
+ *
+ * @param {HTMLElement} box `.card-stats`
+ * @param {object|null|undefined} u 1本ぶんの数値。undefined はまだ届いていない
+ */
+function fillStats(box, u) {
+  box.classList.toggle('is-waiting', u === undefined);
+  if (u === undefined) {
+    box.replaceChildren();
+    return;
+  }
+  const items = STAT_DEFS.map((d) => {
+    const cell = el('span', 'card-stat');
+    cell.append(el('span', 'k', d.label), el('span', 'v', d.of(u)));
+    return cell;
+  });
+  box.replaceChildren(...items);
+}
+
+/**
+ * いま出ているカードの数値を引く。
+ *
+ * **並列に投げる。** 逐次だと 30 件で 5.4 秒、並列なら約 1 秒（実測）。
+ * 1件ずつ届いたそばから、そのカードだけ書き換える ―― 一覧を組み直すと
+ * 読んでいる位置が飛ぶ（`refreshTimes` と同じ流儀）。
+ *
+ * @param {object[]} rows 引く対象。すでに持っているものは飛ばす
+ */
+async function loadUsage(rows) {
+  const a = store.archive;
+  const need = rows.filter((r) => r.sessionId && !a.usage.has(r.sessionId));
+  if (!need.length) return;
+  const token = archiveToken;
+
+  await Promise.all(need.map(async (row) => {
+    let value = null;
+    try {
+      const res = await fetch(`/api/sessions/${row.sessionId}/usage`, { cache: 'no-store' });
+      value = res.ok ? await res.json() : null;
+    } catch {
+      // 取れなくてもカードは出したまま。「—」が並ぶだけ
+      value = null;
+    }
+    // 検索し直されていたら書かない（古い応答で新しい画面を汚さない）
+    if (token !== archiveToken) return;
+    a.usage.set(row.sessionId, value);
+    // その1枚だけ差し替える。組み直さないのでスクロール位置が動かない
+    const box = dom.archive.querySelector(`.card-stats[data-usage-for="${CSS.escape(row.sessionId)}"]`);
+    if (box) fillStats(box, value);
+  }));
 }
 
 /**
@@ -337,7 +419,8 @@ export function initArchive({ onPick = null } = {}) {
   dom.archiveSkillField.prepend(icon('pencil', 14));
   dom.archiveDays.closest('.archive-field').prepend(icon('clock', 14));
   dom.archiveSort.closest('.archive-field').prepend(icon('sort', 14));
-  dom.archiveClear.prepend(icon('x', 13));
+  // 絵だけのボタン。名前は title と aria-label が持つ
+  dom.archiveClear.append(icon('x', 15));
 
   dom.archiveQ.addEventListener('input', () => {
     const next = dom.archiveQ.value.trim() || null;

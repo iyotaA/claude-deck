@@ -139,8 +139,11 @@
       </span>
       <!-- 既定はファイルを開かない検索。タイトルまで探すのは押されたときだけ -->
       <label><input type="checkbox" id="archive-deep"> 中身も探す</label>
-      <!-- 絞り込みを1つでも掛けているときだけ出す。押すと全部外す -->
-      <button class="btn archive-clear" id="archive-clear" type="button" hidden>絞り込みを外す</button>
+      <!-- 絞り込みを1つでも掛けているときだけ出す。押すと全部外す。
+           **絵だけにする。** 隣の絞り込みと同じ形だと「もう1つの絞り込み」に見える。
+           名前は title と aria-label に残るので、触れば出るし読み上げにも乗る -->
+      <button class="btn archive-clear" id="archive-clear" type="button" hidden
+              title="絞り込みを外す" aria-label="絞り込みを外す"></button>
       <!-- どこまで探せたかも、ここに出す。件数の脇に小さく出すだけだと打ち切りに気づけない -->
       <span id="archive-count"></span>
     </div>
