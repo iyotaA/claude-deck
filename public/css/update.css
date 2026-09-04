@@ -39,10 +39,11 @@
   width: .5rem;
   height: .5rem;
   border-radius: 50%;
-  background: var(--accent);
 }
 
-/* 確認できていない側は、新しい版があるのと同じ色にしない */
+/* 色だけ分ける。形（点）は上で共通に作ってある。
+   **確認できていない側を、新しい版があるのと同じ色にしない。** */
+.ver[data-update='new']::before { background: var(--accent); }
 .ver[data-update='bad']::before { background: var(--warn); }
 
 /* お知らせの帯。

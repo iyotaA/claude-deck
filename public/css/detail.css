@@ -342,7 +342,7 @@
 .choices li {
   padding: .3rem .55rem;
   border-left: 3px solid var(--border-strong);
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
   background: var(--bg-elev);
   color: var(--fg-muted);
   line-height: 1.55;
@@ -388,7 +388,7 @@ pre {
   padding: .7rem .8rem;
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   overflow-x: auto;
   font-size: .8rem;
   line-height: 1.55;
@@ -399,7 +399,7 @@ pre {
 code {
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: .1em .35em;
   font-size: .92em;
 }
@@ -439,7 +439,7 @@ pre code { background: none; border: 0; border-radius: 0; padding: 0; font-size:
   padding: .4rem .6rem;
   border-left: 3px solid var(--accent);
   background: var(--bg-elev);
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
 }
 
 .decision-a .label {
@@ -562,7 +562,7 @@ details.rejected .label { color: var(--fg); }
   height: 1.9rem;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--fg-muted);
 }

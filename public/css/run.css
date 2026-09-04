@@ -84,7 +84,7 @@
   box-shadow: var(--shadow);
 }
 
-.runform::backdrop { background: rgb(0 0 0 / 45%); }
+.runform::backdrop { background: var(--scrim); }
 
 /* 頭と足を留めて、中身だけを縦に流す */
 .runform[open] {
@@ -327,7 +327,7 @@
   box-shadow: var(--shadow);
 }
 
-.runsw::backdrop { background: rgb(0 0 0 / 45%); }
+.runsw::backdrop { background: var(--scrim); }
 
 /* 頭と足を留めて、中身だけを縦に流す */
 .runsw[open] {
@@ -400,7 +400,7 @@
   gap: .3rem;
   padding: .22rem .55rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-elev);
   color: var(--fg-muted);
   font: inherit;
@@ -442,7 +442,7 @@
   max-width: 12rem;
   padding: .22rem .5rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-elev);
   color: var(--fg-muted);
   font: inherit;

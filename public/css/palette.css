@@ -27,7 +27,7 @@
   box-shadow: var(--shadow);
 }
 
-.pal::backdrop { background: rgb(0 0 0 / 45%); }
+.pal::backdrop { background: var(--scrim); }
 
 .pal[open] {
   display: grid;
