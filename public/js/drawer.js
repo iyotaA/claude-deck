@@ -13,6 +13,7 @@
  * list.js -> main.js -> list.js の循環になって立ち上がらない。
  */
 import { el } from './util.js';
+import { icon } from './icons.js';
 import { dom } from './store.js';
 
 /** 開閉を覚えておく鍵。「見たいときだけ開く」運用なので、次に開いたときも同じ形にする */
@@ -116,7 +117,9 @@ export function initListDrawer() {
   // 一覧が無い画面に開閉ボタンだけが残ることもない
   const railBtn = el('button', 'rail-btn');
   railBtn.type = 'button';
-  railBtn.append(el('span', 'rail-label', '一覧'));
+  // 右のレールと同じく絵だけ。形は上のバーのハンバーガーと同じ sidebar を借りる
+  // （同じことをする口なので、別の形にすると覚え直しになる）
+  railBtn.append(icon('sidebar', 17));
   railBtn.addEventListener('click', () => {
     setListOpen(!dom.app.classList.contains('is-list-open'), railBtn);
   });
