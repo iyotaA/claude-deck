@@ -25,6 +25,7 @@ import { el } from './util.js';
 import { icon } from './icons.js';
 import { dom, store, SUMMARY_ORDER } from './store.js';
 import { getJson, postJson } from './api.js';
+import { closeOnBackdrop } from './modal.js';
 
 /**
  * 状態ごとの但し書き。
@@ -539,11 +540,7 @@ export function initSettings() {
   dom.settingsOpen.addEventListener('click', open);
   dom.settingsClose.addEventListener('click', () => dom.settings.close());
 
-  // 背面を押したら閉じる。dialog 自身には余白を持たせていないので、
-  // ここへ来るのは背面を押したときだけになる（settings.css の padding: 0）
-  dom.settings.addEventListener('click', (ev) => {
-    if (ev.target === dom.settings) dom.settings.close();
-  });
+  closeOnBackdrop(dom.settings);
 
   dom.settingsSave.addEventListener('click', save);
   dom.settingsTest.addEventListener('click', sendTest);

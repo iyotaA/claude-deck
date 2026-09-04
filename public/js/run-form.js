@@ -23,6 +23,7 @@ import { dom } from './store.js';
 import { select } from './session.js';
 import { getJson, postJson } from './api.js';
 import { fillSelect } from './form-kit.js';
+import { closeOnBackdrop } from './modal.js';
 
 /** 開いたときに引いた選択肢。閉じても捨てないが、開くたびに引き直す */
 let options = null;
@@ -256,11 +257,7 @@ export function initRunForm() {
   dom.runformOpen.addEventListener('click', openRunForm);
   dom.runformClose.addEventListener('click', () => dom.runform.close());
 
-  // 背面を押したら閉じる。dialog 自身に余白を持たせていないので、
-  // ここへ来るのは背面を押したときだけになる（run.css の padding: 0）
-  dom.runform.addEventListener('click', (ev) => {
-    if (ev.target === dom.runform) dom.runform.close();
-  });
+  closeOnBackdrop(dom.runform);
 
   dom.runformStart.addEventListener('click', start);
   dom.runformShow.addEventListener('click', show);

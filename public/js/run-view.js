@@ -30,6 +30,7 @@ import {
 } from './runs.js';
 import { getJson, postJson } from './api.js';
 import { fillSelect, gridRow } from './form-kit.js';
+import { closeOnBackdrop } from './modal.js';
 
 /**
  * 状態に応じたパネルの色。
@@ -797,11 +798,7 @@ function buildOps() {
 
   dlg.append(head, body, foot);
 
-  // 背面を押したら閉じる。dialog 自身に余白を持たせていないので、
-  // ここへ来るのは背面を押したときだけになる（run.css の padding: 0）
-  dlg.addEventListener('click', (ev) => {
-    if (ev.target === dlg) dlg.close();
-  });
+  closeOnBackdrop(dlg);
 
   // <form> で囲っていないので Enter は自分で拾う（起こすフォームと同じ作法）。
   // ここに複数行の欄は無いので、素直に「押した＝この内容にする」でよい
