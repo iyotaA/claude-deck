@@ -22,6 +22,7 @@ import { el, fact } from './util.js';
 import { panel, SEC } from './panel.js';
 import { runFor, EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
 import { getJson, postJson } from './api.js';
+import { fillSelect, gridRow } from './form-kit.js';
 
 /** これに入っていれば、その run はもう終わっている（`run-view.js` と同じ語彙）。 */
 const RUN_OVER = new Set(['stopped', 'failed', 'done']);
@@ -122,37 +123,6 @@ function noteModel() {
 function noteMode() {
   const hit = (options?.modes ?? []).find((m) => m.value === ui.mode.value);
   ui.danger.hidden = !hit?.danger;
-}
-
-/** `<select>` の中身を入れ替える。 */
-function fillSelect(sel, items) {
-  sel.replaceChildren();
-  for (const it of items) {
-    const opt = el('option', null, it.label);
-    opt.value = it.value;
-    sel.append(opt);
-  }
-}
-
-/**
- * 3列のグリッドに1行足す。設定モーダルの `.settings-grid` をそのまま借りている。
- *
- * @param {HTMLElement} grid 入れ先
- * @param {string} id 入力の id。ラベルと結ぶ
- * @param {string} text ラベル
- * @param {HTMLElement} control 入力。器（複数の入力をまとめた span）でもよい
- * @param {string} hint 下に出す一言
- * @param {string} [forId] 器を渡すとき、ラベルと結ぶ中の入力の id
- */
-function gridRow(grid, id, text, control, hint, forId = '') {
-  const lb = el('label', 'settings-label', text);
-  if (forId) {
-    lb.htmlFor = forId;
-  } else {
-    control.id = id;
-    lb.htmlFor = id;
-  }
-  grid.append(lb, control, el('p', 'settings-hint', hint));
 }
 
 /** 下に一言出す。空文字で消える。 */

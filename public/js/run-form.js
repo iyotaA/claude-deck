@@ -22,6 +22,7 @@ import { EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
 import { dom } from './store.js';
 import { select } from './session.js';
 import { getJson, postJson } from './api.js';
+import { fillSelect } from './form-kit.js';
 
 /** 開いたときに引いた選択肢。閉じても捨てないが、開くたびに引き直す */
 let options = null;
@@ -110,24 +111,6 @@ function noteFold() {
   if (effort) parts.push(EFFORT_LABELS[effort] ?? effort);
   parts.push(budget ? `上限 ${budget} USD` : '上限なし');
   dom.runFoldNote.textContent = parts.join(' / ');
-}
-
-/**
- * <select> の中身を組み直す。
- *
- * @param {HTMLSelectElement} sel
- * @param {Array<{value: string, label: string, danger?: boolean}>} items
- */
-function fillSelect(sel, items) {
-  sel.replaceChildren();
-  for (const it of items) {
-    const opt = el('option', null, it.label);
-    opt.value = it.value;
-    // 但し書きを出すかどうかの根拠。値そのもの（bypassPermissions）で
-    // 判定すると、語彙が増えたときにここも直すことになる
-    if (it.danger) opt.dataset.danger = '1';
-    sel.append(opt);
-  }
 }
 
 /** 引いた選択肢を画面へ流し込む */
