@@ -30,6 +30,13 @@ const RESET = '[0m';
 const DIM = '[2m';
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
 
+/**
+ * 色を付ける。TTY でないときと `NO_COLOR` のときは素のまま返す。
+ *
+ * @param {string} text 中身
+ * @param {string} [code] 色の指定。無ければ何もしない
+ * @returns {string}
+ */
 function paint(text, code) {
   return useColor && code ? `${code}${text}${RESET}` : text;
 }
@@ -41,6 +48,14 @@ function width(text) {
   return w;
 }
 
+/**
+ * 見た目の幅で切って、足りないぶんを空白で埋める。
+ * 収まらなければ末尾を `…` にする（列がずれるより読めないほうがまし）。
+ *
+ * @param {*} text 中身。null や undefined でも落とさない
+ * @param {number} size 何桁ぶんに収めるか
+ * @returns {string}
+ */
 function pad(text, size) {
   const t = String(text ?? '');
   let w = 0;
@@ -54,6 +69,12 @@ function pad(text, size) {
   return out + ' '.repeat(Math.max(0, size - w));
 }
 
+/**
+ * 経過を短く言う。**取れないものは 0 秒にせず「—」**（0 と不明を分ける）。
+ *
+ * @param {number|null|undefined} ms 経過（ミリ秒）
+ * @returns {string}
+ */
 function since(ms) {
   if (ms === null || ms === undefined) return '—';
   const s = Math.round(ms / 1000);
@@ -64,6 +85,11 @@ function since(ms) {
   return h < 24 ? `${h}時間${m % 60}分` : `${Math.floor(h / 24)}日`;
 }
 
+/**
+ * 一覧を1回書き出す。`--all` が無ければ終わったものを落とす。
+ *
+ * @returns {Promise<void>}
+ */
 async function show() {
   const { rows, meta } = await listSessions();
   const target = showAll ? rows : rows.filter((r) => r.alive || r.state !== 'ended');

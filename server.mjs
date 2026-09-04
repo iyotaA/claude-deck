@@ -117,6 +117,13 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
 };
 
+/**
+ * JSON を1本返す。**キャッシュさせない**（毎秒変わるものを配るため）。
+ *
+ * @param {object} res 応答
+ * @param {number} status HTTP の番号
+ * @param {object} body そのまま JSON にする中身
+ */
 function sendJson(res, status, body) {
   const text = JSON.stringify(body);
   res.writeHead(status, {
@@ -181,6 +188,11 @@ let refreshTimer = null;
 let refreshing = false;
 let pendingRefresh = false;
 
+/**
+ * 一覧を1回組む。
+ *
+ * @returns {Promise<{rows:object[], meta:object}>} 行と、上のバーに出す要約
+ */
 async function computeSessions() {
   const { rows, meta } = await listSessions();
   return { rows, meta };
@@ -258,6 +270,11 @@ async function refresh(force = false) {
   }
 }
 
+/**
+ * 引き直しをまとめる。監視は1つの変更で何度も鳴るので、最後の1回だけ走らせる。
+ *
+ * @param {number} delay まとめる幅（ミリ秒）
+ */
 function queueRefresh(delay = DEBOUNCE_MS) {
   if (refreshTimer) clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
@@ -266,6 +283,12 @@ function queueRefresh(delay = DEBOUNCE_MS) {
   }, delay);
 }
 
+/**
+ * 一覧を見ている窓すべてへ1件流す。実行のぶんは `runBroadcast`（相乗りさせない）。
+ *
+ * @param {string} event イベント名（`sessions` / `tick` / `error`）
+ * @param {object} data 中身
+ */
 function broadcast(event, data) {
   if (clients.size === 0) return;
   const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -278,6 +301,12 @@ function broadcast(event, data) {
   }
 }
 
+/**
+ * 一覧の SSE。窓ごとに1本つながる。実行のぶんは `handleRunStream`。
+ *
+ * @param {object} req 要求
+ * @param {object} res 応答
+ */
 function handleStream(req, res) {
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
@@ -1188,6 +1217,12 @@ function watch(dir, recursive) {
   }
 }
 
+/**
+ * 監視を始める。**`fs.watch` とポーリングの二重。**
+ * watch が効かない環境（ネットワーク越しの置き場所など）でもポーリングで動く。
+ *
+ * @returns {{okSessions:boolean, okProjects:boolean}} watch が張れたかどうか
+ */
 function startWatching() {
   const okSessions = watch(sessionsDir, false);
   const okProjects = watch(projectsDir, true);
@@ -1569,6 +1604,11 @@ server.once('listening', () => {
   if (!noOpen) openBrowser(url);
 });
 
+/**
+ * 既定のブラウザで開く。**開けなくても落とさない**（URL は先に表示してある）。
+ *
+ * @param {string} url 開く先
+ */
 function openBrowser(url) {
   try {
     if (process.platform === 'win32') {

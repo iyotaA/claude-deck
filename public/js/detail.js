@@ -16,7 +16,7 @@
  * 右のインスペクタ（INSP_DEFS）は「作業しながら横目で見るもの」。既定では閉じている。
  *
  *   数値 … 何にトークンを使ったか
- *   状態 … セッションの状態
+ *   診断 … 困ったときに見る値
  *
  * 分けたのは、これを中央に混ぜると数字を見るために作業の手元を隠すことになるため。
  * 右なら中央と同時に見られる。**同時に開くのは1つだけ**にしてあるのは、
@@ -442,8 +442,11 @@ function renderInspector(ctx) {
   dom.inspTitle.textContent = def.title;
 
   const stack = el('div', 'stack');
-  if (def.needsDetail && !ctx.d) fillPending(stack, ctx.error);
-  else fillInsp(stack, ctx);
+  // **INSP_DEFS は needsDetail を持たない。** 右の2つは全文が無くても組める
+  // （数値は別の窓口から来る・診断は一覧の行が材料）。
+  // 中央タブと形を揃えて `def.needsDetail` を見に行っていたが、
+  // 常に undefined で分岐が1つも通っていなかったので外した
+  fillInsp(stack, ctx);
   dom.inspBody.append(stack);
 }
 

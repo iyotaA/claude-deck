@@ -26,10 +26,25 @@ export const ASK_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
 /** 実行中のツールを自分で止めたときに入る印。指示ではないが判断の記録にはなる。 */
 const INTERRUPT_RE = /^\[Request interrupted by user/;
 
+/**
+ * 実行中のツールを自分で止めた行か。
+ *
+ * @param {object} entry 会話ログの1行
+ * @returns {boolean}
+ */
 export function isInterrupt(entry) {
   return entry?.type === 'user' && INTERRUPT_RE.test(textOf(entry));
 }
 
+/**
+ * 1行から中身のブロックを取り出す。**形の解釈をここに集約している。**
+ *
+ * `content` は配列のことも、ただの文字列のこともある（実測）。
+ * 文字列のときは text ブロック1つに包んで返し、呼ぶ側が両方を知らずに済むようにする。
+ *
+ * @param {object} entry 会話ログの1行
+ * @returns {object[]} ブロックの配列。取り出せなければ空配列
+ */
 export function contentBlocks(entry) {
   const content = entry?.message?.content;
   if (Array.isArray(content)) return content;
@@ -46,12 +61,27 @@ export function textOf(entry) {
     .trim();
 }
 
+/**
+ * その行が呼んだツールを並べる。
+ *
+ * @param {object} entry 会話ログの1行
+ * @returns {Array<{id:string, name:string, input:object}>} 呼んでいなければ空配列
+ */
 export function toolUses(entry) {
   return contentBlocks(entry)
     .filter((b) => b?.type === 'tool_use')
     .map((b) => ({ id: b.id, name: b.name, input: b.input ?? {} }));
 }
 
+/**
+ * その行が返したツール結果を並べる。`id` は対応する `toolUses` の `id`。
+ *
+ * `content` は文字列のことも、text ブロックの配列のこともある（実測）。
+ * どちらも1本の文字列に均して返す。
+ *
+ * @param {object} entry 会話ログの1行
+ * @returns {Array<{id:string, isError:boolean, text:string}>} 返していなければ空配列
+ */
 export function toolResults(entry) {
   return contentBlocks(entry)
     .filter((b) => b?.type === 'tool_result')

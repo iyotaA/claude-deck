@@ -523,14 +523,14 @@ function mergeTools(list) {
 /**
  * スキル別の消費を、セッションを跨いで足す。
  *
- * **標本が小さい。** 全ログを走査してもスキルは 12種・82件しかなく、
- * うち6種は n=1 だった（実測）。1回しか呼んでいないものを並べて
- * 「このスキルは重い」と読めてしまわないよう、
- * 呼んだ回数（runs）と、使ったセッションの数（sessions）を必ず一緒に返す。
- * 順位から外すかどうかの線引きは画面側で引く。
+ * **標本が小さい。** 一意なスキル名は 24 種（帰属ラベルで数えた実測・429 ファイル）で、
+ * 1回しか呼んでいないものが混じる。それを並べて「このスキルは重い」と
+ * 読めてしまわないよう、呼んだ回数（runs）と、使ったセッションの数（sessions）を
+ * 必ず一緒に返す。順位から外すかどうかの線引きは画面側で引く。
  *
- * @param {object[]} list 各セッションの usage
- * @returns {object[]}
+ * @param {object[]} recs 各セッションの usage
+ * @param {number} totalIte 全体の増分。`unattributed.share` の分母に使う
+ * @returns {{skills:object[], undated:number, unattributed:object, omitted:object}}
  */
 function mergeSkills(recs, totalIte) {
   const byName = new Map();

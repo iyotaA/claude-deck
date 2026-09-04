@@ -110,6 +110,12 @@ export function initialListOpen() {
   return localStorage.getItem(LIST_OPEN_KEY) !== '0';
 }
 
+/**
+ * 一覧の引き出しを配線する。レール・上のバー・Esc・外側の押下。
+ *
+ * **窓の広さは見張らない。** 広さで形が変わらなくなったので要らなくなった
+ * （前は広くなった時点で `setListOpen(false)` して列へ戻していた）。
+ */
 export function initListDrawer() {
   // 左端のレール。**右のレール（detail.js の initInspector）と同じ形で組む。**
   // 開閉の口が上のバーと一覧の帯に散っていて、右の「数値・診断」とは作法が違った。
@@ -140,9 +146,6 @@ export function initListDrawer() {
     ev.preventDefault();
     setListOpen(false, dom.listToggle);
   });
-
-  // 窓の広さで形が変わらなくなったので、幅の変化を見張る必要が無くなった。
-  // （前は広くなった時点で setListOpen(false) して列へ戻していた）
 
   syncListInert();
 }

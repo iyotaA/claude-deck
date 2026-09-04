@@ -69,7 +69,6 @@ function setBusy(on) {
   dom.runPrompt.disabled = on;
 }
 
-/** 選んだモードが危ないものなら、赤い但し書きを見せる */
 /**
  * 「自分で入力」のときだけ入力欄を出す。
  *
@@ -86,6 +85,7 @@ function noteModel() {
   noteFold();
 }
 
+/** 選んだモードが危ないものなら、赤い但し書きを見せる */
 function noteMode() {
   const danger = dom.runMode.selectedOptions[0]?.dataset.danger === '1';
   dom.runNote.hidden = !danger;
@@ -212,7 +212,7 @@ async function start() {
   try {
     const res = await fetch('/api/runs', {
       method: 'POST',
-      // 付け忘れると書き込み口の門番に断られる。ここ1箇所に寄せてある
+      // 付け忘れると書き込み口の門番に断られる
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(collect(prompt)),
     });
