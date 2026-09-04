@@ -29,6 +29,8 @@ import {
   runFor, EFFORT_LABELS, MODEL_FREE, modelOptions, modelPick, modelValue,
 } from './runs.js';
 import { getJson, postJson } from './api.js';
+import { fillSelect, gridRow } from './form-kit.js';
+import { closeOnBackdrop } from './modal.js';
 
 /**
  * 状態に応じたパネルの色。
@@ -229,46 +231,6 @@ let ops = null;
 
 /** 控えた焦点。detach() で控え、runPanel() の最後に戻す。 */
 let focusMemo = null;
-
-/**
- * <select> の中身を組み直す。
- *
- * 起こすフォーム（層7）にも同じ形の小道具があるが、あちらを import すると
- * 層3 → 層7 の逆向きになる。10行に満たないのでこちらに持つ
- * （共有するなら層0の util.js へ出すことになり、そちらのほうが影響が広い）。
- *
- * @param {HTMLSelectElement} sel
- * @param {Array<{value: string, label: string}>} items
- */
-function fillSelect(sel, items) {
-  sel.replaceChildren();
-  for (const it of items) {
-    const opt = el('option', null, it.label);
-    opt.value = it.value;
-    sel.append(opt);
-  }
-}
-
-/**
- * 3列のグリッドに1行足す。設定モーダルの .settings-grid をそのまま借りている。
- *
- * @param {HTMLElement} grid 入れ先
- * @param {string} id 入力の id。ラベルと結ぶ
- * @param {string} text ラベル
- * @param {HTMLElement} control 入力。器（複数の入力をまとめた span）でもよい
- * @param {string} hint 右に置く説明
- * @param {string} [forId] 器を渡すとき、ラベルと結ぶ中の入力の id
- */
-function gridRow(grid, id, text, control, hint, forId = '') {
-  const lb = el('label', 'settings-label', text);
-  if (forId) {
-    lb.htmlFor = forId;
-  } else {
-    control.id = id;
-    lb.htmlFor = id;
-  }
-  grid.append(lb, control, el('p', 'settings-hint', hint));
-}
 
 /**
  * 一言出す。空文字で消える。
@@ -836,11 +798,7 @@ function buildOps() {
 
   dlg.append(head, body, foot);
 
-  // 背面を押したら閉じる。dialog 自身に余白を持たせていないので、
-  // ここへ来るのは背面を押したときだけになる（run.css の padding: 0）
-  dlg.addEventListener('click', (ev) => {
-    if (ev.target === dlg) dlg.close();
-  });
+  closeOnBackdrop(dlg);
 
   // <form> で囲っていないので Enter は自分で拾う（起こすフォームと同じ作法）。
   // ここに複数行の欄は無いので、素直に「押した＝この内容にする」でよい

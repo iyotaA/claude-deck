@@ -21,6 +21,7 @@
  * 「縮小」のまま残る）。2箇所に持てば必ず片方が古くなる。
  */
 import { dom, store } from './store.js';
+import { closeOnBackdrop } from './modal.js';
 
 /**
  * 開閉したことを外へ知らせる口。main.js が renderDetail を差す。
@@ -144,9 +145,6 @@ export function initZoom({ onChange, onOpenInWork } = {}) {
   dom.zoom.addEventListener('close', () => closeZoom());
   dom.zoomClose.addEventListener('click', () => closeZoom());
 
-  // 背面を押したら閉じる。dialog 自身に余白を持たせていないので、
-  // ここへ来るのは背面を押したときだけになる（zoom.css の padding: 0）
-  dom.zoom.addEventListener('click', (ev) => {
-    if (ev.target === dom.zoom) closeZoom();
-  });
+  // 閉じ方を差し替える。節点を詳細ペインへ戻す後始末があるので素の close() では足りない
+  closeOnBackdrop(dom.zoom, closeZoom);
 }

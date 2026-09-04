@@ -16,10 +16,12 @@ import { icon } from './icons.js';
 import { dom, store } from './store.js';
 import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
+import { cardShell, cardTitle, closeCardMeta, metaPath } from './card.js';
 import {
   block, readNote, hitRateNote, statTile, barList, shareBar, trendList, tableDetails,
   foldBlock, deltaText,
   tokensStrict, pctStrict, numStrict,
+  toolsBlock as toolsBlockOf,
 } from './usage-chart.js';
 
 /**
@@ -277,26 +279,11 @@ function overviewBlock(d, go) {
  * @returns {HTMLElement|null}
  */
 function toolsBlock(d) {
-  if (!d.tools.length) return null;
-
-  const box = block('何が文脈を食っているか');
-  box.append(el('p', 'note',
-    'そのツールの結果が、どれだけ文脈に積まれたかです。集めたセッションぶんを足しています。'));
-
-  box.append(barList(d.tools.slice(0, BARS_MAX).map((t) => ({
-    label: t.tool,
-    value: t.tokens,
-    sub: `${numStrict(t.calls)} 回`,
-  }))));
-
-  box.append(tableDetails(
-    `ツール ${d.tools.length} 件を表で見る`,
-    ['ツール', '回数', '合計', '平均', '最大1回'],
-    d.tools.map((t) => [
-      t.tool, numStrict(t.calls), numStrict(t.tokens), numStrict(t.avg), numStrict(t.max),
-    ]),
-  ));
-  return box;
+  return toolsBlockOf(d.tools, {
+    note: 'そのツールの結果が、どれだけ文脈に積まれたかです。集めたセッションぶんを足しています。',
+    bars: BARS_MAX,
+    tableLabel: `ツール ${d.tools.length} 件を表で見る`,
+  });
 }
 
 /**
@@ -449,10 +436,9 @@ function skillsBlock(d) {
  * @returns {HTMLElement}
  */
 function usageCard(row) {
-  const li = el('li');
-  const card = el('button', 'card is-usage');
-  card.type = 'button';
-  card.dataset.sessionId = row.sessionId ?? '';
+  // aria-current は付けない。押すとモードごと移るので、
+  // 「いま見ているもの」の意味が一覧・書庫と違う
+  const { li, card } = cardShell(row, { variant: 'is-usage', current: false });
 
   const top = el('div', 'card-top');
   top.append(el('span', 'usage-ite', tokensStrict(row.ite)));
@@ -460,17 +446,16 @@ function usageCard(row) {
   card.append(top);
 
   const label = row.title ?? '（指示なしで終わっています）';
-  const title = el('div', 'card-title', label);
-  if (!row.title) title.classList.add('is-empty');
-  card.append(title);
+  card.append(cardTitle(row, label));
 
   const meta = el('div', 'card-meta');
-  if (row.project) meta.append(el('span', 'path', row.project));
+  const path = metaPath(row);
+  if (path) meta.append(path);
   const model = shortModel(row.model);
   if (model) meta.append(el('span', 'tag', model));
   // 混ざっている行は命中率が読めない。表の列をそのまま信じさせない
   if (row.mixed) meta.append(el('span', 'tag', 'モデル混在'));
-  if (meta.childElementCount > 0) card.append(meta);
+  closeCardMeta(card, meta);
 
   // 行き先の印。**押すと右に詳細が出る**ことを、動かさなくても分かる形で出す
   // （すぐ上に並ぶ .stat は押せないので印を持たない）。

@@ -16,6 +16,7 @@ import { panel, SEC } from './panel.js';
 import {
   block, readNote, hitRateNote, statTile, barList, shareBar, sparkline, tableDetails,
   tokensStrict, pctStrict, numStrict, deltaText,
+  toolsBlock as toolsBlockOf,
 } from './usage-chart.js';
 
 /** 横棒に出すツールの数。残りは下の表で読む。 */
@@ -110,19 +111,8 @@ function tiles(usage, d, b) {
  * @returns {HTMLElement|null}
  */
 function toolsBlock(usage) {
-  if (!usage.tools.length) return null;
-
-  const box = block('何が文脈を食っているか');
-  box.append(el('p', 'note',
-    'そのツールの結果が、どれだけ文脈に積まれたかです。「Read 1回で 68k」が分かれば、次から範囲や limit を絞れます。'));
-
-  box.append(barList(usage.tools.slice(0, BARS_MAX).map((t) => ({
-    label: t.tool,
-    value: t.tokens,
-    sub: `${numStrict(t.calls)} 回`,
-  }))));
-
-  // 帰属できなかったぶん。黙って落とすと合計が合わない理由が分からなくなる
+  // 帰属できなかったぶん。黙って落とすと合計が合わない理由が分からなくなる。
+  // **横断側は出さない**（母数が違って読めないため）ので、ここで組んで渡す
   const u = usage.toolsUnattributed;
   const notes = [];
   if (u.noToolTokens > 0) {
@@ -131,16 +121,13 @@ function toolsBlock(usage) {
   if (u.negativeCount > 0) {
     notes.push(`測れなかった回 ${numStrict(u.negativeCount)} 回（文脈が縮んだ回。ほとんどは圧縮です）`);
   }
-  if (notes.length) box.append(el('p', 'note note-sub', notes.join(' / ')));
 
-  box.append(tableDetails(
-    `全 ${usage.tools.length} 件を表で見る`,
-    ['ツール', '回数', '合計', '平均', '最大1回'],
-    usage.tools.map((t) => [
-      t.tool, numStrict(t.calls), numStrict(t.tokens), numStrict(t.avg), numStrict(t.max),
-    ]),
-  ));
-  return box;
+  return toolsBlockOf(usage.tools, {
+    note: 'そのツールの結果が、どれだけ文脈に積まれたかです。「Read 1回で 68k」が分かれば、次から範囲や limit を絞れます。',
+    bars: BARS_MAX,
+    tableLabel: `全 ${usage.tools.length} 件を表で見る`,
+    extraNote: notes.length ? el('p', 'note note-sub', notes.join(' / ')) : null,
+  });
 }
 
 /**

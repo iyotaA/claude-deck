@@ -16,6 +16,7 @@ import { icon } from './icons.js';
 import { tokensStrict, pctStrict } from './usage-chart.js';
 import { dom, store, syncQuery, ARCHIVE_SORTS, ARCHIVE_DAYS } from './store.js';
 import { select } from './session.js';
+import { cardShell, cardTitle, closeCardMeta, metaBranch, metaPath } from './card.js';
 
 /** カードを押されたあとの後始末。main.js が差す */
 let pick = null;
@@ -42,11 +43,7 @@ let archiveTimer = null;
  * 稼働中の一覧と同じ重さに見えて、どれから手をつけるかが読めなくなる。
  */
 function buildArchiveCard(row) {
-  const li = el('li');
-  const card = el('button', 'card is-archive');
-  card.type = 'button';
-  card.setAttribute('aria-current', String(row.sessionId === store.selected));
-  card.dataset.sessionId = row.sessionId ?? '';
+  const { li, card } = cardShell(row, { variant: 'is-archive' });
 
   const top = el('div', 'card-top');
   const when = el('span', 'when', shortStamp(row.mtimeMs));
@@ -58,13 +55,10 @@ function buildArchiveCard(row) {
 
   // 「読んでいないから空」と「本当に空」を混同させない。read でそこを分ける
   const label = row.title ?? (row.read ? '（指示なしで終わっています）' : '（まだ読んでいません）');
-  const title = el('div', 'card-title', label);
-  if (!row.title) title.classList.add('is-empty');
-  card.append(title);
+  card.append(cardTitle(row, label));
 
   const meta = el('div', 'card-meta');
-  if (row.project) meta.append(el('span', 'path', row.project));
-  if (row.gitBranch && row.gitBranch !== 'HEAD') meta.append(el('span', 'tag', row.gitBranch));
+  meta.append(...[metaPath(row), metaBranch(row)].filter(Boolean));
   // 索引にあれば出す。**絞った結果「なぜこれが出たか」が読める。**
   // 一覧のカード（list.js）と同じ形の札を借りる
   for (const skill of row.skills ?? []) {
@@ -73,7 +67,7 @@ function buildArchiveCard(row) {
   // まだ読んでいない行では null なので何も出ない。中身を読んだ行にだけ付く
   const agents = agentTag(row.subagentCount);
   if (agents) meta.append(agents);
-  if (meta.childElementCount > 0) card.append(meta);
+  closeCardMeta(card, meta);
 
   // 数値の器。**空のまま置いておく。** 中身は別の窓口（/api/sessions/:id/usage）から
   // 遅れて届く。ここで待つと、探した結果が出るまでが遅くなる

@@ -9,6 +9,7 @@ import { idleOf, headOf, visibleRows } from './rows.js';
 import { newestRateLimit, rateView } from './runs.js';
 import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
+import { cardShell, cardTitle, closeCardMeta, metaBranch, metaPath } from './card.js';
 
 /**
  * 一覧の1枚。
@@ -21,12 +22,8 @@ import { select } from './session.js';
  * @returns {HTMLElement} <li> に入れたカード
  */
 export function buildCard(row, onPick = null) {
-  const li = el('li');
-  const card = el('button', 'card');
-  card.type = 'button';
+  const { li, card } = cardShell(row);
   card.style.setProperty('--state-color', STATE_COLOR[row.state] ?? 'var(--off)');
-  card.setAttribute('aria-current', String(row.sessionId === store.selected));
-  card.dataset.sessionId = row.sessionId ?? '';
 
   const top = el('div', 'card-top');
   const state = el('span', 'state', row.stateLabel);
@@ -44,9 +41,7 @@ export function buildCard(row, onPick = null) {
   top.append(idle);
   card.append(top);
 
-  const title = el('div', 'card-title', row.title ?? '（まだ指示なし）');
-  if (!row.title) title.classList.add('is-empty');
-  card.append(title);
+  card.append(cardTitle(row, row.title ?? '（まだ指示なし）'));
 
   if (row.waitingFor) {
     const wait = el('div', 'waiting');
@@ -67,8 +62,7 @@ export function buildCard(row, onPick = null) {
     deck.title = 'この画面の実行フォームから起こしたセッションです';
     meta.append(deck);
   }
-  if (row.project) meta.append(el('span', 'path', row.project));
-  if (row.gitBranch && row.gitBranch !== 'HEAD') meta.append(el('span', 'tag', row.gitBranch));
+  meta.append(...[metaPath(row), metaBranch(row)].filter(Boolean));
   if (row.permissionMode && !QUIET_MODES.has(row.permissionMode)) {
     const tag = el('span', 'tag', row.permissionMode);
     if (row.permissionMode === 'plan') tag.classList.add('is-plan');
@@ -82,7 +76,7 @@ export function buildCard(row, onPick = null) {
   if (agents) meta.append(agents);
   const ctx = tokens(row.contextTokens);
   if (ctx) meta.append(el('span', 'tag', `ctx ${ctx}`));
-  if (meta.childElementCount > 0) card.append(meta);
+  closeCardMeta(card, meta);
 
   card.addEventListener('click', () => {
     select(row.sessionId);

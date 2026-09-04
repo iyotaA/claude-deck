@@ -31,6 +31,7 @@ import { TAB_DEFS, INSP_DEFS, setDetailTab, setInspector } from './detail.js';
 import { select } from './session.js';
 import { openRunForm } from './run-form.js';
 import { setMode } from './mode.js';
+import { closeOnBackdrop } from './modal.js';
 
 // モードの札。**二値に畳まない。** 三項で「監視盤か作業台か」と書くと、
 // モードが1つ増えた日に文言と行き先の2箇所を直すことになる
@@ -348,9 +349,5 @@ export function initPalette() {
 
   dom.palette.addEventListener('keydown', onKey);
 
-  // 背面を押したら閉じる。dialog 自身に余白を持たせていないので、
-  // ここへ来るのは本当に背面を押したときだけ（palette.css の padding: 0）
-  dom.palette.addEventListener('click', (ev) => {
-    if (ev.target === dom.palette) dom.palette.close();
-  });
+  closeOnBackdrop(dom.palette);
 }
