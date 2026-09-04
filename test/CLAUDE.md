@@ -52,6 +52,7 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `notify-index.test.mjs` | 通知の配線。とくに失敗したときのふるまい |
 | `update-state.test.mjs` | 更新の紙の読み方。stale の判定と、無い紙を異常にしないこと |
 | `startup-state.test.mjs` | 自動起動の紙の読み方。紙が無いことを「動いていない」と読まないこと |
+| `update-banner.test.mjs` | 更新の帯の組み立て（`bannerOf`）。枝の順・鍵（`key`）の粒度・押したときに走らせる仕事の配線。**押せる知らせと押せない知らせで鍵を分けること**が本丸 |
 | `md.test.mjs` | Markdown のパーサ。記法を読めることと、途中で切れた入力で壊れないこと。頭出しが中途半端な単位で終わらないこと。チェックリストの印を、印でないもの（`- [2] …`）と分けること |
 | `runs.test.mjs` | 上のバーに出す枠の使用率の判断（`rateView`）。0 と不明の分け方・`resetsAt` を過ぎた枠を落とすこと・`resetsAt` を**秒**として読むこと |
 | `run-dirs.test.mjs` | 起こしてよいフォルダの登録。ドライブ直下・相対パス・`-` 始まりを断ること、大小違いの重複、登録済みの配下、上限、紙の知らないキーを残すこと |
@@ -99,16 +100,48 @@ import で確かめられるのは Node 側の半分だけになり、それで�
 読み取り層（`read/`）と画面側にはテストが無い。
 そこは実物で確かめる。
 
-例外は2枚。`public/js/md.js`（Markdown のパーサ）と `public/js/runs.js` の `rateView()`。
-どちらも DOM を1つも触らない純関数なので、`.js` のまま Node から import できる
+例外は3枚。`public/js/md.js`（Markdown のパーサ）、`public/js/runs.js` の `rateView()`、
+`public/js/update-banner.js`（更新の帯の組み立て）。
+どれも DOM を1つも触らない純関数なので、`.js` のまま Node から import できる
 （`package.json` が `type:module`）。`runs.js` は `EventSource` を関数の中でしか呼ばないので、
-読み込むだけなら何も起きない。
+読み込むだけなら何も起きない。`update-banner.js` は import そのものがゼロ。
 **画面側のファイルでも、判断だけを切り出せばテストに乗る**という前例にしてある。
+
+更新の帯は**この3枚の中でいちばんテストの値打ちが大きい。**
+出るのは更新の道中だけで、紙（`update.json`）を書くのは C# のランチャなので、
+手で出そうとすると本物の更新を走らせるか紙を偽装するしかない
+（実地で確かめるには `%LOCALAPPDATA%` を差し替えて `update.json` を置く。やり方は次の節）。
 
 - ロジック側 … `node cli.mjs` を叩いて一覧が崩れないか見る
 - 画面側 … サーバーを起動してブラウザで見る
 - 見た目をヘッドレスで撮るときは `?nolive=1` を付ける（SSE がつながったままだとロード完了を待ち続ける）
 - 「ターミナルを前面に」は実際に押す（`focus.ps1` へのパスはテストで拾えない）
+
+### 更新の帯を画面で出す
+
+帯は更新の道中しか出ないので、素では見られない。
+**`%LOCALAPPDATA%` を差し替えて紙を置く。** 実物の `%LOCALAPPDATA%\ClaudeDeck\` は触らない
+（あそこは更新でもアンインストールでも掃除されないので、テストのゴミを置くと永久に残る）。
+
+```
+mkdir <作業場>\ClaudeDeck
+# <作業場>\ClaudeDeck\update.json に置く紙。current はいまの版と一致させる
+#   {"state":"available","current":"0.9.1","available":"0.9.2","checkedAt":…,"changedAt":…}
+set LOCALAPPDATA=<作業場>
+set CLAUDE_DECK_LAUNCHER=C:\dummy\ClaudeDeck.exe
+set CLAUDE_DECK_PORT=4401
+node server.mjs --no-open
+```
+
+`CLAUDE_DECK_LAUNCHER` の有無が `canApply` を決める（`server.mjs` の `launcherPath`。
+中身は見ないので、在りもしないパスでよい）。
+**押せる帯と押せない帯は別のサーバーでしか出せない**ので、両方見るなら2本立てる。
+`state` を `done` / `applying` / `failed`（＋ `requested`）に書き換えて読み込み直せば、
+それぞれの帯に切り替わる。`/api/update` は毎回紙を読み直すので、サーバーは立て直さなくてよい。
+
+紙が効いているかは `/api/update` の応答の `path` で確かめる。差し替えに失敗していると
+実物の `%LOCALAPPDATA%` を指すので、そこを見れば取り違えに気づける。
+
 
 `/api/health` が `{ok:true}` を返すかどうかが、生きているかの最短の確認。
 

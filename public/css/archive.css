@@ -93,7 +93,7 @@
   width: 1.9rem;
   height: 1.9rem;
   padding: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border-color: var(--accent);
   color: var(--accent);
 }

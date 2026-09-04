@@ -196,9 +196,6 @@
   display: flex;
   flex-direction: column;
   gap: .4rem;
-}
-
-.group-body {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -331,7 +328,7 @@
   gap: .4rem;
   align-items: baseline;
   padding: .3rem .45rem;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--bg-sunk);
   font-size: .78rem;
   color: var(--fg-muted);
@@ -377,7 +374,7 @@
 .tag {
   padding: 0 .35rem;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   font-size: .72rem;
   color: var(--fg-muted);

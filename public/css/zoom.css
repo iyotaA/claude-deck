@@ -27,7 +27,7 @@
   box-shadow: var(--shadow);
 }
 
-.zoom::backdrop { background: rgb(0 0 0 / 45%); }
+.zoom::backdrop { background: var(--scrim); }
 
 .zoom[open] {
   display: grid;
