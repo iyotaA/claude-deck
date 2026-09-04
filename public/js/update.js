@@ -20,6 +20,7 @@
  */
 import { query, dom, store } from './store.js';
 import { stamp } from './util.js';
+import { postJson } from './api.js';
 
 /**
  * 開いてすぐ、もう1回だけ引き直すまでの間。
@@ -484,14 +485,7 @@ async function applyNow() {
   render();
 
   try {
-    // content-type を必ず付ける。書き込みの門番（shared/origin.mjs）は
-    // application/json 以外を断る（<form> はこれを名乗れない、が守りの根拠）
-    const res = await fetch('/api/update/apply', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
-    });
-    const data = await res.json().catch(() => null);
+    const { res, data } = await postJson('/api/update/apply');
 
     if (res.ok) return;
 

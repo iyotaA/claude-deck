@@ -28,7 +28,7 @@ import { panel, SEC } from './panel.js';
 import {
   runFor, EFFORT_LABELS, MODEL_FREE, modelOptions, modelPick, modelValue,
 } from './runs.js';
-import { getJson } from './api.js';
+import { getJson, postJson } from './api.js';
 
 /**
  * 状態に応じたパネルの色。
@@ -472,13 +472,8 @@ async function postMode(patch) {
   setBusy(true);
   say('替えています…');
   try {
-    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/mode`, {
-      method: 'POST',
-      // 付け忘れると書き込み口の門番に断られる
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(patch),
-    });
-    const data = await res.json().catch(() => null);
+    const { res, data } = await postJson(
+      `/api/runs/${encodeURIComponent(runId)}/mode`, patch);
 
     // 返ってくるまでに別の実行へ移っていることがある。
     // そのまま書くと、**他人の実行の**メッセージ欄を書き換えることになる
@@ -539,13 +534,8 @@ async function post(kind) {
   setBusy(true);
   say(kind === 'switch' ? '替えています…' : '送っています…');
   try {
-    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/${kind}`, {
-      method: 'POST',
-      // 付け忘れると書き込み口の門番に断られる
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => null);
+    const { res, data } = await postJson(
+      `/api/runs/${encodeURIComponent(runId)}/${kind}`, body);
 
     // 返ってくるまでに別の実行へ移っていることがある。
     // そのまま書くと、**他人の実行の**メッセージ欄と入力欄を書き換えることになる
@@ -584,12 +574,7 @@ async function doInterrupt() {
   setBusy(true);
   say('割り込んでいます…');
   try {
-    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/interrupt`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
-    });
-    const data = await res.json().catch(() => null);
+    const { res, data } = await postJson(`/api/runs/${encodeURIComponent(runId)}/interrupt`);
     // 返ってくるまでに別の実行へ移っていることがある（`post()` と同じ作法）
     if (ops.runId !== runId) return;
 
@@ -625,12 +610,7 @@ async function doStop() {
   setBusy(true);
   say('止めています…');
   try {
-    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/stop`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
-    });
-    const data = await res.json().catch(() => null);
+    const { res, data } = await postJson(`/api/runs/${encodeURIComponent(runId)}/stop`);
     if (ops.runId !== runId) return;
 
     if (!res.ok || !data?.ok) {

@@ -24,7 +24,7 @@
 import { el } from './util.js';
 import { icon } from './icons.js';
 import { dom, store, SUMMARY_ORDER } from './store.js';
-import { getJson } from './api.js';
+import { getJson, postJson } from './api.js';
 
 /**
  * 状態ごとの但し書き。
@@ -193,25 +193,6 @@ function fill(s) {
   dom.setDetail.value = s.detail === 'none' ? 'none' : 'full';
 }
 
-/**
- * 書き込みの共通部分。
- *
- * content-type を付けるのはここ1箇所だけにする。付け忘れると門番に 415 で断られる。
- *
- * @param {string} path 窓口
- * @param {object} [body] 送る中身
- * @returns {Promise<object>} 応答の JSON。読めなければ空
- */
-async function post(path, body) {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body ?? {}),
-  });
-  const data = await res.json().catch(() => null);
-  return { res, data: data ?? {} };
-}
-
 /** いまの設定を引いて画面へ入れる。 */
 async function load() {
   try {
@@ -304,10 +285,10 @@ async function postDirs(body, okText) {
   if (busy) return false;
   setBusy(true);
   try {
-    const { res, data } = await post('/api/settings/rundirs', body);
-    if (!res.ok || !data.ok) {
+    const { res, data } = await postJson('/api/settings/rundirs', body);
+    if (!res.ok || !data?.ok) {
       // サーバは断る理由を日本語で返す。HTTP の番号より読めるので、あればそれを出す
-      say(data.reason ?? `保存できませんでした（HTTP ${res.status}）`, 'bad');
+      say(data?.reason ?? `保存できませんでした（HTTP ${res.status}）`, 'bad');
       return false;
     }
     fillDirs(data);
@@ -453,9 +434,9 @@ async function save() {
   setBusy(true);
   say('保存しています…');
   try {
-    const { res, data } = await post('/api/settings/notify', collect());
-    if (!res.ok || !data.ok) {
-      say(data.reason ?? `保存できませんでした（HTTP ${res.status}）`, 'bad');
+    const { res, data } = await postJson('/api/settings/notify', collect());
+    if (!res.ok || !data?.ok) {
+      say(data?.reason ?? `保存できませんでした（HTTP ${res.status}）`, 'bad');
       return;
     }
     fill(data.settings);
@@ -476,9 +457,9 @@ async function clearUrl() {
   if (!confirm('保存した Webhook URL を消します。よろしいですか？')) return;
   setBusy(true);
   try {
-    const { res, data } = await post('/api/settings/notify', { slackWebhookUrl: '' });
-    if (!res.ok || !data.ok) {
-      say(data.reason ?? `消せませんでした（HTTP ${res.status}）`, 'bad');
+    const { res, data } = await postJson('/api/settings/notify', { slackWebhookUrl: '' });
+    if (!res.ok || !data?.ok) {
+      say(data?.reason ?? `消せませんでした（HTTP ${res.status}）`, 'bad');
       return;
     }
     fill(data.settings);
@@ -497,11 +478,11 @@ async function sendTest() {
   setBusy(true);
   say('送っています…');
   try {
-    const { data } = await post('/api/settings/notify/test');
+    const { data } = await postJson('/api/settings/notify/test');
     // 打ちかけを消さないよう、状態の行だけ入れ替える
-    if (data.settings) fillStatus(data.settings);
-    if (data.ok) say('送りました。Slack を見てください', 'good');
-    else say(data.reason ?? '送れませんでした', 'bad');
+    if (data?.settings) fillStatus(data.settings);
+    if (data?.ok) say('送りました。Slack を見てください', 'good');
+    else say(data?.reason ?? '送れませんでした', 'bad');
   } catch (err) {
     say(`送れませんでした（${err.message}）`, 'bad');
   } finally {

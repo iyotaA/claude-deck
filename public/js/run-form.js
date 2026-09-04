@@ -21,7 +21,7 @@ import { icon } from './icons.js';
 import { EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
 import { dom } from './store.js';
 import { select } from './session.js';
-import { getJson } from './api.js';
+import { getJson, postJson } from './api.js';
 
 /** 開いたときに引いた選択肢。閉じても捨てないが、開くたびに引き直す */
 let options = null;
@@ -209,13 +209,7 @@ async function start() {
   setBusy(true);
   say('起こしています…');
   try {
-    const res = await fetch('/api/runs', {
-      method: 'POST',
-      // 付け忘れると書き込み口の門番に断られる
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(collect(prompt)),
-    });
-    const data = await res.json().catch(() => null);
+    const { res, data } = await postJson('/api/runs', collect(prompt));
 
     if (!res.ok || !data?.ok) {
       // サーバーは断る理由を日本語で返す。HTTP の番号より読めるので、あればそれを出す
