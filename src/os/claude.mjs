@@ -416,10 +416,8 @@ export function stopClaude(child, {
         return;
       }
 
-      const killArgs = ['/PID', String(pid), '/T'];
-      if (force) killArgs.push('/F');
       try {
-        const t = spawnFn('taskkill.exe', killArgs, { windowsHide: true });
+        const t = spawnFn('taskkill.exe', taskkillArgs(pid, force), { windowsHide: true });
         // taskkill が無い・権限が足りない。ここで拾わないと 'error' が uncaught になる
         t.on?.('error', () => {});
         // 読まないとパイプが詰まる。中身は使わないので捨てる
@@ -456,6 +454,25 @@ export function stopClaude(child, {
 const KILL_SYNC_TIMEOUT_MS = 3000;
 
 /**
+ * Windows で木ごと落とすときの taskkill の引数。
+ *
+ * `/T` は子孫まで。claude は自分でシェルやツールを起こすので、
+ * これが無いと親だけ消えて孫が残る。
+ *
+ * 段階的に止める側（`stopClaude`）と、最後の後始末（`killTreeSync`）が
+ * 同じ組み立てを別々に書いていた。`/F` の有無だけが違う。
+ *
+ * @param {number} pid 落とす相手
+ * @param {boolean} force `/F`（強制）を付けるか
+ * @returns {string[]}
+ */
+function taskkillArgs(pid, force) {
+  const args = ['/PID', String(pid), '/T'];
+  if (force) args.push('/F');
+  return args;
+}
+
+/**
  * 木ごと落とす。**同期版。**
  *
  * `stopClaude` の3段は非同期で、行儀のよい終わり方（stdin を閉じて向こうが畳む）を待てる。
@@ -484,7 +501,7 @@ export function killTreeSync(pid, { platform = process.platform, spawnSyncFn = s
   }
 
   try {
-    spawnSyncFn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+    spawnSyncFn('taskkill.exe', taskkillArgs(pid, true), {
       windowsHide: true, timeout: KILL_SYNC_TIMEOUT_MS,
     });
   } catch { /* taskkill が無い・権限が足りない。ここから先は打つ手が無い */ }

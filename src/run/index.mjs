@@ -51,7 +51,7 @@ import {
 import { errText, oneLine } from '../shared/text.mjs';
 import { LINE_MAX, claudeInfo, createLineSplitter, spawnClaude, stopClaude } from '../os/claude.mjs';
 import {
-  PERMISSION_MODES, PROMPT_MAX, buildRunSpec, checkModel, checkPermissionMode, mergeSwitch,
+  PERMISSION_MODES, buildRunSpec, checkModel, checkPermissionMode, checkPrompt, mergeSwitch,
 } from './spec.mjs';
 import { RUN_MAX, createRunLedger, isChildDone, isRunOver } from './ledger.mjs';
 import { loadRate, saveRate } from './rate.mjs';
@@ -132,6 +132,23 @@ const INTERRUPT_DENY = Object.freeze({
 });
 
 /**
+ * 台帳の断り方を、HTTP の番号と日本語に直す。
+ *
+ * 表に無い code は 500 に倒す。**台帳が理由を持っていればそちらを優先する**
+ * （どの質問への答えが足りないか、どの項目が同じ値かは、原文を見ないと言えない）。
+ * 表の文言は「読む人が迷わないための既定」でしかない。
+ *
+ * @param {object} table `ANSWER_DENY` / `LIVE_DENY` / `INTERRUPT_DENY` のどれか
+ * @param {{code?: string, reason?: string}} res 台帳の戻り
+ * @param {string} fallback 表にも台帳にも無いときの文言
+ * @returns {{ok: false, status: number, reason: string}}
+ */
+function denyOf(table, res, fallback) {
+  const deny = table[res.code] ?? { status: 500, reason: fallback };
+  return { ok: false, status: deny.status, reason: res.reason ?? deny.reason };
+}
+
+/**
  * 実行の配線を作る。
  *
  * @param {object} [opts]
@@ -208,6 +225,28 @@ export function createRunner({
    */
   function nextRequestId() {
     return `req_${++reqSeq}_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
+  }
+
+  /**
+   * 窓口の入口で run を掴む。無ければ 404、終わっていれば 409。
+   *
+   * **終わりの見方が2つある。** `isRunOver` は run そのものの終端、
+   * `isChildDone` は「子がいない」。予算切れは前者では終端でないが後者では真になる。
+   * 生で並べると見分けが目視頼みになるので、どちらを見るかを引数の名前で言う。
+   *
+   * **`stop()` はこれを通さない。** あちらは終わっているものへの停止を
+   * 失敗にせず `{ok:true}` で返す（連打で 409 を出さないため）ので、向きが逆になる。
+   *
+   * @param {string} runId 実行の識別子
+   * @param {{childDone?: boolean}} [opts] childDone: true なら「子がいない」で断る
+   * @returns {{ok: true, row: object}|{ok: false, status: number, reason: string}}
+   */
+  function guardRun(runId, { childDone = false } = {}) {
+    const row = ledger.get(runId);
+    if (!row) return { ok: false, status: 404, reason: 'その実行は見つかりません' };
+    const over = childDone ? isChildDone(row.state) : isRunOver(row.state);
+    if (over) return { ok: false, status: 409, reason: 'その実行はもう終わっています' };
+    return { ok: true, row };
   }
 
   /**
@@ -595,20 +634,18 @@ export function createRunner({
    */
   function input(runId, text) {
     const at = clock();
-    const row = ledger.get(runId);
-    if (!row) return { ok: false, status: 404, reason: 'その実行は見つかりません' };
-    if (isRunOver(row.state)) return { ok: false, status: 409, reason: 'その実行はもう終わっています' };
+    const guard = guardRun(runId);
+    if (!guard.ok) return guard;
+    const { row } = guard;
     // **許可待ちに user 行を送っても1行も進まない。** 相手が待っているのは control_response で、
     // 指示文ではない。通すと「送ったのに動かない」——今回直したバグと同じ壊れ方を再生産する
     if (row.state === 'needs-permission') {
       return { ok: false, status: 409, reason: '許可を聞かれています。先にその確認へ答えてください' };
     }
 
-    const body = typeof text === 'string' ? text.trim() : '';
-    if (!body) return { ok: false, status: 400, reason: '指示が空です' };
-    if (body.length > PROMPT_MAX) {
-      return { ok: false, status: 400, reason: `指示が長すぎます（${PROMPT_MAX} 文字まで）` };
-    }
+    const checkedPrompt = checkPrompt(text);
+    if (!checkedPrompt.ok) return { ok: false, status: 400, reason: checkedPrompt.reason };
+    const body = checkedPrompt.prompt;
 
     const sent = live.get(runId)?.child ? write(runId, body, at) : restart(runId, body, at);
     if (!sent.ok) return { ...sent, row: ledger.get(runId) };
@@ -633,10 +670,10 @@ export function createRunner({
    */
   function answer(runId, requestId, body) {
     const at = clock();
-    const row = ledger.get(runId);
-    if (!row) return { ok: false, status: 404, reason: 'その実行は見つかりません' };
     // 見るのは `isChildDone`。予算切れは終端ではないが、子がいないので答えを書く先が無い
-    if (isChildDone(row.state)) return { ok: false, status: 409, reason: 'その実行はもう終わっています' };
+    const guard = guardRun(runId, { childDone: true });
+    if (!guard.ok) return guard;
+    const { row } = guard;
 
     const id = typeof requestId === 'string' ? requestId.trim() : '';
     if (!id) return { ok: false, status: 400, reason: 'どの要求への答えか分かりません' };
@@ -670,9 +707,7 @@ export function createRunner({
 
     const res = ledger.answer(runId, id, decision, at);
     if (!res.ok) {
-      const deny = ANSWER_DENY[res.code] ?? { status: 500, reason: '答えを送れませんでした' };
-      // 台帳が理由を持っているときはそちらを出す（どの質問が足りないかは原文を見ないと言えない）
-      return { ok: false, status: deny.status, reason: res.reason ?? deny.reason };
+      return denyOf(ANSWER_DENY, res, '答えを送れませんでした');
     }
 
     // 書けたかどうかはここで初めて分かる。**書けていないのに 202 を返さない**
@@ -700,9 +735,9 @@ export function createRunner({
    */
   function setLive(runId, body) {
     const at = clock();
-    const row = ledger.get(runId);
-    if (!row) return { ok: false, status: 404, reason: 'その実行は見つかりません' };
-    if (isRunOver(row.state)) return { ok: false, status: 409, reason: 'その実行はもう終わっています' };
+    const guard = guardRun(runId);
+    if (!guard.ok) return guard;
+    const { row } = guard;
     // 予算切れは終端ではないが子がいない。加えて `waiting` は
     // 「1往復閉じて子がいない」ときと「許可待ちが時間切れになった（子は生きている）」ときで
     // 同じ札になるので、**状態だけでは足りない。**
@@ -729,9 +764,7 @@ export function createRunner({
 
     const res = ledger.setLive(runId, wants, at);
     if (!res.ok) {
-      const deny = LIVE_DENY[res.code] ?? { status: 500, reason: '替えられませんでした' };
-      // 台帳が項目名つきの理由を持っているときはそちらを出す
-      return { ok: false, status: deny.status, reason: res.reason ?? deny.reason };
+      return denyOf(LIVE_DENY, res, '替えられませんでした');
     }
 
     // 書けたかどうかはここで初めて分かる。**書けていないのに 202 を返さない**
@@ -757,9 +790,9 @@ export function createRunner({
    */
   function interrupt(runId, body) {
     const at = clock();
-    const row = ledger.get(runId);
-    if (!row) return { ok: false, status: 404, reason: 'その実行は見つかりません' };
-    if (isRunOver(row.state)) return { ok: false, status: 409, reason: 'その実行はもう終わっています' };
+    const guard = guardRun(runId);
+    if (!guard.ok) return guard;
+    const { row } = guard;
     // 撃つ先が在るかを知っているのは殻だけ。`setLive` と同じ理由で状態だけでは足りない
     const child = live.get(runId)?.child;
     if (isChildDone(row.state) || !child?.stdin || child.stdin.destroyed) {
@@ -770,8 +803,7 @@ export function createRunner({
       cancelQueued: body?.cancelQueued === true,
     }, at);
     if (!res.ok) {
-      const deny = INTERRUPT_DENY[res.code] ?? { status: 500, reason: '割り込めませんでした' };
-      return { ok: false, status: deny.status, reason: res.reason ?? deny.reason };
+      return denyOf(INTERRUPT_DENY, res, '割り込めませんでした');
     }
 
     // 書けたかどうかはここで初めて分かる。**書けていないのに 202 を返さない**
@@ -840,9 +872,9 @@ export function createRunner({
    */
   async function switchRun(runId, patch, text) {
     const at = clock();
-    const row = ledger.get(runId);
-    if (!row) return { ok: false, status: 404, reason: 'その実行は見つかりません' };
-    if (isRunOver(row.state)) return { ok: false, status: 409, reason: 'その実行はもう終わっています' };
+    const guard = guardRun(runId);
+    if (!guard.ok) return guard;
+    const { row } = guard;
 
     const entry = live.get(runId);
     const prev = entry?.spec;
@@ -853,11 +885,9 @@ export function createRunner({
     const merged = mergeSwitch(prev, patch);
     if (!merged.ok) return { ok: false, status: 400, reason: merged.reason };
 
-    const body = typeof text === 'string' ? text.trim() : '';
-    if (!body) return { ok: false, status: 400, reason: '指示が空です' };
-    if (body.length > PROMPT_MAX) {
-      return { ok: false, status: 400, reason: `指示が長すぎます（${PROMPT_MAX} 文字まで）` };
-    }
+    const checkedPrompt = checkPrompt(text);
+    if (!checkedPrompt.ok) return { ok: false, status: 400, reason: checkedPrompt.reason };
+    const body = checkedPrompt.prompt;
 
     const found = claude();
     if (!found?.path) {
