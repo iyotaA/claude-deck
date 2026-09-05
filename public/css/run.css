@@ -21,7 +21,13 @@
    （状態色は点と細いバーだけに使い、面は塗らない。だから輪は縁だけで、中は塗らない）。
    文字を印に使うのは、既にある `?`（自信が無い印）と同じ形。
 
-   list.css より後に読まれるうえ属性が1つ増えているので、読む順に頼らずに勝つ */
+   list.css より後に読まれるうえ属性が1つ増えているので、読む順に頼らずに勝つ。
+
+   **`transform` と `box-shadow` を明示して消す。** `list.css` の
+   `.state[data-s="…"]::before`（形の割り当て）と詳細度が同じ (0,2,1) なので、
+   読む順で勝ってはいるが、**あちらが置いた宣言までは消えない。**
+   予算切れは一覧では `awaiting-reply` の位置に出る＝`data-s="warn"` が付くので、
+   放っておくと「$」の丸の中にもう1本輪が入り、`hot` の場面では 45 度傾く */
 .state[data-mark="budget"]::before {
   content: "$";
   display: inline-flex;
@@ -33,6 +39,8 @@
   background: none;
   border: 1px solid currentColor;
   border-radius: 50%;
+  transform: none;
+  box-shadow: none;
   font-family: var(--font-mono);
   font-size: var(--fs-0);
   font-weight: 700;
@@ -172,12 +180,14 @@
   /* <summary> の既定の三角を消す。自前の chevron を回すため。
      list-style は Firefox / Chrome、::-webkit-details-marker は Safari 側 */
   list-style: none;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
 .runform-fold-head::-webkit-details-marker { display: none; }
 
 .runform-fold-head:hover {
   border-color: var(--border-strong);
+  background: var(--bg-hi);
   color: var(--fg);
 }
 
@@ -410,12 +420,14 @@
   font-size: var(--fs-1);
   line-height: 1.5;
   cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
 .composer-now[hidden] { display: none; }
 
 .composer-now:hover:not(:disabled) {
   border-color: var(--accent);
+  background: var(--bg-hi);
   color: var(--fg);
 }
 
@@ -452,10 +464,12 @@
   font-size: var(--fs-1);
   line-height: 1.5;
   cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
 .composer-slash:hover:not(:disabled) {
   border-color: var(--accent);
+  background: var(--bg-hi);
   color: var(--fg);
 }
 

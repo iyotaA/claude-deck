@@ -213,9 +213,10 @@
   color: var(--fg-faint);
   white-space: nowrap;
   cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
-.detail-tab:hover { color: var(--fg-muted); }
+.detail-tab:hover { background: var(--bg-hi); color: var(--fg-muted); }
 
 .detail-tab[aria-pressed="true"] {
   border-bottom-color: var(--accent);

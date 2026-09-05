@@ -169,11 +169,14 @@ const LIVE_KEYS = new Set(['permissionMode', 'model']);
  */
 function stateBadge(row) {
   const badge = el('span', 'state', row.stateLabel ?? row.state);
-  // 色は必ず変数経由で取る（一覧の STATE_COLOR と同じ渡し方）。
+  // 色は必ず変数経由で取る（一覧の colorOf と同じ渡し方）。
   // 色が付かない状態は、動いているか・もう動かないかの2つに分ける
-  const tone = toneOf(row.state);
-  const color = tone ? `var(--${tone})` : (RUN_OVER.has(row.state) ? 'var(--off)' : 'var(--calm)');
-  badge.style.setProperty('--state-color', color);
+  const tone = toneOf(row.state) ?? (RUN_OVER.has(row.state) ? 'off' : 'calm');
+  badge.style.setProperty('--state-color', `var(--${tone})`);
+  // 点の形も揃える。**台帳の状態は一覧と語彙が違う**（waiting / stalled / budget …）ので、
+  // store.js の表は引けない。上の toneOf が同じ4つ（hot / warn / calm / off）へ畳んでいるので、
+  // そこから形だけ借りる
+  badge.dataset.s = tone;
   if (row.state === 'budget') badge.dataset.mark = 'budget';
   return badge;
 }
@@ -679,7 +682,7 @@ function buildOps() {
     insertSlash(name);
   });
 
-  const send = el('button', 'btn is-primary', '送る');
+  const send = el('button', 'btn is-lead', '送る');
   send.type = 'button';
   send.addEventListener('click', () => post('input'));
 
@@ -786,7 +789,7 @@ function buildOps() {
   const body = el('div', 'settings-body');
   body.append(grid, note);
 
-  const apply = el('button', 'btn is-primary', 'この内容にする');
+  const apply = el('button', 'btn is-lead', 'この内容にする');
   apply.type = 'button';
   apply.addEventListener('click', applySwitch);
 

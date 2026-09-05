@@ -33,7 +33,7 @@
 import { el, num } from './util.js';
 import { mark } from './perf.js';
 import { icon } from './icons.js';
-import { store, syncQuery, STATE_COLOR } from './store.js';
+import { store, syncQuery, colorOf, toneOf } from './store.js';
 import { dom } from './dom.js';
 import { headOf, detailErrorNow } from './rows.js';
 import { panel } from './panel.js';
@@ -579,7 +579,8 @@ export function renderDetail() {
   // stateLabel が無いときに空の .state を出すと、色の点だけが残って意味を持たない
   if (row.stateLabel) {
     const state = el('span', 'state', row.stateLabel);
-    state.style.color = STATE_COLOR[row.state] ?? 'var(--off)';
+    state.style.color = colorOf(row.state);
+    state.dataset.s = toneOf(row.state);
     // 予算切れだけは点ではなく印にする（理由は list.js の buildCard 側に書いた）
     if (row.run?.state === 'budget') state.dataset.mark = 'budget';
     sub.append(state);
