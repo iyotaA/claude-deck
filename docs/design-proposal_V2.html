@@ -1,0 +1,2253 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>画面デザイン案 V2 — ClaudeDeck</title>
+<!-- V2 ＝ 骨格は案A（信号盤）、色と字と質感は案B（読む机）。
+     V1（design-proposal.html）で3案を並べた結果、この組み合わせに決まった。
+
+     **混ぜると衝突が3つ出る。** 案Aの骨格は密度で稼ぐ設計、案Bの質感は
+     余白で読ませる設計なので、素朴に重ねると一覧が縦に伸びて信号盤の役目が消える。
+     その解き方が §1。ここがこの文書の本体。
+
+     依存ゼロ・外部リクエスト0。file:// で開いて全部動く。
+     本体（public/）は1行も触っていない。 -->
+<style>
+/* ==========================================================================
+   1. 紙そのもの（この文書の器）。モックの中とは別系統（--doc-*）
+   ========================================================================== */
+
+:root {
+  --doc-bg:      #f7f6f2;
+  --doc-panel:   #ffffff;
+  --doc-sunk:    #efece5;
+  --doc-fg:      #1a1815;
+  --doc-fg2:     #5f594f;
+  --doc-fg3:     #8f887c;
+  --doc-line:    #e5e0d6;
+  --doc-line2:   #cdc6b8;
+  --doc-accent:  #b45a34;
+  --doc-code:    #f0ece3;
+  --doc-shadow:  0 1px 2px rgb(60 48 34 / 5%), 0 12px 32px -14px rgb(60 48 34 / 18%);
+  --doc-glass:   rgb(247 246 242 / 82%);
+
+  --doc-sans: "Yu Gothic UI", "Hiragino Sans", "Noto Sans JP", "Segoe UI",
+              system-ui, sans-serif;
+  --doc-mono: "Cascadia Mono", Consolas, "SF Mono", ui-monospace, monospace;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --doc-bg:      #171614;
+  --doc-panel:   #201f1c;
+  --doc-sunk:    #1b1a18;
+  --doc-fg:      #f0ede5;
+  --doc-fg2:     #b0aa9e;
+  --doc-fg3:     #837d72;
+  --doc-line:    #302d28;
+  --doc-line2:   #454138;
+  --doc-accent:  #e08159;
+  --doc-code:    #262421;
+  --doc-shadow:  0 1px 2px rgb(0 0 0 / 40%), 0 18px 44px -16px rgb(0 0 0 / 70%);
+  --doc-glass:   rgb(23 22 20 / 82%);
+
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scrollbar-color: var(--doc-line2) transparent; scroll-behavior: smooth; }
+* { scrollbar-width: thin; }
+
+body {
+  margin: 0;
+  background: var(--doc-bg);
+  color: var(--doc-fg);
+  font-family: var(--doc-sans);
+  font-size: 15px;
+  line-height: 1.8;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+:focus-visible { outline: 2px solid var(--doc-accent); outline-offset: 2px; }
+
+.doc-top {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  flex-wrap: wrap;
+  padding: .7rem clamp(1rem, 4vw, 3rem);
+  background: var(--doc-glass);
+  backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--doc-line);
+}
+
+.doc-top h1 { margin: 0; font-size: .82rem; font-weight: 700; letter-spacing: .04em; color: var(--doc-fg2); white-space: nowrap; }
+.doc-top h1 b { color: var(--doc-fg); }
+
+.vtag {
+  padding: .1rem .5rem;
+  border-radius: 999px;
+  background: var(--doc-accent);
+  color: #fff;
+  font-family: var(--doc-mono);
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+}
+
+.doc-nav { display: flex; gap: .1rem; flex-wrap: wrap; }
+.doc-nav a {
+  padding: .2rem .6rem;
+  border-radius: 999px;
+  color: var(--doc-fg3);
+  font-size: .76rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.doc-nav a:hover { background: var(--doc-sunk); color: var(--doc-fg); }
+
+.doc-tools { display: flex; align-items: center; gap: .5rem; margin-left: auto; }
+
+.doc-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
+  height: 2rem; padding: 0 .7rem;
+  border: 1px solid var(--doc-line);
+  border-radius: 9px;
+  background: var(--doc-panel);
+  color: var(--doc-fg2);
+  font: inherit; font-size: .78rem;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, transform .15s ease;
+}
+.doc-btn:hover { border-color: var(--doc-line2); color: var(--doc-fg); transform: translateY(-1px); }
+.doc-btn .i { width: 15px; height: 15px; flex: none; }
+
+.wrap { max-width: 78rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 3rem) 8rem; }
+
+.hero { padding: clamp(3rem, 8vw, 5.5rem) 0 clamp(2rem, 5vw, 3rem); }
+
+.hero .eyebrow {
+  display: inline-flex; align-items: center; gap: .45rem;
+  margin-bottom: 1rem;
+  padding: .2rem .8rem .2rem .55rem;
+  border: 1px solid var(--doc-line);
+  border-radius: 999px;
+  background: var(--doc-panel);
+  font-size: .72rem; font-weight: 600; letter-spacing: .06em;
+  color: var(--doc-fg2);
+}
+.hero .eyebrow .dot { width: .45rem; height: .45rem; border-radius: 50%; background: var(--doc-accent); }
+
+.hero h2 {
+  margin: 0 0 1rem;
+  font-size: clamp(1.9rem, 5.5vw, 3.3rem);
+  font-weight: 800; line-height: 1.28; letter-spacing: -.02em;
+}
+.hero p { max-width: 47rem; margin: 0; font-size: clamp(.95rem, 2vw, 1.08rem); color: var(--doc-fg2); }
+
+.sec { padding-top: clamp(2.5rem, 6vw, 4.5rem); scroll-margin-top: 4.5rem; }
+.sec > h3 {
+  display: flex; align-items: baseline; gap: .7rem;
+  margin: 0 0 .4rem;
+  font-size: clamp(1.25rem, 3vw, 1.65rem);
+  font-weight: 700; letter-spacing: -.01em;
+}
+.sec > h3 .no { font-family: var(--doc-mono); font-size: .8rem; font-weight: 500; color: var(--doc-accent); }
+.sec > .lead { max-width: 48rem; margin: 0 0 1.8rem; color: var(--doc-fg2); }
+
+h4.sub { margin: 2.4rem 0 .8rem; font-size: 1rem; font-weight: 700; }
+h5.sub2 { margin: 1.6rem 0 .5rem; font-size: .9rem; font-weight: 700; color: var(--doc-fg2); }
+
+p { margin: 0 0 1rem; }
+p:last-child { margin-bottom: 0; }
+strong { font-weight: 700; }
+code, .mono { font-family: var(--doc-mono); font-size: .88em; }
+:not(pre) > code { padding: .1em .35em; border-radius: 4px; background: var(--doc-code); }
+a { color: var(--doc-accent); }
+
+.tbl-wrap { overflow-x: auto; margin: 0 0 1rem; }
+table { width: 100%; min-width: 34rem; border-collapse: collapse; font-size: .85rem; }
+thead th {
+  padding: .5rem .7rem;
+  border-bottom: 1px solid var(--doc-line2);
+  text-align: left; font-size: .74rem; font-weight: 700; letter-spacing: .04em;
+  color: var(--doc-fg3); white-space: nowrap;
+}
+tbody td { padding: .6rem .7rem; border-bottom: 1px solid var(--doc-line); vertical-align: top; color: var(--doc-fg2); }
+tbody td:first-child { color: var(--doc-fg); font-weight: 600; }
+tbody tr:last-child td { border-bottom: 0; }
+.num { font-family: var(--doc-mono); font-variant-numeric: tabular-nums; }
+
+.note {
+  margin: 1rem 0 0;
+  padding: .85rem 1.1rem;
+  border-left: 3px solid var(--doc-accent);
+  border-radius: 0 10px 10px 0;
+  background: var(--doc-sunk);
+  font-size: .87rem; color: var(--doc-fg2);
+}
+
+.note.is-warn { border-left-color: #b5851f; }
+
+ul.bul { margin: 0 0 1rem; padding-left: 1.2rem; }
+ul.bul li { margin-bottom: .35rem; }
+ul.bul li::marker { color: var(--doc-fg3); }
+
+.grid2 { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); }
+
+/* 衝突 → 解き方 の1枚 */
+.clash {
+  display: grid;
+  gap: .7rem;
+  padding: 1.2rem 1.3rem;
+  border: 1px solid var(--doc-line);
+  border-radius: 14px;
+  background: var(--doc-panel);
+  box-shadow: var(--doc-shadow);
+}
+.clash .kk {
+  display: inline-flex; align-items: center; gap: .45rem;
+  font-family: var(--doc-mono); font-size: .72rem; letter-spacing: .08em; color: var(--doc-fg3);
+}
+.clash .kk i { width: .5rem; height: .5rem; border-radius: 50%; background: #b5851f; }
+.clash h5 { margin: 0; font-size: 1.05rem; font-weight: 800; letter-spacing: -.01em; }
+.clash .why { margin: 0; font-size: .87rem; color: var(--doc-fg2); }
+.clash .fix {
+  margin: 0;
+  padding: .7rem .9rem;
+  border-radius: 10px;
+  background: var(--doc-sunk);
+  font-size: .87rem;
+}
+.clash .fix b { color: var(--doc-accent); }
+
+kbd {
+  padding: .05em .4em;
+  border: 1px solid var(--doc-line2); border-bottom-width: 2px;
+  border-radius: 5px; background: var(--doc-panel);
+  font-family: var(--doc-mono); font-size: .78em;
+}
+
+/* ==========================================================================
+   2. 決定したトークン（案Bの色と質感 ＋ 案Aの骨格が要る密度）
+
+   ここから内側が「V2 の世界」。画面側は意味トークンだけを使う。
+   ライトが基本で、暗いほうは下のブロックが差し替える。
+   ========================================================================== */
+
+.stage {
+  --font-sans: "Yu Gothic UI", "Hiragino Sans", "Noto Sans JP",
+               "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "SF Mono", ui-monospace, monospace;
+
+  /* ---- 面。案Bの暖かい紙。ライトは純白ではなくクリーム ---- */
+  --bg:        #faf9f5;
+  --bg-elev:   #ffffff;
+  --bg-sunk:   #f0ede6;
+  --bg-hi:     #e8e3d8;
+  /* 字の3段。**クリーム地の上で全部 4.5:1 を超えるところまで押し上げてある。**
+     最初の案（muted #6B655C / faint #9A9287）は faint が 2.92 しかなく、
+     いまの本体（#8A99AC on #FFF ＝ 2.90）と同じ弱さだった。
+     トークンを作り直すここが直す機会なので押し上げる。段の差は保っている（15.96 / 7.35 / 4.99） */
+  --fg:        #1f1d1a;   /* 15.96 : 1 */
+  --fg-muted:  #57524a;   /*  7.35 : 1 */
+  --fg-faint:  #726b61;   /*  4.99 : 1 */
+  --border:    #e4dfd5;
+  --border-strong: #cec7b8;
+
+  /* ---- 強調。テラコッタ。**押せるものにしか使わない** ----
+     #B45A34（4.48）から1段落とした。字にも使うので 4.5 を割ってはいけない。
+     白を載せた側も 5.74 で、面と字の両方向で通る */
+  --accent:    #a24e2b;   /*  5.44 : 1（面に白を載せると 5.74 : 1） */
+  --accent-fg: #ffffff;
+  --accent-soft: rgb(162 78 43 / 10%);
+
+  /* ---- 状態。**赤系から意図的に離す**（衝突2の解） ----
+     --off は --fg-faint と同じ値にする。**いまの本体もそうなっている**
+     （--l-off と --l-fg-faint がどちらも #8A99AC）。
+     「終了・不明」は添え物と同じ重さ、という割り当てをそのまま引き継ぐ */
+  --hot:  #a51c30;   /* あなたの操作で止まっている  7.10 : 1 */
+  --warn: #8a6412;   /* あなたの返信を待っている    5.10 : 1 */
+  --calm: #2f6e8f;   /* Claude が動いている        5.32 : 1 */
+  --done: #3f7d4f;   /* 終わって通っている          4.68 : 1 */
+  --off:  #726b61;   /* 終了・不明                 4.99 : 1 */
+
+  /* ---- 影。4段。案Bのやわらかい落ち方（暖色を混ぜる） ---- */
+  --sh-1: 0 1px 2px rgb(60 48 34 / 5%);
+  --sh-2: 0 2px 4px rgb(60 48 34 / 5%), 0 10px 26px -10px rgb(60 48 34 / 16%);
+  --sh-3: 0 2px 6px rgb(60 48 34 / 8%), 0 28px 60px -20px rgb(60 48 34 / 28%);
+  --hi:   inset 0 1px 0 rgb(255 255 255 / 70%);
+
+  /* ---- 角丸。案Bの大きめ。ただし**役割で持つ**（衝突3の解） ---- */
+  --r-xs:   5px;   /* 札・タグ。行の中に並ぶ小さいもの */
+  --r-sm:   8px;   /* 入力欄・ボタン・圧縮した行 */
+  --r-md:  12px;   /* カード・パネル */
+  --r-lg:  18px;   /* ヒーローカード・モーダル */
+  --r-pill: 999px; /* 押せるものだけの形 */
+
+  /* ---- 字。**8段。案Bの7段に「11px」を1つ足した**（衝突1の解） ----
+     案Bのいちばん下は 12px だが、案Aの圧縮した行はそれだと縦に伸びる。
+     読む面は 15px/1.78 のまま、一覧だけ 11〜13px で組めるようにする */
+  --fs-0: 11px;   /* 添え物（置き場所・件数・いつ） */
+  --fs-1: 12px;   /* 状態の名前・圧縮した行の題 */
+  --fs-2: 13px;   /* カードの題・ボタン・タブ */
+  --fs-3: 14px;   /* 時系列の本文 */
+  --fs-4: 15px;   /* 詳細の本文。**ここが案Bの主役** */
+  --fs-5: 21px;   /* 詳細の見出し */
+  --fs-6: 30px;   /* ヒーローの経過時間・数値の札 */
+  --fs-7: 44px;   /* 数値モードの主役 */
+
+  /* 行間も2つ持つ。詰める場所と読ませる場所で分ける */
+  --lh-tight: 1.5;
+  --lh-read:  1.78;
+
+  --pane-pad: 1.35rem;
+  --ease: cubic-bezier(.2, .7, .3, 1);
+
+  overflow: hidden;
+  border: 1px solid var(--doc-line);
+  border-radius: 14px;
+  box-shadow: var(--doc-shadow);
+  font-family: var(--font-sans);
+  font-size: var(--fs-2);
+  line-height: var(--lh-tight);
+  color: var(--fg);
+  background: var(--bg-sunk);
+}
+
+:root[data-theme="dark"] .stage {
+  --bg:        #1c1b19;
+  --bg-elev:   #272521;
+  --bg-sunk:   #201f1c;
+  --bg-hi:     #33302a;
+  --fg:        #f5f2ea;
+  --fg-muted:  #b8b2a6;
+  --fg-faint:  #8a8479;
+  --border:    #35322c;
+  --border-strong: #4c483f;
+
+  --accent:    #e08159;
+  --accent-fg: #1c1b19;
+  --accent-soft: rgb(224 129 89 / 16%);
+
+  /* 暗いほうは hot をローズへ寄せる。accent（ピーチ）と色相を約30度離す。
+     それでも近いので、**形の差**（下の .state[data-s]）を併用する */
+  --hot:  #ff5a76;
+  --warn: #e8b341;
+  --calm: #6fa8c9;
+  --done: #7fbf7f;
+  --off:  #8a8479;
+
+  --sh-1: 0 1px 2px rgb(0 0 0 / 35%);
+  --sh-2: 0 2px 4px rgb(0 0 0 / 35%), 0 10px 26px -10px rgb(0 0 0 / 55%);
+  --sh-3: 0 2px 6px rgb(0 0 0 / 45%), 0 28px 60px -20px rgb(0 0 0 / 70%);
+  --hi:   inset 0 1px 0 rgb(255 255 255 / 5%);
+}
+
+.stage * { box-sizing: border-box; }
+.stage .num, .stage .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.stage.pad { padding: 1.1rem 1.2rem; background: var(--bg); }
+
+.stage-head { display: flex; align-items: baseline; gap: .6rem; margin: 2.2rem 0 .6rem; flex-wrap: wrap; }
+.stage-head h4 { margin: 0; font-size: 1rem; font-weight: 700; }
+.stage-head .tagline { font-size: .8rem; color: var(--doc-fg3); }
+
+.stage-scroll { overflow-x: auto; }
+.stage-scroll > .frame { min-width: 48rem; }
+
+/* ==========================================================================
+   3. モックの部品
+
+   クラス名は実物（public/css/）に揃えてある。決まった値をそのまま
+   該当ファイルへ持っていけるようにするため。
+   使ってよいのは意味トークンだけ。色を直に書かない。
+   ========================================================================== */
+
+.frame { background: var(--bg-sunk); }
+
+/* ------------------------------------------------------------- 上のバー */
+
+.topbar {
+  display: flex; align-items: center; gap: .55rem .9rem; flex-wrap: wrap;
+  padding: .6rem 1rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: inline-flex; align-items: center; gap: .4rem;
+  margin: 0;
+  font-size: var(--fs-1); font-weight: 700; letter-spacing: .02em;
+  color: var(--fg-muted); white-space: nowrap;
+}
+.brand svg { width: 16px; height: 16px; color: var(--accent); flex: none; }
+
+.modes { display: flex; gap: .1rem; }
+
+.tab {
+  padding: .25rem .65rem;
+  border: 0; border-bottom: 2px solid transparent;
+  background: none; font: inherit; font-size: var(--fs-1);
+  color: var(--fg-faint); cursor: pointer;
+  transition: color .15s var(--ease);
+}
+.tab:hover { color: var(--fg-muted); }
+.tab[aria-pressed="true"] { color: var(--fg); font-weight: 700; border-bottom-color: var(--accent); }
+
+.topbar-actions { display: flex; align-items: center; gap: .4rem; margin-left: auto; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .3rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
+  color: var(--fg); font: inherit; font-size: var(--fs-1);
+  cursor: pointer;
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease), transform .15s var(--ease);
+}
+.btn:hover { border-color: var(--border-strong); box-shadow: var(--sh-2), var(--hi); transform: translateY(-1px); }
+
+/* **1画面に1つだけ、塗った面を許す。** それがこれ。
+   状態色（hot / warn / calm / off）の面は1つも塗らないので、優劣の読み方は壊れない */
+.btn.is-lead {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 700;
+  box-shadow: var(--sh-2);
+}
+.btn.is-lead:hover { box-shadow: var(--sh-3); transform: translateY(-1px); }
+
+.btn.is-quiet { background: none; box-shadow: none; color: var(--fg-muted); }
+.btn.is-quiet:hover { background: var(--bg-hi); box-shadow: none; }
+
+.ibtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.85rem; height: 1.85rem; padding: 0;
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  background: none; color: var(--fg-muted); cursor: pointer;
+  transition: background .15s var(--ease), color .15s var(--ease);
+}
+.ibtn:hover { background: var(--bg-hi); color: var(--fg); }
+.ibtn svg { width: 16px; height: 16px; }
+
+.live {
+  display: inline-flex; align-items: center; gap: .32rem;
+  font-size: var(--fs-0); color: var(--fg-faint); white-space: nowrap;
+}
+.live::before {
+  content: ""; width: .45rem; height: .45rem; border-radius: 50%;
+  background: var(--done);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--done) 20%, transparent);
+}
+
+.statusbar {
+  flex: 0 0 calc(100% + 2rem);
+  display: flex; align-items: center; flex-wrap: wrap; gap: .2rem 1.3rem;
+  margin: 0 -1rem -.6rem;
+  padding: .38rem 1rem;
+  background: var(--bg-sunk);
+  border-top: 1px solid var(--border);
+}
+
+.summary { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem 1.3rem; }
+
+/* 押せないものは面も枠も持たない。点と字だけ */
+.tally {
+  display: inline-flex; align-items: center; gap: .32rem;
+  font-size: var(--fs-0); color: var(--fg-muted); white-space: nowrap;
+}
+.tally strong { color: var(--fg); font-family: var(--font-mono); font-weight: 600; }
+.tally.is-hot { color: var(--hot); }
+.tally.is-hot strong { color: var(--hot); font-size: var(--fs-3); }
+
+.rate { display: flex; align-items: center; gap: .45rem; margin-left: auto; font-size: var(--fs-0); color: var(--fg-faint); }
+.rate .meter { width: 4rem; height: 4px; border-radius: 999px; background: var(--bg-hi); overflow: hidden; }
+.rate .meter i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+
+/* ---------------------------------------------- 状態の点（衝突2の解） */
+
+/* テラコッタの強調と赤い状態色が近いので、**色だけに頼らず形も変える。**
+   点は .state::before の1つで描く（要素を増やさない） */
+.state {
+  display: inline-flex; align-items: center; gap: .32rem;
+  font-size: var(--fs-1); font-weight: 700;
+  color: var(--state-color, var(--off));
+  white-space: nowrap;
+}
+
+.state::before { content: ""; width: .45rem; height: .45rem; border-radius: 50%; background: currentColor; }
+
+/* 止まっている＝菱形。ひと目で他と違う形。輪は静かに出したまま */
+.state[data-s="hot"]::before {
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent);
+}
+
+/* **呼吸させるのはヒーロー帯の札だけ。**
+   一覧のカードにも上のバーの点にも掛けると、画面に動くものが同時に何個も出る。
+   帯はそもそも「ここを見ろ」の場所なので、意味が重なる場所は1つでいい。
+   上のバーは常に見えているので、そこで光り続けると作業中ずっと気が散る */
+.hero-card .state[data-s="hot"]::before { animation: pulse 2.6s var(--ease) infinite; }
+/* 待っている＝輪（中が空いている） */
+.state[data-s="warn"]::before { background: none; box-shadow: inset 0 0 0 2px currentColor; }
+/* 動いている＝塗った丸（既定のまま） */
+/* 終わった＝細い輪 */
+.state[data-s="off"]::before { background: none; box-shadow: inset 0 0 0 1.5px currentColor; }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent); }
+  50%      { box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 5%, transparent); }
+}
+
+/* --------------------------------------------------------------- 骨格 */
+
+.deck { display: grid; grid-template-columns: auto 15.5rem minmax(0, 1fr) auto; min-height: 0; height: 23rem; }
+
+.rail {
+  display: flex; flex-direction: column; align-items: center; gap: .3rem;
+  padding: .5rem .28rem;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+.rail.is-right { border-right: 0; border-left: 1px solid var(--border); }
+
+.list-pane {
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+.list-head {
+  display: flex; align-items: center; gap: .4rem;
+  padding: .45rem .75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-0); color: var(--fg-muted);
+}
+.list-head .n { margin-left: auto; font-family: var(--font-mono); color: var(--fg-faint); }
+
+.list {
+  list-style: none; margin: 0; padding: .45rem;
+  overflow-y: auto; min-height: 0;
+  display: flex; flex-direction: column; gap: .3rem;
+}
+
+.group, .group-body { display: flex; flex-direction: column; gap: .2rem; list-style: none; margin: 0; padding: 0; }
+
+.group-head {
+  position: sticky; top: -.45rem; z-index: 1;
+  display: flex; align-items: center; gap: .35rem;
+  margin: 0 -.45rem; padding: .3rem .8rem;
+  background: var(--bg);
+  color: var(--state-color, var(--fg));
+  font-size: var(--fs-0); font-weight: 700; letter-spacing: .03em;
+}
+.group-head .n { margin-left: auto; font-family: var(--font-mono); font-weight: 400; color: var(--fg-faint); }
+.group + .group { margin-top: .3rem; }
+
+/* ------------------------------------------- 圧縮した行（衝突1の解） */
+
+/* 案Aの骨格の要。ヒーローに出ないものは**1行**に落とす。
+   案Bの余白のまま組むと縦に伸びて、信号盤の役目（一覧で全体が見える）が消える。
+   だから**この行だけ案Bの下の段（11〜12px・行間 1.5）で組む。**
+   読ませる場所（詳細ペイン）は 15px / 1.78 のまま */
+.row {
+  display: grid;
+  grid-template-columns: .55rem minmax(0, 1fr) auto;
+  align-items: center; gap: .5rem;
+  width: 100%;
+  padding: .32rem .5rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none; text-align: left; cursor: pointer;
+  transition: background .15s var(--ease);
+}
+.row:hover { background: var(--bg-hi); }
+.row .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--state-color, var(--off)); }
+.row[data-s="warn"] .dot { background: none; box-shadow: inset 0 0 0 2px var(--state-color); }
+.row[data-s="off"] .dot { background: none; box-shadow: inset 0 0 0 1.5px var(--state-color); }
+.row .t { font-size: var(--fs-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .m { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--fg-faint); }
+.row[aria-current="true"] { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+
+/* --------------------------------------------------- ヒーローの帯（案A） */
+
+/* ボールの所在を画面のいちばん上に大きく出す。
+   **0件のときは帯ごと消える。** 一覧側の「あなたの番」の見出しは
+   0件でも残すので、「見ていない」と「無い」の区別は付いたまま。
+
+   **件数に上限を置かない。** 折り返して縦に伸ばすと圧縮行の意味が消えるので、
+   横へ流して溢れさせる。何件あっても帯の高さは変わらない */
+.hero-wrap {
+  position: relative;
+  background:
+    radial-gradient(130% 150% at 0% 0%, var(--accent-soft), transparent 60%),
+    var(--bg-sunk);
+  border-bottom: 1px solid var(--border);
+}
+
+/* 両端の膜。「まだ続きがある」を形で示す。
+   **帯（スクロールする側）ではなく器に載せる。** 中に置くと膜も一緒に流れる。
+
+   **出し入れはスクロール位置に追従させる。** 端まで送っても右の膜が残ると、
+   最後の1枚がうっすら覚えたままになって「まだ先がある」と読めてしまう。
+   判断は data-edge の1つに寄せ、書くのは scroll を見る側（下の script）。
+   CSS 側は当てるだけにしておくと、どこで決めているかが1箇所で済む */
+.hero-wrap::before,
+.hero-wrap::after {
+  content: "";
+  position: absolute; top: 0; bottom: 0;
+  width: 3.5rem; z-index: 2; pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s var(--ease);
+}
+
+.hero-wrap::before { left: 0; background: linear-gradient(to right, var(--bg-sunk), transparent); }
+.hero-wrap::after { right: 0; background: linear-gradient(to left, var(--bg-sunk), transparent); }
+
+.hero-wrap[data-edge="right"]::after,
+.hero-wrap[data-edge="both"]::after { opacity: 1; }
+.hero-wrap[data-edge="left"]::before,
+.hero-wrap[data-edge="both"]::before { opacity: 1; }
+
+.hero-band {
+  display: flex;
+  gap: .7rem;
+  padding: .9rem 1rem;
+  overflow-x: auto;
+  /* 送った先で札の左端が揃う。半端な位置で止まると読み始めが探しにくい */
+  scroll-snap-type: x proximity;
+}
+
+/* 幅を固定して、**次の1枚が必ず見切れる**ようにする。
+   1fr で分けると、2件のときに2枚で埋まって「続きがある」が伝わらなくなる */
+.hero-card { flex: 0 0 min(21rem, 74%); scroll-snap-align: start; }
+
+/* 帯の末尾に置く「ほか N 件」。押すと一覧の「あなたの番」へ飛ぶ */
+.hero-more {
+  flex: 0 0 auto;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: .15rem;
+  min-width: 6.5rem;
+  padding: .8rem 1rem;
+  /* 破線は但し書きと区切りの形。ここは「札そのものではない」ことを示す */
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+  transition: background .15s var(--ease), color .15s var(--ease);
+}
+.hero-more:hover { background: var(--bg-hi); color: var(--fg); }
+.hero-more b { font-family: var(--font-mono); font-size: var(--fs-5); font-weight: 700; line-height: 1; }
+.hero-more span { font-size: var(--fs-0); }
+
+.hero-card {
+  position: relative;
+  display: grid; gap: .5rem;
+  padding: .9rem 1rem .9rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-2), var(--hi);
+  text-align: left; cursor: pointer; overflow: hidden;
+  transition: box-shadow .2s var(--ease), transform .2s var(--ease);
+}
+.hero-card:hover { box-shadow: var(--sh-3), var(--hi); transform: translateY(-2px); }
+
+/* 左の帯。**案Bの角丸が大きいぶん太くする**（4px）。
+   18px の角丸に 3px の帯だと、上下の端が丸みに飲まれて消える */
+.hero-card::before {
+  content: ""; position: absolute; inset: 0 auto 0 0;
+  width: 4px; background: var(--state-color, var(--hot));
+}
+
+.hero-card .h-top { display: flex; align-items: center; gap: .5rem; }
+
+/* いちばん知りたい数を、いちばん大きく出す。
+   いまの本体はここが .74rem（10.4px）で、題名より小さい */
+.hero-card .h-idle {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: var(--fs-6); font-weight: 700;
+  line-height: 1; letter-spacing: -.03em;
+  color: var(--state-color, var(--fg));
+}
+.hero-card .h-idle small { font-size: var(--fs-0); font-weight: 500; letter-spacing: 0; color: var(--fg-faint); }
+
+.hero-card .h-title { font-size: var(--fs-4); font-weight: 700; line-height: 1.45; }
+
+.hero-card .h-ask {
+  padding: .5rem .65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+  font-size: var(--fs-1); color: var(--fg-muted);
+  overflow: hidden;
+}
+.hero-card .h-ask b { font-family: var(--font-mono); color: var(--fg); }
+.hero-card .h-ask .c { display: block; margin-top: .2rem; font-family: var(--font-mono); color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hero-card .h-act { display: flex; gap: .4rem; flex-wrap: wrap; }
+
+/* 帯が空のときに出す1行。**空の帯を置かない** */
+.hero-none {
+  padding: .7rem 1rem;
+  background: var(--bg-sunk);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-1); color: var(--fg-faint);
+  text-align: center;
+}
+
+/* --------------------------------------------------------------- カード */
+
+.card {
+  position: relative;
+  display: grid; gap: .3rem; width: 100%;
+  padding: .6rem .7rem .6rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
+  text-align: left; cursor: pointer;
+  transition: box-shadow .18s var(--ease), border-color .18s var(--ease), transform .18s var(--ease);
+}
+.card::before {
+  content: ""; position: absolute; inset: .4rem auto .4rem .35rem;
+  width: 3px; border-radius: 999px; background: var(--state-color, var(--off));
+}
+.card:hover { border-color: var(--border-strong); box-shadow: var(--sh-2), var(--hi); transform: translateY(-1px); }
+.card[aria-current="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--bg);
+  box-shadow: var(--sh-2), 0 0 0 3px var(--accent-soft), var(--hi);
+}
+
+.card-top { display: flex; align-items: center; gap: .45rem; }
+.idle { margin-left: auto; font-size: var(--fs-0); color: var(--fg-faint); font-family: var(--font-mono); white-space: nowrap; }
+.card-title { font-size: var(--fs-2); font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+
+.waiting {
+  display: flex; gap: .35rem; align-items: baseline;
+  padding: .28rem .45rem;
+  border-radius: var(--r-xs);
+  background: var(--bg-sunk);
+  font-size: var(--fs-0); color: var(--fg-muted); overflow: hidden;
+}
+.waiting .tool { font-family: var(--font-mono); font-weight: 700; color: var(--state-color, var(--fg)); }
+.waiting .d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .45rem; font-size: var(--fs-0); color: var(--fg-faint); }
+.card-meta .path { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tag {
+  padding: .05rem .4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  background: var(--bg);
+  font-size: var(--fs-0); color: var(--fg-muted); white-space: nowrap;
+}
+.tag.is-skill { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); color: var(--accent); background: var(--accent-soft); }
+.tag.is-deck { border-color: transparent; background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.tag.is-agents { border-color: color-mix(in srgb, var(--done) 45%, var(--border)); color: var(--done); }
+
+/* --------------------------------------------------------- 詳細（中央） */
+
+.detail-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; background: var(--bg-sunk); }
+
+.detail-tabs {
+  display: flex; gap: .15rem;
+  padding: .35rem var(--pane-pad) 0;
+  background: var(--bg-sunk);
+  border-bottom: 1px solid var(--border);
+}
+.dtab {
+  padding: .3rem .65rem;
+  border: 0; border-bottom: 2px solid transparent;
+  background: none; font: inherit; font-size: var(--fs-1);
+  color: var(--fg-faint); cursor: pointer;
+}
+.dtab[aria-pressed="true"] { color: var(--fg); font-weight: 700; border-bottom-color: var(--accent); }
+
+.detail-scroll { min-height: 0; overflow-y: auto; padding: 0 var(--pane-pad) 2rem; }
+
+/* **読む面はここから案Bの尺。** 一覧の詰めた組みとは別世界にする */
+.detail {
+  padding-top: 1.1rem;
+  max-width: 42rem;
+  margin-inline: auto;
+  font-size: var(--fs-4);
+  line-height: var(--lh-read);
+}
+
+.detail h2 { margin: 0 0 .3rem; font-size: var(--fs-5); font-weight: 700; line-height: 1.4; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.detail-sub { display: flex; flex-wrap: wrap; gap: .25rem .7rem; margin-bottom: .9rem; font-size: var(--fs-0); color: var(--fg-muted); line-height: 1.5; }
+.detail-sub .path { font-family: var(--font-mono); }
+
+.purpose { margin-bottom: 1.2rem; padding: .1rem 0 .1rem .9rem; border-left: 3px solid var(--accent); }
+.purpose .h { font-size: var(--fs-4); font-weight: 600; line-height: 1.6; }
+
+.panel {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg);
+  box-shadow: var(--sh-1), var(--hi);
+  overflow: hidden;
+}
+.panel-head {
+  display: flex; align-items: center; gap: .4rem;
+  padding: .5rem .8rem;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-1); font-weight: 700; color: var(--fg-muted);
+  line-height: 1.5;
+}
+.panel-head .n { margin-left: auto; font-family: var(--font-mono); font-weight: 400; color: var(--fg-faint); }
+.panel-body { padding: .85rem; }
+
+/* 答えないと1行も進まないパネル。**色は増やさず --hot から作る** */
+.panel.is-block {
+  border-color: color-mix(in srgb, var(--hot) 40%, var(--border));
+  box-shadow: var(--sh-2), 0 0 0 3px color-mix(in srgb, var(--hot) 9%, transparent);
+}
+.panel.is-block .panel-head { color: var(--hot); background: color-mix(in srgb, var(--hot) 6%, var(--bg)); }
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: .3rem .9rem; margin: 0; font-size: var(--fs-3); line-height: 1.65; }
+.facts dt { color: var(--fg-faint); white-space: nowrap; font-family: var(--font-mono); font-size: var(--fs-0); padding-top: .15rem; }
+.facts dd { margin: 0; color: var(--fg-muted); }
+
+/* 本文（Markdown） */
+.md { font-size: var(--fs-4); line-height: var(--lh-read); }
+.md p { margin: 0 0 .7rem; }
+.md p:last-child { margin-bottom: 0; }
+.md h3 { margin: 1.2rem 0 .4rem; font-size: var(--fs-4); font-weight: 700; }
+.md h3:first-child { margin-top: 0; }
+.md code { font-family: var(--font-mono); font-size: .88em; padding: .05em .3em; border-radius: 4px; background: var(--bg-sunk); }
+.md ul { margin: 0 0 .7rem; padding-left: 1.2rem; }
+.md li { margin-bottom: .15rem; }
+.md li::marker { color: var(--fg-faint); }
+.md li[data-task]::marker { font-family: var(--font-mono); }
+.md li[data-task="done"] { color: var(--fg-faint); }
+.md li[data-task="done"]::marker { content: "✓ "; color: var(--done); }
+.md li[data-task="doing"]::marker { content: "■ "; color: var(--accent); }
+.md li[data-task="todo"]::marker { content: "□ "; color: var(--fg-faint); }
+
+/* -------------------------------------------------------------- 時系列 */
+
+.tl { display: flex; flex-direction: column; gap: .6rem; }
+.tl-item { position: relative; display: grid; grid-template-columns: 1.6rem 1fr; gap: .6rem; font-size: var(--fs-3); line-height: 1.65; }
+.tl-item::before { content: ""; position: absolute; top: 1.6rem; bottom: -.6rem; left: .75rem; width: 1px; background: var(--border); }
+.tl-item:last-child::before { display: none; }
+
+.tl-mark {
+  display: flex; align-items: center; justify-content: center;
+  width: 1.6rem; height: 1.6rem;
+  border: 1px solid var(--border); border-radius: 50%;
+  background: var(--bg); box-shadow: var(--sh-1);
+  color: var(--fg-faint); z-index: 1;
+}
+.tl-mark svg { width: 13px; height: 13px; }
+/* 印は**5群**に丸める（16 ある kind ごとには割らない）。
+   種類の名前は隣に字で出ているので、印は「読み飛ばすため」に割れば足りる。
+   未知の kind が来たら群の割り当てが無いので、既定（枠だけの丸）に落ちる ―― 消えない */
+.tl-item.is-me .tl-mark { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); color: var(--accent); background: var(--accent-soft); }
+.tl-item.is-plan .tl-mark { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); color: var(--warn); }
+.tl-item.is-edit .tl-mark { border-color: color-mix(in srgb, var(--done) 50%, var(--border)); color: var(--done); }
+.tl-item.is-note .tl-mark { color: var(--fg-faint); }
+
+.tl-body { min-width: 0; }
+.tl-kind { display: flex; align-items: baseline; gap: .45rem; margin-bottom: .2rem; }
+.tl-kind b { font-size: var(--fs-0); font-weight: 700; letter-spacing: .04em; color: var(--fg-muted); }
+.tl-kind .when { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--fg-faint); }
+
+.tl-text { padding: .5rem .7rem; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg); color: var(--fg-muted); }
+.tl-item.is-me .tl-text { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, var(--border)); color: var(--fg); }
+
+/* ---------------------------------------------------- 右のインスペクタ */
+
+.insp { display: flex; flex-direction: column; min-height: 0; background: var(--bg); border-left: 1px solid var(--border); overflow-y: auto; }
+.insp-head { padding: .5rem .75rem; border-bottom: 1px solid var(--border); font-size: var(--fs-0); font-weight: 700; letter-spacing: .04em; color: var(--fg-muted); }
+.insp-body { padding: .75rem; display: grid; gap: .75rem; }
+
+/* -------------------------------------------------------------- 数値 */
+
+.stats { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); }
+
+/* 押せない札は**沈めて枠を外す。** 押せるカード（浮いた面＋影）と形で分かれる */
+.stat { padding: .7rem .8rem; border-radius: var(--r-md); background: var(--bg-sunk); }
+.stat .k { font-size: var(--fs-0); color: var(--fg-faint); letter-spacing: .03em; }
+.stat .v { font-family: var(--font-mono); font-size: var(--fs-6); font-weight: 700; line-height: 1.2; letter-spacing: -.03em; color: var(--fg); }
+.stat .v small { font-size: var(--fs-3); font-weight: 500; color: var(--fg-faint); }
+.stat .d { font-size: var(--fs-0); color: var(--fg-faint); }
+.stat .d.up { color: var(--hot); }
+.stat .d.down { color: var(--done); }
+
+.bar { display: grid; grid-template-columns: 8rem 1fr 4.5rem; align-items: center; gap: .55rem; padding: .28rem 0; font-size: var(--fs-1); }
+.bar .l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-muted); }
+.bar-track { height: .5rem; border-radius: 999px; background: var(--bg-hi); overflow: hidden; }
+.bar-fill { display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 65%, transparent), var(--accent)); }
+.bar .n { font-family: var(--font-mono); font-size: var(--fs-0); text-align: right; color: var(--fg-muted); }
+
+.spark { width: 100%; height: 2.8rem; display: block; }
+.spark .line { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+.spark .area { fill: url(#sparkfill); }
+.spark .dot { fill: currentColor; }
+
+/* ------------------------------------------------------------- 書庫 */
+
+.archive-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .4rem;
+  padding: .6rem .85rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.field {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .3rem .6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
+  font-size: var(--fs-1); color: var(--fg-muted); cursor: pointer;
+}
+.field svg { width: 13px; height: 13px; color: var(--fg-faint); }
+.field.is-q { flex: 1 1 11rem; border-radius: var(--r-sm); cursor: text; }
+.field.is-q input { flex: 1; min-width: 0; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-1); outline: none; }
+.field.is-q input::placeholder { color: var(--fg-faint); }
+.field.is-on { border-color: transparent; background: var(--accent); color: var(--accent-fg); font-weight: 600; box-shadow: var(--sh-2); }
+.field.is-on svg { color: var(--accent-fg); }
+
+.archive-grid { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr)); padding: .9rem; }
+.card.is-archive { padding-left: .8rem; }
+.card.is-archive::before { content: none; }
+.card .when { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--fg-muted); }
+
+/* ------------------------------------------------- モーダル・実行まわり */
+
+.modal {
+  display: grid; grid-template-columns: 9.5rem 1fr;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg);
+  box-shadow: var(--sh-3);
+  overflow: hidden;
+}
+.modal-nav { display: flex; flex-direction: column; gap: .1rem; padding: .85rem .55rem; background: var(--bg-sunk); border-right: 1px solid var(--border); }
+
+.navb {
+  display: flex; align-items: center; gap: .4rem;
+  padding: .38rem .6rem;
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  background: none; font: inherit; font-size: var(--fs-1);
+  color: var(--fg-muted); text-align: left; cursor: pointer;
+}
+.navb:hover { background: var(--bg-hi); }
+.navb[aria-pressed="true"] { background: var(--bg); border-color: var(--border); color: var(--fg); font-weight: 700; box-shadow: var(--sh-1); }
+.navb svg { width: 14px; height: 14px; flex: none; }
+
+.modal-body { padding: 1.1rem 1.2rem; display: grid; gap: .85rem; align-content: start; }
+.modal-body h5 { margin: 0; font-size: var(--fs-4); font-weight: 700; }
+
+.f-label { font-size: var(--fs-1); font-weight: 600; color: var(--fg-muted); margin-bottom: .22rem; }
+.f-hint { font-size: var(--fs-0); color: var(--fg-faint); margin-top: .22rem; line-height: 1.55; }
+
+.f-text, .f-select {
+  width: 100%;
+  padding: .4rem .6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  box-shadow: var(--hi);
+  color: var(--fg); font: inherit; font-size: var(--fs-1);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.f-text:focus, .f-select:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: 0 0 0 3px var(--accent-soft); }
+.f-text::placeholder { color: var(--fg-faint); }
+.f-select.is-danger { border-color: var(--hot); box-shadow: 0 0 0 3px color-mix(in srgb, var(--hot) 12%, transparent); }
+
+.f-danger { display: flex; gap: .4rem; align-items: flex-start; font-size: var(--fs-0); color: var(--hot); line-height: 1.55; }
+.f-danger svg { width: 14px; height: 14px; flex: none; margin-top: .18rem; }
+
+.modal-foot { display: flex; align-items: center; gap: .5rem; padding-top: .5rem; border-top: 1px solid var(--border); margin-top: .1rem; }
+.modal-foot .msg { font-size: var(--fs-0); color: var(--fg-faint); }
+.modal-foot .right { margin-left: auto; display: flex; gap: .4rem; }
+
+.ask {
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--r-md);
+  background: var(--bg);
+  box-shadow: var(--sh-2), 0 0 0 3px color-mix(in srgb, var(--warn) 10%, transparent);
+  overflow: hidden;
+}
+.ask-head {
+  display: flex; align-items: center; gap: .4rem;
+  padding: .55rem .8rem;
+  background: color-mix(in srgb, var(--warn) 7%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 28%, var(--border));
+  font-size: var(--fs-1); font-weight: 700; color: var(--warn);
+}
+.ask-head svg { width: 15px; height: 15px; }
+.ask-body { padding: .85rem; display: grid; gap: .6rem; font-size: var(--fs-2); }
+
+.ask pre, .code {
+  margin: 0;
+  padding: .55rem .7rem;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+  font-family: var(--font-mono); font-size: var(--fs-1);
+  color: var(--fg); overflow-x: auto;
+}
+
+.choices { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; }
+.choices li {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .42rem .6rem;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  font-size: var(--fs-1); cursor: pointer;
+  transition: background .15s var(--ease), border-color .15s var(--ease);
+}
+.choices li:hover { background: var(--bg-hi); border-color: var(--border-strong); }
+.choices li.is-picked { border-color: var(--accent); background: var(--accent-soft); }
+.choices li .k { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--fg-faint); }
+
+.ask-act { display: flex; gap: .4rem; flex-wrap: wrap; }
+
+.composer { display: grid; gap: .4rem; padding: .65rem var(--pane-pad); background: var(--bg); border-bottom: 1px solid var(--border); }
+.composer-top { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.composer-now {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .14rem .55rem;
+  border: 1px solid var(--border); border-radius: var(--r-pill);
+  background: var(--bg-elev); box-shadow: var(--sh-1), var(--hi);
+  font-size: var(--fs-0); color: var(--fg-muted); cursor: pointer;
+}
+.composer-in {
+  display: flex; gap: .45rem; align-items: flex-end;
+  padding: .5rem .55rem .5rem .75rem;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--bg-elev); box-shadow: var(--sh-1), var(--hi);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.composer-in:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: 0 0 0 3px var(--accent-soft); }
+.composer-in textarea { flex: 1; min-width: 0; height: 2.3rem; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-3); resize: none; outline: none; }
+.composer-in textarea::placeholder { color: var(--fg-faint); }
+
+/* 狭い窓 */
+@media (max-width: 860px) {
+  .deck { grid-template-columns: auto minmax(0, 1fr) auto; height: 22rem; }
+  .list-pane, .insp { display: none; }
+  .modal { grid-template-columns: 1fr; }
+  .modal-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+}
+
+/* ==========================================================================
+   4. 尺の見本
+   ========================================================================== */
+
+.ts-row { display: flex; align-items: baseline; gap: .9rem; padding: .35rem 0; border-bottom: 1px dashed var(--border); }
+.ts-row:last-child { border-bottom: 0; }
+.ts-row .k { flex: none; width: 4rem; font-family: var(--font-mono); font-size: var(--fs-0); color: var(--fg-faint); }
+.ts-row .u { flex: none; width: 2.6rem; font-family: var(--font-mono); font-size: var(--fs-0); color: var(--fg-faint); }
+.ts-row .s { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.ts-row .w { flex: none; font-size: var(--fs-0); color: var(--fg-faint); margin-left: auto; white-space: nowrap; }
+
+.ts-0 { font-size: var(--fs-0); }
+.ts-1 { font-size: var(--fs-1); }
+.ts-2 { font-size: var(--fs-2); }
+.ts-3 { font-size: var(--fs-3); }
+.ts-4 { font-size: var(--fs-4); }
+.ts-5 { font-size: var(--fs-5); font-weight: 700; letter-spacing: -.01em; }
+.ts-6 { font-size: var(--fs-6); font-weight: 700; letter-spacing: -.02em; }
+.ts-7 { font-size: var(--fs-7); font-weight: 800; letter-spacing: -.03em; line-height: 1.1; }
+
+.demo-grid { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); }
+.demo-box {
+  display: grid; place-content: center; gap: .1rem;
+  height: 4.6rem; padding: .5rem;
+  border: 1px solid var(--border); background: var(--bg-elev);
+  text-align: center; font-size: var(--fs-0); color: var(--fg-muted);
+}
+.demo-box b { display: block; font-family: var(--font-mono); font-size: var(--fs-1); color: var(--fg); }
+.e-0 { box-shadow: none; }
+.e-1 { box-shadow: var(--sh-1), var(--hi); }
+.e-2 { box-shadow: var(--sh-2), var(--hi); }
+.e-3 { box-shadow: var(--sh-3), var(--hi); }
+.r-xs { border-radius: var(--r-xs); }
+.r-sm { border-radius: var(--r-sm); }
+.r-md { border-radius: var(--r-md); }
+.r-lg { border-radius: var(--r-lg); }
+.r-pill { border-radius: var(--r-pill); }
+
+.tone { display: flex; flex-wrap: wrap; gap: .5rem; }
+.tone .t { text-align: center; font-size: var(--fs-0); color: var(--fg-faint); }
+.tone .t i { display: block; width: 3.8rem; height: 2.3rem; margin-bottom: .2rem; border: 1px solid var(--border); border-radius: var(--r-sm); }
+.tone .t code { font-family: var(--font-mono); font-size: var(--fs-0); }
+
+/* 状態の形を並べて見せる */
+.shapes { display: flex; flex-wrap: wrap; gap: 1.1rem; }
+
+/* ==========================================================================
+   5. 「いま」の再現（.legacy）。比べる基準線。**V2 の色を継がせない**
+   ========================================================================== */
+
+.legacy {
+  --font-sans: "Yu Gothic UI", "Yu Gothic", YuGothic, "Hiragino Sans", Meiryo, system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "SF Mono", "Yu Gothic UI", monospace;
+  --bg: #FFFFFF; --bg-elev: #F5F7FA; --bg-sunk: #EDF1F6;
+  --fg: #16202E; --fg-muted: #5A6B80; --fg-faint: #8A99AC;
+  --border: #D8DFE8; --border-strong: #C2CCD9; --accent: #1F5FD0;
+  --hot: #C2372B; --warn: #A8620A; --calm: #1F5FD0; --done: #1B7A46; --off: #8A99AC;
+  font-family: var(--font-sans); font-size: 14px; line-height: 1.6;
+  color: var(--fg); background: var(--bg);
+}
+:root[data-theme="dark"] .legacy {
+  --bg: #1C1B19; --bg-elev: #2B2A27; --bg-sunk: #232220;
+  --fg: #F5F4EF; --fg-muted: #C2C0B6; --fg-faint: #918E85;
+  --border: #3A3934; --border-strong: #4E4C46; --accent: #4C8DFF;
+  --hot: #FF6B5A; --warn: #F2B01E; --calm: #4C8DFF; --done: #4ACB84; --off: #918E85;
+}
+.legacy .l-list { display: flex; flex-direction: column; gap: .4rem; padding: .5rem; }
+.legacy .l-head { display: flex; align-items: center; gap: .35rem; padding: .35rem; font-size: .74rem; font-weight: 700; }
+.legacy .l-head .n { margin-left: auto; font-family: var(--font-mono); font-weight: 400; color: var(--fg-faint); }
+.legacy .l-card {
+  position: relative; display: grid; gap: .3rem;
+  padding: .6rem .7rem .6rem 1rem;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elev); text-align: left;
+}
+.legacy .l-card::before { content: ""; position: absolute; inset: .35rem auto .35rem .3rem; width: 3px; border-radius: 2px; background: var(--sc, var(--off)); }
+.legacy .l-top { display: flex; align-items: baseline; gap: .5rem; }
+.legacy .l-state { display: inline-flex; align-items: center; gap: .3rem; font-size: .76rem; font-weight: 700; color: var(--sc, var(--off)); }
+.legacy .l-state::before { content: ""; width: .45rem; height: .45rem; border-radius: 50%; background: currentColor; }
+.legacy .l-idle { margin-left: auto; font-size: .74rem; font-family: var(--font-mono); color: var(--fg-faint); }
+.legacy .l-title { font-size: .92rem; font-weight: 600; line-height: 1.35; }
+.legacy .l-wait { display: flex; gap: .4rem; padding: .3rem .45rem; border-radius: 6px; background: var(--bg-sunk); font-size: .78rem; color: var(--fg-muted); overflow: hidden; }
+.legacy .l-wait .tool { font-family: var(--font-mono); font-weight: 700; color: var(--sc, var(--fg)); white-space: nowrap; }
+.legacy .l-wait .d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.legacy .l-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; font-size: .74rem; color: var(--fg-faint); }
+.legacy .l-meta .path { font-family: var(--font-mono); }
+.legacy .l-tag { padding: 0 .35rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); font-size: .72rem; color: var(--fg-muted); }
+.legacy .l-tag.is-skill { border-color: var(--accent); color: var(--accent); }
+
+.vs { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
+.vs-col > .cap { display: flex; align-items: center; gap: .4rem; margin-bottom: .4rem; font-size: .74rem; font-weight: 700; letter-spacing: .05em; color: var(--doc-fg3); }
+.vs-col > .cap .pin { padding: .05rem .45rem; border-radius: 999px; background: var(--doc-sunk); font-family: var(--doc-mono); font-size: .68rem; }
+.vs-col > .cap .pin.is-new { background: var(--doc-accent); color: #fff; }
+.vs-box { overflow: hidden; border: 1px solid var(--doc-line); border-radius: 12px; box-shadow: var(--doc-shadow); }
+</style>
+</head>
+<body>
+
+<header class="doc-top">
+  <h1><b>ClaudeDeck</b> 画面デザイン案</h1>
+  <span class="vtag">V2</span>
+  <nav class="doc-nav">
+    <a href="#s1">衝突と解き方</a>
+    <a href="#s2">トークン</a>
+    <a href="#s3">モック</a>
+    <a href="#s4">いまとの比較</a>
+    <a href="#s5">決めたこと</a>
+    <a href="#s6">当てる順番</a>
+  </nav>
+  <div class="doc-tools">
+    <button class="doc-btn" id="theme" type="button" aria-label="配色を切り替える">
+      <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/>
+      </svg>
+      <span id="theme-label">ライト</span>
+    </button>
+  </div>
+</header>
+
+<main class="wrap">
+<!-- アイコンの形は1箇所に置いて <use> で借りる。
+     本体の icons.js が「形は1箇所」にしているのと同じ考え方。
+     **絵文字は使わない** … 自分の色を持つので currentColor が乗らない -->
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-deck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/>
+  </symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/>
+  </symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="currentColor">
+    <path fill-rule="evenodd" d="M13.9 2.5h-3.8l-.5 2.2-1.6.9-2.1-.8-1.9 3.3 1.6 1.5v1.8l-1.6 1.5 1.9 3.3 2.1-.8 1.6.9.5 2.2h3.8l.5-2.2 1.6-.9 2.1.8 1.9-3.3-1.6-1.5v-1.8l1.6-1.5-1.9-3.3-2.1.8-1.6-.9-.5-2.2ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/>
+  </symbol>
+  <symbol id="i-contrast" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+    <circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17Z" fill="currentColor" stroke="none"/>
+  </symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.7-4.7"/>
+  </symbol>
+  <symbol id="i-side" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3.6 4.6h5v14.8h-5z" fill="currentColor" stroke="none"/>
+  </symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+    <path d="M4 19V5M4 19h16"/><path d="M8 16v-4M12.5 16V8M17 16v-6"/>
+  </symbol>
+  <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+    <circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><circle cx="12" cy="7.9" r=".9" fill="currentColor" stroke="none"/>
+  </symbol>
+  <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+    <circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>
+  </symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+    <rect x="4" y="7.5" width="16" height="12" rx="3"/><path d="M12 4v3.5"/><path d="M9 13h.01M15 13h.01" stroke-linecap="round"/>
+  </symbol>
+  <!-- 手が動いた群。**icons.js に既にある `pencil` を借りる**（新しく作らない） -->
+  <symbol id="i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M14.5 6.5l3 3"/>
+  </symbol>
+  <symbol id="i-plan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 3.5h9L19 8v12.5H6z"/><path d="M14.5 3.5V8H19"/><path d="M9 12.5h7M9 16h4.5"/>
+  </symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 4.5 21 19.5H3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/>
+  </symbol>
+  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4.5 12 20 4.5 15.5 20l-3.3-6.2z"/>
+  </symbol>
+</svg>
+
+<section class="hero">
+  <span class="eyebrow"><i class="dot"></i>V2 — 骨格 A × 質感 B</span>
+  <h2>信号盤の骨格に、<br>読む机の色と字を載せる。</h2>
+  <p>
+    V1 の3案から決まった組み合わせ。<strong>ただし素朴に重ねると壊れる。</strong>
+    案A の骨格は<em>密度</em>で全体を見せる設計、案B の質感は<em>余白</em>で読ませる設計なので、
+    そのまま足すと一覧が縦に伸びて信号盤の役目が消える。
+    衝突は3つ出た。<strong>その解き方がこの文書の本体</strong>で、モックはその結果。
+  </p>
+</section>
+
+<!-- ====================================================== 1. 衝突と解き方 -->
+<section class="sec" id="s1">
+  <h3><span class="no">01</span>混ぜると出る3つの衝突</h3>
+  <p class="lead">
+    どれも「どちらかを捨てる」ではなく、<strong>効く場所を分ける</strong>ことで両立させている。
+  </p>
+
+  <div style="display:grid;gap:1.1rem">
+
+    <!-- ---- 衝突 1 ---- -->
+    <div class="clash">
+      <span class="kk"><i></i>衝突 1 ／ 密度</span>
+      <h5>案B の本文 15px・行間 1.78 で一覧を組むと、信号盤にならない</h5>
+      <p class="why">
+        案A の骨格は「ヒーローに出ないものは1行に落とす」で全体を見せる。
+        そこへ案B の尺をそのまま当てると、1行の高さが <span class="num">28px</span> から
+        <span class="num">47px</span> へ増える（計算値）。12本並べると
+        <span class="num">377px</span> が <span class="num">568px</span> になり、
+        <strong>スクロールしないと全体が見えない＝信号盤の役目が消える。</strong>
+      </p>
+      <p class="fix">
+        <b>解き方 ―― 字の段を8つに割り、効かせる場所を分ける。</b>
+        案B の7段の下に <code>--fs-0: 11px</code> を1つ足す。
+        <strong>一覧と圧縮した行は 11〜13px・行間 1.5</strong>、
+        <strong>詳細ペイン（読む場所）は 15px・行間 1.78</strong>。
+        案B の「読ませる」は本文のためのものなので、一覧まで持っていく必要が無い。
+      </p>
+      <div class="stage pad" style="margin-top:.2rem">
+        <div style="display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr))">
+          <div>
+            <div style="font-size:var(--fs-0);color:var(--fg-faint);margin-bottom:.35rem">案B の尺をそのまま当てた場合</div>
+            <div style="display:flex;flex-direction:column;gap:.35rem">
+              <div class="row" style="padding:.6rem .5rem" data-s="calm"><i class="dot" style="--state-color:var(--calm)"></i><span class="t" style="font-size:var(--fs-3);line-height:1.78">週次レポートの集計クエリを直す</span><span class="m">48秒</span></div>
+              <div class="row" style="padding:.6rem .5rem" data-s="calm"><i class="dot" style="--state-color:var(--calm)"></i><span class="t" style="font-size:var(--fs-3);line-height:1.78">在庫同期のリトライ設計</span><span class="m">3秒</span></div>
+              <div class="row" style="padding:.6rem .5rem" data-s="warn"><i class="dot" style="--state-color:var(--warn)"></i><span class="t" style="font-size:var(--fs-3);line-height:1.78">検索インデックスの再構築が遅い件</span><span class="m">21分</span></div>
+              <div class="row" style="padding:.6rem .5rem" data-s="off"><i class="dot" style="--state-color:var(--off)"></i><span class="t" style="font-size:var(--fs-3);line-height:1.78">管理画面のアクセス権を見直す</span><span class="m">2時間前</span></div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:var(--fs-0);color:var(--accent);margin-bottom:.35rem;font-weight:700">V2（一覧だけ下の段で組む）</div>
+            <div style="display:flex;flex-direction:column;gap:.2rem">
+              <div class="row" data-s="calm"><i class="dot" style="--state-color:var(--calm)"></i><span class="t">週次レポートの集計クエリを直す</span><span class="m">48秒</span></div>
+              <div class="row" data-s="calm"><i class="dot" style="--state-color:var(--calm)"></i><span class="t">在庫同期のリトライ設計</span><span class="m">3秒</span></div>
+              <div class="row" data-s="warn"><i class="dot" style="--state-color:var(--warn)"></i><span class="t">検索インデックスの再構築が遅い件</span><span class="m">21分</span></div>
+              <div class="row" data-s="off"><i class="dot" style="--state-color:var(--off)"></i><span class="t">管理画面のアクセス権を見直す</span><span class="m">2時間前</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- 衝突 2 ---- -->
+    <div class="clash">
+      <span class="kk"><i></i>衝突 2 ／ 色</span>
+      <h5>テラコッタの強調が、<code>--hot</code>（あなたの操作で止まっている）と近い</h5>
+      <p class="why">
+        <code>tokens.css</code> のコメントが名指しで避けている所そのもの ――
+        「<code>--d-accent</code> を Claude の terracotta にすると <code>--d-hot</code> と見分けが付かなくなる」。
+        しかも案A の骨格は<strong>ヒーローカードで hot をいちばん大きく出す</strong>ので、
+        この衝突がいちばん目立つ場所に来る。
+      </p>
+      <p class="fix">
+        <b>解き方 ―― 二段構え。</b>
+        ①状態色を赤系から意図的に離す（明 <code>#A51C30</code> のクリムゾン／
+        暗 <code>#FF5A76</code> のローズ。テラコッタとは色相で約30度離れる）。
+        ②<strong>それでも足りないので、点の形も変える</strong>。
+        色覚の差にも効くし、<code>.state::before</code> の <code>border-radius</code> と
+        <code>box-shadow</code> を替えるだけなので<strong>要素は1つも増えない</strong>。
+      </p>
+      <div class="stage pad" style="margin-top:.2rem">
+        <div class="shapes">
+          <span class="state" data-s="hot" style="--state-color:var(--hot)">あなたの番（菱形）</span>
+          <span class="state" data-s="warn" style="--state-color:var(--warn)">返信待ち（輪）</span>
+          <span class="state" data-s="calm" style="--state-color:var(--calm)">実行中（塗った丸）</span>
+          <span class="state" data-s="off" style="--state-color:var(--off)">終了（細い輪）</span>
+          <span style="margin-left:auto"><button class="btn is-lead" type="button">起こす（強調）</button></span>
+        </div>
+        <div style="margin-top:.7rem;font-size:var(--fs-0);color:var(--fg-faint)">
+          強調（テラコッタ）は<strong>押せるものにしか出ない</strong>。状態の点は必ず形を持つ。
+          この2つが同じ画面に並んでも、役割を取り違えない
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- 衝突 3 ---- -->
+    <div class="clash">
+      <span class="kk"><i></i>衝突 3 ／ 形</span>
+      <h5>案B の角丸 18px を、案A の圧縮した行に当てられない</h5>
+      <p class="why">
+        高さ <span class="num">28px</span> の行に <span class="num">18px</span> の角丸を当てると、
+        丸みが上下から食い合って<strong>カプセルになる</strong>。
+        しかもピル型（<code>999px</code>）は「押せるものだけの形」と決まっているので、
+        押せるが押せる<em>札</em>ではない行が、札の顔で並ぶことになる。
+        逆にヒーローカードの左帯（<span class="num">3px</span>）は、
+        18px の角丸だと<strong>上下の端が丸みに飲まれて消える</strong>。
+      </p>
+      <p class="fix">
+        <b>解き方 ―― 角丸を5段にして、役割で持つ。</b>
+        小さいものほど角を立てる。行は <code>--r-sm</code>（8px）、カードは <code>--r-md</code>（12px）、
+        ヒーローとモーダルだけ <code>--r-lg</code>（18px）。
+        <strong>ヒーローの左帯は 3px → 4px に太らせる</strong>（丸みに負けない太さ）。
+      </p>
+      <div class="stage pad" style="margin-top:.2rem">
+        <div class="demo-grid">
+          <div class="demo-box e-1 r-xs"><b>--r-xs 5px</b>タグ・状態の札</div>
+          <div class="demo-box e-1 r-sm"><b>--r-sm 8px</b>行・入力欄・ボタン</div>
+          <div class="demo-box e-1 r-md"><b>--r-md 12px</b>カード・パネル</div>
+          <div class="demo-box e-1 r-lg"><b>--r-lg 18px</b>ヒーロー・モーダル</div>
+          <div class="demo-box e-1 r-pill"><b>--r-pill</b>押せる札だけ</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ====================================================== 2. トークン -->
+<section class="sec" id="s2">
+  <h3><span class="no">02</span>確定したトークン</h3>
+  <p class="lead">
+    ここが <code>tokens.css</code> に入る値。<strong>右上のボタンでライト／ダークを切り替えて確かめられる。</strong>
+  </p>
+
+  <h4 class="sub">字 ―― 8段</h4>
+  <div class="stage pad">
+    <div class="ts-row"><span class="k">--fs-7</span><span class="u">44</span><span class="s ts-7">2.4M</span><span class="w">数値モードの主役</span></div>
+    <div class="ts-row"><span class="k">--fs-6</span><span class="u">30</span><span class="s ts-6">6:12</span><span class="w">ヒーローの経過・数値の札</span></div>
+    <div class="ts-row"><span class="k">--fs-5</span><span class="u">21</span><span class="s ts-5">請求書の取り込みバッチ</span><span class="w">詳細の見出し</span></div>
+    <div class="ts-row"><span class="k">--fs-4</span><span class="u">15</span><span class="s ts-4">本文。長い Markdown を読む段</span><span class="w">読む面（案B の主役）</span></div>
+    <div class="ts-row"><span class="k">--fs-3</span><span class="u">14</span><span class="s ts-3">時系列の本文</span><span class="w">時系列・facts</span></div>
+    <div class="ts-row"><span class="k">--fs-2</span><span class="u">13</span><span class="s ts-2">カードの題・ボタン・タブ</span><span class="w">一覧のカード</span></div>
+    <div class="ts-row"><span class="k">--fs-1</span><span class="u">12</span><span class="s ts-1">状態の名前・圧縮した行の題</span><span class="w">一覧の行</span></div>
+    <div class="ts-row"><span class="k">--fs-0</span><span class="u">11</span><span class="s ts-0">置き場所・件数・いつ測ったか</span><span class="w">添え物（V2 で足した段）</span></div>
+  </div>
+
+  <h4 class="sub">色</h4>
+  <div class="stage pad">
+    <div class="tone">
+      <span class="t"><i style="background:var(--bg)"></i><code>--bg</code></span>
+      <span class="t"><i style="background:var(--bg-elev)"></i><code>--bg-elev</code></span>
+      <span class="t"><i style="background:var(--bg-sunk)"></i><code>--bg-sunk</code></span>
+      <span class="t"><i style="background:var(--bg-hi)"></i><code>--bg-hi</code></span>
+      <span class="t"><i style="background:var(--accent)"></i><code>--accent</code></span>
+      <span class="t"><i style="background:var(--accent-soft)"></i><code>--accent-soft</code></span>
+      <span class="t"><i style="background:var(--hot)"></i><code>--hot</code></span>
+      <span class="t"><i style="background:var(--warn)"></i><code>--warn</code></span>
+      <span class="t"><i style="background:var(--calm)"></i><code>--calm</code></span>
+      <span class="t"><i style="background:var(--done)"></i><code>--done</code></span>
+      <span class="t"><i style="background:var(--off)"></i><code>--off</code></span>
+    </div>
+  </div>
+
+  <div class="tbl-wrap" style="margin-top:1rem">
+    <table>
+      <thead><tr><th style="width:20%">トークン</th><th style="width:20%">明るいほう</th><th style="width:20%">暗いほう</th><th>役目</th></tr></thead>
+      <tbody>
+        <tr><td><code>--bg</code></td><td class="num">#FAF9F5</td><td class="num">#1C1B19</td><td>地。<strong>純白ではなくクリーム</strong>にするのが案B の肝</td></tr>
+        <tr><td><code>--bg-elev</code></td><td class="num">#FFFFFF</td><td class="num">#272521</td><td>浮いた面（カード・ボタン・入力欄）</td></tr>
+        <tr><td><code>--bg-sunk</code></td><td class="num">#F0EDE6</td><td class="num">#201F1C</td><td>沈んだ面（帯・押せない札・コード）</td></tr>
+        <tr><td><code>--bg-hi</code></td><td class="num">#E8E3D8</td><td class="num">#33302A</td><td><strong>V2 で足す。</strong> 触れたときの面。いまは無く、hover が線の色しか変えられない</td></tr>
+        <tr><td><code>--accent</code></td><td class="num">#A24E2B <span style="color:var(--doc-fg3)">5.44</span></td><td class="num">#E08159 <span style="color:var(--doc-fg3)">6.11</span></td><td>強調。<strong>押せるものにしか使わない。</strong> 面に白を載せた側も 5.74</td></tr>
+        <tr><td><code>--accent-soft</code></td><td class="num">rgb(162 78 43 / 10%)</td><td class="num">rgb(224 129 89 / 16%)</td><td><strong>V2 で足す。</strong> 選択中の光の輪・自分の発言の面</td></tr>
+        <tr><td><code>--hot</code></td><td class="num">#A51C30 <span style="color:var(--doc-fg3)">7.10</span></td><td class="num">#FF5A76 <span style="color:var(--doc-fg3)">5.72</span></td><td>あなたの操作で止まっている。<strong>テラコッタから色相で離してある</strong></td></tr>
+        <tr><td><code>--warn</code></td><td class="num">#8A6412 <span style="color:var(--doc-fg3)">5.10</span></td><td class="num">#E8B341 <span style="color:var(--doc-fg3)">—</span></td><td>あなたの返信を待っている</td></tr>
+        <tr><td><code>--calm</code></td><td class="num">#2F6E8F <span style="color:var(--doc-fg3)">5.32</span></td><td class="num">#6FA8C9 <span style="color:var(--doc-fg3)">—</span></td><td>Claude が動いている</td></tr>
+        <tr><td><code>--done</code></td><td class="num">#3F7D4F <span style="color:var(--doc-fg3)">4.68</span></td><td class="num">#7FBF7F <span style="color:var(--doc-fg3)">—</span></td><td>終わって通っている</td></tr>
+        <tr><td><code>--off</code></td><td class="num">#726B61 <span style="color:var(--doc-fg3)">4.99</span></td><td class="num">#8A8479 <span style="color:var(--doc-fg3)">4.64</span></td><td>終了・不明。<strong><code>--fg-faint</code> と同じ値。</strong> いまの本体も両者は同値（<code>#8A99AC</code>）</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <strong>明るいほうは、クリーム地の上で全部 4.5:1 を超えるところまで押し上げてある</strong>（灰色の数字が実測比）。
+    最初の案は <code>--fg-faint</code> が <span class="num">2.92</span> しかなく、
+    いまの本体（<code>#8A99AC</code> on <code>#FFFFFF</code> ＝ <span class="num">2.90</span>）と同じ弱さだった。
+    <strong>退行ではないが、トークンを作り直すここが直す機会</strong>なので直してある。
+    3段の差（<span class="num">15.96</span> / <span class="num">7.35</span> / <span class="num">4.99</span>）は保っているので、
+    「添え物は弱い」という読み方は消えていない。
+  </div>
+
+  <div class="note">
+    <strong>新しく足す色のトークンは <code>--bg-hi</code> と <code>--accent-soft</code> の2つだけ。</strong>
+    光の輪・棒のグラデ・止まっているパネルの薄い面は、どれも
+    <code>color-mix()</code> で既存トークンから作っている。
+    だから <code>tokens.css</code> の二重定義（明るい側と暗い側）を両方直す義務は、この2つぶんしか増えない。
+  </div>
+
+  <h4 class="sub">影 ―― 4段</h4>
+  <p>
+    案B のやわらかい落ち方。<strong>影に暖色を混ぜる</strong>のがこの案の質感で、
+    純黒の影だと紙の暖かさが濁る（<code>rgb(60 48 34)</code> を使っている）。
+  </p>
+  <div class="stage pad">
+    <div class="demo-grid">
+      <div class="demo-box e-0 r-md"><b>影なし</b>沈んだ面・帯</div>
+      <div class="demo-box e-1 r-md"><b>--sh-1</b>カード・ボタン</div>
+      <div class="demo-box e-2 r-md"><b>--sh-2</b>選択中・ヒーロー</div>
+      <div class="demo-box e-3 r-md"><b>--sh-3</b>モーダル・拡大</div>
+    </div>
+    <div style="margin-top:.7rem;font-size:var(--fs-0);color:var(--fg-faint)">
+      <code>--hi</code>（内側1pxのハイライト）は全段に重ねる。暗いほうで効く
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 3. モック -->
+<section class="sec" id="s3">
+  <h3><span class="no">03</span>画面のモック</h3>
+  <p class="lead">
+    4画面。クラス名は実物（<code>public/css/</code>）に揃えてあるので、
+    ここの値をそのまま該当ファイルへ持っていける。
+  </p>
+
+  <!-- ---------------------------------------------- 作業台 -->
+  <div class="stage-head">
+    <h4>作業台</h4>
+    <span class="tagline">上＝案A の信号盤（大きく出す）／下＝案A の圧縮した行（全体を見せる）／中央＝案B の読む面</span>
+  </div>
+
+  <div class="stage stage-scroll">
+    <div class="frame">
+      <header class="topbar">
+        <h1 class="brand"><svg><use href="#i-deck"/></svg>ClaudeDeck</h1>
+        <div class="modes" role="group" aria-label="画面のモード">
+          <button class="tab" type="button" aria-pressed="true">作業台</button>
+          <button class="tab" type="button" aria-pressed="false">書庫</button>
+          <button class="tab" type="button" aria-pressed="false">数値</button>
+        </div>
+        <div class="topbar-actions">
+          <span class="live">つながっている</span>
+          <button class="btn is-lead" type="button">起こす</button>
+          <button class="ibtn" type="button" title="再読み込み" aria-label="再読み込み"><svg><use href="#i-refresh"/></svg></button>
+          <button class="ibtn" type="button" title="設定を開く" aria-label="設定を開く"><svg><use href="#i-gear"/></svg></button>
+          <button class="ibtn" type="button" title="配色を切り替える" aria-label="配色を切り替える"><svg><use href="#i-contrast"/></svg></button>
+        </div>
+        <div class="statusbar">
+          <div class="summary">
+            <span class="tally is-hot"><span class="state" data-s="hot" style="--state-color:var(--hot)"></span>あなたの番 <strong>7</strong></span>
+            <span class="tally"><span class="state" data-s="calm" style="--state-color:var(--calm)"></span>実行中 <strong>2</strong></span>
+            <span class="tally"><span class="state" data-s="warn" style="--state-color:var(--warn)"></span>返信待ち <strong>1</strong></span>
+            <span class="tally"><span class="state" data-s="off" style="--state-color:var(--off)"></span>終了 <strong>14</strong></span>
+          </div>
+          <div class="rate">枠の使用率 <span class="meter"><i style="width:38%"></i></span> <span class="num">38%</span> <span style="color:var(--fg-faint)">18:40 に戻る</span></div>
+        </div>
+      </header>
+
+      <!-- 案A の要。ボールの所在を画面のいちばん上に、いちばん大きく出す。
+           **0件なら帯ごと消える**（下の .hero-none に替わる）。
+
+           **ボタンは場面で違う。** 答えられるのは画面から起こしたセッションだけで、
+           ターミナルで走っているものには答える窓口そのものが無い（`asks` は
+           src/run/ledger.mjs が抱える行にしか載らない）。できるのは窓を前へ出すこと。
+           どちらなのかは「この画面から」の札の有無で示す -->
+      <div class="hero-wrap">
+        <div class="hero-band">
+
+          <!-- ① 画面から起こした ＋ 許可要求が来ている → その場で答えられる -->
+          <div class="hero-card" role="button" tabindex="0" style="--state-color:var(--hot)">
+            <div class="h-top">
+              <span class="state" data-s="hot">許可待ち</span>
+              <span class="tag is-deck">この画面から</span>
+              <span class="h-idle">6:12<small> 経過</small></span>
+            </div>
+            <div class="h-title">請求書の取り込みバッチを日次に切り替える</div>
+            <div class="h-ask">
+              実行してよいか訊いている ― <b>Bash</b>
+              <span class="c">npm run migrate -- --dry-run</span>
+            </div>
+            <div class="h-act">
+              <span class="btn is-lead">許可して進める</span>
+              <span class="btn">断る</span>
+            </div>
+          </div>
+
+          <!-- ② 画面から起こした ＋ プラン承認待ち -->
+          <div class="hero-card" role="button" tabindex="0" style="--state-color:var(--hot)">
+            <div class="h-top">
+              <span class="state" data-s="hot">プラン承認待ち</span>
+              <span class="tag is-deck">この画面から</span>
+              <span class="h-idle">1:47<small> 経過</small></span>
+            </div>
+            <div class="h-title">通知テンプレートの多言語化</div>
+            <div class="h-ask">
+              プランを出して止まっている ― <b>7</b> 段・<b>3</b> ファイル
+              <span class="c">de / fr / es の3言語を追加</span>
+            </div>
+            <div class="h-act">
+              <span class="btn is-lead">承認して書かせる</span>
+              <span class="btn">読む</span>
+            </div>
+          </div>
+
+          <!-- ③ ターミナルで走っている → **答える口が無い。** 窓を前に出すだけ。
+               「この画面から」の札が無いことが、その差の印になる -->
+          <div class="hero-card" role="button" tabindex="0" style="--state-color:var(--hot)">
+            <div class="h-top">
+              <span class="state" data-s="hot">承認待ち</span>
+              <span class="h-idle">12:30<small> 経過</small></span>
+            </div>
+            <div class="h-title">監査ログの保持期間を延ばす</div>
+            <div class="h-ask">
+              実行してよいか訊いている ― <b>Write</b>
+              <span class="c">retention/policy.yaml</span>
+            </div>
+            <div class="h-act">
+              <span class="btn is-lead">ターミナルを前面に</span>
+              <span class="btn">開く</span>
+            </div>
+          </div>
+
+          <!-- 溢れたぶん。**折り返さず横へ流す**ので、何件あっても帯の高さは変わらない -->
+          <button class="hero-more" type="button">
+            <b>4</b><span>ほか</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="deck">
+        <nav class="rail" aria-label="セッション一覧を開く">
+          <button class="ibtn" type="button" title="一覧を畳む" aria-label="一覧を畳む"><svg><use href="#i-side"/></svg></button>
+        </nav>
+
+        <!-- ヒーローに出ていないものは1行へ落とす。全体が一度に見える -->
+        <div class="list-pane">
+          <div class="list-head">ほかに動いているもの <span class="n">17</span></div>
+          <ul class="list">
+            <li class="group" style="--state-color:var(--calm)">
+              <div class="group-head">実行中 <span class="n">2</span></div>
+              <ul class="group-body">
+                <li><button class="row" type="button" data-s="calm" style="--state-color:var(--calm)">
+                  <i class="dot"></i><span class="t">週次レポートの集計クエリを直す</span><span class="m">48秒</span>
+                </button></li>
+                <li><button class="row" type="button" data-s="calm" style="--state-color:var(--calm)">
+                  <i class="dot"></i><span class="t">在庫同期のリトライ設計</span><span class="m">3秒</span>
+                </button></li>
+              </ul>
+            </li>
+            <li class="group" style="--state-color:var(--warn)">
+              <div class="group-head">返信待ち <span class="n">1</span></div>
+              <ul class="group-body">
+                <li><button class="row" type="button" data-s="warn" style="--state-color:var(--warn)">
+                  <i class="dot"></i><span class="t">検索インデックスの再構築が遅い件</span><span class="m">21分</span>
+                </button></li>
+              </ul>
+            </li>
+            <li class="group" style="--state-color:var(--off)">
+              <div class="group-head">終了 <span class="n">14</span></div>
+              <ul class="group-body">
+                <li><button class="row" type="button" data-s="off" style="--state-color:var(--off)">
+                  <i class="dot"></i><span class="t">管理画面のアクセス権を見直す</span><span class="m">2時間前</span>
+                </button></li>
+                <li><button class="row" type="button" data-s="off" style="--state-color:var(--off)">
+                  <i class="dot"></i><span class="t">CSV 取込のエラー文言を直す</span><span class="m">昨日</span>
+                </button></li>
+                <li><button class="row" type="button" data-s="off" style="--state-color:var(--off)">
+                  <i class="dot"></i><span class="t">監査ログの保持期間を延ばす</span><span class="m">昨日</span>
+                </button></li>
+                <li><button class="row" type="button" data-s="off" style="--state-color:var(--off)">
+                  <i class="dot"></i><span class="t">画像の遅延読み込みを入れる</span><span class="m">3日前</span>
+                </button></li>
+                <li><button class="row" type="button" data-s="off" style="--state-color:var(--off)">
+                  <i class="dot"></i><span class="t">Webhook の再送を指数バックオフに</span><span class="m">3日前</span>
+                </button></li>
+              </ul>
+            </li>
+          </ul>
+        </div>
+
+        <!-- 中央だけは案B の尺。15px / 行間 1.78 で読ませる -->
+        <div class="detail-pane">
+          <div class="detail-tabs">
+            <button class="dtab" type="button" aria-pressed="true">経過</button>
+            <button class="dtab" type="button" aria-pressed="false">いま</button>
+            <button class="dtab" type="button" aria-pressed="false">成果</button>
+            <button class="dtab" type="button" aria-pressed="false">診断</button>
+          </div>
+          <div class="detail-scroll">
+            <div class="detail">
+              <h2>請求書の取り込みバッチを日次に切り替える</h2>
+              <div class="detail-sub">
+                <span class="path">~/work/billing-batch</span>
+                <span>feat/daily</span>
+                <span class="num">2.4M tok</span>
+                <span class="num">74 件</span>
+              </div>
+
+              <div class="purpose">
+                <div class="h">週次で回していた取り込みを日次へ。既存のジョブは残したまま、フラグで選べるようにする。</div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head"><svg style="width:14px;height:14px"><use href="#i-plan"/></svg>提出したプラン</div>
+                <div class="panel-body">
+                  <div class="md">
+                    <h3>やること</h3>
+                    <p>スケジューラの設定を1箇所へ寄せてから、切り替えのフラグを足す。既存の週次ジョブは消さない。</p>
+                    <ul>
+                      <li data-task="done">スケジューラの設定を読み出す口を切る</li>
+                      <li data-task="doing">日次・週次の切り替えフラグを足す</li>
+                      <li data-task="todo">移行スクリプトを流して差分を確かめる</li>
+                      <li data-task="todo">切り戻しの手順を <code>docs/</code> に残す</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">この会話での判断 <span class="n">3件</span></div>
+                <div class="panel-body">
+                  <dl class="facts">
+                    <dt>14:05</dt><dd>週次ジョブは<strong>消さずに残す</strong>を選んだ（切り戻しの道を残すため）</dd>
+                    <dt>14:11</dt><dd>フラグは環境変数ではなく<strong>設定ファイル</strong>へ（環境ごとに違う値になるのを避ける）</dd>
+                    <dt>14:19</dt><dd><code>--dry-run</code> を先に流して差分を見る</dd>
+                  </dl>
+                </div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">経過 <span class="n">74件</span></div>
+                <div class="panel-body">
+                  <div class="tl">
+                    <div class="tl-item is-me">
+                      <span class="tl-mark"><svg><use href="#i-user"/></svg></span>
+                      <div class="tl-body">
+                        <div class="tl-kind"><b>指示</b><span class="when">14:02</span></div>
+                        <div class="tl-text">日次に切り替えたい。既存の週次ジョブは残したまま、切り替えのフラグで選べるようにして。</div>
+                      </div>
+                    </div>
+                    <div class="tl-item is-plan">
+                      <span class="tl-mark"><svg><use href="#i-plan"/></svg></span>
+                      <div class="tl-body">
+                        <div class="tl-kind"><b>プラン</b><span class="when">14:05</span></div>
+                        <div class="tl-text">7段・3ファイル・承認済み</div>
+                      </div>
+                    </div>
+                    <div class="tl-item is-edit">
+                      <span class="tl-mark"><svg><use href="#i-pencil"/></svg></span>
+                      <div class="tl-body">
+                        <div class="tl-kind"><b>ファイルの書き換え</b><span class="when">14:18</span></div>
+                        <div class="tl-text"><span class="mono">Edit</span> scheduler/config.ts
+                          <span style="color:var(--done)">+34</span> <span style="color:var(--hot)">-8</span></div>
+                      </div>
+                    </div>
+                    <div class="tl-item is-note">
+                      <span class="tl-mark"><svg><use href="#i-alert"/></svg></span>
+                      <div class="tl-body">
+                        <div class="tl-kind"><b>文脈の圧縮</b><span class="when">14:18</span></div>
+                        <div class="tl-text">1.2M 捨てて続けた</div>
+                      </div>
+                    </div>
+                    <div class="tl-item">
+                      <span class="tl-mark"><svg><use href="#i-bot"/></svg></span>
+                      <div class="tl-body">
+                        <div class="tl-kind"><b>中間報告</b><span class="when">14:19</span></div>
+                        <div class="tl-text">フラグは足しました。移行スクリプトを <code>--dry-run</code> で1回流して差分を見たいので、実行の許可をください。</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <nav class="rail is-right" aria-label="右の紙">
+          <button class="ibtn" type="button" title="数値" aria-label="数値"><svg><use href="#i-chart"/></svg></button>
+          <button class="ibtn" type="button" title="診断" aria-label="診断"><svg><use href="#i-info"/></svg></button>
+        </nav>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>帯は横へ流す。件数に上限を置かない。</strong>
+    折り返して縦に伸ばすと、下の圧縮行（全体を見せる役目）が押し出されてしまう。
+    横なら<strong>何件あっても帯の高さは変わらない</strong>。
+    札の幅を <code>min(21rem, 74%)</code> に固定してあるので、窓の幅に応じて 1〜3枚が出て、
+    <strong>次の1枚が必ず見切れる</strong>（1fr で分けると、2件のときに2枚で埋まって
+    「続きがある」が伝わらなくなる）。右端の膜と末尾の「ほか N 件」がそれを補う。
+  </div>
+
+  <div class="note">
+    <strong>ボタンの中身が場面で違う。</strong>
+    答えられるのは<strong>画面から起こしたセッションだけ</strong>で、
+    ターミナルで走っているものには答える窓口そのものが無い
+    （<code>asks</code> は <code>src/run/ledger.mjs</code> が抱える行にしか載らない）。
+    できるのは <code>POST /api/focus</code> で窓を前へ出すこと。
+    だから3枚目だけボタンが「ターミナルを前面に」になっていて、
+    その差を<strong>「この画面から」の札の有無</strong>で示している。
+  </div>
+
+  <div class="note">
+    <strong>0件のときは帯ごと消える。</strong> 空の帯を置くと、静かな日に画面の一等地が空白になる。
+    ただし一覧側の「あなたの番」の見出しは 0件でも残すので、
+    「見ていない」と「無い」の区別は付いたまま。
+  </div>
+
+  <div class="stage" style="margin-top:.8rem">
+    <div class="frame">
+      <div class="hero-none">いま、あなたの返事を待っているセッションはありません</div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------- 数値 -->
+  <div class="stage-head">
+    <h4>数値</h4>
+    <span class="tagline">段を作った効果がいちばん出る場所。いまは数が本文と同じ大きさで並んでいる</span>
+  </div>
+
+  <div class="stage stage-scroll">
+    <div class="frame">
+      <div style="padding:1.1rem 1.2rem;background:var(--bg)">
+        <div class="stats">
+          <div class="stat"><div class="k">今日の消費</div><div class="v">8.1<small>M</small></div><div class="d up">昨日比 +24%</div></div>
+          <div class="stat"><div class="k">直近24本の中央値</div><div class="v">1.7<small>M</small></div><div class="d">1本あたり</div></div>
+          <div class="stat"><div class="k">枠の使用率</div><div class="v">38<small>%</small></div><div class="d">5時間枠・18:40 に戻る</div></div>
+          <div class="stat"><div class="k">走っている本数</div><div class="v">2<small>/3</small></div><div class="d down">枠に余りあり</div></div>
+        </div>
+
+        <div class="panel" style="margin-top:1rem">
+          <div class="panel-head"><svg style="width:14px;height:14px"><use href="#i-chart"/></svg>直近12本の推移</div>
+          <div class="panel-body">
+            <svg class="spark" viewBox="0 0 300 44" preserveAspectRatio="none" style="color:var(--accent)"
+                 aria-label="直近12本の消費の推移">
+              <defs>
+                <linearGradient id="sparkfill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="currentColor" stop-opacity=".26"/>
+                  <stop offset="100%" stop-color="currentColor" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path class="area" d="M0,34 L27,30 L55,33 L82,22 L109,26 L136,16 L164,19 L191,9 L218,14 L245,7 L273,11 L300,4 L300,44 L0,44 Z"/>
+              <path class="line" d="M0,34 L27,30 L55,33 L82,22 L109,26 L136,16 L164,19 L191,9 L218,14 L245,7 L273,11 L300,4"/>
+              <circle class="dot" cx="300" cy="4" r="2.8"/>
+            </svg>
+            <div style="display:flex;justify-content:space-between;font-size:var(--fs-0);color:var(--fg-faint);font-family:var(--font-mono)">
+              <span>12本前 620k</span><span>直近 2.4M</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">何が文脈を食っているか <span class="n">上位5</span></div>
+          <div class="panel-body">
+            <div class="bar"><span class="l">Read</span><span class="bar-track"><i class="bar-fill" style="width:82%"></i></span><span class="n">1.72M</span></div>
+            <div class="bar"><span class="l">Grep</span><span class="bar-track"><i class="bar-fill" style="width:39%"></i></span><span class="n">812k</span></div>
+            <div class="bar"><span class="l">Task（子）</span><span class="bar-track"><i class="bar-fill" style="width:26%"></i></span><span class="n">544k</span></div>
+            <div class="bar"><span class="l">Edit</span><span class="bar-track"><i class="bar-fill" style="width:21%"></i></span><span class="n">430k</span></div>
+            <div class="bar"><span class="l">Bash</span><span class="bar-track"><i class="bar-fill" style="width:9%"></i></span><span class="n">188k</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------- 書庫 -->
+  <div class="stage-head">
+    <h4>書庫</h4>
+    <span class="tagline">絞り込みの札はピル（押せるものの形）。カードに数値の器を置く</span>
+  </div>
+
+  <div class="stage stage-scroll">
+    <div class="frame">
+      <div class="archive-head">
+        <span class="field is-q">
+          <svg><use href="#i-search"/></svg>
+          <input type="search" placeholder="ID・置き場所で探す" aria-label="書庫を検索">
+        </span>
+        <span class="field">すべての置き場所</span>
+        <span class="field is-on">simplify</span>
+        <span class="field">30日</span>
+        <span class="field">新しい順</span>
+        <span class="field">中身も探す</span>
+      </div>
+      <div class="archive-grid">
+        <div class="card is-archive" role="button" tabindex="0">
+          <div class="card-top"><span class="when">9月3日 14:02</span><span class="idle">74件</span></div>
+          <div class="card-title">請求書の取り込みバッチを日次に切り替える</div>
+          <div class="card-meta"><span class="path">~/work/billing-batch</span><span class="tag is-skill">simplify</span></div>
+          <div class="bar" style="grid-template-columns:1fr 4.5rem">
+            <span class="bar-track"><i class="bar-fill" style="width:64%"></i></span><span class="n">2.4M</span>
+          </div>
+        </div>
+        <div class="card is-archive" role="button" tabindex="0">
+          <div class="card-top"><span class="when">9月2日 09:41</span><span class="idle">31件</span></div>
+          <div class="card-title">管理画面のアクセス権を見直す</div>
+          <div class="card-meta"><span class="path">~/work/admin-console</span><span class="tag is-agents">サブエージェント 3</span></div>
+          <div class="bar" style="grid-template-columns:1fr 4.5rem">
+            <span class="bar-track"><i class="bar-fill" style="width:28%"></i></span><span class="n">1.1M</span>
+          </div>
+        </div>
+        <div class="card is-archive" role="button" tabindex="0">
+          <div class="card-top"><span class="when">8月30日 18:20</span><span class="idle">12件</span></div>
+          <div class="card-title">CSV 取込のエラー文言を直す</div>
+          <div class="card-meta"><span class="path">~/work/importer</span><span class="tag is-skill">simplify</span></div>
+          <!-- まだ届いていない数値は 0 と書かず、点線の器だけ置く。
+               届いたときにカードの背が動かない -->
+          <div class="bar" style="grid-template-columns:1fr 4.5rem">
+            <span class="bar-track" style="background:none;border:1px dashed var(--border)"></span>
+            <span class="n" style="color:var(--fg-faint)">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------- モーダル・実行 -->
+  <div class="stage-head">
+    <h4>モーダル・実行まわり</h4>
+    <span class="tagline">設定・許可要求のカード・起こすフォーム</span>
+  </div>
+
+  <div class="stage stage-scroll">
+    <div class="frame" style="padding:1.2rem;background:var(--bg-sunk);display:grid;gap:1.2rem">
+
+      <div class="modal">
+        <div class="modal-nav">
+          <button class="navb" type="button" aria-pressed="true"><svg><use href="#i-send"/></svg>通知</button>
+          <button class="navb" type="button" aria-pressed="false"><svg><use href="#i-deck"/></svg>作業フォルダ</button>
+          <button class="navb" type="button" aria-pressed="false"><svg><use href="#i-info"/></svg>いまの様子</button>
+        </div>
+        <div class="modal-body">
+          <h5>回答待ちを Slack へ送る</h5>
+          <div>
+            <div class="f-label">Webhook の URL</div>
+            <input class="f-text" type="text" placeholder="https://hooks.slack.com/services/****/****/****">
+            <div class="f-hint">空のままなら変えない。消すのは「消す」ボタンだけの役目</div>
+          </div>
+          <div style="display:grid;gap:.7rem;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr))">
+            <div><div class="f-label">何分待ったら送るか</div><input class="f-text mono" type="text" value="5"></div>
+            <div><div class="f-label">同じ相手への間隔</div><input class="f-text mono" type="text" value="30"></div>
+          </div>
+          <div class="modal-foot">
+            <span class="msg">有効 / 送信 12 / 失敗 0</span>
+            <span class="right">
+              <button class="btn" type="button">テスト送信</button>
+              <button class="btn is-lead" type="button">保存する</button>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;gap:1.2rem;grid-template-columns:repeat(auto-fit,minmax(19rem,1fr))">
+        <div class="ask">
+          <div class="ask-head"><svg><use href="#i-alert"/></svg>実行してよいか訊いています</div>
+          <div class="ask-body">
+            <pre>npm run migrate -- --dry-run</pre>
+            <div style="color:var(--fg-muted)">どう進めるか選んでください。</div>
+            <ul class="choices">
+              <li class="is-picked"><span class="k">1</span>この1回だけ許可する</li>
+              <li><span class="k">2</span>この会話のあいだ Bash を許可する</li>
+              <li><span class="k">3</span>断る（理由を書く）</li>
+            </ul>
+            <div class="ask-act">
+              <button class="btn is-lead" type="button">送る</button>
+              <button class="btn" type="button">断る</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal" style="grid-template-columns:1fr">
+          <div class="modal-body">
+            <h5>セッションを起こす</h5>
+            <div>
+              <div class="f-label">作業フォルダ</div>
+              <select class="f-select"><option>~/work/billing-batch</option></select>
+            </div>
+            <div>
+              <div class="f-label">最初の指示</div>
+              <textarea class="f-text" rows="2" placeholder="何をしてほしいか書く" style="resize:none;font-family:inherit"></textarea>
+            </div>
+            <div>
+              <div class="f-label">権限モード</div>
+              <select class="f-select is-danger"><option>bypass permissions</option></select>
+              <div class="f-danger" style="margin-top:.35rem">
+                <svg><use href="#i-alert"/></svg>
+                <span>何も確認せずに走ります。書き換えも削除も止まりません</span>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <span class="msg">いま 2 本 / 上限 3 本</span>
+              <span class="right"><button class="btn is-lead" type="button">起こす</button></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 4. いまとの比較 -->
+<section class="sec" id="s4">
+  <h3><span class="no">04</span>いまと並べる</h3>
+  <p class="lead">
+    中身のデータは同じ。左が現状、右が V2。<strong>配色の切り替えも効く</strong>ので、
+    暗いほうでも見比べられる。
+  </p>
+
+  <div class="vs">
+    <div class="vs-col">
+      <div class="cap"><span class="pin">NOW</span> いまの一覧カード</div>
+      <div class="vs-box">
+        <div class="legacy">
+          <div class="l-list">
+            <div class="l-head" style="color:var(--hot)">あなたの番 <span class="n">2</span></div>
+            <div class="l-card" style="--sc:var(--hot)">
+              <div class="l-top"><span class="l-state">許可待ち</span><span class="l-idle">6分12秒</span></div>
+              <div class="l-title">請求書の取り込みバッチを日次に切り替える</div>
+              <div class="l-wait"><span class="tool">Bash</span><span class="d">npm run migrate -- --dry-run</span></div>
+              <div class="l-meta">
+                <span class="path">~/work/billing-batch</span>
+                <span class="l-tag">feat/daily</span>
+                <span class="l-tag is-skill">simplify</span>
+              </div>
+            </div>
+            <div class="l-card" style="--sc:var(--warn)">
+              <div class="l-top"><span class="l-state">返信待ち</span><span class="l-idle">21分</span></div>
+              <div class="l-title">検索インデックスの再構築が遅い件</div>
+              <div class="l-meta"><span class="path">~/work/search-api</span><span class="l-tag">main</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="vs-col">
+      <div class="cap"><span class="pin is-new">V2</span> 信号盤 × 読む机</div>
+      <div class="vs-box">
+        <div class="stage">
+          <div class="frame">
+            <div class="hero-band" style="padding:.7rem">
+              <div class="hero-card" role="button" tabindex="0" style="--state-color:var(--hot);flex:1 1 auto">
+                <div class="h-top">
+                  <span class="state" data-s="hot">許可待ち</span>
+                  <span class="h-idle">6:12<small> 経過</small></span>
+                </div>
+                <div class="h-title">請求書の取り込みバッチを日次に切り替える</div>
+                <div class="h-ask">実行してよいか訊いている ― <b>Bash</b><span class="c">npm run migrate -- --dry-run</span></div>
+                <div class="h-act"><span class="btn is-lead">許可して進める</span><span class="btn">断る</span></div>
+              </div>
+            </div>
+            <div style="padding:.45rem;background:var(--bg);display:flex;flex-direction:column;gap:.2rem">
+              <div class="group-head" style="--state-color:var(--warn);margin:0;padding:.3rem .35rem">返信待ち <span class="n">1</span></div>
+              <button class="row" type="button" data-s="warn" style="--state-color:var(--warn)">
+                <i class="dot"></i><span class="t">検索インデックスの再構築が遅い件</span><span class="m">21分</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tbl-wrap" style="margin-top:1.6rem">
+    <table>
+      <thead><tr><th style="width:22%">何が変わるか</th><th style="width:26%">いま</th><th>V2</th></tr></thead>
+      <tbody>
+        <tr><td>ボールの所在</td><td>左の列の中の、他と同じ大きさのカード1枚</td><td><strong>画面のいちばん上に、いちばん大きく。</strong> 経過時間は 10.4px → 30px</td></tr>
+        <tr><td>止まっていない残り</td><td>同じ大きさのカードで縦に積む</td><td>1行へ圧縮。<strong>17本が一度に視界に入る</strong></td></tr>
+        <tr><td>読む面</td><td>13.4px / 行間 1.6</td><td><strong>15px / 行間 1.78。</strong> 長いプランを読み物として組む</td></tr>
+        <tr><td>地の色</td><td>純白 <code>#FFFFFF</code></td><td>クリーム <code>#FAF9F5</code>。明るいほうのまぶしさが減る</td></tr>
+        <tr><td>面の段</td><td>影ゼロ。差は 1px の枠だけ</td><td>影4段＋内側のハイライト。<strong>カードが紙に見える</strong></td></tr>
+        <tr><td>状態の見分け</td><td>色だけ（点はすべて同じ丸）</td><td>色＋<strong>形</strong>（菱形・輪・塗った丸・細い輪）</td></tr>
+        <tr><td>触ったときの反応</td><td><code>border-color</code> が変わるだけ</td><td>1px 浮く＋面が変わる＋止まっている点は呼吸する</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ====================================================== 5. 決めたこと -->
+<section class="sec" id="s5">
+  <h3><span class="no">05</span>決めたこと／まだ決めていないこと</h3>
+  <p class="lead">
+    大枠が通ったあとに詰めた4つと、実装しながら決められる残り。
+  </p>
+
+  <h4 class="sub">決まったこと</h4>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:22%">論点</th><th style="width:30%">決めたこと</th><th>理由</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>ヒーロー帯のボタン</td>
+          <td><strong>答えられるものだけボタンを出す</strong>（外のセッションは「ターミナルを前面に」）</td>
+          <td><code>asks</code> は <code>run/ledger.mjs</code> の行にしか載らない ＝ 外で走っているものは<strong>答える窓口が存在しない</strong>。混在するので、差を「この画面から」の札で示す</td>
+        </tr>
+        <tr>
+          <td>帯の上限</td>
+          <td><strong>上限なし。横へ流す</strong>（1〜3枚 ＋ 次が見切れる ＋ 末尾に「ほか N 件」）</td>
+          <td>折り返すと縦に伸びて圧縮行が押し出される。横なら何件でも帯の高さが変わらない</td>
+        </tr>
+        <tr>
+          <td>明るいほうの字の濃さ</td>
+          <td><strong>AA（4.5:1）を満たすまで押し上げる</strong></td>
+          <td>最初の案は <code>--fg-faint</code> が 2.92。いまの本体と同等なので退行ではないが、トークンを作り直すここが直す機会。3段の差は保てる</td>
+        </tr>
+        <tr>
+          <td>圧縮行の中身</td>
+          <td><strong>点・題・経過だけ</strong></td>
+          <td>1行 28px を保つ。置き場所やスキルは、選んだときに詳細ペインで読める</td>
+        </tr>
+        <tr>
+          <td>時系列の印</td>
+          <td><strong>入れる。ただし 5群に丸める</strong>（16 ある kind ごとには割らない）</td>
+          <td>種類の名前は隣に字で出ているので、印は「読み飛ばすため」に割れば足りる。13px の丸に16種類を描き分けるのは無理がある。新しいアイコンは3つで済む</td>
+        </tr>
+        <tr>
+          <td>一覧の「あなたの番」見出し</td>
+          <td><strong>一覧から外す</strong></td>
+          <td>上限なしで全部が帯へ行くので、残すと永久に 0件の見出しが居座る。<code>keepEmpty: true</code> の役目（「見ていない」と「無い」を分ける）は、帯と <code>.hero-none</code> が引き継ぐ</td>
+        </tr>
+        <tr>
+          <td>上のバーの「あなたの番 N」</td>
+          <td><strong>残す</strong></td>
+          <td>書庫・数値モードでは帯が消える。あちらではこの札だけがボールの所在を示す手がかりになる</td>
+        </tr>
+        <tr>
+          <td>帯の膜</td>
+          <td><strong>スクロール位置に追従させる</strong>（<code>scroll</code> を見る3行）</td>
+          <td>端まで送っても右の膜が残ると、最後の1枚がうっすら覚えて「まだ先がある」と読める。判断は <code>data-edge</code> の1語に畳み、当てるのは CSS</td>
+        </tr>
+        <tr>
+          <td>呼吸する点</td>
+          <td><strong>ヒーロー帯の札だけ</strong></td>
+          <td>一覧のカードと上のバーにも掛けると、動くものが同時に何個も出る。上のバーは常に見えているので、そこで光り続けると作業中ずっと気が散る</td>
+        </tr>
+        <tr>
+          <td>狭い窓（860px 以下）の帯</td>
+          <td><strong>そのまま横スクロール</strong></td>
+          <td>札は <code>74%</code> 幅なので1枚ずつ送れる。<code>narrow.css</code> を触らずに済み、帯の約束が画面幅で変わらない</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4 class="sub">時系列の印 ―― 5群の割り当て</h4>
+  <p>
+    <strong>未知の <code>kind</code> は既定（枠だけの丸）に落ちる。</strong>
+    サーバが種類を1つ足しても印が消えないので、「未知の形で落ちない」を守れる。
+  </p>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:22%">群</th><th style="width:30%">含む kind</th><th style="width:16%">印</th><th>色</th></tr></thead>
+      <tbody>
+        <tr><td>あなた</td><td><code>prompt</code> <code>answer</code> <code>interrupt</code> <code>slash</code> <code>denial</code></td><td>人（<strong>新規</strong>）</td><td><code>--accent</code>。面も薄く敷く</td></tr>
+        <tr><td>判断の節目</td><td><code>plan</code> <code>skill</code> <code>agent</code></td><td>書類（<strong>新規</strong>）</td><td><code>--warn</code></td></tr>
+        <tr><td>手が動いた</td><td><code>edit</code> <code>trace</code></td><td><code>pencil</code>（既存）</td><td><code>--done</code></td></tr>
+        <tr><td>Claude の言葉</td><td><code>say</code> <code>recap</code></td><td>ロボット（<strong>新規</strong>）</td><td>既定（<code>--fg-faint</code>）</td></tr>
+        <tr><td>事故と区切り</td><td><code>error</code> <code>compact</code> <code>elided</code></td><td><code>alert</code>（既存）</td><td><code>--fg-faint</code></td></tr>
+        <tr><td><em>未知</em></td><td><em>上のどれにも入らないもの</em></td><td><em>印なし（枠だけの丸）</em></td><td>既定</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    <code>icons.js</code> に足すのは <strong>3つだけ</strong>（人・書類・ロボット）。
+    <code>pencil</code> と <code>alert</code> は既にある。
+    <strong>細かい形は 16px で必ず見る</strong> ―― 線で描いた歯車が潰れた前例があるので、
+    3つとも同じ検算を通す。
+  </p>
+
+  <h4 class="sub">残っているのは2つ</h4>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:26%">論点</th><th style="width:30%">いまの見当</th><th>決めどき</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>markdown.css</code> の見出しの寸法</td>
+          <td>本文 13.44 → 15px なので ×1.116。h1 21.1 / h2 18.6 / h3 16.6 / h4 15.4</td>
+          <td><strong>計算で決まるので、実質は確認だけ。</strong> <strong>h4 と本文の差が 0.4px になる</strong>ので、「h4 は大きさではなく色で示す」という既存の解がより効く（変える必要はない）</td>
+        </tr>
+        <tr>
+          <td>PR の切り方</td>
+          <td>未定</td>
+          <td>着手前。履歴が「段」で切ってある（<code>refactor: …（段7）</code>）ので、それに揃えるのが自然</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <strong>設計の判断はこれで出そろっている。</strong>
+    残る2つはどちらも「決める」より「確かめる」に近い。
+  </div>
+</section>
+
+<!-- ====================================================== 6. 当てる順番 -->
+<section class="sec" id="s6">
+  <h3><span class="no">06</span>当てる順番</h3>
+  <p class="lead">
+    <strong>段1〜3 は CSS だけ。</strong>段4 も既存の JS に足すのは2行。
+    新しい部品が増えるのは段5（時系列の印）と段6（帯と圧縮行）で、
+    <strong>この2つは独立に出せる</strong>ので、どちらを先にしてもよい。
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr><th style="width:6%">段</th><th style="width:26%">やること</th><th style="width:26%">触る場所</th><th>効き方・気をつけること</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>トークンを差し替える（暖かい紙・字8段・影4段・角丸5段）＋ <code>--bg-hi</code> と <code>--accent-soft</code> を足す</td>
+          <td><code>tokens.css</code></td>
+          <td>色が一斉に変わる。<strong>明暗の2ブロックを必ず両方直す</strong>（片方だけ直すと、切り替えたときだけ古い色が出る）</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>面と影の段を当てる（カード・パネル・ボタン・モーダル・入力欄）</td>
+          <td><code>base.css</code> <code>list.css</code> <code>detail.css</code> <code>settings.css</code></td>
+          <td><strong>ここでいちばん印象が変わる。</strong> 骨格は1行も動かない</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>字の段を割り当て直す。<strong>一覧は 11〜13px、詳細は 15px</strong></td>
+          <td><code>list.css</code> <code>detail.css</code> <code>usage.css</code> <code>markdown.css</code></td>
+          <td>25種のばらけた <code>font-size</code> を8段へ寄せる。<code>markdown.css</code> の見出しは実測で決まっているので、<strong>本文を上げるぶん全段を比率で再計算する</strong></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>状態の形（菱形・輪）と、触ったときの反応</td>
+          <td><code>list.css</code> <code>base.css</code> ＋ <code>store.js</code> <code>list.js</code> 各1行</td>
+          <td><code>.state::before</code> の <code>border-radius</code> と <code>box-shadow</code> だけ。<strong>要素は増えない。</strong> 形の割り当ては <code>STATE_COLOR</code> の隣に <code>STATE_SHAPE</code> を置き、<code>?? 'dot'</code> で未知の状態を落とさない。<code>data-s</code> を書く場所は色と同じ3箇所（カード・見出し・上のバー）。<strong>呼吸させるのは帯だけ</strong>なので、セレクタを <code>.hero-card</code> で絞る</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>時系列に印を入れる（5群）</td>
+          <td><code>timeline/item.js</code> <code>icons.js</code> <code>timeline.css</code></td>
+          <td><strong>ここから JS に及ぶ。</strong> <code>.tl-mark</code> は実物に存在しない<strong>新しい部品</strong>なので、CSS だけでは作れない。<code>icons.js</code> に足すのは3つ（人・書類・ロボット）。<code>pencil</code> と <code>alert</code> は既にある。未知の <code>kind</code> は枠だけの丸に落とす</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>ヒーローの帯（横スクロール）を足し、残りを圧縮した行にする</td>
+          <td><code>list.js</code> <code>dom.js</code> <code>store.js</code> ＋ 新しい CSS 1枚</td>
+          <td>帯へ出すのは <code>row.blocking</code> が真のものを先頭から。<strong>並べ替えではなく切り出し</strong>なので比較器は増えない。ボタンの出し分けは <code>row.asks</code> の有無で決め、無いほうは <code>focusTerminal(row.pid)</code> へ回す。<code>STATE_GROUPS</code> から <code>hot</code> を落とす</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4 class="sub">実装のときに踏みそうな所</h4>
+  <ul class="bul">
+    <li><strong>新しい CSS を足すなら <code>&lt;link&gt;</code> の順に気をつける。</strong> 宣言順で勝ち負けが付き、<code>narrow.css</code> は必ず最後。ヒーロー帯の CSS は <code>list.css</code> の直後が自然</li>
+    <li><strong>ヒーロー帯を <code>.app</code> の直下に置かない。</strong> <code>grid-template-rows</code> が2行しか宣言していないので、3つ目の子を足すと高さの配分が崩れる。<code>.topbar</code> の中に <code>flex: 0 0 100%</code> で置くか、<code>.deck</code> の中の1行として持つ</li>
+    <li><strong><code>[hidden]</code> で出し入れするものに <code>display</code> を素で書かない。</strong> ヒーロー帯は 0件で消えるので、<code>display: grid</code> を素で書くと <code>[hidden]</code>（0,1,0）に勝って出たままになる</li>
+    <li><strong>0件の1行（<code>.hero-none</code>）を消さない。</strong> 帯ごと消すだけだと、その場所に何があったのか分からなくなる</li>
+    <li><strong>帯を <code>renderList()</code> の中で毎回組み直さない。</strong> あれは <code>dom.list.replaceChildren()</code> で丸ごと作り直し、<code>stream.js</code> が2秒ごとに呼ぶ。素朴に足すと<strong>横に送った位置が毎回先頭へ戻る</strong> ―― 「ほか N 件」を見に行った瞬間に引き戻される。<strong>blocking な行の id と状態の並びを鍵にして、変わったときだけ組み直す</strong>（<code>detailKeyOf()</code> と同じ作法）</li>
+    <li><strong><code>refreshTimes()</code> の対象に帯を足す。</strong> いまは <code>dom.list.querySelectorAll('.card')</code> しか見ていないので、帯の <code>.h-idle</code>（6:12）が固まったままになる。上の「鍵が変わるまで組み直さない」とセットで必要（組み直さない以上、時刻は中身だけ差し替えるしかない）</li>
+    <li><strong>膜は帯（スクロールする側）ではなく器に載せる。</strong> 中に置くと膜も一緒に流れて、いつも同じ場所に居てくれない</li>
+    <li><strong>膜の出し入れは <code>data-edge</code> の1語に畳む。</strong> 判断は <code>scroll</code> を見る側に置き、CSS は当てるだけにする。両方に散らすと、どちらで決めているのか追えなくなる。<code>resize</code> でも引き直す（窓幅で「そもそも溢れているか」が変わる）</li>
+    <li><strong>札の幅を <code>1fr</code> で分けない。</strong> 2件のときに2枚で埋まり、「まだ続きがある」が伝わらなくなる。固定幅（<code>min(21rem, 74%)</code>）にして必ず次を見切れさせる</li>
+    <li><strong>答えられないセッションに「許可する」を出さない。</strong> <code>asks</code> は <code>run/ledger.mjs</code> の行にしか載らないので、外で走っているものは押しても何も起きない。判定は <code>row.asks</code> の有無ひとつ</li>
+    <li><strong>帯のボタンから <code>run-view.js</code> の節点を掴まない。</strong> 「許可して進める」の実体は <code>run-ask.js</code> の1枚に保つ（要求カードを2枚組むと「どちらが本物か」の管理が丸ごと増える）。帯のボタンは<strong>その1枚を呼び出すだけ</strong>にする</li>
+    <li><code>color-mix()</code> は Chrome 111 以降。ローカル専用の画面なので問題ないが、使えない環境向けの代替は用意していない</li>
+    <li><code>test/contract.test.mjs</code> は色も寸法も見ていないので、この変更で落ちるテストは無い見込み</li>
+  </ul>
+
+  <div class="note">
+    <strong>段1〜4 だけでも「のっぺり」はほぼ解ける。</strong>
+    段5（時系列の印）と段6（帯と圧縮行）は情報設計の話なので、
+    1〜4 を当てて実際に使ってから着手しても遅くない。
+  </div>
+</section>
+
+</main>
+
+<script>
+/* 操作は配色の切り替え1つだけ。V1 にあった案の切り替えは、案が決まったので落とした */
+(function () {
+  var root = document.documentElement;
+  var label = document.getElementById('theme-label');
+  function paint() { label.textContent = root.dataset.theme === 'dark' ? 'ライト' : 'ダーク'; }
+  if (!window.matchMedia || !window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    root.dataset.theme = 'light';
+  }
+  paint();
+  document.getElementById('theme').addEventListener('click', function () {
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    paint();
+  });
+
+  /* ヒーロー帯の膜。**判断はここ1箇所、当てるのは CSS。**
+     出す・出さないを CSS 側の :hover や擬似クラスで作ろうとすると、
+     「端まで送ったか」が表せない。data-edge の1語に畳んで渡す。
+     本体へ持っていくときもこのまま（3行の scroll ハンドラ1つで済む） */
+  var bands = document.querySelectorAll('.hero-band');
+  for (var b = 0; b < bands.length; b++) {
+    (function (band) {
+      var wrap = band.closest('.hero-wrap');
+      if (!wrap) return;   // 器を持たない帯（比較の節に1つある）は膜も持たない
+      function edge() {
+        var max = band.scrollWidth - band.clientWidth;
+        // 1px の余裕を見る。端ちょうどでも小数のずれで届かないことがある
+        wrap.dataset.edge = max <= 1 ? 'none'
+          : band.scrollLeft <= 1 ? 'right'
+          : band.scrollLeft >= max - 1 ? 'left'
+          : 'both';
+      }
+      band.addEventListener('scroll', edge, { passive: true });
+      // 窓の幅が変わると、そもそも溢れているかどうかが変わる
+      window.addEventListener('resize', edge);
+      edge();
+    })(bands[b]);
+  }
+})();
+</script>
+</body>
+</html>
