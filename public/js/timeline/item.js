@@ -7,11 +7,33 @@
  * 行の中で使う部品は blocks.js と waits.js にある。ここは組み立ての順番だけを持つ。
  */
 import { el, dur, num, hms, markUp, marked, countHits } from '../util.js';
-import { labelOf } from './kinds.js';
+import { labelOf, markOf } from './kinds.js';
 // 層0 のアイコン。timeline/ からも直に見てよい（icons.js は util.js しか見ない）
 import { icon } from '../icons.js';
 import { waitBadge } from './waits.js';
 import { bodyText, answerBlock, planBlock, rawBlock, whenNode } from './blocks.js';
+
+/**
+ * 左の列に置く印。
+ *
+ * **群は5つだけ**（`kinds.js` の `KIND_MARK`）。16 ある種類ごとに割らないのは、
+ * 13px の丸に描き分けるのが無理だから ―― それに種類の名前は印のすぐ右に
+ * 字で出ているので、印の役目は「読み飛ばすときの手がかり」まででいい。
+ *
+ * **知らない種類でも列は残す。** 節点ごと省くと本文が左の列へずれ込む
+ * （`whenNode` が時刻の無い行でも空の節点を返すのと同じ理由）。
+ *
+ * @param {string} kind item.kind
+ * @returns {HTMLElement}
+ */
+function markNode(kind) {
+  const node = el('span', 'tl-mark');
+  const m = markOf(kind);
+  if (!m) return node;
+  node.dataset.g = m.group;
+  node.append(icon(m.icon, 13));
+  return node;
+}
 
 /**
  * 時系列の1行。
@@ -38,6 +60,7 @@ export function timelineItem(item, ctx = {}) {
   }
 
   row.append(whenNode(item.at));
+  row.append(markNode(item.kind));
   const body = el('div', 'tl-body');
   const kindRow = el('div', 'tl-kind');
   kindRow.append(...markUp(labelOf(item.kind, ctx), needle));
@@ -114,10 +137,8 @@ export function timelineItem(item, ctx = {}) {
     // 一覧は panels.css の .files を借りる（右の「書き換えたファイル」と同じ顔）。
     // 借り元は 1列目に回数を入れるが、ここは行ごとにツールが違うのでツール名を入れる
     case 'edit': {
-      // 種類の名前に絵を添える。**14種のうちここだけ。**
-      // 芯の「どんな作業をしたか」に直答する行なので、流し読みで拾えるようにする。
-      // 増やすと「絵が並んでいるうちの1つ」になって、この行の意味が薄まる
-      kindRow.prepend(icon('pencil', 13));
+      // 印は左の列（.tl-mark）が持つようになったので、ここで絵を添えない。
+      // 前は種類の名前に鉛筆を prepend していて、**16種のうちここだけ**が絵を持っていた
       const ul = el('ul', 'files');
       for (const c of item.calls ?? []) {
         const li = el('li');
