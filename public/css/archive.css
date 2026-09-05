@@ -67,6 +67,18 @@
   min-width: 0;
   padding: 0;
   border: 0;
+  /* **丸みと影も外す。枠と一緒に外側へ預ける。**
+     `list.css` の `.archive-q` と `.archive-head select` は、この器がまだ無かった頃の
+     「単体で置く」ための指定で、`border-radius` と `box-shadow: var(--hi)` を持っている。
+     ここで打ち消していたのは `border` と `padding` だけだったので、
+     **中に丸い線がもう1本残っていた** ―― `--hi` は内側 1px のハイライトで、
+     丸みで切り取られるため輪郭のように見える。
+
+     `<select>` では長いあいだ隠れていた。ネイティブの見た目が上から描いていたためで、
+     `appearance: none`（`base.css`）で素の箱にした途端に出てきた。
+     検索欄（`<input>`）のほうは元から素の箱なので、ずっと出ていたことになる */
+  border-radius: 0;
+  box-shadow: none;
   background: var(--bg-elev);
   color: var(--fg);
 }
@@ -80,6 +92,19 @@
 
 .archive-field .archive-q:focus-visible,
 .archive-field select:focus-visible { outline: none; }
+
+/* 右端に置くシェブロン（`base.css` の `.selectbox > .sel-mark`）のぶんを空ける。
+   **値をあちらに持たせない** … 器の余白がここ（`.25rem .45rem`）で決まっているので、
+   絵をどこに置けるかもここでしか決められない。
+   (0,2,1) なので、上の `.archive-field select`（0,1,1）に詳細度で勝つ。
+
+   13px の絵に、字との隙間を 5px ほど足した幅 */
+.archive-field.selectbox select { padding-right: 1.1rem; }
+
+/* 器が左右に `.45rem` の余白を持つので、絵はその内側の端に置く。
+   こうすると**左の絵と右の絵が枠から同じだけ内側**に来る（`base.css` の `.4rem` は
+   器に余白が無い側＝設定モーダル向けの値で、ここでは二重に空いて内側へ寄りすぎる） */
+.archive-field.selectbox > .sel-mark { right: 0; }
 
 /* 絞り込みを外す口。**1つでも掛けているときだけ出す。**
    常に出していると、何も絞っていないのに外す口があることになる。

@@ -13,7 +13,7 @@
  */
 import { el, shortModel, num } from './util.js';
 import { icon } from './icons.js';
-import { store } from './store.js';
+import { store, USAGE_DEFAULTS } from './store.js';
 import { dom } from './dom.js';
 import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
@@ -504,6 +504,30 @@ function rowsBlock(d) {
   return box;
 }
 
+/**
+ * いま絞り込みを掛けているか。
+ *
+ * **判断は `USAGE_DEFAULTS` の中身から作る。** ここで `limit !== 30` のように
+ * 数を直に書くと、既定を動かした日に「外す口が出たままになる」か
+ * 「掛けているのに出ない」のどちらかになる。
+ *
+ * @returns {boolean}
+ */
+function usageFiltered() {
+  const u = store.usageTab;
+  return Object.entries(USAGE_DEFAULTS).some(([key, value]) => u[key] !== value);
+}
+
+/**
+ * 「絞り込みを外す」の出し入れ。
+ *
+ * **1つでも掛けているときだけ出す**（書庫の `.archive-clear` と同じ）。
+ * 常に出していると、何も絞っていないのに外す口があることになる。
+ */
+function renderUsageClear() {
+  dom.usageClear.hidden = !usageFiltered();
+}
+
 /** ヘッダに出す件数。どこまで読んだかも一緒に出す */
 function renderUsageCount() {
   const u = store.usageTab;
@@ -567,16 +591,17 @@ function setUsageSec(sec) {
 /**
  * 節ナビの札を組み直す。件数が変わるので、引き直すたびに呼ぶ。
  *
- * 見た目は `settings.css` の `.settings-navb` を借りている
- * （**顔の語彙を増やさない**。選んでいないあいだは面も枠も持たず、
- * 選んだものだけが面と `--accent` の棒を持つ）。
+ * 見た目は `list.css` の `.tab`（下線式）を借りている
+ * （**顔の語彙を増やさない**）。前は `settings.css` の `.settings-navb` だったが、
+ * あれは縦ナビの作法（選んだものの左に棒）で、横に並ぶ帯で使っているのは
+ * ここだけだった。`.tab` に寄せると、画面のタブの顔が3種から2種に減る。
  *
  * @param {object|null} d `/api/usage` の応答
  */
 function renderUsageNav(d) {
   dom.usageNav.replaceChildren();
   for (const sec of SECTIONS) {
-    const btn = el('button', 'settings-navb', sec.label);
+    const btn = el('button', 'tab', sec.label);
     btn.type = 'button';
     btn.dataset.sec = sec.id;
     btn.setAttribute('aria-pressed', String(sec.id === usageSec));
@@ -593,6 +618,7 @@ function renderUsage() {
   const u = store.usageTab;
   dom.usage.replaceChildren();
   renderUsageCount();
+  renderUsageClear();
   renderModelOptions();
   renderUsageNav(u.loaded ? u.data : null);
   dom.usage.dataset.sec = usageSec;
@@ -725,6 +751,25 @@ export function initUsageTab({ onPick: pick = null } = {}) {
   const u = store.usageTab;
   dom.usageLimit.value = String(u.limit);
   dom.usageDays.value = u.days ? String(u.days) : '';
+
+  // 絵は**絞り込みの札にだけ**差す（書庫と同じ流儀）。横に3つ並ぶものは
+  // 形で見分けられると速い。中身のカードには置かない
+  dom.usageDays.closest('.archive-field').prepend(icon('clock', 14));
+  // 本数は「セッションの束」なので、題名の脇と同じ絵を借りる
+  dom.usageLimit.closest('.archive-field').prepend(icon('deck', 14));
+  dom.usageModel.closest('.archive-field').prepend(icon('chip', 14));
+  // 絵だけのボタン。名前は title と aria-label が持つ
+  dom.usageClear.append(icon('x', 15));
+
+  // **外したら既定へ戻して引き直す。** 戻す先は USAGE_DEFAULTS の1箇所から取る
+  // （ここに数を書くと、既定を動かした日に食い違う）
+  dom.usageClear.addEventListener('click', () => {
+    Object.assign(u, USAGE_DEFAULTS);
+    dom.usageLimit.value = String(u.limit);
+    dom.usageDays.value = '';
+    // モデルの <select> は renderModelOptions() が値を当て直すので、ここでは触らない
+    loadUsage();
+  });
 
   // 3つとも意図した1クリックなので、その場で引き直す（検索欄のような間引きは要らない）
   dom.usageDays.addEventListener('change', () => {

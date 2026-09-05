@@ -131,14 +131,33 @@ export const KIND_MARK = {
    書いても誰も引かない ―― 使わないものを表に残すと、次に触る人が
    「なぜ効かないのか」を探すことになる。 */
 
-/** 群 → アイコンの名前。`icons.js` の形を借りるだけで、新しい絵を持たない。 */
-const MARK_ICON = {
-  me: 'user',
-  mark: 'doc',
-  hand: 'pencil',
-  say: 'bubble',
-  note: 'alert',
-};
+/**
+ * 群そのものの並び・名前・絵。
+ *
+ * **`KIND_MARK` の値として現れる5つを、ここで1度だけ表にする。**
+ * 前は群の名前が上の表のコメントにしか無く、
+ * 絞り込みの帯にも説明モーダルの凡例にも出せなかった。
+ *
+ * 並びは「あなた → 判断 → 手 → 言葉 → 但し書き」で、
+ * **自分が動かしたものから順**に置く（読み飛ばすときの手がかり、という印の役目に合わせる）。
+ *
+ * 絵は `icons.js` の形を借りるだけで、新しくは持たない。
+ */
+export const MARK_GROUPS = [
+  { group: 'me', icon: 'user', label: 'あなた' },
+  { group: 'mark', icon: 'doc', label: '判断の節目' },
+  { group: 'hand', icon: 'pencil', label: '手が動いた' },
+  { group: 'say', icon: 'bubble', label: 'Claude の言葉' },
+  { group: 'note', icon: 'alert', label: '但し書き' },
+];
+
+/**
+ * 群 → アイコンの名前。
+ *
+ * **上の表から作る。** 手で書くと群を1つ足した日に片方だけ古くなる
+ * （色の表と形の表を2つ持たない、と同じ話）。
+ */
+const MARK_ICON = Object.fromEntries(MARK_GROUPS.map((g) => [g.group, g.icon]));
 
 /**
  * その種類の印を引く。

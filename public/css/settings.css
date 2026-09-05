@@ -305,6 +305,15 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* 右端に置くシェブロン（`base.css` の `.selectbox > .sel-mark`）のぶんを空ける。
+   **値を `base.css` に持たせない** … 左右の余白がここ（`.45rem`）で決まっているので、
+   絵をどこに置けるかもここでしか決められない。
+   (0,2,0) なので、上の `.settings-select`（0,1,0）に詳細度で勝つ。
+
+   絵は枠から `.4rem` の位置に 13px ぶん座るので、字が届いてよいのはその手前まで
+   ―― 6.4 ＋ 13 ＋ 隙間 4px で 1.5rem */
+.selectbox > .settings-select { padding-right: 1.5rem; }
+
 .settings-unit {
   font-size: var(--fs-1);
   color: var(--fg-muted);

@@ -20,6 +20,8 @@
 <link rel="stylesheet" href="css/timeline.css">
 <link rel="stylesheet" href="css/panels.css">
 <link rel="stylesheet" href="css/settings.css">
+<!-- 説明モーダルは settings.css のクラスを借りるので、必ずその直後に読む -->
+<link rel="stylesheet" href="css/about.css">
 <link rel="stylesheet" href="css/update.css">
 <link rel="stylesheet" href="css/usage.css">
 <link rel="stylesheet" href="css/run.css">
@@ -63,8 +65,13 @@
       <span class="live" id="live" data-live="wait">接続中</span>
       <!-- ここだけ文字を残す。他の3つと違って、押すと新しいものが生まれる -->
       <button class="btn is-lead" id="runform-open" type="button" aria-label="新しいセッションを起こす">起こす</button>
-      <!-- 補助の3つはアイコンだけにする。名前は title と aria-label に残るので、
-           触れば出るし読み上げにも乗る。中身（SVG）は main.js が差す -->
+      <!-- 補助の4つはアイコンだけにする。名前は title と aria-label に残るので、
+           触れば出るし読み上げにも乗る。中身（SVG）は main.js が差す。
+
+           **説明を先頭に置く。** 渡された人がいちばん先に押すもので、
+           残り3つ（再読み込み・設定・配色）は使い慣れてから触るものなので、
+           読む順（左から右）と押す順を合わせてある -->
+      <button class="ibtn" id="about-open" type="button" title="このアプリについて" aria-label="このアプリについて"></button>
       <button class="ibtn" id="reload" type="button" title="再読み込み" aria-label="再読み込み"></button>
       <button class="ibtn" id="settings-open" type="button" title="設定を開く" aria-label="設定を開く"></button>
       <button class="ibtn" id="theme-toggle" type="button" title="配色を切り替える" aria-label="配色を切り替える"></button>
@@ -133,7 +140,7 @@
       </span>
       <!-- 置き場所。**候補はサーバが渡す**（meta.projects）。
            スラッグは不可逆なので、表示名は向こうが代表1本を読んで作る -->
-      <span class="archive-field">
+      <span class="archive-field selectbox">
         <select id="archive-project" aria-label="置き場所で絞り込む">
           <option value="">すべての置き場所</option>
         </select>
@@ -141,13 +148,13 @@
       <!-- スキル。**候補の出どころが他と違う。** 末尾 64KB には1件も写らないので、
            サーバが立ち上げの裏で作る索引（read/skills.mjs）から引く。
            索引がまだできていないあいだは、この札だけ薄くして「作成中」と出す -->
-      <span class="archive-field" id="archive-skill-field">
+      <span class="archive-field selectbox" id="archive-skill-field">
         <select id="archive-skill" aria-label="使ったスキルで絞り込む">
           <option value="">すべてのスキル</option>
         </select>
       </span>
       <!-- 期間。サーバは 1〜3650 日を受けるので、刻みは後から増やせる -->
-      <span class="archive-field">
+      <span class="archive-field selectbox">
         <select id="archive-days" aria-label="期間で絞り込む">
           <option value="">期間を絞らない</option>
           <option value="7">7日</option>
@@ -156,7 +163,7 @@
           <option value="365">1年</option>
         </select>
       </span>
-      <span class="archive-field">
+      <span class="archive-field selectbox">
         <select id="archive-sort" aria-label="書庫の並び順">
           <option value="recent">新しい順</option>
           <option value="oldest">古い順</option>
@@ -180,19 +187,36 @@
          モデルの選択肢は応答から組むので、ここには「すべて」だけを置く -->
     <div class="list-head usage-head" id="usage-head" hidden>
       <div class="usage-nav" id="usage-nav" role="group" aria-label="見る中身"></div>
-      <select id="usage-days" aria-label="集計する期間">
-        <option value="">期間を絞らない</option>
-        <option value="7">7日</option>
-        <option value="30">30日</option>
-      </select>
-      <select id="usage-limit" aria-label="集計するセッション数">
-        <option value="10">10本</option>
-        <option value="30">30本</option>
-        <option value="60">60本</option>
-      </select>
-      <select id="usage-model" aria-label="集計するモデル">
-        <option value="">すべてのモデル</option>
-      </select>
+      <!-- 絞り込みは**書庫と同じ形**にする（`.archive-field` を借りる）。
+           前は素の <select> が3つ並んでいて、「30本」だけを見ても
+           それが期間なのか本数なのか形からは出てこなかった。
+           絵は archive.js と同じく JS が差す（形は icons.js の1箇所で持つ） -->
+      <span class="archive-field selectbox">
+        <select id="usage-days" aria-label="集計する期間">
+          <option value="">期間を絞らない</option>
+          <option value="7">7日</option>
+          <option value="30">30日</option>
+        </select>
+      </span>
+      <span class="archive-field selectbox">
+        <select id="usage-limit" aria-label="集計するセッション数">
+          <option value="10">10本</option>
+          <option value="30">30本</option>
+          <option value="60">60本</option>
+        </select>
+      </span>
+      <span class="archive-field selectbox">
+        <select id="usage-model" aria-label="集計するモデル">
+          <option value="">すべてのモデル</option>
+        </select>
+      </span>
+      <!-- 既定と違うときだけ出す。**書庫の `.archive-clear` をそのまま借りる**
+           （ピル型・--accent・絵だけ）。隣の絞り込みと形が3つとも違うので、
+           「もう1つの絞り込み」には見えない -->
+      <button class="btn archive-clear" id="usage-clear" type="button" hidden
+              title="絞り込みを外す" aria-label="絞り込みを外す"></button>
+      <!-- 件数は絞り込みの結果の説明なので、**同じ行の右端**へ寄せる
+           （一覧の #list-count と同じ作法）。前は flex: 1 0 100% で3行目に居た -->
       <span id="usage-count"></span>
     </div>
     <div class="usage-pane" id="usage" hidden></div>
@@ -325,10 +349,10 @@
 
           <label class="settings-label" for="set-detail">質問文</label>
           <span class="settings-row">
-            <select class="settings-select" id="set-detail">
+            <span class="selectbox"><select class="settings-select" id="set-detail">
               <option value="full">載せる</option>
               <option value="none">載せない</option>
-            </select>
+            </select></span>
           </span>
           <p class="settings-hint">「載せない」にすると本文を落として状態だけ送る</p>
         </section>
@@ -391,6 +415,180 @@
   </div>
 
 </dialog>
+<!-- このアプリの説明。**設定モーダルのクラスをそのまま借りる**
+     （run-form.js が借りたのと同じ作法。器の寸法だけ about.css に書いてある）。
+     左で節を選び右に中身を出す形も同じで、出し分けは CSS が data-sec でやる。
+
+     **中身のほとんどは静的に置く。** JS が組むのは凡例2つ（状態の点・経過の印）と
+     版の1行だけで、どれも既にある表から引く ―― 種類や状態が1つ増えた日に
+     凡例だけが古くなることを防ぐため -->
+<dialog class="settings about" id="about" data-sec="what" aria-labelledby="about-title">
+
+  <div class="settings-head">
+    <h2 id="about-title">ClaudeDeck について</h2>
+    <button class="settings-x" id="about-close" type="button" aria-label="閉じる">&#215;</button>
+  </div>
+
+  <div class="settings-split">
+
+    <!-- role="tab" は使わない（上のモードの札と同じ理由。矢印キーの契約が付く）。
+         アイコンは about.js が差す -->
+    <div class="settings-nav" id="about-nav" role="group" aria-label="説明の節">
+      <button class="settings-navb" type="button" data-sec="what" aria-pressed="true">このアプリは</button>
+      <button class="settings-navb" type="button" data-sec="screen" aria-pressed="false">画面の見かた</button>
+      <button class="settings-navb" type="button" data-sec="marks" aria-pressed="false">印の意味</button>
+      <button class="settings-navb" type="button" data-sec="words" aria-pressed="false">数値の言葉</button>
+      <button class="settings-navb" type="button" data-sec="about" aria-pressed="false">この版について</button>
+    </div>
+
+    <div class="settings-body">
+
+      <div class="settings-pane" data-sec="what">
+        <section class="settings-sec">
+          <h3 class="settings-h3">答える問いは2つだけ</h3>
+          <p class="about-lead">
+            並行して動かしている Claude Code のセッションについて、
+            <strong>どれが自分の返事を待っているか</strong>と、
+            <strong>そのセッションで自分が何を判断したか</strong>を見るための画面です。
+          </p>
+        </section>
+
+        <!-- 読むだけの節は面を沈めて枠を外す（押せるものが1つも無いことを形で示す）。
+             **会話ログを扱う道具なので、渡された人がいちばん先に気にするのはここ** -->
+        <section class="settings-sec settings-read">
+          <h3 class="settings-h3">安全のために決めてあること</h3>
+          <p class="settings-hint">
+            Claude Code が <code>~/.claude</code> に書いたファイルを<strong>読むだけ</strong>です。
+            あそこへは1バイトも書きません。
+          </p>
+          <p class="settings-hint">
+            受け付けるのは <code>127.0.0.1</code> だけです。
+            会話ログには仕事の中身が入るので、社内ネットからは見えません。
+          </p>
+          <p class="settings-hint">
+            このアプリが書くのは <code>%LOCALAPPDATA%\ClaudeDeck\</code> の下だけです。
+          </p>
+          <p class="settings-hint">
+            依存パッケージはゼロ。Node.js 18 以降の標準モジュールだけで動きます。
+          </p>
+        </section>
+      </div>
+
+      <div class="settings-pane" data-sec="screen">
+        <section class="settings-sec">
+          <h3 class="settings-h3">画面は3つのモード</h3>
+          <p class="settings-hint"><strong>作業台</strong> — いま動いているものを見て、答える場所。</p>
+          <p class="settings-hint"><strong>書庫</strong> — 終わったものも含めて、過去を探す場所。</p>
+          <p class="settings-hint"><strong>数値</strong> — セッションを跨いで、何が文脈を食っているかを見る場所。</p>
+        </section>
+
+        <section class="settings-sec">
+          <h3 class="settings-h3">キー操作</h3>
+          <!-- **どこにも書いていなかった。** Ctrl+K は知らないと一生使われない -->
+          <ul class="about-keys">
+            <li><span class="k"><kbd>Ctrl</kbd><kbd>K</kbd></span><span>やりたいことを打って探す</span></li>
+            <li><span class="k"><kbd>↑</kbd><kbd>↓</kbd></span><span>一覧のセッションを移る</span></li>
+            <li><span class="k"><kbd>Ctrl</kbd><kbd>Enter</kbd></span><span>指示を送る・セッションを起こす</span></li>
+            <li><span class="k"><kbd>Esc</kbd></span><span>開いている窓を閉じる</span></li>
+            <li><span class="k"><kbd>←</kbd><kbd>→</kbd></span><span>列の境目を掴んでいるとき、幅を変える（<kbd>Home</kbd> で既定へ）</span></li>
+          </ul>
+        </section>
+
+        <section class="settings-sec settings-read">
+          <h3 class="settings-h3">開き方は URL で人に渡せます</h3>
+          <p class="settings-hint">
+            いま見ているセッション・モード・隠している種類・検索語は、そのままアドレスに乗ります
+            （<code>?session=</code> <code>?mode=</code> <code>?hide=</code> <code>?tq=</code>）。
+            <strong>そのまま送れば、相手も同じ画面で開けます。</strong>
+          </p>
+        </section>
+      </div>
+
+      <!-- 凡例は about.js が組む。**画面側に表を持たない** -->
+      <div class="settings-pane" data-sec="marks">
+        <section class="settings-sec">
+          <h3 class="settings-h3">一覧の点 — いま誰の番か</h3>
+          <ul class="about-legend is-state" id="about-states"></ul>
+        </section>
+
+        <section class="settings-sec">
+          <h3 class="settings-h3">経過の印</h3>
+          <ul class="about-legend" id="about-kinds"></ul>
+        </section>
+
+        <section class="settings-sec">
+          <h3 class="settings-h3">札</h3>
+          <ul class="about-legend is-tag" id="about-tags"></ul>
+        </section>
+      </div>
+
+      <div class="settings-pane" data-sec="words">
+        <section class="settings-sec">
+          <h3 class="settings-h3">実消費</h3>
+          <p class="settings-hint">
+            入力・出力・キャッシュの読み書きに、それぞれの重みを掛けて足した数です。
+            キャッシュから読んだぶんは軽く、書き込みと出力は重く数えます。
+            <strong>請求額ではありません。</strong>
+          </p>
+        </section>
+        <section class="settings-sec">
+          <h3 class="settings-h3">文脈</h3>
+          <p class="settings-hint">
+            その要求の時点で Claude が抱えていた量です。圧縮が入るとここが落ちます。
+          </p>
+        </section>
+        <section class="settings-sec">
+          <h3 class="settings-h3">キャッシュ命中率</h3>
+          <p class="settings-hint">
+            読み直さずに済んだ割合です。<strong>モデルが混ざっていると出せません</strong>
+            （数え方が違うため）。上でモデルを1つ選ぶと出ます。
+          </p>
+        </section>
+        <section class="settings-sec settings-read">
+          <h3 class="settings-h3">スキルの割合は「原因」ではありません</h3>
+          <p class="settings-hint">
+            Claude Code が要求ごとに付けた<strong>帰属ラベル</strong>で数えています。
+            そのスキルの文脈下で走ったという意味で、そのスキルのせいで増えたという意味ではありません
+            ―― 重かったのは仕事の中身かもしれません。
+          </p>
+          <p class="settings-hint">
+            足しても 100% に届かないのは、どのスキルにも紐づかないぶんが残るためです。
+          </p>
+        </section>
+      </div>
+
+      <div class="settings-pane" data-sec="about">
+        <section class="settings-sec">
+          <h3 class="settings-h3">この版</h3>
+          <!-- 版は about.js が /api/update の current から入れる。
+               **画面に版を2つの出どころで書かない**（上のバーの #ver と同じところから取る） -->
+          <p class="about-lead" id="about-version">ClaudeDeck</p>
+          <p class="settings-hint">iyotaA</p>
+        </section>
+
+        <section class="settings-sec settings-read">
+          <h3 class="settings-h3">置き場所</h3>
+          <p class="settings-hint">読んでいるところ　<code>~/.claude</code>（読み取りのみ）</p>
+          <p class="settings-hint">書いているところ　<code>%LOCALAPPDATA%\ClaudeDeck\</code></p>
+        </section>
+
+        <section class="settings-sec">
+          <p class="settings-hint">
+            通知（Slack）や、画面から起こしてよいフォルダの設定は
+            <strong>設定</strong>（歯車）から変えられます。
+          </p>
+        </section>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 足は1行だけ。**読み取り専用であることを常設で出す** ―― 節を移っても消えない -->
+  <div class="settings-foot">
+    <p class="settings-hint">読み取り専用で動いています</p>
+  </div>
+
+</dialog>
 <!-- 新しいセッションを起こす。設定モーダルと同じ作法で、<form> では囲まない。
      本文欄の Enter は改行、実行は Ctrl+Enter。配線は run-form.js が持つ。
      中の見た目は設定モーダルのクラスをそのまま借りる（同じ CSS を二重に持たない）。
@@ -407,7 +605,7 @@
     <section class="settings-sec">
       <label class="settings-label has-icon" data-icon="folder" for="run-cwd">作業フォルダ</label>
       <div class="settings-row">
-        <select class="settings-select runform-wide" id="run-cwd"></select>
+        <span class="selectbox runform-wide"><select class="settings-select" id="run-cwd"></select></span>
       </div>
       <p class="settings-hint">Claude Code が動いたことのあるフォルダと、設定で足したフォルダを出しています</p>
     </section>
@@ -425,7 +623,7 @@
     <section class="settings-sec">
       <label class="settings-label has-icon" data-icon="shield" for="run-mode">権限モード</label>
       <div class="settings-row">
-        <select class="settings-select runform-wide" id="run-mode"></select>
+        <span class="selectbox runform-wide"><select class="settings-select" id="run-mode"></select></span>
       </div>
       <!-- 危ないモードを選んだときだけ出す。中身は固定なので run-form.js は出し入れだけする。
            **色だけで伝えない。** 三角の印と、選ぶ欄そのものの枠も赤くする -->
@@ -449,7 +647,7 @@
              入力欄は選ばれるまで畳んでおく。配線は run-form.js -->
         <label class="settings-label" for="run-model-pick">モデル</label>
         <span class="settings-row">
-          <select class="settings-select runform-wide" id="run-model-pick"></select>
+          <span class="selectbox runform-wide"><select class="settings-select" id="run-model-pick"></select></span>
           <input class="settings-text" id="run-model" type="text" hidden
                  spellcheck="false" autocomplete="off" aria-label="モデル名を自分で入力"
                  placeholder="モデル名をそのまま書く">
@@ -458,7 +656,7 @@
 
         <label class="settings-label" for="run-effort">思考量</label>
         <span class="settings-row">
-          <select class="settings-select" id="run-effort"></select>
+          <span class="selectbox"><select class="settings-select" id="run-effort"></select></span>
         </span>
         <p class="settings-hint">深いほど時間とトークンを使います</p>
 
