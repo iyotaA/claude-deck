@@ -29,6 +29,10 @@
 **数値（`view/usage.mjs`）の設計は `src/parse/CLAUDE.md` にある。**
 集計そのものは `parse/usage.mjs` にあり、両方を1枚にまとめてあるため。
 
+クエリの読み取り（`intOf` / `textOf` / `getter` と、長さと期間の上限）は `view/query.mjs`。
+`archive.mjs` と `usage.mjs` が**バイト単位で同じものを持っていた**ので寄せてある。
+窓口を足すときもここから取る。**素の `Number()` で読まない**（`NaN` がそのまま下流へ流れる）。
+
 書庫の置き場所の候補（`meta.projects`）は `buildProjects()` が作る。
 **表示名は「グループごとに、いちばん新しい1本だけ末尾を読む」で取る。**
 索引がタダで持っているのは `projectDir`（スラッグ）だけで、これは不可逆
