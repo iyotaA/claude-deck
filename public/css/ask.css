@@ -28,7 +28,7 @@
 .ask + .ask { margin-top: .35rem; }
 
 /* ツール名。パネル直下の .wait-tool より少し引き締める */
-.ask > .wait-tool { font-size: .84rem; }
+.ask > .wait-tool { font-size: var(--fs-2); }
 
 /* 引数・コマンドの本文。詳細ペインの pre と同じ扱い */
 .ask > pre {
@@ -36,7 +36,7 @@
   padding: .5rem .6rem;
   border-radius: var(--r-sm);
   background: var(--code-bg);
-  font-size: .78rem;
+  font-size: var(--fs-1);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -46,7 +46,7 @@
 
 /* 断る理由。空でも送れるので、目立たせない */
 .ask-why {
-  font-size: .78rem;
+  font-size: var(--fs-1);
 }
 
 /* ボタンの並び。狭ければ折り返す（.run-ops-foot と同じ作法） */
@@ -74,7 +74,7 @@
 
 /* 質問の見出し（AskUserQuestion の header）。質問文より小さく、上に置く */
 .ask-head {
-  font-size: .74rem;
+  font-size: var(--fs-1);
   color: var(--fg-muted);
 }
 

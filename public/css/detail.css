@@ -56,13 +56,13 @@
   display: grid;
   place-items: center;
   color: var(--fg-muted);
-  font-size: .9rem;
+  font-size: var(--fs-3);
   text-align: center;
 }
 
 .detail h2 {
   margin: 0 0 .2rem;
-  font-size: 1.15rem;
+  font-size: var(--fs-5);
   font-weight: 700;
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -73,7 +73,7 @@
   flex-wrap: wrap;
   gap: .3rem .6rem;
   margin-bottom: .7rem;
-  font-size: .78rem;
+  font-size: var(--fs-1);
   color: var(--fg-muted);
 }
 
@@ -102,7 +102,7 @@
 }
 
 .detail-actions .hint {
-  font-size: .76rem;
+  font-size: var(--fs-1);
   color: var(--fg-muted);
   overflow-wrap: anywhere;
 }
@@ -118,7 +118,7 @@
 }
 
 .purpose-head {
-  font-size: 1rem;
+  font-size: var(--fs-4);
   font-weight: 600;
   line-height: 1.55;
   overflow-wrap: anywhere;
@@ -126,7 +126,7 @@
 
 .purpose-warn {
   margin-top: .35rem;
-  font-size: .76rem;
+  font-size: var(--fs-1);
   color: var(--warn);
 }
 
@@ -137,7 +137,7 @@
   align-items: baseline;
   gap: .4rem;
   margin-top: .3rem;
-  font-size: .72rem;
+  font-size: var(--fs-0);
   color: var(--fg-faint);
 }
 
@@ -153,7 +153,7 @@
   grid-template-columns: max-content 1fr;
   gap: .2rem .7rem;
   margin: .55rem 0 0;
-  font-size: .8rem;
+  font-size: var(--fs-2);
 }
 
 .purpose-points dt {
@@ -209,7 +209,7 @@
   border-bottom: 2px solid transparent;
   background: none;
   font: inherit;
-  font-size: .82rem;
+  font-size: var(--fs-2);
   color: var(--fg-faint);
   white-space: nowrap;
   cursor: pointer;
@@ -226,7 +226,7 @@
 .detail-tab .n {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: .74rem;
+  font-size: var(--fs-1);
   color: var(--fg-faint);
 }
 
@@ -242,7 +242,7 @@
   margin: 0;
   padding: 1.4rem .2rem;
   color: var(--fg-faint);
-  font-size: .84rem;
+  font-size: var(--fs-2);
 }
 
 .stack { display: flex; flex-direction: column; gap: 1.1rem; }
@@ -268,7 +268,7 @@
   padding: .5rem .8rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
-  font-size: .82rem;
+  font-size: var(--fs-2);
   font-weight: 700;
   color: var(--fg-muted);
   letter-spacing: .02em;
@@ -315,10 +315,10 @@
    色を見分けにくい人にも届く印を1つ持たせるため。
    タブの帯を太字にする案は捨てた（隣のタブの位置が動いて押し間違いが起きる） */
 .panel.is-block { border-left-width: 3px; }
-.panel.is-block > h3 { font-size: .88rem; }
+.panel.is-block > h3 { font-size: var(--fs-3); }
 
 .wait-lead {
-  font-size: .76rem;
+  font-size: var(--fs-1);
   font-weight: 700;
   color: var(--fg-faint);
 }
@@ -328,12 +328,12 @@
 .wait-tool {
   font-family: var(--font-mono);
   font-weight: 700;
-  font-size: .88rem;
+  font-size: var(--fs-3);
 }
 
 .wait-q {
   font-weight: 600;
-  font-size: .88rem;
+  font-size: var(--fs-3);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -346,7 +346,7 @@
   display: flex;
   flex-direction: column;
   gap: .3rem;
-  font-size: .82rem;
+  font-size: var(--fs-2);
 }
 
 .choices li {
@@ -366,7 +366,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: .35rem .9rem;
   margin: 0;
-  font-size: .82rem;
+  font-size: var(--fs-2);
 }
 
 .facts dt { color: var(--fg-muted); white-space: nowrap; }
@@ -400,7 +400,7 @@ pre {
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   overflow-x: auto;
-  font-size: .8rem;
+  font-size: var(--fs-2);
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -419,7 +419,7 @@ pre code { background: none; border: 0; border-radius: 0; padding: 0; font-size:
 .note {
   margin: 0;
   color: var(--fg-muted);
-  font-size: .8rem;
+  font-size: var(--fs-2);
 }
 
 .panel > h3 .count {
@@ -440,7 +440,7 @@ pre code { background: none; border: 0; border-radius: 0; padding: 0; font-size:
 
 .decision-q {
   font-weight: 600;
-  font-size: .88rem;
+  font-size: var(--fs-3);
   line-height: 1.5;
 }
 
@@ -454,7 +454,7 @@ pre code { background: none; border: 0; border-radius: 0; padding: 0; font-size:
 
 .decision-a .label {
   font-weight: 700;
-  font-size: .9rem;
+  font-size: var(--fs-3);
   color: var(--accent);
 }
 
@@ -462,7 +462,7 @@ pre code { background: none; border: 0; border-radius: 0; padding: 0; font-size:
    digest 側で oneLine を通していない生の文字列なので、改行を潰さずに出す */
 .decision-a .why {
   margin: .2rem 0 0;
-  font-size: .8rem;
+  font-size: var(--fs-2);
   color: var(--fg-muted);
   line-height: 1.6;
   white-space: pre-wrap;
@@ -471,7 +471,7 @@ pre code { background: none; border: 0; border-radius: 0; padding: 0; font-size:
 
 .decision-a.is-free .label { color: var(--warn); }
 
-details.rejected { font-size: .78rem; }
+details.rejected { font-size: var(--fs-1); }
 details.rejected > summary {
   cursor: pointer;
   color: var(--fg-faint);
@@ -510,7 +510,7 @@ details.rejected .label { color: var(--fg); }
 
 .insp-head h2 {
   margin: 0 auto 0 0;
-  font-size: .82rem;
+  font-size: var(--fs-2);
   font-weight: 700;
   color: var(--fg-muted);
 }
@@ -528,6 +528,8 @@ details.rejected .label { color: var(--fg); }
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-elev);
+  /* **字の段には載せない。** ここは字ではなく × の記号の大きさで、
+     段に寄せると閉じるボタンの形そのものが変わる（箱の寸法は別に決めてある） */
   font-size: 1.05rem;
   line-height: 1;
   color: var(--fg-muted);

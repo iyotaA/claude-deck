@@ -37,7 +37,7 @@
 }
 
 .stat-label {
-  font-size: .72rem;
+  font-size: var(--fs-0);
   color: var(--fg-muted);
 }
 
@@ -46,7 +46,7 @@
    揃えたいのは表の行と、下の横棒の値のほうだけ */
 .stat-value {
   margin-top: .2rem;
-  font-size: 1.35rem;
+  font-size: var(--fs-6);
   font-weight: 700;
   line-height: 1.2;
   overflow-wrap: anywhere;
@@ -58,7 +58,7 @@
    小さい数字が4枚横に並ぶので、ここは桁を揃える */
 .stat-delta {
   margin-top: .15rem;
-  font-size: .72rem;
+  font-size: var(--fs-0);
   font-variant-numeric: tabular-nums;
   color: var(--fg-muted);
 }
@@ -68,7 +68,7 @@
    読まないと誤読する話が入るので、隠さず常に出す */
 .stat-note {
   margin-top: .25rem;
-  font-size: .7rem;
+  font-size: var(--fs-0);
   line-height: 1.45;
   color: var(--fg-faint);
 }
@@ -85,7 +85,7 @@
 
 .usage-block > h4 {
   margin: 0 0 .4rem;
-  font-size: .82rem;
+  font-size: var(--fs-2);
   font-weight: 700;
   color: var(--fg);
 }
@@ -106,7 +106,7 @@
 /* 帰属できなかったぶんの注記。上の横棒に続く話なので、間を詰めて置く */
 .note-sub {
   margin-top: .5rem;
-  font-size: .72rem;
+  font-size: var(--fs-0);
   color: var(--fg-faint);
 }
 
@@ -137,7 +137,7 @@
 
 .usage-read p {
   margin: 0;
-  font-size: .72rem;
+  font-size: var(--fs-0);
   line-height: 1.55;
   color: var(--fg-faint);
 }
@@ -178,7 +178,7 @@
   grid-template-columns: minmax(0, 13rem) minmax(0, 14rem) auto auto minmax(0, 1fr);
   align-items: center;
   gap: .5rem;
-  font-size: .78rem;
+  font-size: var(--fs-1);
 }
 
 .bar-label {
@@ -262,7 +262,7 @@
 /* 絵は形しか語らない。両端と山の高さは必ず文字でも出す */
 .spark-caption {
   margin: .35rem 0 0;
-  font-size: .72rem;
+  font-size: var(--fs-0);
   font-variant-numeric: tabular-nums;
   color: var(--fg-faint);
 }
@@ -297,7 +297,7 @@
 .usage-table,
 .usage-fold {
   margin-top: .6rem;
-  font-size: .76rem;
+  font-size: var(--fs-1);
 }
 
 .usage-table > summary,
