@@ -434,6 +434,96 @@ button {
   color: var(--fg);
 }
 
+/* ------------------------------------------------------------ 選ぶ口 */
+
+/* **ネイティブの矢印を消す。**
+   押せるものは丸い枠と自前の絵で揃えてあるのに、`<select>` だけが
+   OS の描いた三角を持っていて、そこだけ別の作りに見えていた。
+
+   **形は新しく作らない。** `icons.js` の `chevron` を 90 度回して置く
+   （起こすフォームの畳みが開くときに回すのと、同じ形・同じ向きの使い方）。
+   差すのは `main.js` の1行で、`.selectbox` を全部まとめて舐める。
+
+   ここが**どの画面からも使う部品**なので `base.css` に置く。
+   設定モーダルの CSS に居るのは向きが逆（`.btn.is-lead` を移したのと同じ理由）。 */
+select { appearance: none; }
+
+/* 選ぶ口の器。**位置決めだけ**を持つ。
+   面と枠は中の `<select>`（`.archive-field` / `.settings-select`）がそれぞれ持っていて、
+   あちらは寸法が違うので、絵を入れる余白も各自の CSS で空ける */
+.selectbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.selectbox > select { flex: 1 1 auto; min-width: 0; }
+
+/* 絵。**`pointer-events` を切る**ので、ここを押しても下の `<select>` に当たる。
+   器を `<label>` にして開かせる手もあるが、あちらは**ブラウザによって開かない**
+   （押しても何も起きない場所が生まれる）。
+
+   **`.icon` では当てない。`.sel-mark` で選り分ける。**
+   器の中には先頭の絵（書庫の `folder` / `clock` / `sort`、数値の `deck` / `chip`）も
+   居るので、`.icon` で当てるとそちらまで流れから外れて右端へ飛び、90 度回る
+   ―― `sort` の横棒3本が縦棒3本になって、シェブロンと重なって出ていた。
+
+   縦は自分で決める。**flex の器の中の絶対配置に任せない** ――
+   静止位置が `align-items` で決まる仕様はブラウザ差が出やすい。
+   `transform-origin` は既定で中心なので、回しても中心は動かない */
+.selectbox > .sel-mark {
+  position: absolute;
+  top: 50%;
+  right: .4rem;
+  transform: translateY(-50%) rotate(90deg);
+  pointer-events: none;
+  color: var(--fg-faint);
+}
+
+/* 開いたときの一覧まで揃える。**新しい Chrome / Edge だけが効く。**
+
+   普通の `<select>` の一覧はブラウザ（OS）が描くもので、CSS はほとんど届かない。
+   `appearance: base-select` はそれを画面側へ明け渡す仕組みで、
+   **対応していないブラウザはこのブロックごと無視する**ので、
+   上の「閉じた口だけ揃える」に黙って落ちる。JS は1行も増えない。
+
+   ここで新しい色は作らない。器はモーダルと同じ段（`--bg-elev` ＋ `--sh-3` ＋ `--r-md`）、
+   触れたときは `--bg-hi`、選んでいるものは `--accent`。 */
+@supports (appearance: base-select) {
+  select { appearance: base-select; }
+
+  /* ブラウザ側の矢印は出さない。上の `.selectbox > .sel-mark` と二重になる */
+  select::picker-icon { display: none; }
+
+  ::picker(select) {
+    appearance: base-select;
+    padding: .25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-elev);
+    box-shadow: var(--sh-3);
+    color: var(--fg);
+    font-size: var(--fs-2);
+  }
+
+  option {
+    padding: .3rem .5rem;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--fg);
+  }
+
+  option:hover { background: var(--bg-hi); }
+
+  /* 選んでいるもの。**面は塗らずに字と印だけ**にする
+     （一覧の中で塗ると、触れたときの `--bg-hi` と強さが並ぶ） */
+  option:checked { color: var(--accent); font-weight: 700; }
+
+  /* ブラウザが置くチェックの印。位置だけ詰める */
+  option::checkmark { margin-right: .35rem; color: var(--accent); }
+}
+
 /* つながっているか。押せないので面も枠も持たない。
    触ると詳しい文が出ることを、形（カーソル）で知らせる（.ver と同じ） */
 .live {

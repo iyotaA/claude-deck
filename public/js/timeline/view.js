@@ -9,7 +9,10 @@
 import { el, num } from '../util.js';
 import { mark } from '../perf.js';
 import { store, syncQuery } from '../store.js';
-import { KIND_LABELS, SIDECHAIN_LABELS, splitEdits } from './kinds.js';
+import {
+  KIND_LABELS, KIND_MARK, MARK_GROUPS, SIDECHAIN_LABELS,
+  splitEdits, initialHiddenKinds, hideQueryValue,
+} from './kinds.js';
 import { icon } from '../icons.js';
 import { filterTimeline, countKinds } from './search.js';
 import { rawUrlFor } from './blocks.js';
@@ -104,21 +107,98 @@ let tlSearchTimer = null;
  */
 let kindsOpen = false;
 
-/**
- * 畳んだ札に書く文字。
+/* ------------------------------------------------- 絞り込み（選択形式） */
+
+/*
+ * **内部の持ち方は変えていない。** 正はいまも `store.hiddenKinds` という
+ * 拒否リストで、`?hide=` に同期する。許可リストにすると、サーバが新しい種類を
+ * 足したときに既定で見えなくなる ―― その理由はいまも生きている。
  *
- * **中身を書く。** 「絞り込み」だけだと、押すまで何が起きているのか分からない。
- * 既定では足跡を隠しているので、畳んだままでもそれが読める
- *
- * @param {Set<string>} hidden いま隠している種類
+ * 画面の「選択」は、その裏返し（`!hiddenKinds.has(kind)`）の言い換えとして扱う。
+ * こうしておけば URL の契約も、新しい種類が既定で出ることも、そのまま残る。
  */
-function filterLabel(hidden) {
-  if (!hidden.size) return '絞り込み';
-  if (hidden.size === 1) {
-    const [k] = hidden;
-    return `絞り込み — ${KIND_LABELS[k] ?? k}を隠しています`;
+
+/**
+ * いま既定の絞り込みか（＝「絞り込みを外す」を出さなくてよいか）。
+ *
+ * **判断を新しく書かない。** `hideQueryValue` が「既定と同じなら null」を
+ * 返す形で既に同じことを決めているので、そちらに乗る。
+ * 既定の中身を知っているのは `kinds.js` の側、という切り分けも崩れない
+ *
+ * @returns {boolean}
+ */
+function isDefaultKinds() {
+  return hideQueryValue(store.hiddenKinds) === null;
+}
+
+/**
+ * 素のクリック。**その種類（群）だけを見る。**
+ *
+ * @param {string[]} keys 出す種類
+ * @param {string[]} all いま出うる種類すべて
+ */
+function pickOnly(keys, all) {
+  const next = new Set(all);
+  for (const k of keys) next.delete(k);
+  store.hiddenKinds = next;
+}
+
+/**
+ * Ctrl（⌘）＋クリック。足し引き。
+ *
+ * **最後の1つを外したら既定へ戻す。** 「0個選択」は選択形式として壊れているし、
+ * 時系列が1行も出ない状態を人が作れてしまう
+ *
+ * @param {string[]} keys 触る種類
+ * @param {boolean} hide 隠す側へ倒すか
+ * @param {string[]} all いま出うる種類すべて
+ */
+function pickAdd(keys, hide, all) {
+  for (const k of keys) {
+    if (hide) store.hiddenKinds.add(k);
+    else store.hiddenKinds.delete(k);
   }
-  return `絞り込み — ${num(hidden.size)} 種類を隠しています`;
+  if (all.every((k) => store.hiddenKinds.has(k))) store.hiddenKinds = initialHiddenKinds();
+}
+
+/**
+ * 群がいまどの状態か。**三態。**
+ *
+ * 既定（足跡だけ隠す）では `hand` が `some` になる。
+ * **群だけを選ぶ形にできないのはここ** … `trace` と `edit` は同じ群にいるので、
+ * 群の二値では既定の姿すら表せない
+ *
+ * @param {Array<[string, number]>} kinds その群に出ている [種類, 件数]
+ * @returns {'all'|'some'|'none'}
+ */
+function groupSel(kinds) {
+  const shown = kinds.filter(([k]) => !store.hiddenKinds.has(k)).length;
+  if (!shown) return 'none';
+  return shown === kinds.length ? 'all' : 'some';
+}
+
+/**
+ * 種類ごとの件数を、印の群ごとに束ねる。
+ *
+ * 並びは `MARK_GROUPS` の順。そこに無い種類（`compact`）は最後の「印なし」へ落とす。
+ * **知らない種類も落とさない** … 群を持たないだけで、絞り込みからは選べる
+ * （未知の形で落ちない、と同じ扱い）。
+ *
+ * @param {Map<string, number>} counts `countKinds` の結果
+ * @returns {Array<{group: string, icon: ?string, label: string, kinds: Array<[string, number]>, n: number}>}
+ */
+function groupCounts(counts) {
+  const buckets = new Map(MARK_GROUPS.map((g) => [g.group, { ...g, kinds: [], n: 0 }]));
+  buckets.set('', { group: '', icon: null, label: '印なし', kinds: [], n: 0 });
+
+  for (const [kind, n] of counts) {
+    // 省略はチップに出さない（下の filterBar のコメントに理由）
+    if (kind === 'elided') continue;
+    const b = buckets.get(KIND_MARK[kind] ?? '') ?? buckets.get('');
+    b.kinds.push([kind, n]);
+    b.n += n;
+  }
+  return [...buckets.values()].filter((b) => b.kinds.length);
 }
 
 /**
@@ -183,65 +263,199 @@ export function filterBar(all) {
   });
   bar.append(q);
 
-  // 種類のチップは札の向こうへ畳む。**常時は「探す」だけ。**
-  // 実測（489件のセッション）でチップが11枚出ていて、絞り込みの帯だけで
-  // 常時見えているものの2割を占めていた。押す動機（特定の種類だけ見たい・隠したい）は
-  // はっきりしているので、1手の向こうで足りる
-  const kindsBtn = el('button', 'btn tl-filter-btn');
-  kindsBtn.type = 'button';
-  kindsBtn.setAttribute('aria-pressed', String(kindsOpen));
-  // **文字は span に包む。** 隠す種類が変わるたびに書き換えるので、
-  // ボタンへ直に textContent を入れると絵（SVG）ごと消える
-  const kindsLabel = el('span', null, filterLabel(store.hiddenKinds));
-  // 押せば何か出ることを絵で示す。開くと 90 度回る（起こすフォームの畳みと同じ作法）
-  kindsBtn.append(icon('chevron', 13), kindsLabel);
-  bar.append(kindsBtn);
+  // **押す口だけを別の器に入れる。**
+  // 選択形式では1つ押すと他の札の見た目まで変わる（「これだけ」を選ぶので）ため、
+  // 帯そのものを組み直す必要がある。入力欄まで巻き込むと、
+  // 打っている途中の caret が消える ―― だから作り直す範囲をここに閉じる
+  const picks = el('div', 'tl-picks');
+  bar.append(picks);
 
-  const kinds = el('div', 'tl-kinds');
-  kinds.hidden = !kindsOpen;
-  kindsBtn.addEventListener('click', () => {
-    kindsOpen = !kindsOpen;
-    kinds.hidden = !kindsOpen;
-    kindsBtn.setAttribute('aria-pressed', String(kindsOpen));
-  });
+  // 省略はチップに出さない。自分で選ぶ種類ではなく、間引きの副産物だから
+  // （落としているのは groupCounts の中）。
+  //
+  // 目印の中身が隠している種類だけなら、目印も一緒に落としている（elidedAllHidden）。
+  // つまり出るか出ないかは他のチップで決まる。それをチップにすると、実測した例では
+  // 「省略 74」と出しながら1行も出ない状態になった（74 件すべてが足跡だけの区間で、
+  // 足跡は既定で隠れているため）。押しても何も起きず、件数だけが嘘になる。
+  //
+  // 目印ごと消したい人は URL で指定できる（?hide=elided）。そちらは効いたままにする
+  const groups = groupCounts(countKinds(items));
+  // いま出うる種類すべて。「これだけを見る」と「最後の1つ」の判断に要る
+  const every = groups.flatMap((g) => g.kinds.map(([k]) => k));
 
-  for (const [kind, n] of countKinds(items)) {
-    // 省略はチップに出さない。自分で選ぶ種類ではなく、間引きの副産物だから。
-    //
-    // 目印の中身が隠している種類だけなら、目印も一緒に落としている（elidedAllHidden）。
-    // つまり出るか出ないかは他のチップで決まる。それをチップにすると、実測した例では
-    // 「省略 74」と出しながら1行も出ない状態になった（74 件すべてが足跡だけの区間で、
-    // 足跡は既定で隠れているため）。押しても何も起きず、件数だけが嘘になる。
-    //
-    // 目印ごと消したい人は URL で指定できる（?hide=elided）。そちらは効いたままにする
-    if (kind === 'elided') continue;
-    const chip = el('button', 'tl-chip', KIND_LABELS[kind] ?? kind);
-    chip.type = 'button';
-    chip.append(el('span', 'n', num(n)));
-    // 押した状態は「出している」を true とする。隠す種類を持つのは store 側の拒否リスト
-    const paint = () => {
-      const shown = !store.hiddenKinds.has(kind);
-      chip.setAttribute('aria-pressed', String(shown));
-      chip.title = shown ? 'この種類を隠す' : 'この種類を出す';
-    };
-    paint();
-    chip.addEventListener('click', () => {
-      if (store.hiddenKinds.has(kind)) store.hiddenKinds.delete(kind);
-      else store.hiddenKinds.add(kind);
-      paint();
-      // 畳んだときに読む文字なので、ここで追随させる。
-      // これを忘れると、種類を隠したのに札が「絞り込み」のままになり、
-      // 畳んだ人には何が隠れているのか分からなくなる
-      kindsLabel.textContent = filterLabel(store.hiddenKinds);
-      // 残すのは URL（?hide=）だけ。localStorage に覚えさせない理由は initialHiddenKinds に書いた
-      syncQuery();
-      render({ reset: true });
-    });
-    kinds.append(chip);
-  }
-  bar.append(kinds);
+  const repaint = () => paintPicks(picks, groups, every, repaint);
+  repaint();
 
   return bar;
+}
+
+/** 群の状態を title に書くときの言い方。 */
+const SEL_NOTE = {
+  all: '全部出しています',
+  some: '一部だけ出しています',
+  none: '隠しています',
+};
+
+/**
+ * 押したあとの後始末。**3つを必ずこの順で。**
+ *
+ * 残すのは URL（`?hide=`）だけ。`localStorage` に覚えさせない理由は
+ * `initialHiddenKinds` に書いた
+ *
+ * @param {() => void} repaint 帯を組み直す口
+ */
+function applyPick(repaint) {
+  syncQuery();
+  // 当てはまる件数が変わるので窓は先頭から出し直す
+  render({ reset: true });
+  repaint();
+}
+
+/**
+ * 種類の札1枚。
+ *
+ * @param {string} kind 種類
+ * @param {number} n 件数
+ * @param {string[]} every いま出うる種類すべて
+ * @param {() => void} repaint
+ */
+function kindChip(kind, n, every, repaint) {
+  const chip = el('button', 'tl-chip', KIND_LABELS[kind] ?? kind);
+  chip.type = 'button';
+  chip.dataset.pick = `k:${kind}`;
+  chip.append(el('span', 'n', num(n)));
+
+  // 押した状態は「出している」を true とする。隠す種類を持つのは store 側の拒否リスト
+  const shown = !store.hiddenKinds.has(kind);
+  chip.setAttribute('aria-pressed', String(shown));
+  chip.title = shown
+    ? 'この種類だけを見る（Ctrl+クリックで足し引き）'
+    : 'この種類を出す（Ctrl+クリックで足し引き）';
+
+  chip.addEventListener('click', (ev) => {
+    if (ev.ctrlKey || ev.metaKey) pickAdd([kind], shown, every);
+    else pickOnly([kind], every);
+    applyPick(repaint);
+  });
+  return chip;
+}
+
+/**
+ * 群の札1枚。**常時見えているのはこれだけ。**
+ *
+ * @param {object} g `groupCounts` の1件
+ * @param {string[]} every いま出うる種類すべて
+ * @param {() => void} repaint
+ */
+function groupChip(g, every, repaint) {
+  const chip = el('button', 'tl-gchip');
+  chip.type = 'button';
+  chip.dataset.pick = `g:${g.group}`;
+  // 色は CSS が data-g で当てる。**印を持たない群（compact）には付けない**
+  if (g.group) chip.dataset.g = g.group;
+  if (g.icon) chip.append(icon(g.icon, 14));
+  chip.append(document.createTextNode(g.label), el('span', 'n', num(g.n)));
+
+  const sel = groupSel(g.kinds);
+  chip.dataset.sel = sel;
+  chip.title = `${g.label} — ${SEL_NOTE[sel]}。押すとこの群だけ、Ctrl+クリックで足し引き`;
+
+  const keys = g.kinds.map(([k]) => k);
+  chip.addEventListener('click', (ev) => {
+    if (ev.ctrlKey || ev.metaKey) pickAdd(keys, sel === 'all', every);
+    else pickOnly(keys, every);
+    applyPick(repaint);
+  });
+  return chip;
+}
+
+/**
+ * 細目（群の中の種類）。畳みの中に出す。
+ *
+ * @param {object[]} groups
+ * @param {string[]} every
+ * @param {() => void} repaint
+ */
+function subPanel(groups, every, repaint) {
+  const sub = el('div', 'tl-sub');
+  sub.append(el('p', 'tl-sub-lead', '群の中の種類。ここで1つ外すと、上の群は「一部」になります'));
+  for (const g of groups) {
+    const box = el('div', 'tl-group');
+    if (g.group) box.dataset.g = g.group;
+    // 群の頭。**押せない見出し**なので span で置く（押す口を増やさない）
+    const head = el('span', 'gh');
+    head.title = g.label;
+    if (g.icon) head.append(icon(g.icon, 13));
+    else head.append(el('span', null, '—'));
+    box.append(head);
+    for (const [kind, n] of g.kinds) box.append(kindChip(kind, n, every, repaint));
+    sub.append(box);
+  }
+  return sub;
+}
+
+/**
+ * 押す口を組み直す。
+ *
+ * **焦点を名前で拾い直す。** 節点ごと作り直すので、押した札は消える。
+ * 拾い直さないと、キーボードで操作している人の焦点が毎回 body へ飛ぶ
+ *
+ * @param {HTMLElement} picks 差し替える器
+ * @param {object[]} groups
+ * @param {string[]} every
+ * @param {() => void} repaint 自分自身
+ */
+function paintPicks(picks, groups, every, repaint) {
+  const focused = document.activeElement?.dataset?.pick ?? null;
+  picks.replaceChildren();
+
+  const line = el('div', 'tl-gchips');
+  for (const g of groups) line.append(groupChip(g, every, repaint));
+
+  // 細目の畳み。**開閉は覚えない**（開くたび畳んだ状態から始める）。
+  // 何が隠れているかは、上の群の札が三態で常に出しているので、
+  // 「畳んだ札には中身を書く」は形のほうで満たしている
+  const fold = el('button', 'btn tl-filter-btn');
+  fold.type = 'button';
+  fold.dataset.pick = 'fold';
+  fold.setAttribute('aria-pressed', String(kindsOpen));
+  fold.title = '群の中の種類まで出す';
+  // 押せば何か出ることを絵で示す。開くと 90 度回る（起こすフォームの畳みと同じ作法）
+  fold.append(icon('chevron', 13), el('span', null, '細目'));
+  fold.addEventListener('click', () => {
+    kindsOpen = !kindsOpen;
+    repaint();
+  });
+  line.append(fold);
+
+  // 外す口。**既定と違うときだけ出す。** 常に出していると、
+  // 何も絞っていないのに外す口があることになる。
+  //
+  // **見た目は書庫の `.archive-clear` をそのまま借りる**（ピル型・--accent・絵だけ）。
+  // あちらは `.archive-head` を親に取っていないクラス単体なので、ここでも効く。
+  // 画面に「絞り込みを外す」が3箇所（書庫・数値・ここ）できたので、宣言は1つに保つ
+  if (!isDefaultKinds()) {
+    const clear = el('button', 'btn archive-clear');
+    clear.type = 'button';
+    clear.dataset.pick = 'clear';
+    clear.title = '絞り込みを外す';
+    clear.setAttribute('aria-label', '絞り込みを外す');
+    clear.append(icon('x', 15));
+    clear.addEventListener('click', () => {
+      store.hiddenKinds = initialHiddenKinds();
+      applyPick(repaint);
+    });
+    line.append(clear);
+  }
+  picks.append(line);
+
+  if (kindsOpen) picks.append(subPanel(groups, every, repaint));
+
+  // 消えた札（外す口）に焦点があったときは、畳みの札へ落とす
+  const back = focused
+    ? picks.querySelector(`[data-pick="${focused}"]`) ?? picks.querySelector('[data-pick="fold"]')
+    : null;
+  back?.focus();
 }
 
 /**

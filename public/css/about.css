@@ -1,0 +1,191 @@
+/* ClaudeDeck ── このアプリの説明
+ *
+ * 読む順は settings.css の直後。**あちらのクラスを借りているので、後ろでないと上書きできない。**
+ *
+ * 自前で持つのは4つだけ。
+ *   - 節の出し分け（`data-sec` の組み合わせ。あちらは notify / dirs / state しか知らない）
+ *   - 器の高さ（説明は設定より縦に長い）
+ *   - 凡例の並び（`.about-legend`）
+ *   - キー操作の並び（`.about-keys`）
+ *
+ * それ以外（`.settings` 本体・`::backdrop`・`[open]`・幅・頭・足・`.settings-sec` …）は
+ * `settings.css` のものがそのまま効く。**顔の語彙を増やさない。**
+ */
+
+/* 器の高さ。**設定より高くする。**
+ *
+ * あちらは「節ごとに中身の量が違うので、いちばん多い節に合わせて固定する」
+ * という理由で 34rem。こちらは節がどれも読み物で、印の節がいちばん縦に長い。
+ * 34rem のままだと凡例が常にスクロールの向こうへ隠れる。
+ *
+ * **max-height にしない**のはあちらと同じ理由（節を切り替えるたびに
+ * `<dialog>` の中央配置で上下に跳ねる）。 */
+.about {
+  height: min(38rem, calc(100vh - 3rem));
+}
+
+/* 節の出し分け。**JS は器の data-sec に名前を書くだけ。**
+   節を1つ足しても配線が増えない（settings.css / usage-mode.css と同じ作法） */
+.about[data-sec="what"]   .settings-pane[data-sec="what"],
+.about[data-sec="screen"] .settings-pane[data-sec="screen"],
+.about[data-sec="marks"]  .settings-pane[data-sec="marks"],
+.about[data-sec="words"]  .settings-pane[data-sec="words"],
+.about[data-sec="about"]  .settings-pane[data-sec="about"] { display: block; }
+
+/* 足は1行を読ませるだけ。設定の足（ボタンが2つ並ぶ）とは役目が違うので詰める */
+.about .settings-foot { padding: .5rem 1rem; }
+.about .settings-foot .settings-hint { margin: 0; }
+
+/* 節の頭の1文。本文より1段大きく出して、読み始めの位置を作る */
+.about-lead {
+  margin: 0;
+  font-size: var(--fs-3);
+  line-height: var(--lh-read);
+  color: var(--fg-muted);
+}
+
+.about-lead strong { color: var(--fg); }
+
+/* ------------------------------------------------------------------ 凡例 */
+
+/* 印 ／ 名前 ＋ 中身 の2列。**印の列幅は時系列の印（1.6rem）に合わせる。**
+   実物と同じ大きさで出さないと、画面で探すときの手がかりにならない */
+.about-legend {
+  display: grid;
+  gap: .5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about-legend li {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr);
+  align-items: start;
+  gap: .6rem;
+}
+
+/* 印の器。**timeline.css の `.tl-mark` と同じ寸法・同じ色の当て方にする。**
+   宣言を借りに行かないのは、あちらが `.tl` の中の位置（margin-top・z-index）まで
+   持っていて、ここでは要らないため。**色は同じトークンから取る** */
+.about-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  /* 面を2枚に重ねる理由は timeline.css の `.tl-mark[data-g="me"]` に書いた */
+  background: var(--bg);
+  box-shadow: var(--sh-1);
+  color: var(--fg-faint);
+}
+
+.about-mark[data-g="me"] {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg);
+  color: var(--accent);
+}
+
+.about-mark[data-g="mark"] { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); color: var(--warn); }
+.about-mark[data-g="hand"] { border-color: color-mix(in srgb, var(--done) 50%, var(--border)); color: var(--done); }
+
+/* 印を持たない種類（文脈の圧縮）。**空の丸を置かない** ――
+   時系列の `.tl-mark:empty` と同じで、点に縮める */
+.about-mark:empty {
+  width: .5rem;
+  height: .5rem;
+  margin: .55rem;
+  border-color: var(--border-strong);
+  background: var(--border-strong);
+  box-shadow: none;
+}
+
+/* **名前と中身は縦に積む。** どちらも `<span>` なので、素のままだと
+   同じ行に続けて出て「あなたあなたの指示 ／ …」のように字がくっつく。
+   `display: block` にして行を分ける ―― 余白で足すと、
+   折り返したときに2行目の頭だけ字下げが残る */
+.about-legend .lg-name {
+  display: block;
+  font-size: var(--fs-2);
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+.about-legend .lg-kinds {
+  display: block;
+  margin-top: .1rem;
+  font-size: var(--fs-1);
+  line-height: 1.6;
+  color: var(--fg-faint);
+}
+
+/* 状態の点。**1列目には点だけを置く**（名前は本文の側）。
+   `.state` は `white-space: nowrap` を持つので、名前を中に入れると
+   「質問待ち / プラン承認待ち / 承認待ち」が列から溢れて右の文と重なる。
+   印の凡例とまったく同じ組みにしてあるので、列の指定も要らない。
+
+   点は `.state::before` が描く。器を列の幅いっぱいに広げて中央に置く */
+.about-legend.is-state .state {
+  justify-content: center;
+  width: 1.6rem;
+}
+
+/* 状態と札は「名前」がそのまま印なので、本文を1段濃くする
+   （印の凡例は絵が主役なので、あちらは `--fg-faint` のまま） */
+.about-legend.is-state .lg-kinds,
+.about-legend.is-tag .lg-kinds { color: var(--fg-muted); }
+
+/* 札は幅が短いので、名前と中身を横に並べる */
+.about-legend.is-tag li {
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  align-items: center;
+}
+
+.about-legend.is-tag .lg-kinds { margin-top: 0; }
+
+/* -------------------------------------------------------------- キー操作 */
+
+.about-keys {
+  display: grid;
+  gap: .35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-1);
+}
+
+.about-keys li {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: .5rem;
+  align-items: baseline;
+  color: var(--fg-muted);
+}
+
+.about-keys .k { display: inline-flex; gap: .2rem; }
+
+/* キーの札。**`palette.css` の `.kbd` と同じ形**にしたいが、あちらは
+   パレットの中に閉じた名前なので、素の `<kbd>` に同じ寸法を持たせる */
+.about-keys kbd {
+  padding: .05rem .35rem;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--r-xs);
+  background: var(--bg-elev);
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--fg-muted);
+}
+
+/* 狭い窓。**settings.css と同じ閾値で畳む**（あちらが自分で持っているのと同じ理由で、
+   モーダルの都合を narrow.css へ散らさない） */
+@media (max-width: 40rem) {
+  .about-legend.is-tag li,
+  .about-keys li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: .15rem;
+  }
+}

@@ -42,19 +42,153 @@
 
 .tl-q:focus-visible { border-color: var(--accent); }
 
-.tl-kinds {
+/* 押す口の器。**探す欄を巻き込まないための境目。**
+
+   選択形式では1つ押すと他の札の見た目まで変わるので、帯を組み直す必要がある。
+   入力欄まで作り直すと打っている途中の caret が消えるので、
+   作り直す範囲をこの器の中に閉じてある（`view.js` の `paintPicks`）。
+
+   **`[hidden]` は要らない。** ここは JS が出し入れしない（中身を入れ替えるだけ） */
+.tl-picks {
   display: flex;
-  flex-wrap: wrap;
-  gap: .3rem;
-  /* 帯の中で行を分ける。札を押して出したとき、探す欄の下に回り込ませる */
-  flex: 1 0 100%;
+  flex-direction: column;
+  gap: .4rem;
 }
 
-/* **`display` を素で書いたので `[hidden]` を打ち消す。**
-   `[hidden]` のブラウザ既定（`display: none`）は詳細度 0,1,0 しか無く、
-   上の `.tl-kinds`（0,1,0）と同点で、後に読まれるこちらが勝ってしまう。
-   `run.css` の `.runform-danger` で同じ踏み方をしている */
-.tl-kinds[hidden] { display: none; }
+/* 群の札の行。**常時見えているのはこれだけ。**
+   細目・外す口も同じ行に置いて、押せるものを1行にまとめる */
+.tl-gchips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .3rem;
+}
+
+/* 群の札。種類の札（`.tl-chip`）より少しだけ大きく、絵を持つ。
+   ピル型は押せるものの形なので、そこは共通 */
+.tl-gchip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .2rem .6rem .2rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  font: inherit;
+  font-size: var(--fs-1);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+
+.tl-gchip .n {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+}
+
+/* 群の色。**時系列の印（`.tl-mark[data-g]`）と同じ割り当てを使う。**
+   新しい色は1つも作らない ―― 絞り込みと印が同じ色で結びつくことがこの案の値打ち */
+.tl-gchip[data-g="me"] { color: var(--accent); }
+.tl-gchip[data-g="mark"] { color: var(--warn); }
+.tl-gchip[data-g="hand"] { color: var(--done); }
+
+.tl-gchip:hover { border-color: var(--border-strong); background: var(--bg-hi); }
+
+/* 三態。**全部と一部は同じ面で、差は右下の点だけ。**
+   両方とも「出している」側なので、面まで変えると別の意味に見える */
+.tl-gchip[data-sel="all"],
+.tl-gchip[data-sel="some"] {
+  border-color: var(--border-strong);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
+}
+
+/* 一部だけ出している印。既定（足跡だけ隠す）では「手が動いた」がこれになる。
+   節点を足さずに `::after` で描く（時系列の印の形と同じ作法） */
+.tl-gchip[data-sel="some"]::after {
+  content: "";
+  position: absolute;
+  right: .3rem;
+  bottom: .12rem;
+  width: .35rem;
+  height: .35rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* 全部隠している。**`.tl-chip[aria-pressed="false"]` と同じ形にする**
+   ―― 枠を透明にして取り消し線。破線は但し書きと区切り専用なので使わない */
+.tl-gchip[data-sel="none"] {
+  border-color: transparent;
+  background: none;
+  box-shadow: none;
+  color: var(--fg-faint);
+  text-decoration: line-through;
+}
+
+/* 外れているものの hover を**別に書く。** 上の `.tl-gchip:hover`（0,2,0）と
+   `[data-sel="none"]`（0,2,0）は同点で、後に読まれるあちらが枠を透明へ戻す。
+   `.tl-chip` でまったく同じ踏み方をしている（下） */
+.tl-gchip[data-sel="none"]:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-muted);
+}
+
+/* 細目。畳みの中に出す群ごとの塊。
+   面を沈めて「上の行の中身」であることを示す（枠は足さない ―― 入れ子の箱に見える） */
+.tl-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem .9rem;
+  padding: .5rem .6rem;
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
+}
+
+.tl-sub-lead {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+}
+
+/* 群1つぶん。頭の印と、その群の種類の札が横に並ぶ */
+.tl-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .3rem;
+}
+
+/* 群の頭。**押せない見出しなので、枠も面も持たない**
+   （押せるものと止まった絵で見分けが付くように） */
+.tl-group > .gh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--fg-faint);
+}
+
+.tl-group[data-g="me"] > .gh { color: var(--accent); }
+.tl-group[data-g="mark"] > .gh { color: var(--warn); }
+.tl-group[data-g="hand"] > .gh { color: var(--done); }
+
+/* 絞り込みを外す口は**ここに書かない。** `archive.css` の `.archive-clear` を
+   そのまま借りる（`view.js` が `btn archive-clear` を付ける）。
+
+   あちらのセレクタは `.archive-head` を親に取っていないクラス単体なので、
+   時系列の帯の中でも効く（`run-form.js` が設定モーダルのクラスを借りたのと同じ形）。
+   ピル型・`--accent`・絵だけの3つを重ねた形で、隣の絞り込みの札
+   （ピル型・灰の輪郭・文字つき）とはどの手掛かりでも見分けが付く。
+
+   **数値の帯（`#usage-clear`）も同じものを借りている。**
+   画面に「絞り込みを外す」が3箇所できたので、宣言は1つに保つ。 */
 
 /* 畳みの札。開いたら chevron を 90 度回す。
    `run.css` の `.runform-fold` と同じ作法にしてある
@@ -189,9 +323,21 @@ mark {
 /* 群ごとの色。**新しい色は1つも作らない。**
    自分が動かした所（me）だけ強調を当て、判断の節目は --warn、
    手が動いた所は --done。Claude の言葉と但し書きは既定のまま沈める */
+/* **面は2枚に重ねる。** `--accent-soft` は α10%（暗いほうは 16%）の半透明なので、
+   素で置くと上の `background: var(--bg)`（不透明）を消してしまい、
+   行をつなぐ縦線（`.tl::before`）が丸の中を素通りする。
+   線の `left` はちょうど印の中心なので、`user` の絵（`fill: none` の線画）を縦に貫いて見える。
+
+   **`color-mix(in srgb, var(--accent) 10%, var(--bg))` にしない。**
+   あれは 10% を CSS に直に書くことになり、暗いほうだけ 16% という
+   `tokens.css` の割り当てが効かなくなる（`--accent-soft` を持っている意味が消える）。
+   重ねる形なら、明暗の差はトークン側に残ったままになる。
+
+   **半透明の面を持つのはこの群だけ。** `mark` と `hand` は `border-color` と `color` しか
+   触らず、`say` と `note` は上書きの規則そのものが無い。だから直すのはここ1箇所でよい */
 .tl-mark[data-g="me"] {
   border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
-  background: var(--accent-soft);
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg);
   color: var(--accent);
 }
 

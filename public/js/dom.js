@@ -83,7 +83,17 @@ export const dom = {
   usageDays: document.getElementById('usage-days'),
   usageLimit: document.getElementById('usage-limit'),
   usageModel: document.getElementById('usage-model'),
+  usageClear: document.getElementById('usage-clear'),
   usageCount: document.getElementById('usage-count'),
+  // このアプリの説明。about.js だけが使う
+  about: document.getElementById('about'),
+  aboutOpen: document.getElementById('about-open'),
+  aboutClose: document.getElementById('about-close'),
+  aboutNav: document.getElementById('about-nav'),
+  aboutStates: document.getElementById('about-states'),
+  aboutKinds: document.getElementById('about-kinds'),
+  aboutTags: document.getElementById('about-tags'),
+  aboutVersion: document.getElementById('about-version'),
   // 通知の設定モーダル。settings.js だけが使う
   settings: document.getElementById('settings'),
   settingsOpen: document.getElementById('settings-open'),

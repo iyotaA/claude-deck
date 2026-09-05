@@ -23,23 +23,24 @@
    上の部品はそのまま共有するので、足すのは器と絞り込みの帯とセッションの行だけ */
 
 /* 絞り込みが3つ並ぶので、書庫のヘッダと同じく折り返す。
-   select の見た目は .archive-head と同じにしたいが、あちらの規則を
-   .usage-head へ広げには行かない（list.css が usage の名前を知ることになる）。
-   同じ宣言をこちらに持つほうが、どちらの都合で変えたのかが後から読める */
+
+   **中身は `archive.css` の `.archive-field` / `.archive-clear` をそのまま借りる。**
+   前はここに `select` の見た目を書き写していて、
+   「同じ宣言をこちらに持つほうが、どちらの都合で変えたのかが後から読める」と
+   理由を付けてあった。**その理由のほうが実態と合わなくなった** ――
+   書き写した結果、書庫の札には絵と枠と解除の口があるのに、
+   数値の帯だけが素の `<select>` 3つで、絵が1つも無い状態になっていた。
+
+   借りられるのは、あちらのセレクタが `.archive-head` を親に取っていない
+   クラス単体だから（`run-form.js` が設定モーダルのクラスを借りたのと同じ形）。
+   `archive.css` は `usage-mode.css` より前に読まれるので、順の心配も要らない */
 .usage-head { flex-wrap: wrap; }
 
-.usage-head select {
-  padding: .25rem .3rem;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-elev);
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--fs-1);
-}
-
+/* 件数は**絞り込みの結果の説明**なので、同じ行の右端へ寄せる。
+   前は `flex: 1 0 100%` で3行目に落ちていて、
+   節ナビ・絞り込み・件数で帯が3行を使っていた（一覧の `#list-count` と同じ作法にする） */
 .usage-head #usage-count {
-  flex: 1 0 100%;
+  margin-left: auto;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--fg-faint);
@@ -140,25 +141,39 @@
 .usage-pane[data-sec="skills"] .usage-sec[data-sec="skills"],
 .usage-pane[data-sec="rows"]   .usage-sec[data-sec="rows"] { display: block; }
 
-/* 節ナビ。**見た目は settings.css の .settings-navb をそのまま借りる**
-   （顔の語彙を増やさない）。あちらは縦に並ぶが、こちらは絞り込みの帯の中なので横。
+/* 節ナビ。**見た目は list.css の `.tab`（下線式）を借りる。**
 
-   帯（.list-head）の地は --bg-sunk で、選んだ札だけが --bg へ浮く。
-   .settings-navb が「沈んだ帯の上で選んだものが浮く」形をそのまま持っているので、
-   その関係がここでも成り立つ */
+   前は `settings.css` の `.settings-navb` を借りていて、
+   「沈んだ帯の上で選んだものが浮く関係がそのまま成り立つ」という理由を付けてあった。
+   関係そのものは確かに成り立っていたが、**あれは縦ナビの作法**（選んだものの左に棒）で、
+   横に並ぶ帯で使っているのはこの1箇所だけだった。
+   おかげで画面のタブの顔が3種類（`.tab` / `.detail-tab` / ここ）になっていた。
+
+   `.tab` に寄せると2種類に減る。**帯の地は `--bg-sunk` のままでよい** ――
+   中央のタブ帯（`.detail-tabs`）も同じ地の上で下線式なので、前例がそのまま使える。
+
+   節の見出しは器の中に出るので、ナビの札とは別。
+   ナビは「どれを見るか」、帯は「いま何の話か」 */
 .usage-nav {
   display: flex;
   /* 帯そのものは折り返すが、中のこれは別の flex コンテナなので自分で畳む。
      狭い窓では札4つが1行に収まらない */
   flex-wrap: wrap;
   flex: 1 0 100%;
-  gap: .25rem;
-  margin-bottom: .15rem;
+  gap: .1rem;
 }
 
-/* 節の見出しは器の中に出るので、ナビの札とは別。
-   ナビは「どれを見るか」、帯は「いま何の話か」 */
-.usage-nav .settings-navb { padding: .3rem .55rem; }
+/* 帯の高さに合わせて上下だけ詰める（上のバーの `.modes .tab` と同じ手当て） */
+.usage-nav .tab { padding: .25rem .6rem .2rem; }
+
+/* 件数。`.detail-tab .n` と同じ扱いで、押せない添え物として沈める */
+.usage-nav .tab .n {
+  margin-left: .3rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+}
 
 /* ------------------------------------- 概要の「いちばん重いもの」 */
 

@@ -68,6 +68,7 @@ import { initMode, setMode } from './mode.js';
 import { select, detailCache } from './session.js';
 import { setLive, fetchOnce, connect } from './stream.js';
 import { initSettings } from './settings.js';
+import { initAbout } from './about.js';
 import { initUpdate } from './update.js';
 import { initRunForm } from './run-form.js';
 import { initPalette } from './palette.js';
@@ -152,6 +153,7 @@ initUsageTab({ onPick: () => setMode('work') });
 // （mode.js があちらを import すると、同じ層7 に向きが1本増える）
 initMode({ onUsage: showUsage, onArchive: showArchive });
 initSettings();
+initAbout();
 initUpdate();
 initRunForm();
 initPalette();
@@ -198,6 +200,22 @@ subscribeRuns(() => {
 dom.listToggle.append(icon('sidebar'));
 dom.brand.prepend(icon('deck'));
 dom.runformOpen.prepend(icon('plus', 14));
+// 選ぶ口の絵。**12箇所をまとめて1回で舐める。**
+// ネイティブの矢印は base.css が消しているので、代わりに置く形が要る。
+// chevron を 90 度回して下向きにするのは CSS 側（`.selectbox > .sel-mark`）。
+//
+// **`sel-mark` の名前を必ず付ける。** 器の中には先頭の絵（書庫の `sort` など）も
+// 居るので、`.icon` で当てると**そちらまで右端へ飛んで 90 度回る**
+// （横棒3本が縦棒3本になって、シェブロンと重なって出ていた）。
+//
+// 器は index.html に静的に置いてあるものだけなので、ここで1回差せば足りる
+// （候補が入れ替わっても器は作り直さない）
+for (const box of document.querySelectorAll('.selectbox')) {
+  const mark = icon('chevron', 13);
+  mark.classList.add('sel-mark');
+  box.append(mark);
+}
+dom.aboutOpen.append(icon('info'));
 dom.reload.append(icon('refresh'));
 dom.settingsOpen.append(icon('gear'));
 dom.themeToggle.append(icon('contrast'));
