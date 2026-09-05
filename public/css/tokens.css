@@ -14,60 +14,100 @@
    * 色を変えるときに直す場所を1箇所にする。
    */
 
-  /* 明るいほう */
-  --l-bg:        #FFFFFF;
-  --l-bg-elev:   #F5F7FA;
-  --l-bg-sunk:   #EDF1F6;
-  --l-code-bg:   #F0F3F7;
-  --l-fg:        #16202E;
-  --l-fg-muted:  #5A6B80;
-  --l-fg-faint:  #8A99AC;
-  --l-border:    #D8DFE8;
-  --l-border-strong: #C2CCD9;
-  --l-accent:    #1F5FD0;
+  /* 明るいほう。**地は純白ではなくクリーム。**
+   *
+   * 純白（#FFFFFF）だと、毎日ずっと開いている画面としてはまぶしい。
+   * 1段落としたぶんの余地を、カード（--l-bg-elev）を白にすることへ回す。
+   * 面の上下は「地 < 浮きもの」で、暗いほうとは逆向き（下の説明を見よ）。
+   *
+   * **字の3段は、この地の上で全部 4.5:1 を超えるところまで押し上げてある。**
+   * 前は --l-fg-faint が #8A99AC（2.90:1）で、添え物が読めるかどうかの境目だった。
+   * 段の差（15.96 / 7.35 / 4.99）は保っているので「添え物は弱い」の読み方は消えていない。
+   *
+   * --l-off は --l-fg-faint と同じ値。**前もそうだった**（どちらも #8A99AC）。
+   * 「終了・不明」は添え物と同じ重さ、という割り当てをそのまま引き継いでいる。
+   */
+  --l-bg:        #FAF9F5;
+  --l-bg-elev:   #FFFFFF;
+  --l-bg-sunk:   #F0EDE6;
+  --l-bg-hi:     #E8E3D8;
+  --l-code-bg:   #F3F0E9;
+  --l-fg:        #1F1D1A;      /* 15.96 : 1 */
+  --l-fg-muted:  #57524A;      /*  7.35 : 1 */
+  --l-fg-faint:  #726B61;      /*  4.99 : 1 */
+  --l-border:    #E4DFD5;
+  --l-border-strong: #CEC7B8;
+  --l-accent:    #A24E2B;      /*  5.44 : 1（面に白を載せると 5.74 : 1） */
   --l-accent-fg: #FFFFFF;
-  --l-hot:       #C2372B;
-  --l-warn:      #A8620A;
-  --l-calm:      #1F5FD0;
-  --l-done:      #1B7A46;
-  --l-off:       #8A99AC;
-  --l-shadow: 0 1px 2px rgb(22 32 46 / 6%), 0 4px 12px rgb(22 32 46 / 4%);
+  --l-accent-soft: rgb(162 78 43 / 10%);
+  --l-hot:       #A51C30;      /*  7.10 : 1 */
+  --l-warn:      #8A6412;      /*  5.10 : 1 */
+  --l-calm:      #2F6E8F;      /*  5.32 : 1 */
+  --l-done:      #3F7D4F;      /*  4.68 : 1 */
+  --l-off:       #726B61;      /*  4.99 : 1 */
 
   /* 暗いほう。
    * 色調は青みを抜いた暖かい濃いグレー（Claude のサイトに寄せている）。
    * 前はネイビー（#0B1220 系）だったが、青の面と青の強調（--d-accent）が
    * 同じ系統で、押せるものと地面の区別が弱かった。
    *
-   * 面の上下は明るいほうと逆で、カードがいちばん暗く、地がその1段上、
-   * 押せるものがさらに上。暗い側でカードを明るくすると、数の多いカードが
-   * 全部浮いて同じ重さに見える。
+   * 面の上下は明るいほうと逆で、地がいちばん暗く、沈んだ面がその上、
+   * 押せるもの（--d-bg-elev）がさらに上。暗い側でカードを暗くすると沈んで見えるので、
+   * 「浮いているものほど明るい」を暗い側だけ守る。
    *
-   * --d-accent は青のまま置く。Claude の terracotta にすると
-   * --d-hot（あなたの操作で止まっている）と見分けが付かなくなる。
+   * **--d-accent はテラコッタ（ピーチ）。** 長く青を置いていたのは
+   * 「Claude の terracotta にすると --d-hot と見分けが付かなくなる」ためだった。
+   * その問題は残っているので、色相を約30度離した（--d-hot をローズへ）うえで、
+   * **状態の点は形でも分ける**（list.css の .state[data-s]）。色だけに頼らない。
    */
   --d-bg:        #1C1B19;
-  --d-bg-elev:   #2B2A27;
-  --d-bg-sunk:   #232220;
-  --d-code-bg:   #262624;
-  --d-fg:        #F5F4EF;
-  --d-fg-muted:  #C2C0B6;
-  --d-fg-faint:  #918E85;
-  --d-border:    #3A3934;
-  --d-border-strong: #4E4C46;
-  --d-accent:    #4C8DFF;
+  --d-bg-elev:   #272521;
+  --d-bg-sunk:   #201F1C;
+  --d-bg-hi:     #33302A;
+  --d-code-bg:   #262421;
+  --d-fg:        #F5F2EA;
+  --d-fg-muted:  #B8B2A6;
+  --d-fg-faint:  #8A8479;      /*  4.64 : 1 */
+  --d-border:    #35322C;
+  --d-border-strong: #4C483F;
+  --d-accent:    #E08159;      /*  6.11 : 1 */
   --d-accent-fg: #1C1B19;
-  --d-hot:       #FF6B5A;
-  --d-warn:      #F2B01E;
-  --d-calm:      #4C8DFF;
-  --d-done:      #4ACB84;
-  --d-off:       #918E85;
-  --d-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 14px rgb(0 0 0 / 22%);
+  --d-accent-soft: rgb(224 129 89 / 16%);
+  --d-hot:       #FF5A76;      /*  5.72 : 1 */
+  --d-warn:      #E8B341;
+  --d-calm:      #6FA8C9;
+  --d-done:      #7FBF7F;
+  --d-off:       #8A8479;
+
+  /* 影。**4段に割る。**
+   *
+   * 前は1段（--l-shadow / --d-shadow）しか無く、しかも使い道が
+   * モーダル・引き出し・パレットの7箇所だけだった。つまり画面の段は
+   * 「地」と「浮きもの」の2つで、流れの中の面（カード・パネル）には
+   * 影が1つも落ちていない。差を作る手段が 1px の罫線しか残っていなかった。
+   *
+   * **明るいほうの影に暖色を混ぜる**（rgb(60 48 34)）。純黒を落とすと、
+   * せっかくクリームにした紙の色が影のところだけ濁って見える。
+   *
+   * --hi は内側の 1px のハイライト。影を落とさずに面を1段持ち上げる道具で、
+   * 暗いほうでとくに効く（暗い側では影が地に沈んで見えないため）。
+   */
+  --l-sh-1: 0 1px 2px rgb(60 48 34 / 5%);
+  --l-sh-2: 0 2px 4px rgb(60 48 34 / 5%), 0 10px 26px -10px rgb(60 48 34 / 16%);
+  --l-sh-3: 0 2px 6px rgb(60 48 34 / 8%), 0 28px 60px -20px rgb(60 48 34 / 28%);
+  --l-hi:   inset 0 1px 0 rgb(255 255 255 / 70%);
+
+  --d-sh-1: 0 1px 2px rgb(0 0 0 / 35%);
+  --d-sh-2: 0 2px 4px rgb(0 0 0 / 35%), 0 10px 26px -10px rgb(0 0 0 / 55%);
+  --d-sh-3: 0 2px 6px rgb(0 0 0 / 45%), 0 28px 60px -20px rgb(0 0 0 / 70%);
+  --d-hi:   inset 0 1px 0 rgb(255 255 255 / 5%);
 
   /* ── 意味トークン。画面側はこちらだけを使う ──────────────── */
   /* 面 */
   --bg:        var(--l-bg);
   --bg-elev:   var(--l-bg-elev);
   --bg-sunk:   var(--l-bg-sunk);
+  --bg-hi:     var(--l-bg-hi);   /* 触れたときの面。hover が線の色しか変えられなかった */
   --code-bg:   var(--l-code-bg);
   /* 文字 */
   --fg:        var(--l-fg);
@@ -79,19 +119,54 @@
   /* 強調 */
   --accent:    var(--l-accent);
   --accent-fg: var(--l-accent-fg);
+  --accent-soft: var(--l-accent-soft); /* 選んでいるものの光の輪・自分の発言の面 */
   /* 状態 */
   --hot:       var(--l-hot);   /* あなたの操作で止まっている */
   --warn:      var(--l-warn);  /* あなたの返信を待っている */
   --calm:      var(--l-calm);  /* Claude が動いている */
   --done:      var(--l-done);  /* 終わって通っている（TODO の完了） */
   --off:       var(--l-off);   /* 終了・不明 */
-  --shadow:    var(--l-shadow);
+  /* 影 */
+  --sh-1:      var(--l-sh-1);  /* カード・ボタン */
+  --sh-2:      var(--l-sh-2);  /* 選んでいるもの・浮いた札 */
+  --sh-3:      var(--l-sh-3);  /* モーダル・引き出し・拡大 */
+  --hi:        var(--l-hi);    /* 内側の 1px。影を落とさずに面を持ち上げる */
+
+  /* いちばん深い段の別名。**残してあるのは既存の7箇所のため**
+     （モーダル・引き出し・パレット・拡大）。どれも --sh-3 の役どころなので、
+     名前だけ生かして中身を新しい段へ繋ぎ替える。使う側は順に --sh-3 へ寄せる */
+  --shadow:    var(--sh-3);
 
   --font-sans: "Yu Gothic UI", "Yu Gothic", YuGothic, "Hiragino Sans",
                "Hiragino Kaku Gothic ProN", Meiryo, system-ui, sans-serif;
   --font-mono: "Cascadia Mono", Consolas, "SF Mono", "Yu Gothic UI", monospace;
 
-  --radius: 8px;
+  /* 字の段。**8段に割る。**
+   *
+   * 前は 25 種類の font-size が散らばっていたが、**9割が .68〜.88rem
+   * （9.5〜12.3px）に固まっていた**。種類は多いのに差が無い＝視線の入口が無い。
+   *
+   * ここで作るのは大きい字だけではない。**小さい字も一緒に作る**のが要点で、
+   * 添え物（--fs-0）と主役（--fs-6）の両方が居ないと段にならない。
+   *
+   * px で持つ。rem にすると、この段そのものが body の font-size に乗って
+   * 二重の尺になる（実測で決めた markdown.css の見出しと噛み合わなくなる）。
+   *
+   * 行間は2つだけ。**詰める場所と読ませる場所で分ける。**
+   * 一覧（--lh-tight）で読む面の行間を使うと1行が 28px から 47px へ伸び、
+   * 12本並べたときに 377px が 568px になる（＝全体が一度に見えなくなる）。
+   */
+  --fs-0: 11px;   /* 添え物（置き場所・件数・いつ測ったか） */
+  --fs-1: 12px;   /* 状態の名前・圧縮した行の題・ボタン */
+  --fs-2: 13px;   /* カードの題・タブ */
+  --fs-3: 14px;   /* 時系列の本文・facts */
+  --fs-4: 15px;   /* 詳細の本文。長い Markdown を読む段 */
+  --fs-5: 21px;   /* 詳細の見出し */
+  --fs-6: 30px;   /* ヒーローの経過時間・数値の札 */
+  --fs-7: 44px;   /* 数値モードの主役 */
+
+  --lh-tight: 1.5;    /* 一覧・行・帯 */
+  --lh-read: 1.78;    /* 詳細ペイン・Markdown */
 
   /* 角丸の段。**数字ではなく役割で持つ。**
 
@@ -99,8 +174,21 @@
      どれも役割が決まっていた。数字のままだと grep しても
      「押せるものの形はどこか」が出せない。
 
-     --radius-pill は `public/CLAUDE.md` の「**ピル型は押せるものだけの形にする**」
+     **5段に割り直した。** 前の4つは 4〜8px に固まっていて、押せるもの（ボタン）と
+     読むもの（カード）と器（モーダル）が同じ硬さで並んでいた。
+     いまは「小さいものほど角を立て、大きい器ほど丸める」で割ってある。
+
+     --r-pill は `public/CLAUDE.md` の「**ピル型は押せるものだけの形にする**」
      という約束そのもの。名前で持てば、その約束を破っている場所を探せる。 */
+  --r-xs:   5px;    /* 札・タグ。行の中に並ぶ小さいもの */
+  --r-sm:   8px;    /* 入力欄・ボタン・圧縮した行 */
+  --r-md:  12px;    /* カード・パネル */
+  --r-lg:  18px;    /* ヒーローの札・モーダル */
+  --r-pill: 999px;  /* 押せるものだけの形 */
+
+  /* 前の4つ。**使う側を寄せ終えたら消す**（段2）。
+     いま消すと 49 箇所が同時に動いて、色の差し替えと形の差し替えが1つの差分に混ざる */
+  --radius: 8px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-pill: 999px;
@@ -135,6 +223,7 @@
     --bg:        var(--d-bg);
     --bg-elev:   var(--d-bg-elev);
     --bg-sunk:   var(--d-bg-sunk);
+    --bg-hi:     var(--d-bg-hi);
     --code-bg:   var(--d-code-bg);
     --fg:        var(--d-fg);
     --fg-muted:  var(--d-fg-muted);
@@ -143,12 +232,16 @@
     --border-strong: var(--d-border-strong);
     --accent:    var(--d-accent);
     --accent-fg: var(--d-accent-fg);
+    --accent-soft: var(--d-accent-soft);
     --hot:       var(--d-hot);
     --warn:      var(--d-warn);
     --calm:      var(--d-calm);
     --done:      var(--d-done);
     --off:       var(--d-off);
-    --shadow:    var(--d-shadow);
+    --sh-1:      var(--d-sh-1);
+    --sh-2:      var(--d-sh-2);
+    --sh-3:      var(--d-sh-3);
+    --hi:        var(--d-hi);
 
     color-scheme: dark;
   }
@@ -159,6 +252,7 @@
   --bg:        var(--d-bg);
   --bg-elev:   var(--d-bg-elev);
   --bg-sunk:   var(--d-bg-sunk);
+  --bg-hi:     var(--d-bg-hi);
   --code-bg:   var(--d-code-bg);
   --fg:        var(--d-fg);
   --fg-muted:  var(--d-fg-muted);
@@ -167,12 +261,16 @@
   --border-strong: var(--d-border-strong);
   --accent:    var(--d-accent);
   --accent-fg: var(--d-accent-fg);
+  --accent-soft: var(--d-accent-soft);
   --hot:       var(--d-hot);
   --warn:      var(--d-warn);
   --calm:      var(--d-calm);
   --done:      var(--d-done);
   --off:       var(--d-off);
-  --shadow:    var(--d-shadow);
+  --sh-1:      var(--d-sh-1);
+  --sh-2:      var(--d-sh-2);
+  --sh-3:      var(--d-sh-3);
+  --hi:        var(--d-hi);
 
   color-scheme: dark;
 }
