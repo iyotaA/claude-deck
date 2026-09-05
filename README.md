@@ -62,12 +62,12 @@
 | 更新の push | SSE（画面側は `EventSource`） |
 | セッション実行 | `node:child_process`（claude CLI を裏で起こす） |
 | 外へ出る通信 | Slack への POST だけ（`fetch`。設定したときだけ） |
-| 画面 | バニラ JS 31 枚（ESM）・素の CSS 11 枚 |
-| テスト | `node:test` ＋ `node:assert/strict`（29 ファイル） |
-| Windows | PowerShell 4 枚・`.cmd` 1 枚 |
+| 画面 | バニラ JS（ESM）・素の CSS。ビルド無し |
+| テスト | `node:test` ＋ `node:assert/strict` |
+| Windows | PowerShell ＋ `.cmd` |
 | 依存 | なし（`dependencies` は空） |
 
-窓を出す部分と、更新を当てる部分だけは .NET 9（C#）＋ Velopack です。
+窓を出す部分と、更新を当てる部分だけは .NET 10（C#）＋ Velopack です。
 本体（`src/` と `public/`）は、これが有っても無くても同じように動きます。
 詳しくは [開発者向け情報](docs/development.md) にまとめてあります。
 
