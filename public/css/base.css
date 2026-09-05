@@ -227,11 +227,12 @@ body {
   height: 2.15rem;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
 }
 
-.list-toggle:hover { border-color: var(--border-strong); }
+.list-toggle:hover { border-color: var(--border-strong); box-shadow: var(--sh-2), var(--hi); }
 /* 開いているあいだは左の帯を塗る。**アイコンで状態を示す。**
    絵が「いま一覧が出ているか」を持つので、押した先に何が起きるかが読める。
    出し分けは aria-expanded に乗せてある（drawer.js が付け替えるので JS は増えない） */
@@ -350,33 +351,54 @@ button {
   cursor: pointer;
 }
 
+/* 押せるものは**浮かせる。** 面（--bg-elev）＋ 影1段（--sh-1）＋ 内側の1px（--hi）。
+   前は枠1本だけで、押せないもの（沈んだ面）との差が線の色しか無かった。
+
+   触ったときは影を1段上げて 1px 持ち上げる。前は border-color だけが動いていて、
+   **手応えがカーソルを乗せるまで出ないうえ、出ても線1本ぶんだった** */
 .btn {
   padding: .25rem .65rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
   font-size: .8rem;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 
-.btn:hover { border-color: var(--border-strong); }
+.btn:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--sh-2), var(--hi);
+  transform: translateY(-1px);
+}
 
-/* 押すと新しいものが生まれるボタン。ここだけ文字を残して枠と字を強調する。
-   **面は塗らない。** 塗ると「状態色は点と細いバーだけ。面は塗らない」の
-   約束と競合して、上のバーでいちばん強い面がボタンになる */
+/* 押すと新しいものが生まれるボタン。**ここだけ面を塗る。**
+
+   長く「面は塗らない」で通してきた。理由は「状態色は点と細いバーだけ」の約束と
+   競合して、上のバーでいちばん強い面がボタンになるから。
+
+   **その心配のほうが実態と合わなくなった。** 数えたら画面には塗った面が
+   1つも無く（影も 0 箇所）、いちばん強い場所がどこにも作れていなかった。
+   競合しないのは --accent が**状態色ではない**ため ―― hot / warn / calm / off の
+   面は1つも塗らないので、「どれから手をつけるか」の読み方は動かない。
+
+   **1画面に1つだけ**が条件。ここを増やすと、また強さの差が消える */
 .btn.is-lead {
   display: inline-flex;
   align-items: center;
   gap: .3rem;
   padding-left: .5rem;
-  border-color: var(--accent);
-  background: none;
-  color: var(--accent);
+  border-color: transparent;
+  background: var(--accent);
+  box-shadow: var(--sh-2);
+  color: var(--accent-fg);
   font-weight: 700;
 }
 
 .btn.is-lead:hover {
-  border-color: var(--accent);
+  border-color: transparent;
   background: var(--accent);
+  box-shadow: var(--sh-3);
   color: var(--accent-fg);
 }
 
@@ -391,14 +413,16 @@ button {
   height: 1.9rem;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: none;
   color: var(--fg-muted);
 }
 
+/* 触れたときは面で応える（--bg-hi）。**枠を出さない。**
+   前は枠と面の両方が現れていて、触るたびにボタンが1つ増えたように見えた。
+   この段は「いつでも使えるが、いま見るものではない」なので、反応も1つでいい */
 .ibtn:hover {
-  border-color: var(--border);
-  background: var(--bg-elev);
+  background: var(--bg-hi);
   color: var(--fg);
 }
 
@@ -414,13 +438,17 @@ button {
   cursor: help;
 }
 
+/* 光の輪は color-mix で currentColor から作る。**新しいトークンを増やさない。**
+   増やすと tokens.css の二重定義（明るい側と暗い側）を両方直す義務が生まれる */
 .live::before {
   content: "";
   width: .5rem;
   height: .5rem;
   border-radius: 50%;
-  background: var(--off);
+  background: currentColor;
+  color: var(--off);
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent);
 }
 
-.live[data-live="on"]::before { background: var(--calm); }
-.live[data-live="off"]::before { background: var(--hot); }
+.live[data-live="on"]::before { color: var(--calm); }
+.live[data-live="off"]::before { color: var(--hot); }

@@ -131,7 +131,7 @@
   margin-top: .6rem;
   padding: .5rem .6rem;
   max-width: 46rem;
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg-sunk);
 }
 
@@ -189,7 +189,7 @@
 /* 溝。棒が短いときでも「ここが全体」と分かるように、薄く敷いておく */
 .bar-track {
   height: .5rem;
-  border-radius: var(--radius-pill);
+  border-radius: var(--r-pill);
   background: var(--bg-sunk);
   overflow: hidden;
 }
@@ -197,7 +197,7 @@
 .bar-fill {
   display: block;
   height: 100%;
-  border-radius: var(--radius-pill);
+  border-radius: var(--r-pill);
   /* 1位以外は文脈の色。名義のカテゴリなので、値の大小で色を変えない */
   background: var(--border-strong);
 }
@@ -231,7 +231,7 @@
 .spark {
   height: 3.4rem;
   padding: .3rem .1rem;
-  border-radius: var(--radius-md);
+  border-radius: var(--r-md);
   background: var(--bg-sunk);
 }
 
@@ -275,7 +275,7 @@
 .bar.is-trend .trend-spark {
   display: block;
   height: 1.5rem;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-xs);
   background: var(--bg-sunk);
   overflow: hidden;
 }

@@ -78,10 +78,10 @@
   margin-bottom: auto;
   max-height: min(50rem, calc(100vh - 6rem));
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-lg);
   background: var(--bg);
   color: var(--fg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--sh-3);
 }
 
 .runform::backdrop { background: var(--scrim); }
@@ -164,7 +164,7 @@
   gap: .4rem;
   padding: .4rem .55rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: var(--bg-elev);
   font-size: .8rem;
   color: var(--fg-muted);
@@ -209,8 +209,9 @@
   width: 100%;
   padding: .45rem .55rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: var(--bg-elev);
+  box-shadow: var(--hi);
   color: var(--fg);
   font-family: var(--font-mono);
   font-size: .78rem;
@@ -278,8 +279,9 @@
   width: 100%;
   padding: .45rem .55rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: var(--bg-elev);
+  box-shadow: var(--hi);
   color: var(--fg);
   font-family: var(--font-mono);
   font-size: .78rem;
@@ -321,10 +323,10 @@
   width: min(34rem, calc(100vw - 2rem));
   max-height: min(44rem, calc(100vh - 3rem));
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-lg);
   background: var(--bg);
   color: var(--fg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--sh-3);
 }
 
 .runsw::backdrop { background: var(--scrim); }
@@ -400,8 +402,9 @@
   gap: .3rem;
   padding: .22rem .55rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--r-pill);
   background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
   color: var(--fg-muted);
   font: inherit;
   font-size: .76rem;
@@ -442,7 +445,7 @@
   max-width: 12rem;
   padding: .22rem .5rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--r-pill);
   background: var(--bg-elev);
   color: var(--fg-muted);
   font: inherit;

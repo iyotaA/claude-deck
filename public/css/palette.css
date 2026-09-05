@@ -24,7 +24,7 @@
   border-radius: 12px;
   background: var(--bg);
   color: var(--fg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--sh-3);
 }
 
 .pal::backdrop { background: var(--scrim); }

@@ -90,20 +90,29 @@
   min-width: 0;
   padding: .3rem .45rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: var(--bg-elev);
+  box-shadow: var(--hi);
   color: var(--fg);
   font: inherit;
   font-size: .8rem;
 }
 
-.archive-q:focus-visible { border-color: var(--accent); }
+/* 焦点は線の色だけで示さない。**外へ光の輪を回す。**
+   1px の枠を塗り替えるだけだと、どこに焦点があるか探すことになる。
+   base.css の :focus-visible（2px の outline）は入力欄でも出るので、
+   ここはその内側を面ごと持ち上げるぶんだけを足す */
+.archive-q:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 
 .archive-head select {
   padding: .25rem .3rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: var(--bg-elev);
+  box-shadow: var(--hi);
   color: var(--fg);
   font: inherit;
   font-size: .78rem;
@@ -166,14 +175,15 @@
   margin: -.3rem -.25rem -.3rem 0;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
   font-size: 1.05rem;
   line-height: 1;
   color: var(--fg-muted);
 }
 
-.drawer-close:hover { border-color: var(--border-strong); color: var(--fg); }
+.drawer-close:hover { border-color: var(--border-strong); box-shadow: var(--sh-2), var(--hi); color: var(--fg); }
 
 .list {
   list-style: none;
@@ -245,6 +255,12 @@
 .list[hidden],
 .list-head[hidden] { display: none; }
 
+/* **紙に見せる。** 面（--bg-elev）＋ 影1段（--sh-1）＋ 内側の1px（--hi）。
+   前は 1px の枠だけで、罫線で区切った表と区別が付かなかった
+   （数えたら流れの中の面に影が 0 箇所だった）。
+
+   角丸は --r-md（12px）。押せるもの（ボタン・入力欄）の --r-sm（8px）より丸い。
+   「小さいものほど角を立て、大きい器ほど丸める」の段に乗せてある */
 .card {
   position: relative;
   display: grid;
@@ -252,10 +268,11 @@
   width: 100%;
   padding: .6rem .7rem .6rem 1rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
   text-align: left;
-  transition: border-color .12s ease, background .12s ease;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 
 /* 状態は左端の細いバーで示す。面を塗らないので優劣が読める */
@@ -264,15 +281,26 @@
   position: absolute;
   inset: .35rem auto .35rem .3rem;
   width: 3px;
-  border-radius: 2px;
+  border-radius: var(--r-pill);
   background: var(--state-color, var(--off));
 }
 
-.card:hover { border-color: var(--border-strong); }
+.card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--sh-2), var(--hi);
+  transform: translateY(-1px);
+}
 
+/* 選んでいるもの。**枠の色だけで示さない。**
+   1px の線を塗り替えるだけだと、隣のカードとの差が 1px ぶんしか無かった。
+   影を1段上げ、外側に光の輪（--accent-soft）を回して面ごと持ち上げる。
+
+   枠は --accent そのものではなく border と混ぜる。純色の輪郭に光の輪が重なると、
+   同じ色が2本並んで太い枠に見える */
 .card[aria-current="true"] {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   background: var(--bg);
+  box-shadow: var(--sh-2), 0 0 0 3px var(--accent-soft), var(--hi);
 }
 
 .card-top {
@@ -328,7 +356,7 @@
   gap: .4rem;
   align-items: baseline;
   padding: .3rem .45rem;
-  border-radius: var(--radius-md);
+  border-radius: var(--r-xs);
   background: var(--bg-sunk);
   font-size: .78rem;
   color: var(--fg-muted);
@@ -374,14 +402,17 @@
 .tag {
   padding: 0 .35rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-xs);
   background: var(--bg);
   font-size: .72rem;
   color: var(--fg-muted);
   white-space: nowrap;
 }
 
-.tag.is-skill { border-color: var(--accent); color: var(--accent); }
+/* スキルの札だけ、ごく薄い面を敷く（--accent-soft）。
+   輪郭だけの札が横に何枚も並ぶ中で、いちばん引きたい1枚を面で分ける。
+   **色は増やさない** … --accent から作った1つを使い回している */
+.tag.is-skill { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--accent-soft); color: var(--accent); }
 .tag.is-plan { border-color: var(--warn); color: var(--warn); }
 
 /* この画面から起こしたセッションの印。

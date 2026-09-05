@@ -144,7 +144,7 @@
 .purpose-src .claim {
   padding: .05rem .3rem;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--r-xs);
   color: var(--fg-muted);
 }
 
@@ -247,10 +247,13 @@
 
 .stack { display: flex; flex-direction: column; gap: 1.1rem; }
 
+/* パネルも紙にする（カードと同じ段）。面 ＋ 影1段 ＋ 内側の1px。
+   詳細ペインの地は --bg-sunk なので、この段が入って初めて器として浮く */
 .panel {
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
+  box-shadow: var(--sh-1), var(--hi);
   overflow: hidden;
   /* 上に張り付いているタブの帯の下に隠れないよう、余白を残す。
      飛ぶ先の目次は無くなったが、id はそのまま振ってあるので #sec-… を直に開ける */
@@ -285,8 +288,15 @@
 
 .panel > .panel-body { padding: .8rem; }
 
-.panel.is-hot { border-color: var(--hot); }
-.panel.is-hot > h3 { color: var(--hot); }
+/* 急ぎのパネル。**新しい色は作らない。**
+   枠と光の輪はどちらも --hot から color-mix で作る。面も塗らない
+   （塗ると「状態色は点と細いバーだけ」の約束と競合する）。
+   見出しの帯にだけごく薄く敷くのは、あれが面ではなく帯だから */
+.panel.is-hot {
+  border-color: color-mix(in srgb, var(--hot) 45%, var(--border));
+  box-shadow: var(--sh-2), 0 0 0 3px color-mix(in srgb, var(--hot) 9%, transparent), var(--hi);
+}
+.panel.is-hot > h3 { color: var(--hot); background: color-mix(in srgb, var(--hot) 6%, var(--bg-elev)); }
 .panel.is-warn { border-color: var(--warn); }
 .panel.is-warn > h3 { color: var(--warn); }
 
@@ -342,7 +352,7 @@
 .choices li {
   padding: .3rem .55rem;
   border-left: 3px solid var(--border-strong);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
   background: var(--bg-elev);
   color: var(--fg-muted);
   line-height: 1.55;
@@ -388,7 +398,7 @@ pre {
   padding: .7rem .8rem;
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--r-sm);
   overflow-x: auto;
   font-size: .8rem;
   line-height: 1.55;
@@ -399,7 +409,7 @@ pre {
 code {
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-xs);
   padding: .1em .35em;
   font-size: .92em;
 }
@@ -439,7 +449,7 @@ pre code { background: none; border: 0; border-radius: 0; padding: 0; font-size:
   padding: .4rem .6rem;
   border-left: 3px solid var(--accent);
   background: var(--bg-elev);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
 }
 
 .decision-a .label {
@@ -516,7 +526,7 @@ details.rejected .label { color: var(--fg); }
   margin: -.3rem -.25rem;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: var(--bg-elev);
   font-size: 1.05rem;
   line-height: 1;
@@ -562,7 +572,7 @@ details.rejected .label { color: var(--fg); }
   height: 1.9rem;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--r-sm);
   background: none;
   color: var(--fg-muted);
 }

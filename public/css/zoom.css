@@ -21,10 +21,10 @@
   max-width: none;
   max-height: none;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-lg);
   background: var(--bg);
   color: var(--fg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--sh-3);
 }
 
 .zoom::backdrop { background: var(--scrim); }
@@ -55,7 +55,7 @@
   align-self: center;
   padding: .2rem .55rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: none;
   font: inherit;
   font-size: .76rem;
