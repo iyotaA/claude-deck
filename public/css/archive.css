@@ -43,12 +43,16 @@
   gap: .3rem;
   padding: .25rem .45rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
   color: var(--fg-faint);
 }
 
-.archive-field:focus-within { border-color: var(--accent); }
+.archive-field:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 
 /* 中身は枠を外して、外側の枠に任せる。二重の枠にすると押せる範囲が読めなくなる。
 
@@ -93,7 +97,7 @@
   width: 1.9rem;
   height: 1.9rem;
   padding: 0;
-  border-radius: var(--radius-pill);
+  border-radius: var(--r-pill);
   border-color: var(--accent);
   color: var(--accent);
 }

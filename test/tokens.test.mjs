@@ -105,12 +105,9 @@ test('明るいほうで割り当てた意味トークンは、暗いほうで�
   const SHARED = new Set([
     '--font-sans', '--font-mono',
     '--r-xs', '--r-sm', '--r-md', '--r-lg', '--r-pill',
-    '--radius', '--radius-sm', '--radius-md', '--radius-pill',
     '--fs-0', '--fs-1', '--fs-2', '--fs-3', '--fs-4', '--fs-5', '--fs-6', '--fs-7',
     '--lh-tight', '--lh-read',
     '--scrim', '--read-max',
-    // いちばん深い段の別名。中身（--sh-3）が差し替わるので、ここは指し直さなくてよい
-    '--shadow',
   ]);
 
   const picked = new Set(meaningful(assigned(PICKED)));
@@ -134,13 +131,13 @@ test('暗いほうで差し替えているものは、明るいほうにも居�
 
 test('意味トークンは実体（--l-* / --d-*）を指す。色を直に書かない', () => {
   // 直に書くと、明暗のどちらか片方にしか効かない値が意味トークンに混ざる。
-  // 例外は --shadow（別名なので --sh-3 を指す）と、明暗で変えない --scrim
-  const EXCEPT = new Set(['--shadow', '--scrim', '--read-max']);
+  // 例外は明暗で変えないもの（膜と読む幅）だけ
+  const EXCEPT = new Set(['--scrim', '--read-max']);
 
   for (const [, name, value] of ROOT.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
     if (name.startsWith('--l-') || name.startsWith('--d-')) continue;
     if (EXCEPT.has(name)) continue;
-    if (/^(--font|--r-|--radius|--fs-|--lh-)/.test(name)) continue;
+    if (/^(--font|--r-|--fs-|--lh-)/.test(name)) continue;
     assert.match(
       value.trim(),
       /^var\(--[ld]-/,

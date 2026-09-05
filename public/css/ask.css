@@ -34,7 +34,7 @@
 .ask > pre {
   margin: 0;
   padding: .5rem .6rem;
-  border-radius: var(--radius-md);
+  border-radius: var(--r-sm);
   background: var(--code-bg);
   font-size: .78rem;
   line-height: 1.5;

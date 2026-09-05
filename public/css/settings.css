@@ -20,10 +20,10 @@
      窓が低いときは calc(100vh - 3rem) 側で縮む */
   height: min(34rem, calc(100vh - 3rem));
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-lg);
   background: var(--bg);
   color: var(--fg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--sh-3);
 }
 
 .settings::backdrop { background: var(--scrim); }
@@ -61,7 +61,7 @@
   gap: .4rem;
   padding: .35rem .5rem;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: none;
   font: inherit;
   font-size: .82rem;
@@ -70,13 +70,16 @@
   cursor: pointer;
 }
 
-.settings-navb:hover { color: var(--fg); }
+.settings-navb:hover { background: var(--bg-hi); color: var(--fg); }
 
+/* 選んでいる節。**面と棒に影を1段足す。**
+   帯（--bg-sunk）の上で --bg の面が浮く、という関係は前からあったが、
+   その差が明度だけだった。影が入ると「持ち上がっている」ほうで読める */
 .settings-navb[aria-pressed="true"] {
   background: var(--bg);
   color: var(--fg);
   font-weight: 700;
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent), var(--sh-1), var(--hi);
 }
 
 /* 登録してあるフォルダの数。押せない札なので枠は持たない */
@@ -125,7 +128,7 @@
   height: 1.8rem;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: none;
   font-size: 1.1rem;
   line-height: 1;
@@ -229,7 +232,7 @@
    （上のバーで「押せないものは面も枠も持たない」と決めたのと同じ線） */
 .settings-read {
   padding: .6rem .7rem;
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg-sunk);
 }
 
@@ -259,8 +262,9 @@
 .settings-select {
   padding: .3rem .45rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: var(--bg-elev);
+  box-shadow: var(--hi);
   color: var(--fg);
   font: inherit;
   font-size: .8rem;
@@ -278,9 +282,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 焦点は線の色だけで示さない。外へ光の輪を回して、面ごと持ち上げる */
 .settings-text:focus-visible,
 .settings-num:focus-visible,
-.settings-select:focus-visible { border-color: var(--accent); }
+.settings-select:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 
 .settings-unit {
   font-size: .78rem;
@@ -356,7 +364,7 @@
   gap: .5rem;
   padding: .25rem .15rem .25rem .45rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   font-size: .78rem;
 }
 

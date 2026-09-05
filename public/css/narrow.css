@@ -91,8 +91,8 @@
     max-height: 72%;
     border-top: 1px solid var(--border);
     border-left: 0;
-    border-radius: var(--radius) var(--radius) 0 0;
-    box-shadow: var(--shadow);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: var(--sh-3);
     animation: insp-up .18s ease;
   }
 
@@ -125,7 +125,7 @@
 
   /* 影は開いているときだけ。閉じていても影はにじむので、画面の左端に帯が出てしまう */
   .is-list-open .list-pane {
-    box-shadow: var(--shadow);
+    box-shadow: var(--sh-3);
     transform: translateX(0);
   }
 
