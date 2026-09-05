@@ -1,6 +1,6 @@
 {
   "name": "claude-deck",
-  "version": "0.9.1",
+  "version": "1.0.0",
   "private": true,
   "description": "並行して動かしている Claude Code セッションの状態を一覧・詳細で見るローカルダッシュボード",
   "type": "module",
