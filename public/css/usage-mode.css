@@ -35,7 +35,7 @@
   background: var(--bg-elev);
   color: var(--fg);
   font: inherit;
-  font-size: .78rem;
+  font-size: var(--fs-1);
 }
 
 .usage-head #usage-count {
@@ -100,8 +100,9 @@
 
 /* 節見出しを帯にして、スクロールのあいだ上に残す。
 
-   **狙いは大きさではなく役割の分離。** h4 は .82rem、.stat-value は 1.35rem で、
-   見出しより数字のほうが 1.6 倍大きく、視線が見出しを飛ばしていた。
+   **狙いは大きさではなく役割の分離。** 見出しは --fs-2（13px）、数字は --fs-6（30px）で、
+   見出しより数字のほうが 2.3 倍大きく、視線が見出しを飛ばしていた。
+   **その差は段を作ったぶん広がっている**（前は 1.6 倍）が、狙いは変わらない ――
    字を大きくして competing させるのではなく、見出しの側にだけ
    「線」と「粘り」を持たせて別の役割に見せる。
 
@@ -176,7 +177,7 @@
   gap: .6rem;
   padding: .45rem .1rem;
   border-bottom: 1px solid var(--border);
-  font-size: .78rem;
+  font-size: var(--fs-1);
 }
 
 .usage-peek li:last-child { border-bottom: 0; }
@@ -199,7 +200,7 @@
 /* **何で並べているかを必ず書く。** 3つの行はそれぞれ別のものさしなので、
    書かないと同じ順序で並んでいると読まれる */
 .usage-peek .peek-basis {
-  font-size: .7rem;
+  font-size: var(--fs-0);
   color: var(--fg-faint);
 }
 
@@ -214,7 +215,7 @@
   border-radius: var(--r-sm);
   background: none;
   font: inherit;
-  font-size: .76rem;
+  font-size: var(--fs-1);
   color: var(--accent);
   cursor: pointer;
 }
@@ -285,7 +286,7 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-  font-size: .82rem;
+  font-size: var(--fs-2);
 }
 
 /* 数値モードは全幅で見せる。左の一覧も、中央の詳細ペインも、右のインスペクタとレールも消す。

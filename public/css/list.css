@@ -38,7 +38,7 @@
   border-bottom: 2px solid transparent;
   background: none;
   font: inherit;
-  font-size: .82rem;
+  font-size: var(--fs-2);
   color: var(--fg-faint);
   cursor: pointer;
 }
@@ -78,7 +78,7 @@
   gap: .5rem;
   padding: .5rem .75rem;
   border-bottom: 1px solid var(--border);
-  font-size: .78rem;
+  font-size: var(--fs-1);
   color: var(--fg-muted);
 }
 
@@ -95,7 +95,7 @@
   box-shadow: var(--hi);
   color: var(--fg);
   font: inherit;
-  font-size: .8rem;
+  font-size: var(--fs-2);
 }
 
 /* 焦点は線の色だけで示さない。**外へ光の輪を回す。**
@@ -115,7 +115,7 @@
   box-shadow: var(--hi);
   color: var(--fg);
   font: inherit;
-  font-size: .78rem;
+  font-size: var(--fs-1);
 }
 
 .archive-head #archive-count {
@@ -131,7 +131,7 @@
 .card.is-archive::before { content: none; }
 
 .card .when {
-  font-size: .74rem;
+  font-size: var(--fs-1);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--fg-muted);
@@ -145,7 +145,7 @@
 
 .empty-note {
   margin-top: .5rem;
-  font-size: .78rem;
+  font-size: var(--fs-1);
   color: var(--fg-faint);
 }
 
@@ -178,6 +178,8 @@
   border-radius: var(--r-sm);
   background: var(--bg-elev);
   box-shadow: var(--sh-1), var(--hi);
+  /* **字の段には載せない。** ここは字ではなく × の記号の大きさで、
+     段に寄せると閉じるボタンの形そのものが変わる（箱の寸法は別に決めてある） */
   font-size: 1.05rem;
   line-height: 1;
   color: var(--fg-muted);
@@ -230,7 +232,7 @@
   padding: .35rem .85rem .3rem;
   background: var(--bg);
   color: var(--state-color, var(--fg));
-  font-size: .74rem;
+  font-size: var(--fs-1);
   font-weight: 700;
 }
 
@@ -313,7 +315,7 @@
   display: inline-flex;
   align-items: center;
   gap: .3rem;
-  font-size: .76rem;
+  font-size: var(--fs-1);
   font-weight: 700;
   color: var(--state-color, var(--off));
   white-space: nowrap;
@@ -335,7 +337,7 @@
 
 .idle {
   margin-left: auto;
-  font-size: .74rem;
+  font-size: var(--fs-1);
   color: var(--fg-faint);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -343,7 +345,7 @@
 }
 
 .card-title {
-  font-size: .92rem;
+  font-size: var(--fs-3);
   font-weight: 600;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -358,7 +360,7 @@
   padding: .3rem .45rem;
   border-radius: var(--r-xs);
   background: var(--bg-sunk);
-  font-size: .78rem;
+  font-size: var(--fs-1);
   color: var(--fg-muted);
   overflow: hidden;
 }
@@ -387,7 +389,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: .3rem .5rem;
-  font-size: .74rem;
+  font-size: var(--fs-1);
   color: var(--fg-faint);
 }
 
@@ -404,7 +406,7 @@
   border: 1px solid var(--border);
   border-radius: var(--r-xs);
   background: var(--bg);
-  font-size: .72rem;
+  font-size: var(--fs-0);
   color: var(--fg-muted);
   white-space: nowrap;
 }
@@ -443,5 +445,5 @@
   padding: 2rem 1rem;
   text-align: center;
   color: var(--fg-muted);
-  font-size: .85rem;
+  font-size: var(--fs-3);
 }

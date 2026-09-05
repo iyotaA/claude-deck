@@ -105,7 +105,7 @@ test('明るいほうで割り当てた意味トークンは、暗いほうで�
   const SHARED = new Set([
     '--font-sans', '--font-mono',
     '--r-xs', '--r-sm', '--r-md', '--r-lg', '--r-pill',
-    '--fs-0', '--fs-1', '--fs-2', '--fs-3', '--fs-4', '--fs-5', '--fs-6', '--fs-7',
+    '--fs-0', '--fs-1', '--fs-2', '--fs-3', '--fs-4', '--fs-5', '--fs-6',
     '--lh-tight', '--lh-read',
     '--scrim', '--read-max',
   ]);

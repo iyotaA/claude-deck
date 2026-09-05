@@ -9,7 +9,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: .5rem;
   align-items: baseline;
-  font-size: .84rem;
+  font-size: var(--fs-2);
 }
 
 /* TODO の状態札。**必ず印を前に置く。**
@@ -17,7 +17,7 @@
    角丸 4px・padding 0 .35rem・.72rem・--fg-muted がすべて同一で意味だけが別だった。
    印の有無をその差にする（.tag は印を持たない。あちらは属性の名前で状態ではない） */
 .todo .st {
-  font-size: .72rem;
+  font-size: var(--fs-0);
   padding: 0 .35rem;
   border: 1px solid var(--border);
   border-radius: var(--r-xs);
@@ -66,21 +66,21 @@
 
 .agent-type {
   font-family: var(--font-mono);
-  font-size: .75rem;
+  font-size: var(--fs-1);
   color: var(--fg-muted);
   overflow-wrap: anywhere;
 }
 
 .agent-desc { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
-.agent-desc-text { font-size: .82rem; overflow-wrap: anywhere; }
+.agent-desc-text { font-size: var(--fs-2); overflow-wrap: anywhere; }
 
 .agent-meta {
-  font-size: .72rem;
+  font-size: var(--fs-0);
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
 }
 
-.agent-note { font-size: .72rem; color: var(--fg-faint); }
+.agent-note { font-size: var(--fs-0); color: var(--fg-faint); }
 
 /* 記録のファイルが無い行。面は塗らず、文字だけ沈める */
 .agent.is-gone .agent-desc-text { color: var(--fg-faint); }
@@ -93,7 +93,7 @@
   display: flex;
   gap: .5rem;
   align-items: baseline;
-  font-size: .8rem;
+  font-size: var(--fs-2);
   font-family: var(--font-mono);
 }
 
@@ -111,5 +111,5 @@
   padding: 1.5rem;
   text-align: center;
   color: var(--fg-muted);
-  font-size: .85rem;
+  font-size: var(--fs-3);
 }

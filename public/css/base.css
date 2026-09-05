@@ -32,8 +32,12 @@ body {
   background: var(--bg-sunk);
   color: var(--fg);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.6;
+  /* 継いだ先で使う既定。**段の 14px（--fs-3）に載せてある。**
+     素の数字だと、段を1つ動かしたときにここだけ取り残される */
+  font-size: var(--fs-3);
+  /* 詰めるほうの行間。読む面（.md）だけが --lh-read（1.78）へ上げる。
+     一覧・帯・パネルの見出しは件数が縦に並ぶ場所なので、こちらに寄せる */
+  line-height: var(--lh-tight);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -194,7 +198,7 @@ body {
   align-items: center;
   gap: .4rem;
   margin: 0;
-  font-size: .8rem;
+  font-size: var(--fs-2);
   font-weight: 700;
   letter-spacing: .01em;
   color: var(--fg-muted);
@@ -279,7 +283,7 @@ body {
   display: inline-flex;
   align-items: baseline;
   gap: .32rem;
-  font-size: .78rem;
+  font-size: var(--fs-1);
   color: var(--fg-muted);
   white-space: nowrap;
 }
@@ -296,7 +300,7 @@ body {
 /* 答えないと1行も進まないもの。数を1段大きくして色を乗せる。
    **どれが止まっているかの判定は画面側に持たない**（meta.stateBlocking から引く） */
 .tally.is-hot { color: var(--hot); }
-.tally.is-hot strong { color: var(--hot); font-size: .95rem; }
+.tally.is-hot strong { color: var(--hot); font-size: var(--fs-4); }
 
 /* 枠の使用率。アカウント共通の値なので画面に1つだけ出す。
    状態ではないので下段の右端へ寄せる。
@@ -315,7 +319,7 @@ body {
   align-items: baseline;
   gap: .35rem;
   font-family: var(--font-mono);
-  font-size: .72rem;
+  font-size: var(--fs-0);
   color: var(--fg-faint);
   white-space: nowrap;
 }
@@ -326,7 +330,7 @@ body {
 
 /* 「いつ測ったか」。数そのものではないので、さらに落とす */
 .rate-age {
-  font-size: .7rem;
+  font-size: var(--fs-0);
   color: var(--fg-faint);
 }
 
@@ -362,7 +366,7 @@ button {
   border-radius: var(--r-sm);
   background: var(--bg-elev);
   box-shadow: var(--sh-1), var(--hi);
-  font-size: .8rem;
+  font-size: var(--fs-2);
   transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 
@@ -432,7 +436,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: .35rem;
-  font-size: .74rem;
+  font-size: var(--fs-1);
   color: var(--fg-faint);
   white-space: nowrap;
   cursor: help;

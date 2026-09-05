@@ -170,7 +170,7 @@
   margin-top: .1rem;
   padding-top: .35rem;
   border-top: 1px solid var(--border);
-  font-size: .68rem;
+  font-size: var(--fs-0);
 }
 
 /* まだ届いていないあいだ。**0 を書かない。**

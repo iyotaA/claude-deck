@@ -37,7 +37,7 @@
   background: var(--bg-elev);
   color: var(--fg);
   font: inherit;
-  font-size: .8rem;
+  font-size: var(--fs-2);
 }
 
 .tl-q:focus-visible { border-color: var(--accent); }
@@ -80,7 +80,7 @@
   border-radius: var(--r-pill);
   background: var(--bg);
   font: inherit;
-  font-size: .76rem;
+  font-size: var(--fs-1);
   color: var(--fg-muted);
   white-space: nowrap;
   cursor: pointer;
@@ -91,7 +91,7 @@
 .tl-chip .n {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: .72rem;
+  font-size: var(--fs-0);
   color: var(--fg-faint);
 }
 
@@ -153,15 +153,15 @@ mark {
   padding-top: .1rem;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: .74rem;
+  font-size: var(--fs-1);
   color: var(--fg-faint);
   white-space: nowrap;
 }
 
 /* 日付は「跨いだかどうか」を確かめるための添え物。時刻より一段小さくして主役を譲る */
-.tl-date { font-size: .7rem; }
+.tl-date { font-size: var(--fs-0); }
 
-.tl-time { font-size: .74rem; }
+.tl-time { font-size: var(--fs-1); }
 
 .tl-body { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
 
@@ -171,7 +171,7 @@ mark {
   flex-wrap: wrap;
   align-items: baseline;
   gap: .4rem;
-  font-size: .74rem;
+  font-size: var(--fs-1);
   font-weight: 700;
   letter-spacing: .02em;
   color: var(--fg-muted);
@@ -196,11 +196,11 @@ mark {
   border: 1px dashed var(--border-strong);
   border-radius: var(--r-sm);
   font-family: var(--font-sans);
-  font-size: .68rem;
+  font-size: var(--fs-0);
 }
 
 .tl-text {
-  font-size: .84rem;
+  font-size: var(--fs-2);
   line-height: 1.65;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -219,7 +219,7 @@ mark {
 .tl[data-kind="plan"] .tl-kind { color: var(--warn); }
 .tl[data-kind="error"] .tl-kind { color: var(--hot); }
 .tl[data-kind="interrupt"] .tl-kind { color: var(--warn); }
-.tl[data-kind="interrupt"] .tl-text { color: var(--warn); font-size: .8rem; }
+.tl[data-kind="interrupt"] .tl-text { color: var(--warn); font-size: var(--fs-2); }
 .tl[data-kind="say"] .tl-text { color: var(--fg-muted); }
 
 /* 文脈が切れた地点は帯にして、時系列の区切りとして目立たせる */
@@ -233,7 +233,7 @@ mark {
 }
 
 .tl[data-kind="compact"] .tl-text {
-  font-size: .78rem;
+  font-size: var(--fs-1);
   color: var(--warn);
   font-weight: 600;
 }
@@ -246,13 +246,13 @@ mark {
   border-radius: var(--r-sm);
 }
 
-.tl[data-kind="recap"] .note { font-size: .72rem; color: var(--fg-faint); }
+.tl[data-kind="recap"] .note { font-size: var(--fs-0); color: var(--fg-faint); }
 .tl[data-kind="recap"] .tl-text { color: var(--fg-muted); }
 
 /* 間引きで落ちた区間の目印。本編ではないので沈める */
 .tl[data-kind="elided"] .tl-kind,
 .tl[data-kind="elided"] .tl-text {
-  font-size: .74rem;
+  font-size: var(--fs-1);
   font-weight: 400;
   color: var(--fg-faint);
 }
@@ -260,7 +260,7 @@ mark {
 /* プランの系譜の1行。面は塗らず、文字色だけ変える。
    一致していた知らせは沈め、目を留めてほしいものだけ警告色にする */
 .plan-note {
-  font-size: .74rem;
+  font-size: var(--fs-1);
   color: var(--fg-faint);
 }
 
@@ -273,7 +273,7 @@ mark {
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   font-family: var(--font-mono);
-  font-size: .76rem;
+  font-size: var(--fs-1);
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -299,7 +299,7 @@ mark {
    状態色は付けない。ここは判断の記録ではなく、そこへ至る道すじの控えなので、
    色を付けると「あなたの回答」や「却下」と同じ重さに見えて順番が読めなくなる */
 .tl[data-kind="trace"] {
-  font-size: .78rem;
+  font-size: var(--fs-1);
   color: var(--fg-faint);
 }
 
@@ -324,7 +324,7 @@ mark {
   flex-wrap: wrap;
   align-items: baseline;
   gap: .4rem;
-  font-size: .76rem;
+  font-size: var(--fs-1);
 }
 
 .trace-detail { color: var(--fg-muted); overflow-wrap: anywhere; }
@@ -332,7 +332,7 @@ mark {
 .trace-n {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: .72rem;
+  font-size: var(--fs-0);
   color: var(--fg-faint);
   white-space: nowrap;
 }
@@ -341,14 +341,14 @@ mark {
 .trace-result {
   margin-top: .15rem;
   font-family: var(--font-mono);
-  font-size: .72rem;
+  font-size: var(--fs-0);
   line-height: 1.5;
   color: var(--fg-faint);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-details.more { font-size: .8rem; }
+details.more { font-size: var(--fs-2); }
 details.more > summary {
   cursor: pointer;
   color: var(--accent);
@@ -365,7 +365,7 @@ details.raw > .raw-body {
   background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  font-size: .72rem;
+  font-size: var(--fs-0);
   line-height: 1.5;
   color: var(--fg-muted);
   white-space: pre-wrap;
