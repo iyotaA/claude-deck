@@ -218,9 +218,10 @@
   font-size: var(--fs-1);
   color: var(--accent);
   cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
-.usage-peek .peek-go:hover { border-color: var(--border-strong); }
+.usage-peek .peek-go:hover { border-color: var(--border-strong); background: var(--bg-hi); }
 
 /* 読む幅の上限。ここは全幅の器なので、但し書きが1行 120 字を超えて読まれなくなる。
 

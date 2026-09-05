@@ -35,15 +35,49 @@ export const LS = Object.freeze({
   theme: 'claude-deck.theme',
 });
 
-export const STATE_COLOR = {
-  'needs-answer': 'var(--hot)',
-  'needs-plan-approval': 'var(--hot)',
-  'needs-approval': 'var(--hot)',
-  'awaiting-reply': 'var(--warn)',
-  running: 'var(--calm)',
-  ended: 'var(--off)',
-  unknown: 'var(--off)',
+/**
+ * 状態 → 見た目の調子。**色と形はここ1つから引く。**
+ *
+ * 強調（`--accent`）をテラコッタにしたので、`--hot` と色相が近い。
+ * `tokens.css` が長く避けていた組み合わせで、離してはあるが**色だけでは足りない**。
+ * だから状態の点は形でも分ける（`list.css` の `.state[data-s]`）。
+ * 色覚の差にも効く。
+ *
+ * **表を2つ持たない。** 色の表と形の表を並べると、同じ7つの状態を2箇所に書くことになり、
+ * 状態を1つ足した日に片方だけ直る。ここが1つなら、足し忘れは
+ * `?? 'off'` に落ちて**消えずに済む**（未知の形で落ちない、と同じ扱い）。
+ */
+export const STATE_TONE = {
+  'needs-answer': 'hot',
+  'needs-plan-approval': 'hot',
+  'needs-approval': 'hot',
+  'awaiting-reply': 'warn',
+  running: 'calm',
+  ended: 'off',
+  unknown: 'off',
 };
+
+/**
+ * その状態の調子を引く。知らない状態は `off`（終了・不明と同じ扱い）。
+ *
+ * @param {string} state 行の `state`
+ * @returns {string} `hot` / `warn` / `calm` / `off`
+ */
+export function toneOf(state) {
+  return STATE_TONE[state] ?? 'off';
+}
+
+/**
+ * その状態の色を引く。**必ず CSS 変数経由**で返す。
+ *
+ * 生の色を返す形にすると、明暗の差し替え（`tokens.css` の3ブロック）に乗らない。
+ *
+ * @param {string} state 行の `state`
+ * @returns {string} `var(--hot)` など
+ */
+export function colorOf(state) {
+  return `var(--${toneOf(state)})`;
+}
 
 /** 一覧のタグに出さない権限モード。どちらも「特別なことは起きていない」を意味する。 */
 export const QUIET_MODES = new Set(['auto', 'default', 'normal', 'acceptEdits']);

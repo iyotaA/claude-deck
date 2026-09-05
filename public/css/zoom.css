@@ -62,10 +62,12 @@
   color: var(--fg-muted);
   white-space: nowrap;
   cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
 .detail-zoom:hover {
   border-color: var(--fg-faint);
+  background: var(--bg-hi);
   color: var(--fg);
 }
 

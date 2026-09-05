@@ -41,9 +41,10 @@
   font-size: var(--fs-2);
   color: var(--fg-faint);
   cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
-.tab:hover { color: var(--fg-muted); }
+.tab:hover { background: var(--bg-hi); color: var(--fg-muted); }
 
 .tab[aria-pressed="true"] {
   color: var(--fg);
@@ -321,12 +322,44 @@
   white-space: nowrap;
 }
 
+/* 点は1つだけ。**形は data-s で替える。要素を増やさない。**
+   `.state::before` が既に点を描いているので、別の節点を足すと二重になる（実測）。
+
+   **色だけに頼らない理由。** 強調（--accent）をテラコッタにしたので --hot と色相が近い。
+   `tokens.css` が長く避けていた組み合わせで、約30度離してはあるが、
+   隣り合って出る場面（ヒーローの札と「起こす」ボタン）では色だけだと弱い。
+   形なら色覚の差にも効く。
+
+   形の割り当てを CSS に列挙しない ―― 出どころは store.js の STATE_TONE ひとつで、
+   ここは受け取った語（hot / warn / calm / off）を描くだけにしてある */
 .state::before {
   content: "";
   width: .45rem;
   height: .45rem;
   border-radius: 50%;
   background: currentColor;
+}
+
+/* あなたの操作で止まっている＝菱形。ひと目で他と違う形にする。
+   輪は静かに出したまま（動かすのはヒーローの札だけ。段6） */
+.state[data-s="hot"]::before {
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent);
+}
+
+/* 返信待ち＝輪（中が空いている）。放っておいても壊れないので、塗らない */
+.state[data-s="warn"]::before {
+  background: none;
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+
+/* Claude が動いている＝塗った丸（既定のまま。いちばん普通の状態） */
+
+/* 終了・不明＝細い輪。輪郭だけ残して、面を持たない */
+.state[data-s="off"]::before {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px currentColor;
 }
 
 .state[data-guess="true"]::after {
@@ -432,7 +465,7 @@
 
    状態色に手を出さない決まりは残っているが、一覧が「どれから手をつけるか」に
    使っているのは hot / warn / calm / off の4つで、--done はそこに入っていない
-   （終了は --off。STATE_COLOR を見よ）。だから判断の色とは混ざらない。
+   （終了は --off。store.js の STATE_TONE を見よ）。だから判断の色とは混ざらない。
 
    前は輪郭と文字を1段濃くするだけだったが、隣に並ぶスキル（--accent）や
    ブランチ（既定の輪郭）と見分けが付かなかった。色そのものを変える */

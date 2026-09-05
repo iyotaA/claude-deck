@@ -163,7 +163,7 @@ function buildUi() {
     start();
   });
 
-  const go = el('button', 'btn is-primary', '続きを起こす');
+  const go = el('button', 'btn is-lead', '続きを起こす');
   go.type = 'button';
   go.addEventListener('click', start);
 

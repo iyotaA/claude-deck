@@ -22,7 +22,7 @@
  * <form> で囲まない（入力欄で Enter を押した瞬間に閉じる）。
  */
 import { el, since } from './util.js';
-import { store, STATE_COLOR } from './store.js';
+import { store, colorOf, toneOf } from './store.js';
 import { dom } from './dom.js';
 import { idleOf } from './rows.js';
 import { setListOpen } from './drawer.js';
@@ -243,7 +243,8 @@ function draw() {
     // 状態の点は一覧のカードと同じ借り方。色は必ず CSS 変数経由で取る
     if (it.state) {
       const dot = el('span', 'state');
-      dot.style.setProperty('--state-color', STATE_COLOR[it.state] ?? 'var(--off)');
+      dot.style.setProperty('--state-color', colorOf(it.state));
+      dot.dataset.s = toneOf(it.state);
       node.append(dot);
     }
     if (it.verb) node.append(el('span', 'verb', it.verb));

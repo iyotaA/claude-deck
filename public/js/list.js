@@ -4,7 +4,7 @@
  * setListOpen が drawer.js に居るのは、main.js に置くとここと循環するため。
  */
 import { el, since, stamp, tokens, agentTag } from './util.js';
-import { store, STATE_COLOR, QUIET_MODES, SUMMARY_ORDER, STATE_GROUPS } from './store.js';
+import { store, colorOf, toneOf, QUIET_MODES, SUMMARY_ORDER, STATE_GROUPS } from './store.js';
 import { dom } from './dom.js';
 import { idleOf, headOf, visibleRows } from './rows.js';
 import { newestRateLimit, rateView } from './runs.js';
@@ -24,10 +24,13 @@ import { cardShell, cardTitle, closeCardMeta, metaBranch, metaPath } from './car
  */
 export function buildCard(row, onPick = null) {
   const { li, card } = cardShell(row);
-  card.style.setProperty('--state-color', STATE_COLOR[row.state] ?? 'var(--off)');
+  card.style.setProperty('--state-color', colorOf(row.state));
 
   const top = el('div', 'card-top');
   const state = el('span', 'state', row.stateLabel);
+  // 点の形も状態で変える。**色だけに頼らない**（強調のテラコッタと --hot が近いため）。
+  // 形の割り当ては色と同じ表（STATE_TONE）から引くので、2箇所に書かずに済む
+  state.dataset.s = toneOf(row.state);
   // 判定に自信が無いものは印を付ける。断定して外すより、迷っていると伝えたほうが役に立つ
   if (row.stateConfident === false) state.dataset.guess = 'true';
   // 予算切れは点ではなく「$」の印にする。一覧では `awaiting-reply`（あなたの番）の
@@ -111,10 +114,12 @@ export function buildCard(row, onPick = null) {
 function buildGroup(group, rows) {
   const li = el('li', 'group');
   // 色は状態から引く。見出しのために新しい色を作らない
-  li.style.setProperty('--state-color', STATE_COLOR[group.states[0]] ?? 'var(--off)');
+  li.style.setProperty('--state-color', colorOf(group.states[0]));
 
   const head = el('div', 'group-head');
-  head.append(el('span', 'state'), el('span', null, group.label));
+  const mark = el('span', 'state');
+  mark.dataset.s = toneOf(group.states[0]);
+  head.append(mark, el('span', null, group.label));
   // 0 のときも 0 と書く。数を消すと「見ていない」と「無い」が同じに見える
   head.append(el('span', 'n', String(rows.length)));
   li.append(head);
@@ -187,7 +192,8 @@ export function renderSummary() {
     // 点だけを出す。`.state` は色を --state-color から取るが、
     // ここは点1つなので color を直に置く（インラインなので変数より先に効く）
     const dot = el('span', 'state');
-    dot.style.color = STATE_COLOR[key];
+    dot.style.color = colorOf(key);
+    dot.dataset.s = toneOf(key);
     item.append(dot, document.createTextNode(label), el('strong', null, n));
     if (blocking[key]) item.classList.add('is-hot');
     dom.summary.append(item);

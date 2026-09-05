@@ -68,6 +68,7 @@
   color: var(--fg-muted);
   text-align: left;
   cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
 .settings-navb:hover { background: var(--bg-hi); color: var(--fg); }
@@ -135,10 +136,12 @@
   font-size: 1.1rem;
   line-height: 1;
   color: var(--fg-muted);
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
 .settings-x:hover {
   border-color: var(--border);
+  background: var(--bg-hi);
   color: var(--fg);
 }
 
@@ -162,15 +165,25 @@
 .settings-msg[data-tone="good"] { color: var(--done); }
 .settings-msg[data-tone="bad"] { color: var(--hot); }
 
-.btn.is-primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-fg);
-}
+/* **`.btn.is-primary` は消した。** `.btn.is-lead`（base.css）と、枠も面も字の色も
+   まったく同じものが2つの名前で並んでいた ―― 段2 で `is-lead` に面を塗ったときに
+   こちらを見落として作った重複。押すと進む主ボタンは1つの名前にする。
 
-.btn.is-primary:hover { border-color: var(--accent); filter: brightness(1.08); }
+   置き場所を base.css 側に寄せたのは、あれが**どの画面からも使う部品**だから。
+   共通のボタンの見た目が、設定モーダルの CSS に居るのは向きが逆だった。
+
+   押せないボタンの指定はここに残す（`.settings-foot` の並びで使う）。 */
 .btn[disabled] { opacity: .5; cursor: default; }
-.btn[disabled]:hover { border-color: var(--border); filter: none; }
+
+/* **押せないものを浮かせない。** `.btn:hover`（0,2,0）が影を1段上げて 1px 持ち上げるので、
+   ここで明示して消さないと、押せない顔のボタンが触れるたびに浮く（詳細度は 0,3,0）。
+   border-color と filter だけ書いていた頃は、その2つしか動いていなかったので要らなかった */
+.btn[disabled]:hover {
+  border-color: var(--border);
+  box-shadow: var(--sh-1), var(--hi);
+  transform: none;
+  filter: none;
+}
 
 /* -------------------------------------------------------------------- 中身 */
 

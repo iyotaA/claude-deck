@@ -47,6 +47,7 @@
   background: var(--bg-elev);
   box-shadow: var(--sh-1), var(--hi);
   color: var(--fg-faint);
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
 .archive-field:focus-within {
