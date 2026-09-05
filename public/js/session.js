@@ -269,8 +269,13 @@ export function select(sessionId, from = 'live') {
   store.selected = sessionId || null;
   store.selectedFrom = store.selected ? from : null;
   // 印は両方の一覧に付け直す。書庫で選んだあと稼働中に戻ったとき、
-  // 同じセッションが両方に居ることがある
-  for (const node of [...dom.list.querySelectorAll('.card'), ...dom.archive.querySelectorAll('.card')]) {
+  // 同じセッションが両方に居ることがある。
+  // **稼働中は圧縮した行（`.row`）**、書庫はカードのままなので両方を拾う
+  for (const node of [
+    ...dom.list.querySelectorAll('.card, .row'),
+    ...dom.heroBand.querySelectorAll('.hero-card'),
+    ...dom.archive.querySelectorAll('.card'),
+  ]) {
     node.setAttribute('aria-current', String(node.dataset.sessionId === store.selected));
   }
   syncQuery();

@@ -92,7 +92,10 @@ export function setListOpen(open, moveFocusTo = null, remember = true) {
   if (!overlaps()) return;
 
   if (open) {
-    const card = dom.list.querySelector('.card[aria-current="true"]') ?? dom.list.querySelector('.card');
+    // 稼働中の一覧は圧縮した行（`.row`）。**`.card` だけ見ていると何も掴めない**
+    // （書庫はカードのままなので、両方を拾う形にしてある）
+    const card = dom.list.querySelector('.card[aria-current="true"], .row[aria-current="true"]')
+      ?? dom.list.querySelector('.card, .row');
     card?.focus();
   } else if (moveFocusTo) {
     moveFocusTo.focus();

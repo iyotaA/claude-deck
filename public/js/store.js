@@ -94,21 +94,29 @@ export const QUIET_MODES = new Set(['auto', 'default', 'normal', 'acceptEdits'])
  * 「あなたの番」のような**まとめた名前**は向こうに無い（監視盤の COLUMNS も同じ理由）。
  * 状態が1つ増えたときは、どの見出しにも入らず末尾へ落ちる。消えはしない。
  *
- * `keepEmpty` は 0 件でも見出しを残すもの。**「あなたの番」だけ真にする。**
- * ここを消すと「見ていない」と「無い」が同じ顔になる。
- * 残り3つまで残すと、静かな日に空の見出しが4本並んで一覧の場所を食う。
+ * **「あなたの番」の見出しはここに無い。** 上の帯（`.hero-wrap`）が
+ * 答えないと進まないものを全部さらっていくので、残すと**永久に 0 件の見出し**が居座る。
+ *
+ * `keepEmpty`（0 件でも見出しを残す）という道具は残してある。あれが守っていたのは
+ * 「見ていない」と「無い」を同じ顔にしないことで、その役目は帯と、
+ * 帯が空のときに出る1行（`.hero-none`）が引き継いだ。
+ * 空の見出しを4本とも残すと、静かな日に一覧の場所を食う。
  */
 export const STATE_GROUPS = [
-  {
-    id: 'hot',
-    label: 'あなたの番',
-    states: ['needs-answer', 'needs-plan-approval', 'needs-approval'],
-    keepEmpty: true,
-  },
   { id: 'run', label: '実行中', states: ['running'] },
   { id: 'reply', label: '返信待ち', states: ['awaiting-reply'] },
   { id: 'done', label: '終了', states: ['ended'] },
 ];
+
+/**
+ * 上の帯へ出す状態。**`STATE_GROUPS` から外したぶんと同じ顔ぶれ。**
+ *
+ * ここに書くのは「どこへ出すか」の割り当てで、急ぎかどうかの判定ではない
+ * （そちらは行の `blocking` ＝ サーバ由来を見る。`meta.stateBlocking` が出どころ）。
+ * 2つの表が食い違う日は来るが、**足りないほうへ落ちても行は消えない** ――
+ * 帯に出なければ「そのほか」の見出しへ回る。
+ */
+export const HERO_STATES = new Set(['needs-answer', 'needs-plan-approval', 'needs-approval']);
 
 /**
  * 一覧の上に出すまとめ。並び順もこの順にする。
