@@ -84,6 +84,73 @@ export const KIND_LABELS = {
   trace: '足跡',
 };
 
+/* --------------------------------------------------------------- 印 */
+
+/**
+ * 種類 → 印の群。**16 ある種類を5つに丸める。**
+ *
+ * 種類ごとに割らないのは、13px の丸に 16 通りを描き分けるのが無理だから。
+ * それに**種類の名前は印のすぐ右に字で出ている**ので、印の役目は
+ * 「読み飛ばすときの手がかり」まででいい。
+ *
+ * | 群 | 何が入るか | 印 |
+ * |---|---|---|
+ * | `me`   | 指示・回答・中断・コマンド・却下 | 人 |
+ * | `mark` | プラン・スキル・サブエージェント | 書類 |
+ * | `hand` | ファイルの書き換え・足跡 | 鉛筆 |
+ * | `say`  | Claude の説明・中間報告 | 吹き出し |
+ * | `note` | エラー・圧縮・省略 | 三角 |
+ *
+ * **ここに無い種類は印を持たない**（`markOf` が null を返す）。
+ * サーバが種類を1つ足しても、印が消えるだけで行そのものは出る
+ * （未知の形で落ちない、と同じ扱い）。
+ */
+export const KIND_MARK = {
+  prompt: 'me',
+  answer: 'me',
+  interrupt: 'me',
+  slash: 'me',
+  denial: 'me',
+
+  plan: 'mark',
+  skill: 'mark',
+  agent: 'mark',
+
+  edit: 'hand',
+  trace: 'hand',
+
+  say: 'say',
+  recap: 'say',
+
+  error: 'note',
+  elided: 'note',
+};
+
+/* **`compact` はここに無い。** あれだけは `timelineItem` が列を組む前に
+   早期 return する全幅の帯で、時刻も印も出さない。
+   書いても誰も引かない ―― 使わないものを表に残すと、次に触る人が
+   「なぜ効かないのか」を探すことになる。 */
+
+/** 群 → アイコンの名前。`icons.js` の形を借りるだけで、新しい絵を持たない。 */
+const MARK_ICON = {
+  me: 'user',
+  mark: 'doc',
+  hand: 'pencil',
+  say: 'bubble',
+  note: 'alert',
+};
+
+/**
+ * その種類の印を引く。
+ *
+ * @param {string} kind item.kind
+ * @returns {?{group: string, icon: string}} 知らない種類なら null
+ */
+export function markOf(kind) {
+  const group = KIND_MARK[kind];
+  return group ? { group, icon: MARK_ICON[group] } : null;
+}
+
 /**
  * ファイルを書き換えるツール。
  *

@@ -136,15 +136,87 @@ mark {
   align-self: stretch;
 }
 
+/* 時刻 ／ 印 ／ 本文 の3列。
+   **印の列を足したぶん、本文は 2.3rem 狭くなる**（列 1.6rem ＋ gap .7rem）。
+   実測換算で 1512px の窓・一覧を開いた状態の本文が 863px → 826px（4% 減）。
+   その代わり、縦に並んだ出来事を「絵で拾って飛ばす」ことができる */
 .tl {
+  position: relative;
   display: grid;
-  grid-template-columns: 5.5rem minmax(0, 1fr);
+  grid-template-columns: 5.5rem 1.6rem minmax(0, 1fr);
   gap: .1rem .7rem;
   padding: .5rem 0;
   border-top: 1px solid var(--border);
 }
 
 .timeline > .tl:first-child { border-top: 0; }
+
+/* 印と印をつなぐ縦の線。**出来事が1本に並んでいることを形で示す。**
+
+   行の中に置く（`.tl` の ::before）ので、行が何件あっても節点は増えない。
+   上下いっぱいに伸ばして隣の行の線と継ぎ目なくつなぐ ―― 行の高さが中身で
+   変わるので、線の長さを数で決められない。
+
+   左の位置は「時刻の列 5.5rem ＋ gap .7rem ＋ 印の半分 .8rem」。
+   数を3つ足すのはここだけなので、列幅を動かしたらこの1行も直す */
+.tl::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(5.5rem + .7rem + .8rem);
+  width: 1px;
+  background: var(--border);
+}
+
+/* 印。丸い器に 13px の絵を1つ。面を敷くのは、上の縦線が絵の後ろを
+   通り抜けて見えないようにするため（線は行いっぱいに伸びている） */
+.tl-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  width: 1.6rem;
+  height: 1.6rem;
+  margin-top: .05rem;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: var(--sh-1);
+  color: var(--fg-faint);
+}
+
+/* 群ごとの色。**新しい色は1つも作らない。**
+   自分が動かした所（me）だけ強調を当て、判断の節目は --warn、
+   手が動いた所は --done。Claude の言葉と但し書きは既定のまま沈める */
+.tl-mark[data-g="me"] {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tl-mark[data-g="mark"] {
+  border-color: color-mix(in srgb, var(--warn) 50%, var(--border));
+  color: var(--warn);
+}
+
+.tl-mark[data-g="hand"] {
+  border-color: color-mix(in srgb, var(--done) 50%, var(--border));
+  color: var(--done);
+}
+
+/* 知らない種類（`KIND_MARK` に無いもの）。**空の丸を置かない。**
+   絵が入らないので、そのままだと中身の無い輪が線の上に浮いて不具合に見える。
+   点に縮めれば「印の無い出来事」として読める。列と線はそのまま残る。
+   左の余白は器の中で中心に置くため（(1.6 - .5) / 2） */
+.tl-mark:empty {
+  width: .5rem;
+  height: .5rem;
+  margin-left: .55rem;
+  border-color: var(--border-strong);
+  background: var(--border-strong);
+  box-shadow: none;
+}
 
 /* 日付と時刻を縦に積む。等幅10文字の yyyy/MM/dd は 5.5rem の列に収まるので、列幅は変えない */
 .tl-when {
@@ -231,6 +303,13 @@ mark {
   margin: .3rem 0;
   border-top: 0;
 }
+
+/* 圧縮の帯には印の縦線を通さない。**ここは列が1つしかない**（時刻も印も出さない
+   全幅の帯）ので、線だけが帯を突き抜ける。
+
+   線が切れること自体は正しい ―― ここより前の細部は Claude 側にも残っていないので、
+   出来事の並びはここでいちど途切れている */
+.tl[data-kind="compact"]::before { display: none; }
 
 .tl[data-kind="compact"] .tl-text {
   font-size: var(--fs-1);
