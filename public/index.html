@@ -14,6 +14,8 @@
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/list.css">
+<!-- カードの定義（.card / .state / .tag）を借りるので list.css の直後に置く -->
+<link rel="stylesheet" href="css/hero.css">
 <link rel="stylesheet" href="css/detail.css">
 <link rel="stylesheet" href="css/timeline.css">
 <link rel="stylesheet" href="css/panels.css">
@@ -94,6 +96,19 @@
       <div class="rate" id="rate" role="status" hidden></div>
     </div>
   </header>
+
+  <!-- ボールの所在。**画面のいちばん上に、いちばん大きく出す。**
+       前は左の列の中の、他と同じ大きさのカード1枚だった。
+
+       **`.app` の3行目として置く。** `.topbar` の中（`.statusbar` と同じ手）にも
+       できるが、あれは道具の帯で、これは作業そのもの。
+       子を足すぶん `.app` の `grid-template-rows` も3行に直してある
+       ―― 直さずに足すと高さの配分が崩れる。
+
+       中身は `list.js` が組む。0件なら帯ごと消える（器に `hidden` が付く） -->
+  <div class="hero-wrap" id="hero-wrap" hidden>
+    <div class="hero-band" id="hero-band"></div>
+  </div>
 
   <div class="deck">
     <!-- 左端のレール。一覧の開閉だけを持つ。中身は drawer.js が組む

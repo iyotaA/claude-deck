@@ -1,0 +1,295 @@
+/* ClaudeDeck ── ボールの所在の帯（上）と、圧縮した行（一覧）
+ *
+ * このアプリが答える2つの問いのうち、**「どれが自分を待っているか」の側**を
+ * 画面のいちばん上に、いちばん大きく出すための1枚。
+ *
+ * 前はどちらも左の列の中に、同じ大きさのカードで並んでいた。
+ * 待っているものと動いているものと終わったものが同じ声量で喋るので、
+ * どれから手をつけるかが読めなかった。
+ *
+ * 帯に出したぶん、残りは1行へ圧縮する。**全体が一度に見えること**が
+ * こちらの役目で、そのために字も行間も詰めるほう（--fs-0 / --fs-1・--lh-tight）に寄せる。
+ *
+ * <link> は list.css の直後。カードの定義（.card / .state / .tag）を借りるので、
+ * あちらより後に読む必要がある。narrow.css は必ず最後。
+ */
+
+/* ------------------------------------------------------------ 帯（器） */
+
+/* 器と、流れる側を分ける。**膜は器に載せる** ―― 帯（スクロールする側）へ置くと
+   膜も一緒に流れて、いつも同じ場所に居てくれない */
+.hero-wrap {
+  position: relative;
+  background:
+    radial-gradient(130% 150% at 0% 0%, var(--accent-soft), transparent 60%),
+    var(--bg-sunk);
+  border-bottom: 1px solid var(--border);
+}
+
+/* display を宣言したので [hidden] を必ず添える（作者側の display は属性に勝つ） */
+.hero-wrap[hidden] { display: none; }
+
+/* 両端の膜。「まだ続きがある」を形で示す。
+
+   **出し入れはスクロール位置に追従させる。** 端まで送っても右の膜が残ると、
+   最後の1枚がうっすら覆われたままになって「まだ先がある」と読めてしまう。
+   判断は `data-edge` の1語に畳んであり（書くのは list.js）、ここは当てるだけ。
+   両方に散らすと、どちらで決めているのか追えなくなる */
+.hero-wrap::before,
+.hero-wrap::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3.5rem;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+
+.hero-wrap::before { left: 0; background: linear-gradient(to right, var(--bg-sunk), transparent); }
+.hero-wrap::after { right: 0; background: linear-gradient(to left, var(--bg-sunk), transparent); }
+
+.hero-wrap[data-edge="right"]::after,
+.hero-wrap[data-edge="both"]::after { opacity: 1; }
+.hero-wrap[data-edge="left"]::before,
+.hero-wrap[data-edge="both"]::before { opacity: 1; }
+
+/* 流れる側。**件数に上限を置かず、折り返さずに横へ流す。**
+   折り返して縦に伸ばすと、下の圧縮行（全体を見せる役目）が押し出される。
+   横なら何件あっても帯の高さは変わらない */
+.hero-band {
+  display: flex;
+  gap: .7rem;
+  padding: .9rem 1rem;
+  overflow-x: auto;
+  /* 送った先で札の左端が揃う。半端な位置で止まると読み始めが探しにくい */
+  scroll-snap-type: x proximity;
+}
+
+/* ------------------------------------------------------------ 帯（札） */
+
+/* **幅を固定して、次の1枚が必ず見切れるようにする。**
+   1fr で分けると、2件のときに2枚で埋まって「続きがある」が伝わらない */
+.hero-card {
+  position: relative;
+  flex: 0 0 min(21rem, 74%);
+  scroll-snap-align: start;
+  display: grid;
+  gap: .5rem;
+  padding: .9rem 1rem .9rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-2), var(--hi);
+  text-align: left;
+  overflow: hidden;
+  transition: box-shadow .2s ease, transform .2s ease;
+}
+
+.hero-card:hover { box-shadow: var(--sh-3), var(--hi); transform: translateY(-2px); }
+
+/* いま開いているもの。一覧のカードと同じ形（光の輪）で示す。
+   **枠を --accent の純色にしない** ―― 輪と同じ色が2本並んで太い枠に見える */
+.hero-card[aria-current="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: var(--sh-2), 0 0 0 3px var(--accent-soft), var(--hi);
+}
+
+/* 左の帯。**カードの 3px より太い 4px。**
+   角丸が 18px あるので、3px だと上下の端が丸みに飲まれて消える */
+.hero-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--state-color, var(--hot));
+}
+
+.hero-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+
+/* **呼吸させるのはここだけ。** 一覧のカードにも上のバーの点にも掛けると、
+   画面に動くものが同時に何個も出る。帯はそもそも「ここを見ろ」の場所なので、
+   意味が重なる場所は1つでいい（上のバーは常に見えているぶん、光り続けると気が散る）。
+   止める指定は base.css の prefers-reduced-motion が全体に効いている */
+.hero-card .state[data-s="hot"]::before {
+  animation: hero-pulse 2.6s cubic-bezier(.2, .7, .3, 1) infinite;
+}
+
+@keyframes hero-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent); }
+  50%      { box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 5%, transparent); }
+}
+
+/* いちばん知りたい数を、いちばん大きく出す。
+   一覧の `.idle` は --fs-0（11px）で、前はここも同じだった ―― 題名より小さい */
+.hero-idle {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-6);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -.03em;
+  color: var(--state-color, var(--fg));
+  white-space: nowrap;
+}
+
+.hero-idle small {
+  font-size: var(--fs-0);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--fg-faint);
+}
+
+.hero-title {
+  font-size: var(--fs-4);
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* 何を訊かれているか。沈めた面に置いて、押せるもの（下の操作）と分ける */
+.hero-ask {
+  padding: .5rem .65rem;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+  font-size: var(--fs-1);
+  color: var(--fg-muted);
+  overflow: hidden;
+}
+
+.hero-ask .tool { font-family: var(--font-mono); font-weight: 700; color: var(--state-color, var(--fg)); }
+
+/* コマンドは1行で切る。折り返させると札の高さが中身で変わり、
+   横に並べたときに背が揃わない */
+.hero-ask .cmd {
+  display: block;
+  margin-top: .2rem;
+  font-family: var(--font-mono);
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero-act { display: flex; gap: .4rem; flex-wrap: wrap; }
+
+/* 溢れたぶんへ渡す札。**破線にしてある** ―― この画面の破線は但し書きと区切り専用で、
+   これは「札そのものではない」ことを示す側。押すと一覧の先頭へ送る */
+.hero-more {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .15rem;
+  min-width: 6.5rem;
+  padding: .8rem 1rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+
+.hero-more:hover { background: var(--bg-hi); color: var(--fg); }
+.hero-more b { font-family: var(--font-mono); font-size: var(--fs-5); font-weight: 700; line-height: 1; }
+.hero-more span { font-size: var(--fs-0); }
+
+/* 0 件のとき。**空の帯を置かない**が、場所そのものは残す。
+   帯ごと消すと、静かな日に画面の一等地が何も言わずに消える */
+.hero-none {
+  padding: .7rem 1rem;
+  font-size: var(--fs-1);
+  color: var(--fg-faint);
+  text-align: center;
+}
+
+/* -------------------------------------------------------- 圧縮した行 */
+
+/* 帯に出ないものは1行へ落とす。**ここだけ字も行間も詰めるほうに寄せる。**
+   読む面（--fs-4 / --lh-read）の尺で組むと1行が 28px から 47px へ伸び、
+   12本並べたときに 377px が 568px になる（＝全体が一度に見えなくなる）。
+
+   出すのは点・題・経過の3つだけ。置き場所もスキルも、
+   選んだときに詳細ペインで読める */
+.row {
+  display: grid;
+  grid-template-columns: .55rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .5rem;
+  width: 100%;
+  padding: .32rem .5rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: var(--lh-tight);
+  text-align: left;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.row:hover { background: var(--bg-hi); }
+
+.row[aria-current="true"] {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* 点は `.state::before` を借りない。**あちらは字と並ぶ前提**（inline-flex ＋ gap）で、
+   ここは列そのものが点1つぶん。形の割り当てだけ同じ語（data-s）で受ける */
+.row .dot {
+  width: .5rem;
+  height: .5rem;
+  border-radius: 50%;
+  background: var(--state-color, var(--off));
+}
+
+.row[data-s="hot"] .dot {
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+}
+
+.row[data-s="warn"] .dot {
+  background: none;
+  box-shadow: inset 0 0 0 2px var(--state-color, var(--off));
+}
+
+.row[data-s="off"] .dot {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--state-color, var(--off));
+}
+
+.row .t {
+  font-size: var(--fs-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .t.is-empty { color: var(--fg-faint); }
+
+.row .m {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------- 出さない場面 */
+
+/* 書庫と数値のあいだは帯ごと消す。あちらは「過去を探す」「数を見る」画面で、
+   いま誰が待っているかは上のバーの `.tally` が持つ */
+.is-archive .hero-wrap,
+.is-usage .hero-wrap { display: none; }
+
+/* 拡大しているあいだは隠す。`.deck` と同じ手当てで、
+   **display: none にしない** ―― 中の横スクロール位置を捨てるので、
+   閉じたときに帯が先頭へ戻る */
+.is-zoom .hero-wrap { visibility: hidden; }

@@ -61,7 +61,7 @@ import { initZoom, openZoom } from './zoom.js';
 import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
 import { renderDetail, renderDetailIfNeeded, initInspector } from './detail.js';
-import { renderList, renderRate } from './list.js';
+import { renderList, renderRate, initHero } from './list.js';
 import { initArchive, showArchive } from './archive.js';
 import { showUsage, initUsageTab } from './usage-tab.js';
 import { initMode, setMode } from './mode.js';
@@ -106,7 +106,9 @@ function initTheme() {
 function initListKeys(listEl, from) {
   listEl.addEventListener('keydown', (ev) => {
     if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
-    const cards = [...listEl.querySelectorAll('.card')];
+    // **`.row` も拾う。** 稼働中の一覧はカードから圧縮した行に替わったので、
+    // `.card` だけ見ていると上下キーがそちらで効かない（書庫はカードのまま）
+    const cards = [...listEl.querySelectorAll('.card, .row')];
     const at = cards.indexOf(document.activeElement);
     if (at === -1) return;
     const next = cards[at + (ev.key === 'ArrowDown' ? 1 : -1)];
@@ -130,6 +132,7 @@ setListOpen(initialListOpen(), null, false);
 // 札だけを付け替えたいこの用には効かない
 // 「作業台で開く」の行き先もここで差す（zoom.js は層2 なので mode.js を import しない）
 initZoom({ onChange: renderDetail, onOpenInWork: () => setMode('work') });
+initHero();
 initInspector();
 initResize();
 // 書庫の探す帯を配線してから initMode に渡す。あちらの setMode は

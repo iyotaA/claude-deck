@@ -4,13 +4,16 @@
  * setListOpen が drawer.js に居るのは、main.js に置くとここと循環するため。
  */
 import { el, since, stamp, tokens, agentTag } from './util.js';
-import { store, colorOf, toneOf, QUIET_MODES, SUMMARY_ORDER, STATE_GROUPS } from './store.js';
+import {
+  store, colorOf, toneOf, QUIET_MODES, SUMMARY_ORDER, STATE_GROUPS, HERO_STATES,
+} from './store.js';
 import { dom } from './dom.js';
 import { idleOf, headOf, visibleRows } from './rows.js';
-import { newestRateLimit, rateView } from './runs.js';
+import { newestRateLimit, rateView, runFor } from './runs.js';
 import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaBranch, metaPath } from './card.js';
+import { postJson } from './api.js';
 
 /**
  * 一覧の1枚。
@@ -125,7 +128,9 @@ function buildGroup(group, rows) {
   li.append(head);
 
   const body = el('ul', 'group-body');
-  for (const row of rows) body.append(buildCard(row));
+  // **カードではなく圧縮した行。** 答えないと進まないものは上の帯が持っていったので、
+  // ここの役目は「全体が一度に見えること」に変わった
+  for (const row of rows) body.append(buildRow(row));
   li.append(body);
   return li;
 }
@@ -140,8 +145,237 @@ function buildGroup(group, rows) {
  * どの見出しにも入らない状態は末尾へまとめる。**黙って落とさない。**
  * サーバ側が状態を1つ足した日に、一覧から行が消えるほうが困る。
  */
+/* ── ボールの所在の帯 ─────────────────────────────────────── */
+
+/**
+ * 帯へ出す行。**並べ替えない。切り出すだけ。**
+ *
+ * `store.rows` はサーバ側が `STATE_RANK` と `idleMs` で並べたものなので、
+ * 前から順に拾えばそのまま「先に手をつけるべき順」になる。
+ * 比較器を画面側に持つと、2箇所に並び順ができる。
+ *
+ * @returns {object[]}
+ */
+function heroRows() {
+  return visibleRows().filter((r) => HERO_STATES.has(r.state));
+}
+
+/**
+ * 帯を組み直すかどうかの鍵。
+ *
+ * **毎フレーム作り直してはいけない。** `renderList()` は 2 秒ごとに
+ * `replaceChildren()` するので、同じ手で組むと**横へ送った位置が毎回先頭へ戻る**
+ * ―― 「ほか N 件」を見に行った瞬間に引き戻される。
+ *
+ * 混ぜるのは「札の顔ぶれと、押せることが変わったか」だけ。
+ * 経過時間は入れない（毎秒動くので、入れると鍵の意味が消える）。
+ * あちらは `refreshTimes()` が中身だけ差し替える。
+ *
+ * @param {object[]} rows 帯へ出す行
+ * @returns {string}
+ */
+function heroKey(rows) {
+  return rows
+    .map((r) => `${r.sessionId}:${r.state}:${runFor(r.sessionId)?.asks?.[0]?.id ?? ''}`)
+    .join('|');
+}
+
+/** 前に組んだときの鍵。null は「まだ一度も組んでいない」 */
+let heroStamp = null;
+
+/**
+ * 帯の1枚。
+ *
+ * **ボタンの中身が場面で違う。** 答えられるのは画面から起こしたセッションだけで、
+ * ターミナルで走っているものには答える窓口そのものが無い
+ * （`asks` は `src/run/ledger.mjs` が抱える行にしか載らない）。
+ * できるのは `POST /api/focus` で窓を前へ出すこと。
+ *
+ * **その差は「この画面から」の札の有無で示す。** 札が無いのにボタンだけ
+ * 「許可する」だと、押しても何も起きないものを出すことになる。
+ *
+ * **要求カードをここに組まない。** 実体は `run-ask.js` の1枚に保つ
+ * （2枚あると「どちらが本物か」の管理が丸ごと増える＝人が承認したものと
+ * 違うものが動く事故の隣）。ここは選んで詳細ペインへ送るだけ。
+ *
+ * @param {object} row 一覧の行
+ * @returns {HTMLElement}
+ */
+function buildHeroCard(row) {
+  const card = el('div', 'hero-card');
+  card.dataset.sessionId = row.sessionId ?? '';
+  card.style.setProperty('--state-color', colorOf(row.state));
+  // 選んでいる印。**帯は鍵が変わるまで組み直さない**ので、以後の付け替えは
+  // `select()` が直に書く（一覧のカードと同じ扱い）
+  card.setAttribute('aria-current', String(row.sessionId === store.selected));
+
+  const top = el('div', 'hero-top');
+  const state = el('span', 'state', row.stateLabel);
+  state.dataset.s = toneOf(row.state);
+  top.append(state);
+  // この画面から起こしたものだけ、その場で答えられる
+  const run = runFor(row.sessionId);
+  if (run) top.append(el('span', 'tag is-deck', 'この画面から'));
+
+  const idle = el('span', 'hero-idle', since(idleOf(row)));
+  idle.dataset.heroIdle = row.sessionId ?? '';
+  if (row.lastActivityAt) idle.title = stamp(row.lastActivityAt);
+  idle.append(el('small', null, ' 経過'));
+  top.append(idle);
+  card.append(top);
+
+  card.append(el('div', 'hero-title', row.title ?? row.name ?? row.sessionId));
+
+  if (row.waitingFor) {
+    const ask = el('div', 'hero-ask');
+    ask.append(el('span', 'tool', row.waitingFor.tool ?? '?'));
+    if (row.waitingFor.detail) ask.append(el('span', 'cmd', row.waitingFor.detail));
+    card.append(ask);
+  }
+
+  const act = el('div', 'hero-act');
+  const go = el('button', 'btn is-lead', run ? '答える' : '開く');
+  go.type = 'button';
+  go.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    select(row.sessionId, 'live');
+    closeListAfterPick();
+  });
+  act.append(go);
+
+  // ターミナルで走っているものは、窓を前に出すことしかできない。
+  // pid が取れていない行には出さない（押せない顔のボタンを出さない）
+  if (!run && row.pid) {
+    const front = el('button', 'btn', 'ターミナルを前面に');
+    front.type = 'button';
+    front.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      postJson(`/api/focus?pid=${encodeURIComponent(row.pid)}`).catch(() => {});
+    });
+    act.append(front);
+  }
+  card.append(act);
+
+  // 札のどこを押しても選べる（ボタンは stopPropagation で先に取る）。
+  //
+  // **`role="button"` は付けない。** 中に本物のボタンが入っているので、
+  // 押せるものの入れ子になる。キーボードから辿る道は中のボタンが持っていて、
+  // これは触っている人向けの近道でしかない。
+  //
+  // **文字を選んでいるあいだは効かせない。** 中に出しているのは実行しようとしている
+  // コマンドで、写して確かめたい場面がある。掴んで離した拍子に選び直されると、
+  // 選択が消えるうえ画面まで切り替わる
+  card.addEventListener('click', () => {
+    if (!window.getSelection()?.isCollapsed) return;
+    select(row.sessionId, 'live');
+    closeListAfterPick();
+  });
+  return card;
+}
+
+/**
+ * ボールの所在の帯を描く。
+ *
+ * **件数に上限を置かない。折り返さずに横へ流す。**
+ * 折り返して縦に伸ばすと、下の圧縮行（全体を見せる役目）が押し出される。
+ *
+ * 0 件なら帯ごと消す（`hidden`）が、**場所は残す** ――
+ * 帯が空のときは「待っているものはありません」の1行を出す。
+ * 帯ごと黙って消えると、静かな日に画面の一等地が何も言わずに空く。
+ */
+export function renderHero() {
+  const rows = heroRows();
+  const key = heroKey(rows);
+  // 顔ぶれも押せることも変わっていなければ、節点に触らない。
+  // 触ると横へ送った位置が戻る（この関数がある理由そのもの）
+  if (key === heroStamp) return;
+  heroStamp = key;
+
+  dom.heroWrap.hidden = false;
+  dom.heroBand.replaceChildren();
+
+  if (rows.length === 0) {
+    // 帯としては組まない（横スクロールも膜も要らない）。器に1行だけ置く
+    dom.heroBand.append(el('div', 'hero-none', 'いま、あなたの返事を待っているセッションはありません'));
+    dom.heroWrap.dataset.edge = 'none';
+    return;
+  }
+
+  for (const row of rows) dom.heroBand.append(buildHeroCard(row));
+  syncHeroEdge();
+}
+
+/**
+ * 膜の出し入れ。**判断はここ1箇所、当てるのは CSS。**
+ *
+ * 出す・出さないを CSS の擬似クラスで作ろうとすると「端まで送ったか」を表せない。
+ * `data-edge` の1語に畳んで渡す。
+ */
+function syncHeroEdge() {
+  const band = dom.heroBand;
+  const max = band.scrollWidth - band.clientWidth;
+  // 1px の余裕を見る。端ちょうどでも小数のずれで届かないことがある
+  dom.heroWrap.dataset.edge = max <= 1 ? 'none'
+    : band.scrollLeft <= 1 ? 'right'
+      : band.scrollLeft >= max - 1 ? 'left'
+        : 'both';
+}
+
+/** 帯の膜を配線する。`main.js` から1回だけ呼ぶ。 */
+export function initHero() {
+  dom.heroBand.addEventListener('scroll', syncHeroEdge, { passive: true });
+  // 窓の幅が変わると、そもそも溢れているかどうかが変わる
+  window.addEventListener('resize', syncHeroEdge);
+}
+
+/* ── 一覧 ─────────────────────────────────────────────── */
+
+/**
+ * 圧縮した1行。**出すのは点・題・経過の3つだけ。**
+ *
+ * 帯に出ないものはここへ落とす。役目は「全体が一度に見えること」なので、
+ * 置き場所もスキルも待ちの中身も出さない ―― どれも選んだときに詳細ペインで読める。
+ *
+ * **カード（`buildCard`）を借りない。** あちらは書庫と数値も使う定型で、
+ * 出す項目が5つある。ここは3つに絞ることそのものが役目なので、借りると
+ * 「何を出さないか」を毎回打ち消すことになる。
+ *
+ * @param {object} row 一覧の行
+ * @returns {HTMLElement} `<li>` に入れた行
+ */
+function buildRow(row) {
+  const li = el('li');
+  const node = el('button', 'row');
+  node.type = 'button';
+  node.dataset.sessionId = row.sessionId ?? '';
+  node.dataset.s = toneOf(row.state);
+  node.style.setProperty('--state-color', colorOf(row.state));
+  node.setAttribute('aria-current', String(row.sessionId === store.selected));
+
+  node.append(el('i', 'dot'));
+  const title = el('span', 't', row.title ?? row.name ?? row.sessionId);
+  if (!row.title) title.classList.add('is-empty');
+  // 題は1行で切るので、全文は title 属性に残す
+  if (row.title) title.title = row.title;
+  node.append(title);
+
+  const idle = el('span', 'm', since(idleOf(row)));
+  if (row.lastActivityAt) idle.title = stamp(row.lastActivityAt);
+  node.append(idle);
+
+  node.addEventListener('click', () => {
+    select(row.sessionId, 'live');
+    closeListAfterPick();
+  });
+  li.append(node);
+  return li;
+}
+
 export function renderList() {
-  const rows = visibleRows();
+  renderHero();
+  // **帯へ出したぶんは一覧から外す。** 同じセッションが2箇所に出ると、
+  // 選んだときの aria-current も二重になる
+  const rows = visibleRows().filter((r) => !HERO_STATES.has(r.state));
   dom.list.replaceChildren();
 
   if (rows.length === 0) {
@@ -266,16 +500,26 @@ export function refreshTimes() {
   renderRate();
 
   const byId = new Map(store.rows.map((r) => [r.sessionId, r]));
-  const cards = dom.list.querySelectorAll('.card');
-  for (const node of cards) {
+  // カード（書庫が借りる形）と、圧縮した行。どちらも経過は最後の子に入っている
+  for (const node of dom.list.querySelectorAll('.card, .row')) {
     const row = byId.get(node.dataset.sessionId);
     if (!row) continue;
-    const idle = node.querySelector('.idle');
+    const idle = node.querySelector('.idle, .m');
     if (idle) {
       idle.textContent = since(idleOf(row));
       // 追記が進めば実時刻も動く。textContent だけ直すと title が古いままになる
       if (row.lastActivityAt) idle.title = stamp(row.lastActivityAt);
     }
+  }
+  // **帯もここで動かす。** あちらは鍵が変わるまで組み直さない作りなので、
+  // 時刻を差し替える場所がここしかない。忘れると経過が固まったままになる。
+  // 「経過」の字は <small> で中に入っているので、textContent ごと書き替えずに
+  // 先頭のテキスト節点だけ差し替える
+  for (const node of dom.heroBand.querySelectorAll('[data-hero-idle]')) {
+    const row = byId.get(node.dataset.heroIdle);
+    if (!row) continue;
+    if (node.firstChild) node.firstChild.nodeValue = since(idleOf(row));
+    if (row.lastActivityAt) node.title = stamp(row.lastActivityAt);
   }
   const detailIdle = dom.detail.querySelector('[data-live-idle]');
   if (detailIdle) {

@@ -26,6 +26,10 @@ export const dom = {
   app: document.getElementById('app'),
   list: document.getElementById('list'),
   listCount: document.getElementById('list-count'),
+  // ボールの所在の帯。器（膜と出し入れ）と、流れる側（札が並ぶ）を分けて持つ。
+  // list.js の renderHero() だけが書く
+  heroWrap: document.getElementById('hero-wrap'),
+  heroBand: document.getElementById('hero-band'),
   summary: document.getElementById('summary'),
   // 枠の使用率（上のバー）。list.js の renderRate() だけが書く
   rate: document.getElementById('rate'),
