@@ -29,7 +29,7 @@ import { dom } from './dom.js';
 import { getJson, postJson } from './api.js';
 import { closeOnBackdrop } from './modal.js';
 import { fillSelect } from './form-kit.js';
-import { EFFORT_LABELS, MODEL_FREE, modelOptions, modelPick, modelValue } from './runs.js';
+import { EFFORT_LABELS, MODEL_FREE, modelHint, modelOptions, modelPick, modelValue } from './runs.js';
 
 /**
  * 状態ごとの但し書き。
@@ -332,6 +332,7 @@ function fillRunDefaults(opts, def, error) {
   dom.runDefMode.value = d.permissionMode ?? '';
 
   fillSelect(dom.runDefModelPick, modelOptions(opts.models));
+  dom.runDefModelHint.textContent = modelHint(opts, '使ったことのあるものを並べています');
   const pick = modelPick(d.model ?? '', opts.models);
   dom.runDefModelPick.value = pick.sel;
   noteDefModel();

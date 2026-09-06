@@ -398,7 +398,13 @@ export function renderList() {
 
   // 件数は鍵に関わらず進める。`textContent` を差し替えるだけなので節点は消えない
   const live = store.rows.filter((r) => r.alive).length;
-  dom.listCount.textContent = `稼働中 ${live} / 表示 ${rows.length}`;
+  // **切られたことを言う。** サーバーは終了済みを上限（`meta.rowsMax`）で切るので、
+  // 静かな日には気づかないが、終了済みが多い日には「あるはずの行が無い」になる。
+  // 落ちたぶんの行き先（書庫）まで添える ―― 数だけ出しても次の手が分からない
+  const omitted = store.meta?.endedOmitted ?? 0;
+  dom.listCount.textContent = omitted > 0
+    ? `稼働中 ${live} / 表示 ${rows.length}（終了済み ${omitted} 件は書庫へ）`
+    : `稼働中 ${live} / 表示 ${rows.length}`;
 
   // **顔ぶれも状態も題も変わっていなければ、節点に触らない。**
   //
