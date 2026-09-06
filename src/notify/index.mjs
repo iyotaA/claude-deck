@@ -46,6 +46,10 @@ export function createNotifier({
   config = loadNotifyConfig(),
   bootAt = Date.now(),
   post = postToSlack,
+  // 1時間に送れる通数。**設定の紙には出さない**（暴走の歯止めで、人が緩める値ではない）。
+  // 引数で受けるのは、上限に達した先の筋道をテストから通すため
+  // ―― 既定の 30 通を実際に送らせると、テストが送信の回数を数える話になる
+  maxPerHour = undefined,
 } = {}) {
   /** ClaudeDeck の URL。listen したあとでないと決まらないので後から入れる */
   let baseUrl = null;
@@ -73,6 +77,8 @@ export function createNotifier({
     remindMs: config.remindMs,
     states: config.states,
     bootAt,
+    // undefined なら watch 側の既定（MAX_PER_HOUR）に落ちる
+    ...(maxPerHour === undefined ? {} : { maxPerHour }),
   });
 
   /**
@@ -116,6 +122,20 @@ export function createNotifier({
    * @returns {Promise<void>}
    */
   async function flush(now = Date.now()) {
+    // **上限で止めたぶんは、窓が空いたら自分で戻る。**
+    //
+    // 前は `paused` から抜ける道が「起動し直す」しか無かった。
+    // 忙しい日ほど1時間 30 通の上限に当たるので、**いちばん通知が要る日に黙る**
+    // ことになっていた（`sendTest` を押すと解ける裏道はあったが、
+    // それを知っている人しか戻せない）。
+    //
+    // 見るのは `watch` 側の判定だけ。あちらは呼ばれるたびに窓を掃除するので、
+    // 1時間が流れていれば勝手に false へ戻る。
+    if (state === 'paused' && !watch.stats(now).overLimit) {
+      state = 'ok';
+      reason = null;
+    }
+
     if (state !== 'ok' || sending) return;
 
     let items = [];
@@ -128,7 +148,7 @@ export function createNotifier({
 
     if (items.length === 0) {
       // 上限に達していたら止める。止めたこと自体は1通だけ知らせる
-      if (watch.stats().overLimit) await pauseOverLimit();
+      if (watch.stats(now).overLimit) await pauseOverLimit(now);
       return;
     }
 
@@ -176,8 +196,12 @@ export function createNotifier({
    *
    * @returns {Promise<void>}
    */
-  async function pauseOverLimit() {
-    const why = '1時間に送れる数の上限に達しました。起動し直すと再開します';
+  async function pauseOverLimit(now = Date.now()) {
+    const untilMs = watch.stats(now).overLimitUntil;
+    // **待ち時間を言う。** 「起動し直すと再開します」だけだと、
+    // 人はそのとおり再起動しに行く（それが前の唯一の逃げ道だった）
+    const mins = Math.max(1, Math.ceil((untilMs ?? 0) / 60000));
+    const why = `1時間に送れる数の上限に達しました。あと ${mins} 分ほどで自動で再開します`;
     stop(why, 'paused');
     sending = true;
     try {
