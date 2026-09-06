@@ -1,6 +1,7 @@
 /* 設定モーダル。層7。
  *
- * 中身は3つ。通知（読んで書ける）・作業フォルダ（読んで書ける）・自動起動（読むだけ）。
+ * 中身は4つ。通知（読んで書ける）・作業フォルダ（読んで書ける）・
+ * 起こすときの既定（読んで書ける）・自動起動（読むだけ）。
  *
  * 作業フォルダだけ保存の経路が違う。**足す・消すはその場で効く**（別の窓口
  * /api/settings/rundirs を叩く）ので、下の「保存」ボタンは通知のぶんだけを送る。
@@ -27,6 +28,8 @@ import { store, SUMMARY_ORDER } from './store.js';
 import { dom } from './dom.js';
 import { getJson, postJson } from './api.js';
 import { closeOnBackdrop } from './modal.js';
+import { fillSelect } from './form-kit.js';
+import { EFFORT_LABELS, MODEL_FREE, modelOptions, modelPick, modelValue } from './runs.js';
 
 /**
  * 状態ごとの但し書き。
@@ -45,7 +48,9 @@ const STATE_NOTES = {
  *
  * ここでしか使わないので main.js ではなく自分で差す（上のバーのぶんはあちらが差す）。
  */
-const NAV_ICONS = { notify: 'bell', dirs: 'folder', state: 'info' };
+// rundef が上のバーの「起こす」と同じ `plus` なのはわざと。
+// あれの欄に何が入るかを決める節なので、同じ絵のほうが結びつく
+const NAV_ICONS = { notify: 'bell', dirs: 'folder', rundef: 'plus', state: 'info' };
 
 /**
  * 節ごとに足へ出す作法の1行。
@@ -57,6 +62,7 @@ const NAV_ICONS = { notify: 'bell', dirs: 'folder', state: 'info' };
 const SEC_NOTE = {
   notify: '',
   dirs: '足す・消すはその場で保存されます',
+  rundef: '変えたらその場で保存されます',
   state: 'ここは読むだけです',
 };
 
@@ -273,6 +279,133 @@ async function loadDirs() {
     fillDirs(await getJson('/api/settings/rundirs'));
   } catch (err) {
     fillDirs(null, err.message);
+  }
+}
+
+/* ── 起こすときの既定 ───────────────────────────────────── */
+
+/**
+ * 節の頭に出す1行。**読めなかったときはここが断りに変わる**ので、
+ * 戻す先が要る（`index.html` の初期値と同じ文にしてある）。
+ */
+const RUNDEF_HINT = 'セッションを起こすフォームに、最初から入っている値です。'
+  + '起こすときにその場で変えられます。';
+
+/**
+ * 選択肢（語彙・候補・範囲）。**`/api/runs/options` から引いたものを持つ。**
+ *
+ * 起こすフォーム（`run-form.js`）と同じ窓口で、こちらは別に1回引く。
+ * あちらから貰う形にすると `settings.js` → `run-form.js` の向きができて、
+ * どちらもフォームを持つ層7 の中に辺が増える。**選択肢を書き写さない**のが要点で、
+ * 引く回数はモーダルを開いたときの1回なので気にしない。
+ *
+ * @type {object|null}
+ */
+let runOpts = null;
+
+/**
+ * 既定値の欄を組み直す。
+ *
+ * **選択肢と、選んである値の2つが揃って初めて出せる。** 別々の窓口から届くので、
+ * 片方だけで組むと「候補が空の <select>」か「候補はあるが選択が反映されない」になる。
+ *
+ * @param {object|null} opts /api/runs/options の応答
+ * @param {object|null} def /api/settings/rundefaults の応答の defaults
+ * @param {string} [error] 読めなかった理由
+ */
+function fillRunDefaults(opts, def, error) {
+  if (error || !opts) {
+    // **「読めなかった」を「何も設定されていない」に読み替えない。**
+    // 欄は空のまま残す（作業フォルダが読み失敗を 0 件と混同しないのと同じ）
+    dom.runDefHint.textContent = error
+      ? `選択肢を読めませんでした（${error}）`
+      : '選択肢を読み込み中…';
+    return;
+  }
+  const d = def ?? {};
+
+  fillSelect(dom.runDefMode, [
+    // **「指定しない」を先頭に置く。** 消す道が無いと、一度選んだら戻せない
+    { value: '', label: `指定しない（${opts.defaultMode ?? 'plan'}）` },
+    ...(opts.modes ?? []).map((m) => ({ value: m.value, label: m.label, danger: m.danger })),
+  ]);
+  dom.runDefMode.value = d.permissionMode ?? '';
+
+  fillSelect(dom.runDefModelPick, modelOptions(opts.models));
+  const pick = modelPick(d.model ?? '', opts.models);
+  dom.runDefModelPick.value = pick.sel;
+  noteDefModel();
+  // noteDefModel() は候補側へ戻したとき書きかけを捨てるので、入れるのはそのあと
+  if (pick.free) dom.runDefModel.value = pick.free;
+
+  fillSelect(dom.runDefEffort, [
+    { value: '', label: '指定しない（CLI の既定）' },
+    ...(opts.efforts ?? []).map((v) => ({ value: v, label: EFFORT_LABELS[v] ?? v })),
+  ]);
+  dom.runDefEffort.value = d.effort ?? '';
+
+  const b = opts.budget ?? {};
+  if (Number.isFinite(b.min)) dom.runDefBudget.min = String(b.min);
+  if (Number.isFinite(b.max)) dom.runDefBudget.max = String(b.max);
+  dom.runDefBudget.value = Number.isFinite(d.budgetUsd) ? String(d.budgetUsd) : '';
+
+  dom.runDefHint.textContent = RUNDEF_HINT;
+}
+
+/** モデルの自由入力を出し入れする。起こすフォームの `noteModel` と同じ作法 */
+function noteDefModel() {
+  const free = dom.runDefModelPick.value === MODEL_FREE;
+  const was = dom.runDefModel.hidden;
+  dom.runDefModel.hidden = !free;
+  if (free && was) dom.runDefModel.focus();
+  // 候補へ戻したら書きかけを捨てる。残すと、見えない欄の中身が送られる
+  if (!free) dom.runDefModel.value = '';
+}
+
+/**
+ * 既定値を読む。**選択肢と値を並べて引く。**
+ *
+ * どちらかが転んでも、片方だけで組めるものは組む（`fillRunDefaults` が受け止める）。
+ */
+async function loadRunDefaults() {
+  const [opts, def] = await Promise.all([
+    getJson('/api/runs/options').catch((err) => ({ __err: err.message })),
+    getJson('/api/settings/rundefaults').catch(() => null),
+  ]);
+  if (opts?.__err) {
+    fillRunDefaults(null, null, opts.__err);
+    return;
+  }
+  runOpts = opts;
+  fillRunDefaults(opts, def?.defaults ?? null);
+}
+
+/**
+ * 変えた欄を送る。**触った項目だけ送る。**
+ *
+ * サーバ側が「キーが無い＝触らない」なので、全部を毎回送らなくてよい。
+ * 空文字は「消す（指定なしへ戻す）」の意味で、そちらは送る必要がある。
+ *
+ * 応答は読み直した値なので、そのまま欄へ流す ―― 濾された結果が返るので、
+ * 範囲外の数を入れたときに丸められたことがその場で見える。
+ *
+ * @param {object} patch 送る項目
+ */
+async function postRunDefaults(patch) {
+  if (busy) return;
+  setBusy(true);
+  try {
+    const { res, data } = await postJson('/api/settings/rundefaults', patch);
+    if (!res.ok || !data?.ok) {
+      say(data?.reason ?? `保存できませんでした（HTTP ${res.status}）`, 'bad');
+      return;
+    }
+    fillRunDefaults(runOpts, data.defaults ?? null);
+    say('保存しました', 'good');
+  } catch (err) {
+    say(`保存できませんでした（${err.message}）`, 'bad');
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -522,6 +655,7 @@ function open() {
   // どれも中で受け止めているので、await せずに投げてよい
   load();
   loadDirs();
+  loadRunDefaults();
   loadStartup();
 }
 
@@ -531,6 +665,12 @@ export function initSettings() {
   for (const b of dom.settingsNav.querySelectorAll('.settings-navb')) {
     const name = NAV_ICONS[b.dataset.sec];
     if (name) b.prepend(icon(name));
+  }
+
+  // 本文の中の絵も差す。差す場所は `data-icon` の印で決まっている（run-form.js と同じ作法）。
+  // **1回だけ。** 中身は静的に置いてあるので、開くたびに走らせると絵が積み重なる
+  for (const node of dom.settings.querySelectorAll('[data-icon]')) {
+    node.prepend(icon(node.dataset.icon));
   }
 
   dom.settingsNav.addEventListener('click', (ev) => {
@@ -548,6 +688,30 @@ export function initSettings() {
   dom.setUrlClear.addEventListener('click', clearUrl);
   dom.runDirAddBtn.addEventListener('click', addDir);
 
+  // 起こすときの既定。**選んだ瞬間に保存する**（作業フォルダと同じ経路）。
+  // 送るのは触った項目だけで、空文字は「消す」の意味になる
+  dom.runDefMode.addEventListener('change', () => {
+    postRunDefaults({ permissionMode: dom.runDefMode.value });
+  });
+  dom.runDefEffort.addEventListener('change', () => {
+    postRunDefaults({ effort: dom.runDefEffort.value });
+  });
+  dom.runDefModelPick.addEventListener('change', () => {
+    noteDefModel();
+    // 「自分で入力」へ移した直後はまだ空。**そこで保存しない** ――
+    // 送ると、書こうとしている最中に「指定なし」で上書きされる。
+    // 保存は自由入力を打ち終えたとき（change / Enter）に走る
+    if (dom.runDefModelPick.value === MODEL_FREE) return;
+    postRunDefaults({ model: modelValue(dom.runDefModelPick.value, dom.runDefModel.value) });
+  });
+  dom.runDefModel.addEventListener('change', () => {
+    postRunDefaults({ model: modelValue(dom.runDefModelPick.value, dom.runDefModel.value) });
+  });
+  // 数の欄は change（欄から出たとき・Enter）で送る。input だと1文字ごとに飛ぶ
+  dom.runDefBudget.addEventListener('change', () => {
+    postRunDefaults({ budgetUsd: dom.runDefBudget.value.trim() });
+  });
+
   // <form> で囲っていないので、Enter は自分で拾う。
   // 囲うと Enter がモーダルを閉じてしまい、保存したつもりで消える
   dom.settings.addEventListener('keydown', (ev) => {
@@ -557,6 +721,9 @@ export function initSettings() {
     // 作業フォルダの追加欄だけ行き先が違う。見た目を .settings-text から借りているので
     // クラスでは見分けられない。参照で分ける（run-form.js が本文欄を分けているのと同じ）
     if (ev.target === dom.runDirAdd) addDir();
+    // 起こすときの既定の欄は、それぞれが change で保存する。
+    // **ここで save() へ流さない**（通知の保存が走って「保存しました」が二重に出る）
+    else if (ev.target === dom.runDefModel || ev.target === dom.runDefBudget) ev.target.blur();
     else save();
   });
 }

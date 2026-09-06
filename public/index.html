@@ -304,6 +304,7 @@
     <div class="settings-nav" id="settings-nav" role="group" aria-label="設定の節">
       <button class="settings-navb" type="button" data-sec="notify" aria-pressed="true">通知</button>
       <button class="settings-navb" type="button" data-sec="dirs" aria-pressed="false">作業フォルダ<span class="n" id="run-dirs-n" hidden></span></button>
+      <button class="settings-navb" type="button" data-sec="rundef" aria-pressed="false">起こすときの既定</button>
       <button class="settings-navb" type="button" data-sec="state" aria-pressed="false">いまの様子</button>
     </div>
 
@@ -316,7 +317,7 @@
              「変えない」を空欄で表せるので、****  のような偽の値を置かずに済む。
              偽の値を置くと、それをそのまま保存して URL を壊す事故が起きる -->
         <section class="settings-sec">
-          <label class="settings-label" for="set-url">Slack Webhook URL</label>
+          <label class="settings-label has-icon" data-icon="bell" for="set-url">Slack Webhook URL</label>
           <div class="settings-row">
             <input class="settings-text" id="set-url" type="text" inputmode="url"
                    spellcheck="false" autocomplete="off" placeholder="まだ設定されていません">
@@ -326,28 +327,28 @@
         </section>
 
         <section class="settings-sec settings-grid">
-          <label class="settings-label" for="set-settle">落ち着き待ち</label>
+          <label class="settings-label has-icon" data-icon="clock" for="set-settle">落ち着き待ち</label>
           <span class="settings-row">
             <input class="settings-num" id="set-settle" type="number" min="0" max="600" step="1">
             <span class="settings-unit">秒</span>
           </span>
           <p class="settings-hint">これだけ止まったままなら送る</p>
 
-          <label class="settings-label" for="set-idle">返信待ち</label>
+          <label class="settings-label has-icon" data-icon="clock" for="set-idle">返信待ち</label>
           <span class="settings-row">
             <input class="settings-num" id="set-idle" type="number" min="0" max="1440" step="1">
             <span class="settings-unit">分</span>
           </span>
           <p class="settings-hint">席を外したときだけ鳴らしたいので長め。0 で通知しない</p>
 
-          <label class="settings-label" for="set-remind">リマインド</label>
+          <label class="settings-label has-icon" data-icon="refresh" for="set-remind">リマインド</label>
           <span class="settings-row">
             <input class="settings-num" id="set-remind" type="number" min="0" max="1440" step="1">
             <span class="settings-unit">分</span>
           </span>
           <p class="settings-hint">放置したときの念押し。0 で無効</p>
 
-          <label class="settings-label" for="set-detail">質問文</label>
+          <label class="settings-label has-icon" data-icon="bubble" for="set-detail">質問文</label>
           <span class="settings-row">
             <span class="selectbox"><select class="settings-select" id="set-detail">
               <option value="full">載せる</option>
@@ -358,7 +359,7 @@
         </section>
 
         <section class="settings-sec">
-          <h3 class="settings-h3">鳴らす状態</h3>
+          <h3 class="settings-h3 has-icon" data-icon="bell">鳴らす状態</h3>
           <!-- 中身は settings.js が組む。日本語のラベルは /api/sessions の
                meta.stateLabels から引くので、画面側には持たない -->
           <ul class="settings-states" id="set-states"></ul>
@@ -372,7 +373,7 @@
            消せる顔をして並べない）。中身は settings.js が組む -->
       <div class="settings-pane" data-sec="dirs">
         <section class="settings-sec">
-          <label class="settings-label" for="run-dir-add">足すフォルダ</label>
+          <label class="settings-label has-icon" data-icon="folder" for="run-dir-add">足すフォルダ</label>
           <div class="settings-row">
             <input class="settings-text" id="run-dir-add" type="text"
                    spellcheck="false" autocomplete="off" placeholder="C:\path\to\project">
@@ -383,12 +384,65 @@
         </section>
       </div>
 
+      <!-- 起こすフォームの欄に最初から入る値。**作業フォルダと同じくその場で保存する**
+           （足の「保存」は通知の節にしか出ないので、ここに保存ボタンは置かない）。
+           選択肢そのものは /api/runs/options が持っていて、この節も同じものを引く。
+           2箇所から配ると、語を1つ足した日に片方だけ古くなる -->
+      <div class="settings-pane" data-sec="rundef">
+        <!-- 節の説明と、選択肢を読めなかったときの断り。**グリッドの外に置く。**
+             中に入れると3列のどこかへ吸い込まれて、エラーが「上限」の行に出る -->
+        <section class="settings-sec">
+          <p class="settings-hint" id="rundef-hint">セッションを起こすフォームに、
+          最初から入っている値です。起こすときにその場で変えられます。</p>
+        </section>
+
+        <!-- **4つとも同じ形に揃える。** ラベルが左、欄が右、ヒントは欄の下。
+             ここだけ2列にしてあるのは、権限モードのラベルが長いから
+             （`auto mode（Claude が判断・危ないものだけ確認）`）―― 3列のままだと
+             `<select>` が列ごと押し広げて右のヒントを潰す。
+             **1つだけ縦積みにして逃げる手は採らない** … 同じ節に2つの並べ方が混ざって、
+             崩れてはいないのに読みづらくなる。列の指定は settings.css にある。
+             `.runform-wide` は run.css のものだが、あちらは settings.css の後に読むので効く
+             （`<link>` の順はルートの CLAUDE.md が凍結している） -->
+        <section class="settings-sec settings-grid">
+          <label class="settings-label has-icon" data-icon="shield" for="rundef-mode">権限モード</label>
+          <span class="settings-row">
+            <span class="selectbox runform-wide"><select class="settings-select" id="rundef-mode"></select></span>
+          </span>
+          <p class="settings-hint">起こすフォームで最初に選ばれているもの</p>
+
+          <label class="settings-label has-icon" data-icon="chip" for="rundef-model-pick">モデル</label>
+          <span class="settings-row">
+            <span class="selectbox runform-wide"><select class="settings-select" id="rundef-model-pick"></select></span>
+            <input class="settings-text" id="rundef-model" type="text" hidden
+                   spellcheck="false" autocomplete="off" aria-label="モデル名を自分で入力"
+                   placeholder="モデル名をそのまま書く">
+          </span>
+          <p class="settings-hint">使ったことのあるものを並べています</p>
+
+          <label class="settings-label has-icon" data-icon="clock" for="rundef-effort">思考量</label>
+          <span class="settings-row">
+            <span class="selectbox"><select class="settings-select" id="rundef-effort"></select></span>
+          </span>
+          <p class="settings-hint">深いほど時間とトークンを使います</p>
+
+          <label class="settings-label has-icon" data-icon="chart" for="rundef-budget">上限</label>
+          <span class="settings-row">
+            <input class="settings-num" id="rundef-budget" type="number" step="0.01">
+            <span class="settings-unit">USD</span>
+          </span>
+          <!-- **金が減る話なので、既定が「上限なし」であることを黙って伏せない。**
+               欄そのものは起こすフォームでも畳まずに出したままにしてある -->
+          <p class="settings-hint">空欄なら上限なし。入れた額に達すると止まります</p>
+        </section>
+      </div>
+
       <!-- 読むだけの節。押せるものが1つも無いので、面を沈めて枠を外す。
            自動起動の入切はコマンドの役目（押した結果を返せない。
            スタブが子の終了コードを伝えないため、同期的に成否を返すボタンは作れない） -->
       <div class="settings-pane" data-sec="state">
         <section class="settings-sec settings-read">
-          <h3 class="settings-h3">自動起動</h3>
+          <h3 class="settings-h3 has-icon" data-icon="deck">自動起動</h3>
           <p class="settings-state" id="startup-state" data-on="">読み込み中…</p>
           <p class="settings-hint" id="startup-legacy" hidden></p>
           <p class="settings-hint" id="startup-error" hidden></p>
@@ -396,7 +450,7 @@
         </section>
 
         <section class="settings-sec settings-read">
-          <h3 class="settings-h3">通知の様子</h3>
+          <h3 class="settings-h3 has-icon" data-icon="bell">通知の様子</h3>
           <p class="settings-hint" id="settings-health"></p>
           <p class="settings-path" id="settings-path"></p>
         </section>

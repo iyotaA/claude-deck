@@ -18,7 +18,7 @@
  */
 import { el } from './util.js';
 import { icon } from './icons.js';
-import { EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
+import { EFFORT_LABELS, MODEL_FREE, modelOptions, modelPick, modelValue } from './runs.js';
 import { dom } from './dom.js';
 import { select } from './session.js';
 import { getJson, postJson } from './api.js';
@@ -127,17 +127,26 @@ function fillOptions(o) {
 
   // 候補は「実際に使われたモデル」だけ。選び直すたびに自由入力の出し入れをする
   fillSelect(dom.runModelPick, modelOptions(o.models));
+  // 設定で選んだモデル。**候補に無いこともある**ので `modelPick` に割らせる
+  // （倒さないと <select> が空になり、指定してあるのに指定なしに見える）
+  const pick = modelPick(o.defaultModel ?? '', o.models);
+  dom.runModelPick.value = pick.sel;
   noteModel();
+  // noteModel() は候補側へ戻したとき書きかけを捨てるので、入れるのはそのあと
+  if (pick.free) dom.runModel.value = pick.free;
 
   fillSelect(dom.runEffort, [
     { value: '', label: '指定しない（CLI の既定）' },
     ...(o.efforts ?? []).map((v) => ({ value: v, label: EFFORT_LABELS[v] ?? v })),
   ]);
+  if (o.defaultEffort) dom.runEffort.value = o.defaultEffort;
 
   const b = o.budget ?? {};
   if (Number.isFinite(b.min)) dom.runBudget.min = String(b.min);
   if (Number.isFinite(b.max)) dom.runBudget.max = String(b.max);
-  if (Number.isFinite(b.default)) dom.runBudget.value = String(b.default);
+  // **既定が無い（上限なし）なら空欄にする。** 前に開いたときの値が残ると、
+  // 設定で上限を外したのに欄には数が入ったままになる
+  dom.runBudget.value = Number.isFinite(b.default) ? String(b.default) : '';
   if (Number.isFinite(o.promptMax)) dom.runPrompt.maxLength = o.promptMax;
 
   noteMode();

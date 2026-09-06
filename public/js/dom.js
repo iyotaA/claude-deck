@@ -122,6 +122,14 @@ export const dom = {
   runDirAdd: document.getElementById('run-dir-add'),
   runDirAddBtn: document.getElementById('run-dir-add-btn'),
   runDirsHint: document.getElementById('run-dirs-hint'),
+  // 起こすときの既定（settings.js）。**こちらも触った時点で保存する**（作業フォルダと同じ）。
+  // 欄の顔ぶれは起こすフォームと同じで、選択肢も同じ /api/runs/options から引く
+  runDefMode: document.getElementById('rundef-mode'),
+  runDefModelPick: document.getElementById('rundef-model-pick'),
+  runDefModel: document.getElementById('rundef-model'),
+  runDefEffort: document.getElementById('rundef-effort'),
+  runDefBudget: document.getElementById('rundef-budget'),
+  runDefHint: document.getElementById('rundef-hint'),
   startupState: document.getElementById('startup-state'),
   startupLegacy: document.getElementById('startup-legacy'),
   startupError: document.getElementById('startup-error'),

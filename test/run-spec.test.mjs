@@ -313,11 +313,19 @@ test('上限なしなら argv に --max-budget-usd を付けない', () => {
   assert.equal(spec({}).args.includes('--max-budget-usd'), false);
 });
 
-test('欄に入る既定値は範囲の中にある', () => {
+test('欄に入る既定値は、上限なしか範囲の中', () => {
   // 画面は options の default をそのまま value に入れるので、範囲の外だと
-  // 押した瞬間に丸められて「入れた額と違う額で走る」ことになる
+  // 押した瞬間に丸められて「入れた額と違う額で走る」ことになる。
+  // **null は「上限なし」で、欄が空になる。** 0 にしない（0 と不明を分ける）
+  if (DEFAULT_BUDGET_USD === null) return;
   assert.ok(DEFAULT_BUDGET_USD >= BUDGET_MIN_USD, `既定 ${DEFAULT_BUDGET_USD} が下限未満`);
   assert.ok(DEFAULT_BUDGET_USD <= BUDGET_MAX_USD, `既定 ${DEFAULT_BUDGET_USD} が上限超え`);
+});
+
+test('予算の既定は上限なし', () => {
+  // 上限を掛けると、予算切れで途中で死んだぶんがやり直しになって却って高くつく。
+  // 掛ける道は残してある（欄は畳まず出したまま・設定から既定も変えられる）
+  assert.equal(DEFAULT_BUDGET_USD, null);
 });
 
 test('範囲の外は丸める。400 では断らない', () => {
