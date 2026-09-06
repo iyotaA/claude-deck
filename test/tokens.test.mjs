@@ -145,3 +145,88 @@ test('意味トークンは実体（--l-* / --d-*）を指す。色を直に書�
     );
   }
 });
+
+/* ── コントラスト ─────────────────────────────────────── */
+
+/**
+ * 相対輝度（WCAG 2.x）。
+ *
+ * **外の道具を入れずに書ける。** 10行の純関数なので、
+ * 「依存パッケージを増やさない」に触らない。
+ *
+ * @param {string} hex `#RRGGBB`
+ * @returns {number}
+ */
+function luminance(hex) {
+  const c = [1, 3, 5]
+    .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+
+/**
+ * 対比。大きいほうが上に来るように割る。
+ *
+ * @param {string} fg 字の色
+ * @param {string} bg 地の色
+ * @returns {number}
+ */
+function contrast(fg, bg) {
+  const a = luminance(fg);
+  const b = luminance(bg);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+/**
+ * トークンの値を引く。`#RRGGBB` 以外（rgb() など）は null。
+ *
+ * @param {string} name `--l-fg` など
+ * @returns {string|null}
+ */
+function hexOf(name) {
+  const m = ROOT.match(new RegExp(String.raw`${name}\s*:\s*(#[0-9A-Fa-f]{6})\b`));
+  return m ? m[1] : null;
+}
+
+test('字の3段は、実際に敷かれている2つの地の両方で AA を満たす', () => {
+  // **`--l-bg` だけで測らない。** tokens.css の注記はその地の値だが、
+  // `body` の地は `--l-bg-sunk`（base.css）で1段沈んでいる。
+  // 沈んだ面の上で使っている実例：`.statusbar` の枠の使用率、`.settings-read`
+  const bg = hexOf('--l-bg');
+  const sunk = hexOf('--l-bg-sunk');
+  assert.ok(bg && sunk, '地の値が読めない');
+
+  for (const name of ['--l-fg', '--l-fg-muted', '--l-fg-faint']) {
+    const fg = hexOf(name);
+    assert.ok(fg, `${name} が読めない`);
+    for (const [label, ground] of [['--l-bg', bg], ['--l-bg-sunk', sunk]]) {
+      const r = contrast(fg, ground);
+      assert.ok(
+        r >= 4.5,
+        `${name} が ${label} の上で ${r.toFixed(2)}:1（AA の 4.5 を割る）`,
+      );
+    }
+  }
+});
+
+test('暗いほうの字の3段も、両方の地で AA を満たす', () => {
+  const dark = block(':root[data-theme="dark"] {');
+  const hex = (name) => {
+    const m = dark.match(new RegExp(String.raw`${name}\s*:\s*(#[0-9A-Fa-f]{6})\b`));
+    return m ? m[1] : null;
+  };
+  // 暗いほうは `--d-*` の実体が `:root` 側に居る。意味トークンから辿らず直に引く
+  const bg = hexOf('--d-bg');
+  const sunk = hexOf('--d-bg-sunk');
+  assert.ok(bg && sunk, `暗いほうの地が読めない（${bg} / ${sunk}）`);
+
+  for (const name of ['--d-fg', '--d-fg-muted', '--d-fg-faint']) {
+    const fg = hexOf(name);
+    assert.ok(fg, `${name} が読めない`);
+    for (const [label, ground] of [['--d-bg', bg], ['--d-bg-sunk', sunk]]) {
+      const r = contrast(fg, ground);
+      assert.ok(r >= 4.5, `${name} が ${label} の上で ${r.toFixed(2)}:1（AA の 4.5 を割る）`);
+    }
+  }
+  assert.ok(hex, '（dark ブロックの読み取りは将来の拡張用。いまは実体を直に見ている）');
+});

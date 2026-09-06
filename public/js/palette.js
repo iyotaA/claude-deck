@@ -232,7 +232,12 @@ function draw() {
   items.forEach((it, i) => {
     if (it.group !== group) {
       group = it.group;
-      dom.palList.append(el('div', 'pal-g', group));
+      // **listbox の直下に role を持たない子を置かない。**
+      // 見出しは option の入れ物（group）として名乗る。名前は中の文字が持つので
+      // aria-label は付けない（二重に読まれる）
+      const head = el('div', 'pal-g', group);
+      head.setAttribute('role', 'presentation');
+      dom.palList.append(head);
     }
 
     const node = el('div', 'pal-i');
@@ -305,6 +310,7 @@ function open() {
   at = 0;
   dom.palQ.value = '';
   say('');
+  dom.palQ.setAttribute('aria-expanded', 'true');
   dom.palette.showModal();
   // 並べるのは開いたあと。閉じているあいだは scrollIntoView が効かない
   draw();
@@ -328,6 +334,14 @@ function onKey(ev) {
 
 /** 配線。main.js から1回だけ呼ぶ */
 export function initPalette() {
+  // 閉じたら `aria-expanded` を戻す。**`cancel` と `close` の両方に配線する。**
+  // 仕様では Esc は cancel → close の順に来るが、実測（Chrome）では
+  // cancel しか来ないことがある（zoom.js が同じ踏み方をしている）。
+  // 片方だけだと、Esc で閉じたあと「開いている」と名乗ったままになる
+  for (const ev of ['cancel', 'close']) {
+    dom.palette.addEventListener(ev, () => dom.palQ.setAttribute('aria-expanded', 'false'));
+  }
+
   // Ctrl+K は document で拾う。入力欄に居ても開けるようにしたいので、
   // 焦点の居場所で分岐しない（drawer.js の Esc と同じ流儀）。
   // Shift 付き（ev.key が 'K'）は拾わない

@@ -139,7 +139,11 @@
    これより狭めると3行になってカードの高さが揃わなくなる */
 .archive-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  /* **`min()` で包む。** 素の `minmax(19rem, 1fr)` は 19rem（304px）を下限として
+     譲らないので、それより狭い窓では列が器からはみ出して横スクロールが出る。
+     `min(19rem, 100%)` なら、窓が狭いときだけ下限のほうが折れる
+     （数値モードの `.usage-grid` が先に同じ書き方をしている） */
+  grid-template-columns: repeat(auto-fill, minmax(min(19rem, 100%), 1fr));
   gap: .5rem;
   margin: 0;
   padding: .6rem;

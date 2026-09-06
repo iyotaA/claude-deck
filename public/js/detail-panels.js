@@ -151,14 +151,30 @@ export function timelinePanel(d) {
   return p.section;
 }
 
+/**
+ * 一度に並べるファイルの数。
+ *
+ * 全部出すと、大きいセッション（実測で 100 件超）ではパネルだけで画面が埋まる。
+ * **切ること自体は正しいが、切ったことは言う**（下を見よ）。
+ */
+const FILES_MAX = 40;
+
 /** @param {object} d 詳細の応答 */
 export function filesPanel(d) {
   if (!d.digest.files.length) return null;
 
-  const p = panel('書き換えたファイル', { id: SEC.files, count: `${d.digest.files.length} 件` });
+  const all = d.digest.files;
+  const p = panel('書き換えたファイル', { id: SEC.files, count: `${all.length} 件` });
   const ul = el('ul', 'files');
-  for (const f of d.digest.files.slice(0, 40)) ul.append(fileLi(f.path, f.count));
+  for (const f of all.slice(0, FILES_MAX)) ul.append(fileLi(f.path, f.count));
   p.body.append(ul);
+
+  // **黙って落とさない。** 見出しの件数は全件を出すので、言わないと
+  // 「120 件」と書いてあるのに 40 行しか出ない状態になる。
+  // 窓口の側（`/api/archive` と `/api/usage`）は切ったことを `scanLimited` で返しているので、
+  // 画面もそれに揃える（0 と「不明」を分けるのと同じ線）
+  const rest = all.length - FILES_MAX;
+  if (rest > 0) p.body.append(el('p', 'note', `ほか ${num(rest)} 件は出していません`));
 
   return p.section;
 }
