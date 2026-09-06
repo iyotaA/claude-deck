@@ -223,3 +223,40 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+
+/* 本文に当たった場所の抜き書き。**深い検索のときだけ出る。**
+
+   面を沈めて枠を外す（`.settings-read` と同じ形）―― 押せるものではなく、
+   カードの主役（題）でもない。「なぜこれが出たか」を読むためのもの。
+
+   等幅にしない。ログの本文は日本語の散文なので、読む字で出す。 */
+.card-hits {
+  display: grid;
+  gap: .25rem;
+  margin-top: .4rem;
+  padding: .4rem .5rem;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+}
+
+/* 3行で切る。**抜き書きは1件あたり 160 字**（サーバー側の SNIPPET_MAX）なので、
+   折り返すと1件でカードの背が倍になる。読み切れなければ開けばいい */
+.card-hit {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: var(--fs-0);
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* 当たった語。時系列の検索と同じ見せ方にする（`markUp` が付ける `<mark>`）。
+   **色を新しく作らない** … `--accent-soft` を敷いて字はそのまま */
+.card-hit mark {
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--fg);
+  font-weight: 700;
+}

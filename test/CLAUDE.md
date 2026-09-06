@@ -63,6 +63,7 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `docs.test.mjs` | **地図が実物と食い違っていないか。** `CLAUDE.md` 群の表に載っていないファイルがあると落ちる。CSS は `index.html` の `<link>` との並びまで見る |
 | `shared-text.test.mjs` | 文字列の小道具（`oneLine` / `clip` / `errText` / `projectNameOf`）。**全層から使う**のにテストが無かった。切る境目（max ちょうど）・空を null にすること・Error でないものを投げられても落ちないこと・区切りが `/` と `\` で混ざること |
 | `shared-kit.test.mjs` | 残りの小道具4枚（`lru` / `env` / `objects` / `tools`）。LRU が「取ったものを最近使ったに戻す」こと（ここが芯。無いとただの FIFO）・**store を共有しないこと**・`0` を「立っていない」と読むこと・`Task*` を前置で拾わないこと・`ExitPlanMode` が `plan` を見ること |
+| `grep.test.mjs` | 本文の検索の**判断だけ**。どの行から人が読む文字列を取るか（ツールの引数と結果は読まない）・当たった場所の切り出し方（前後の `…`・上限・大小の無視・空白の潰し） |
 | `syntax.test.mjs` | **構文として読めるか**（`node --check`）。`server.mjs` と `cli.mjs` と `public/js/` は import しているテストが1枚も無いので、ここが無いと `}` を1つ落としても全部通る。実行はしない（`import()` だと画面側は `document` が無くて落ち、`server.mjs` は listen を始める） |
 | `contract.test.mjs` | **C#・PowerShell と Node のあいだの約束**（`/api/health` のフィールド・argv の旗・環境変数・紙の名前とキー・パック名・**既定のポート**・**紙に書く状態の語**・**文字コードの約束**）。ここだけ**ソースの字を直に読む**。理由は次の節 |
 
