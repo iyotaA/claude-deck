@@ -83,6 +83,20 @@ const ANSWER_BODY_MAX = 64 * 1024;
 let boundPort = 0;
 /** 取りこぼし対策の定期確認。fs.watch が効かない環境でもこれで動く。 */
 const POLL_MS = 2000;
+/**
+ * 誰も見ていないときの確認の間隔。
+ *
+ * **止めない。** `fs.watch` が効かない置き場所（ネットワーク越しなど）では、
+ * この定期確認だけが変化に気づく手段になる。止めると、久しぶりに窓を開けたときに
+ * 最初の1回が空振りして「動いていない」ように見える。
+ *
+ * 30秒にしてあるのは、窓を開けた瞬間に `refresh(true)` が走る（`stream.js` が
+ * つなぎに来る）ので、**この間隔が体感に出るのは通知だけ**だから ――
+ * そしてその通知が有効なときは、そもそもここへ落ちない。
+ */
+const IDLE_POLL_MS = 30000;
+/** 誰も見ていないあいだに空振りした回数。`IDLE_POLL_MS` ぶん貯まったら1回引く */
+let idleTicks = 0;
 /** 変更通知が連続で飛んでくるのをまとめる。 */
 const DEBOUNCE_MS = 250;
 /**
@@ -438,6 +452,57 @@ function serveAsync(res, promise, notFound = null) {
     },
     (err) => sendJson(res, 500, { ok: false, reason: errText(err) }),
   );
+}
+
+/**
+ * いま走っている重い読み取り。鍵 → 約束。
+ *
+ * @type {Map<string, Promise<object>>}
+ */
+const inFlight = new Map();
+
+/**
+ * 同じ読み取りが重なったら、走っているものに相乗りする。
+ *
+ * **重い窓口が3本ある**（`/api/usage`・`/api/archive?deep=1`・`/usage/baseline`）。
+ * どれもログを全文読むので、タブを2枚開いて両方が引くと、
+ * **同じファイルを2回読んで2回 `JSON.parse` する。**
+ * `refresh()` には直列化があるのに、こちらには何も無かった。
+ *
+ * **読み取り専用なので、相乗りで正しさは損なわれない。** 返すのは同じ瞬間の
+ * 同じ中身で、書き込みが混ざる余地が無い（`~/.claude` には書かない）。
+ *
+ * 効くのは2つ。
+ *
+ *   - タブを複数開いたとき、絞り込みを素早く切り替えたとき（画面側の間引きの外側）
+ *   - **外から連打されたとき** … GET は書き込みの門番を通らないので、
+ *     他所のページから `fetch(mode:'no-cors')` で撃てる。応答は読めないが、
+ *     こちらは毎回 60 本の全文読み（実測 2.5〜3.3秒）を走らせることになっていた
+ *
+ * @param {string} key 同じ読み取りだと言える鍵。クエリまで含める
+ * @param {() => Promise<object>} make 走らせる本体
+ * @returns {Promise<object>}
+ */
+function coalesce(key, make) {
+  const running = inFlight.get(key);
+  if (running) return running;
+
+  // **`make()` が同期的に投げても Map に残さない。** try で包まずに
+  // set してしまうと、投げた鍵が永久に残って以後ずっと同じ失敗を配ることになる
+  let p;
+  try {
+    p = Promise.resolve(make());
+  } catch (err) {
+    return Promise.reject(err);
+  }
+
+  // 終わったら必ず外す。**成功も失敗も同じ扱い** ―― 失敗を抱えたままにすると、
+  // 一度こけた鍵が次からずっとその失敗を返す（キャッシュではなく合流なので）
+  const done = p.finally(() => {
+    if (inFlight.get(key) === done) inFlight.delete(key);
+  });
+  inFlight.set(key, done);
+  return done;
 }
 
 function readJsonBody(req, limit = BODY_MAX) {
@@ -949,7 +1014,11 @@ function recentModels() {
     const hit = checkModel(row?.model);
     if (hit.ok) names.add(hit.model);
   }
-  return [...names].sort((a, b) => a.localeCompare(b)).slice(0, MODEL_CHOICE_MAX);
+  const all = [...names].sort((a, b) => a.localeCompare(b));
+  // **切ったことを言えるように、全体の数も返す。**
+  // ここは許可リストではないので切られても詰まないが（無い名前は「自分で入力」から渡せる）、
+  // 黙って落とすと「使ったはずのモデルが候補に無い」の理由が画面から読めない
+  return { models: all.slice(0, MODEL_CHOICE_MAX), total: all.length };
 }
 
 /**
@@ -1330,10 +1399,49 @@ function watch(dir, recursive) {
 function startWatching() {
   const okSessions = watch(sessionsDir, false);
   const okProjects = watch(projectsDir, true);
-  const poll = setInterval(() => queueRefresh(0), POLL_MS);
+  // **刻みは IDLE_POLL_MS ぶん細かく打ち、要るときだけ実際に引く。**
+  // `setInterval` を張り替える形にすると、切り替わる瞬間の取りこぼしを
+  // 自分で面倒みることになる（張り替えた直後に1回打つのか、次まで待つのか）
+  const poll = setInterval(pollTick, POLL_MS);
   poll.unref?.();
   timers.push(poll);
   return { okSessions, okProjects };
+}
+
+/**
+ * ポーリングの1打ち。**誰も見ていなくて通知も要らないなら、間隔を落とす。**
+ *
+ * この画面はログオン時の自動起動で常駐するのが主な使い方なので、
+ * **ブラウザを1枚も開いていない時間のほうが長い。** それでも今までは
+ * 2秒ごとに `listSessions()`（登録簿の全読み ＋ 索引 ＋ 行ごとの `readTail`）が
+ * 走り切っていた ―― `broadcast()` は `clients.size === 0` で即 return するが、
+ * それは**読み終わったあと**の話で、ディスクはもう舐めている。
+ *
+ * **通知が有効なら落とさない。** あれは「返事待ちに気づけない」を埋めるための
+ * 仕組みで、遅らせると鳴るのが遅れる（`settleMs` は既定20秒なので、
+ * 30秒間隔だと落ち着き待ちの判定そのものが粗くなる）。
+ *
+ * **実行中の子がいるときも落とさない。** 台帳の行は SSE で押し出しているが、
+ * 会話ログ側の状態はこの経路でしか拾えない。
+ */
+function pollTick() {
+  // 子がいるかは `livePids()` で見る。**台帳の状態で判定しない** ――
+  // 終端の見方が2つある（`isRunOver` と `isChildDone`）ので、
+  // ここで選ぶと `run/` の判断をサーバー側へ書き写すことになる
+  const busy = clients.size > 0
+    || notifier.settings().enabled
+    || runner.livePids().length > 0;
+  if (busy) {
+    idleTicks = 0;
+    queueRefresh(0);
+    return;
+  }
+
+  // 誰も見ていない。IDLE_POLL_MS に1回だけ引く
+  idleTicks += 1;
+  if (idleTicks * POLL_MS < IDLE_POLL_MS) return;
+  idleTicks = 0;
+  queueRefresh(0);
 }
 
 /* ------------------------------------------------------------------ 起動 */
@@ -1362,7 +1470,11 @@ const server = http.createServer((req, res) => {
     // 作りに行かないのと同じ理由）。この応答には間に合わなくてよく、
     // 次に引いたときに新しいセッションが候補へ出ればそれで足りる
     touchSkillIndex();
-    serveAsync(res, listArchive(parseArchiveQuery(url.searchParams)));
+    // 同じ絞り込みが重なったら相乗りする（`deep=1` はログを開くので重い）。
+    // 鍵はクエリそのもの。**並べ替えてから使う** ―― 同じ絞り込みでも
+    // キーの順が違うだけで別物に見えると、合流の意味が薄れる
+    const q = [...url.searchParams].sort().map(([k, v]) => `${k}=${v}`).join('&');
+    serveAsync(res, coalesce(`archive:${q}`, () => listArchive(parseArchiveQuery(url.searchParams))));
     return;
   }
 
@@ -1371,7 +1483,8 @@ const server = http.createServer((req, res) => {
   // ログを全文読むので、一番重い窓口。上限（USAGE_SCAN_MAX）で切って、
   // 切ったことは meta.scanLimited で正直に返す
   if (pathname === '/api/usage') {
-    serveAsync(res, listUsage(parseUsageQuery(url.searchParams)));
+    const q = [...url.searchParams].sort().map(([k, v]) => `${k}=${v}`).join('&');
+    serveAsync(res, coalesce(`usage:${q}`, () => listUsage(parseUsageQuery(url.searchParams))));
     return;
   }
 
@@ -1405,7 +1518,11 @@ const server = http.createServer((req, res) => {
   // 混ぜると数値の表示そのものが遅くなる。画面は先に数値を出し、遅れて差を書き足す
   const baselineMatch = /^\/api\/sessions\/([\w.-]{1,80})\/usage\/baseline$/.exec(pathname);
   if (baselineMatch) {
-    serveAsync(res, getSessionBaseline(baselineMatch[1]), 'そのセッションが見つかりません');
+    serveAsync(
+      res,
+      coalesce(`baseline:${baselineMatch[1]}`, () => getSessionBaseline(baselineMatch[1])),
+      'そのセッションが見つかりません',
+    );
     return;
   }
 
@@ -1476,7 +1593,11 @@ const server = http.createServer((req, res) => {
       defaultMode: runDefaults.permissionMode ?? DEFAULT_PERMISSION_MODE,
       // **選ぶための材料であって、許可リストではない。** 中身は実際に使われたモデルで、
       // ここに無い名前も画面の自由入力から渡せる（recentModels の説明を見ること）
-      models: recentModels(),
+      ...(() => {
+        const m = recentModels();
+        // 切られたぶんの数だけ渡す。**0 のときも出す**（0 と不明を分ける）
+        return { models: m.models, modelsOmitted: Math.max(0, m.total - m.models.length) };
+      })(),
       // 設定で選んだモデル。候補（`models`）に無いこともあるので、画面はこれを別に見る
       defaultModel: runDefaults.model,
       efforts: EFFORTS,

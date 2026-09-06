@@ -18,7 +18,7 @@
  */
 import { el } from './util.js';
 import { icon } from './icons.js';
-import { EFFORT_LABELS, MODEL_FREE, modelOptions, modelPick, modelValue } from './runs.js';
+import { EFFORT_LABELS, MODEL_FREE, modelHint, modelOptions, modelPick, modelValue } from './runs.js';
 import { dom } from './dom.js';
 import { select } from './session.js';
 import { getJson, postJson } from './api.js';
@@ -131,6 +131,10 @@ function fillOptions(o) {
   // （倒さないと <select> が空になり、指定してあるのに指定なしに見える）
   const pick = modelPick(o.defaultModel ?? '', o.models);
   dom.runModelPick.value = pick.sel;
+  // 候補を切ったなら、そう言う（切られても「自分で入力」から渡せることも添える）
+  dom.runModelHint.textContent = modelHint(
+    o, '使ったことのあるものを並べています。使えるかどうかは CLI が決めます',
+  );
   noteModel();
   // noteModel() は候補側へ戻したとき書きかけを捨てるので、入れるのはそのあと
   if (pick.free) dom.runModel.value = pick.free;

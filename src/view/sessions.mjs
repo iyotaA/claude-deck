@@ -150,6 +150,10 @@ export async function listSessions(now = Date.now()) {
   for (const rec of ended.slice(0, MAX_ROWS)) {
     jobs.push({ registry: null, transcript: rec });
   }
+  // **切ったことを数える。** 終了済みが多い日に「あるはずの行が無い」になるのに、
+  // 画面からは理由が分からなかった。`/api/archive` と `/api/usage` は
+  // `scanLimited` で正直に返しているので、ここもそれに揃える
+  const endedOmitted = Math.max(0, ended.length - MAX_ROWS);
 
   const built = await Promise.all(jobs.map((job) => buildRow({ ...job, now })));
   // 稼働中は中身が薄くても必ず出す（立ち上げ直後がこれに当たる）。
@@ -169,6 +173,11 @@ export async function listSessions(now = Date.now()) {
     stateBlocking: STATE_BLOCKING,
       registryReadErrors: readErrors,
       transcriptsIndexed: index.size,
+      // 一覧に載せる上限と、そこで落ちた終了済みの数。
+      // **0 のときも出す** ―― キーごと消すと「切られたのか、この版が数えないのか」が
+      // 区別できない（0 と不明を分ける）。行き先は書庫だと画面が案内できる
+      rowsMax: MAX_ROWS,
+      endedOmitted,
     },
   };
 }

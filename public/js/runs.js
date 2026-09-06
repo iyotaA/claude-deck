@@ -52,6 +52,25 @@ export const EFFORT_LABELS = {
 export const MODEL_FREE = '__free__';
 
 /**
+ * モデルの候補に添える1行。**切られたぶんがあれば、そう言う。**
+ *
+ * 候補は許可リストではない（無い名前は「自分で入力」から渡せる）ので、
+ * 切られても詰まりはしない。それでも黙って落とすと
+ * 「使ったはずのモデルが候補に無い」の理由が画面から読めない。
+ *
+ * **文言をここに置くのは、起こすフォームと設定画面の両方が使うから。**
+ * 片方に書くともう片方が同じものを持つことになる（EFFORT_LABELS と同じ理由）。
+ *
+ * @param {object|null} opts /api/runs/options の応答
+ * @param {string} base 既定の1行
+ * @returns {string}
+ */
+export function modelHint(opts, base) {
+  const n = opts?.modelsOmitted ?? 0;
+  return n > 0 ? `${base}（多いので新しい順に ${n} 件は省いています。自分で入力から渡せます）` : base;
+}
+
+/**
  * モデルの <select> に並べるもの。
  *
  * 先頭は「指定しない」。**空欄＝CLI の既定**で、これは「外す」の指定でもある。
