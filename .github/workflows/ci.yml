@@ -17,8 +17,6 @@
 #
 # **windows-latest で回す。** `scripts/` は PowerShell、`launcher/` は
 # `net10.0-windows` で、どちらも Linux では確かめられない。
-# Node 側だけなら ubuntu でも通るが、走らせる版を2つに分けると
-# 「どちらで落ちたか」を毎回読み分けることになる。
 #
 # **依存は増えない。** `dependencies` は空のままで、CI が入れるのは
 # ランナーに最初から居る Node と .NET だけ（`npm ci` すら要らない ―― lock も無い）。
@@ -36,34 +34,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  # **版ごとにジョブを分ける。** `setup-node` の `node-version` に複数行を渡すと
+  # 「18\n22」という1つの版名として扱われて落ちる（実測。初回の CI がこれで転んだ）。
+  # 分ければ、どちらの版で落ちたのかもチェックの名前で分かる
+  test:
+    name: テスト（Node ${{ matrix.node }}）
+    runs-on: windows-latest
+    strategy:
+      # 片方が落ちても、もう片方の結果は見たい
+      fail-fast: false
+      matrix:
+        # `engines` は ">=18"。**いちばん古い版と、いま手元で使っている版の両方で見る。**
+        # 18 でしか落ちない書き方（新しい構文）が入るのを、ここで止める
+        node: ['18', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --test
+
+  # Windows でしか確かめられない2つ。**Node のテストとは分ける** ――
+  # 版を2つ回すあいだ、同じものを2回ビルドする意味が無い
+  windows:
+    name: PowerShell と C#
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
-      # engines は ">=18"。**いちばん古い版と、いま手元で使っている版の両方で見る。**
-      # 18 でしか落ちない書き方（新しい構文）が入るのを、ここで止める
-      - uses: actions/setup-node@v4
-        with:
-          node-version: |
-            18
-            22
-
-      - name: テスト（Node 22）
-        run: node --test
-
-      - name: テスト（Node 18）
-        shell: pwsh
-        run: |
-          # setup-node が入れた 18 を直に呼ぶ。`engines` の下限で通ることを見る
-          $node18 = Join-Path $env:RUNNER_TOOL_CACHE 'node/18.*/x64/node.exe'
-          $exe = (Get-Item $node18 -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-          if (-not $exe) {
-            Write-Host '::warning::Node 18 が見つかりません。22 のぶんだけで判断します'
-            exit 0
-          }
-          & $exe --test
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # `.ps1` の構文。**BOM の有無は contract.test.mjs が見ているので、ここは中身**
       - name: PowerShell の構文
@@ -80,7 +77,7 @@ jobs:
             }
           }
           if ($bad -gt 0) { exit 1 }
-          Write-Host "PowerShell: OK"
+          Write-Host 'PowerShell: OK'
 
       - uses: actions/setup-dotnet@v4
         with:
