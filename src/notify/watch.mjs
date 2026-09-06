@@ -191,7 +191,61 @@ export function createNotifyWatch({
   const sendTimes = [];
 
   const stats = { seeded: 0, settled: 0, taken: 0, dropped: 0, vanished: 0, reminded: 0 };
-  let overLimit = false;
+
+  /**
+   * 1時間の窓が埋まっているか。**旗として持たない。**
+   *
+   * 前は一度立てたら戻す場所がどこにも無く、`index.mjs` が
+   * 「起動し直すと再開します」と言うしかなかった。**忙しい日ほど上限に当たる**ので、
+   * いちばん通知が要る日に黙ることになる。
+   *
+   * いまは呼ばれるたびに窓を掃除して数える。窓が流れれば勝手に false へ戻る。
+   *
+   * @param {number} now いまの時刻
+   * @returns {boolean}
+   */
+  function isOverLimit(now) {
+    return countInWindow(now) >= maxPerHour;
+  }
+
+  /**
+   * 1時間の窓に入っている送信の数。**数えるだけで、捨てない。**
+   *
+   * ここで `sendTimes.shift()` すると、`stats()` を呼んだだけで状態が変わる
+   * ―― `health()` は引数なしで（＝`Date.now()` で）呼ぶので、
+   * **時刻を渡してテストしている最中に窓が空になる**（実際に踏んだ）。
+   * 捨てるのは `takeReady`（状態を進める場所）の仕事にする。
+   *
+   * @param {number} now いまの時刻
+   * @returns {number}
+   */
+  function countInWindow(now) {
+    let n = 0;
+    for (const t of sendTimes) if (now - t <= HOUR_MS) n += 1;
+    return n;
+  }
+
+  /**
+   * 窓がいつ空くか。埋まっていなければ null。
+   *
+   * **画面に「あと何分で戻る」を出すために要る。** 止まったことだけを伝えて
+   * 待ち時間を言わないと、人は再起動しに行く（それが前の唯一の逃げ道だった）。
+   *
+   * @param {number} now いまの時刻
+   * @returns {number|null} 空くまでのミリ秒
+   */
+  function overLimitUntil(now) {
+    if (!isOverLimit(now)) return null;
+    // 窓に入っているうち、いちばん古いものが出れば1通ぶん空く。
+    // **`sendTimes[0]` を直に見ない** ―― 掃除をやめたので、
+    // 窓の外に残っている古い記録が先頭に居ることがある
+    let oldest = null;
+    for (const t of sendTimes) {
+      if (now - t > HOUR_MS) continue;
+      if (oldest === null || t < oldest) oldest = t;
+    }
+    return oldest === null ? null : Math.max(0, oldest + HOUR_MS - now);
+  }
 
   /**
    * その行を通知の対象として見るか。
@@ -307,11 +361,10 @@ export function createNotifyWatch({
   function takeReady(now) {
     if (outbox.length === 0) return [];
 
+    // **捨てるのはここだけ。** `stats()` は読み取りなので、呼んだだけで
+    // 状態が変わってはいけない（`isOverLimit` は数えるだけにしてある）
     while (sendTimes.length && now - sendTimes[0] > HOUR_MS) sendTimes.shift();
-    if (sendTimes.length >= maxPerHour) {
-      overLimit = true;
-      return [];
-    }
+    if (isOverLimit(now)) return [];
 
     const out = [];
     const rest = [];
@@ -401,13 +454,16 @@ export function createNotifyWatch({
    *
    * @returns {object}
    */
-  function statsOf() {
+  function statsOf(now = Date.now()) {
     return {
       ...stats,
       pending: pending.size,
       waiting: outbox.length,
       known: known.size,
-      overLimit,
+      // **その時刻での判定。** 呼んだ瞬間に窓を掃除するので、
+      // 1時間が流れていれば黙って false に戻る
+      overLimit: isOverLimit(now),
+      overLimitUntil: overLimitUntil(now),
     };
   }
 

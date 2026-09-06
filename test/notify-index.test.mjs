@@ -463,3 +463,52 @@ test('テスト送信の失敗理由に URL を含めない', async () => {
   assert.ok(!r.reason.includes('xyz123abc456'));
   assert.ok(!JSON.stringify(n.health()).includes('xyz123abc456'));
 });
+
+test('上限に達したら止まるが、窓が空けば自分で戻る', async () => {
+  // **前は `paused` から抜ける道が「起動し直す」しか無かった。**
+  // 忙しい日ほど上限に当たるので、いちばん通知が要る日に黙ることになっていた。
+  const s = spy();
+  const n = createNotifier({ config: on(), bootAt: 0, post: s.fn, maxPerHour: 1 });
+  n.setBaseUrl('http://127.0.0.1:4317/');
+
+  // 1通目は通る
+  n.observe([row('toolu_1')], T0);
+  await n.flush(T0);
+  assert.equal(n.health().state, 'ok');
+
+  // 2通目で上限。止めたことを1通だけ送る
+  n.observe([{ ...row('toolu_2'), sessionId: 'sess-b' }], T0 + 1000);
+  await n.flush(T0 + 1000);
+  assert.equal(n.health().state, 'paused');
+  assert.match(n.health().reason, /自動で再開/, '待ち時間と戻り方を言う');
+  assert.doesNotMatch(n.health().reason, /起動し直す/, '再起動を促さない');
+
+  // 窓が空く前は止まったまま
+  await n.flush(T0 + 1_800_000);
+  assert.equal(n.health().state, 'paused');
+
+  // 1時間たてば、次の flush で自分で戻る
+  await n.flush(T0 + 3_600_002);
+  assert.equal(n.health().state, 'ok', '窓が流れたら再開する');
+  assert.equal(n.health().reason, null, '止めた理由も消す');
+});
+
+test('上限で止めたことは1通だけ知らせる', async () => {
+  // 止まっているあいだ flush は何度も呼ばれる（FLUSH_MS のタイマ）。
+  // そのたびに「止めました」を送ると、上限の意味が無くなる
+  const s = spy();
+  const n = createNotifier({ config: on(), bootAt: 0, post: s.fn, maxPerHour: 1 });
+  n.setBaseUrl('http://127.0.0.1:4317/');
+
+  n.observe([row('toolu_1')], T0);
+  await n.flush(T0);
+  const afterFirst = s.calls.length;
+
+  n.observe([{ ...row('toolu_2'), sessionId: 'sess-b' }], T0 + 1000);
+  await n.flush(T0 + 1000);
+  const afterPause = s.calls.length;
+  assert.equal(afterPause, afterFirst + 1, '止めたことを1通');
+
+  for (const at of [T0 + 2000, T0 + 3000, T0 + 4000]) await n.flush(at);
+  assert.equal(s.calls.length, afterPause, '止まっているあいだは何も送らない');
+});

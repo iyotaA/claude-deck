@@ -231,7 +231,42 @@ test('1時間の上限に達したら止まる', () => {
 
   w.observe([row({ id: 'c' })], AFTER_BOOT);
   assert.deepEqual(w.takeReady(AFTER_BOOT), []);
-  assert.equal(w.stats().overLimit, true);
+  // **時刻を渡す。** `overLimit` は旗ではなく「その時刻で窓が埋まっているか」なので、
+  // 省くと `Date.now()`（テストの T0 から遠い未来）で数えて必ず false になる
+  assert.equal(w.stats(AFTER_BOOT).overLimit, true);
+});
+
+test('上限に達しているあいだ、いつ空くかを言える', () => {
+  // **止めたことだけを伝えて待ち時間を言わないと、人は再起動しに行く**
+  // （それが前の唯一の逃げ道だった）
+  const w = createNotifyWatch({ settleMs: 0, graceMs: 0, maxPerHour: 1, bootAt: T0 });
+  w.observe([row({ id: 'a' })], AFTER_BOOT);
+  w.takeReady(AFTER_BOOT);
+
+  w.observe([row({ id: 'b' })], AFTER_BOOT);
+  w.takeReady(AFTER_BOOT);
+
+  const s = w.stats(AFTER_BOOT);
+  assert.equal(s.overLimit, true);
+  assert.equal(s.overLimitUntil, 3_600_000, 'いちばん古い送信が窓から出るまで');
+
+  // 30分たてば、残りも半分になる
+  assert.equal(w.stats(AFTER_BOOT + 1_800_000).overLimitUntil, 1_800_000);
+});
+
+test('窓が流れれば overLimit は勝手に戻る', () => {
+  // **旗として持たない。** 前は一度立てたら戻す場所がどこにも無く、
+  // 「起動し直すと再開します」と言うしかなかった
+  const w = createNotifyWatch({ settleMs: 0, graceMs: 0, maxPerHour: 1, bootAt: T0 });
+  w.observe([row({ id: 'a' })], AFTER_BOOT);
+  w.takeReady(AFTER_BOOT);
+  w.observe([row({ id: 'b' })], AFTER_BOOT);
+  w.takeReady(AFTER_BOOT);
+  assert.equal(w.stats(AFTER_BOOT).overLimit, true);
+
+  const later = AFTER_BOOT + 3_600_001;
+  assert.equal(w.stats(later).overLimit, false, '1時間たてば false');
+  assert.equal(w.stats(later).overLimitUntil, null, '空いていれば null');
 });
 
 test('1時間たてば上限の数えは戻る', () => {
@@ -638,4 +673,20 @@ test('rearm した猶予を抜けたあとの待ちは鳴る', () => {
   const got = w.takeReady(now + 10_000);
   assert.equal(got.length, 1);
   assert.equal(got[0].key, 'sess-a::toolu_2');
+});
+
+test('stats を呼んでも窓の記録は消えない', () => {
+  // **`stats()` は読み取り。** 前は中で `sendTimes.shift()` していたので、
+  // `health()`（引数なし＝`Date.now()` で呼ぶ）が窓を空にしていた。
+  // 時刻を渡して確かめている最中に、別の呼び出しが状態を進めることになる
+  const w = createNotifyWatch({ settleMs: 0, graceMs: 0, maxPerHour: 1, bootAt: T0 });
+  w.observe([row({ id: 'a' })], AFTER_BOOT);
+  w.takeReady(AFTER_BOOT);
+
+  // 遠い未来の時刻で読む（本番の health() がこれに当たる）
+  w.stats(Date.now());
+  w.stats();
+
+  // それでも、元の時刻から見れば窓はまだ埋まっている
+  assert.equal(w.stats(AFTER_BOOT).overLimit, true, 'stats が窓を空にした');
 });
