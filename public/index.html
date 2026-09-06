@@ -36,6 +36,11 @@
 <link rel="stylesheet" href="css/narrow.css">
 </head>
 <body>
+<!-- キーボードで来た人が、上のバーの道具8つを通り抜けて本文へ跳ぶ口。
+     **焦点が当たるまで見えない**（.skip:not(:focus) が画面の外へ逃がす）ので、
+     触っている人の視界には出ない。行き先は詳細ペインの流れる箱で、
+     あそこは既に tabindex="-1" を持っている（焦点を受けられる） -->
+<a class="skip" href="#detail">本文へ移動</a>
 <div class="app" id="app">
 
   <header class="topbar">
@@ -62,7 +67,7 @@
            渡された側が自分の版を確かめられる場所が、画面にはここしか無い -->
       <span class="ver" id="ver" hidden></span>
       <!-- 押せないものは面も枠も持たない。隣のボタンと形で分ける -->
-      <span class="live" id="live" data-live="wait">接続中</span>
+      <span class="live" id="live" role="status" data-live="wait">接続中</span>
       <!-- ここだけ文字を残す。他の3つと違って、押すと新しいものが生まれる -->
       <button class="btn is-lead" id="runform-open" type="button" aria-label="新しいセッションを起こす">起こす</button>
       <!-- 補助の4つはアイコンだけにする。名前は title と aria-label に残るので、
@@ -117,7 +122,7 @@
     <div class="hero-band" id="hero-band"></div>
   </div>
 
-  <div class="deck">
+  <main class="deck">
     <!-- 左端のレール。一覧の開閉だけを持つ。中身は drawer.js が組む
          （右のレールを detail.js が組むのと同じ流儀で、並びと語彙を1箇所に置く）。
 
@@ -274,7 +279,7 @@
     <!-- 右端のレール。中身は detail.js が組む（並びと語彙を1箇所に持つため）。
          閉じていても幅は取ったままにする。消すと押すたびに中央の幅が跳ねる -->
     <nav class="rail" id="rail" aria-label="詳しいところを開く"></nav>
-  </div>
+  </main>
 
   <!-- 引き出しの背後を覆う膜。押すと閉じる -->
   <div class="scrim" id="scrim"></div>
@@ -746,7 +751,7 @@
 <dialog class="pal" id="palette" aria-label="コマンド入力">
   <div class="pal-in">
     <span class="pal-caret" aria-hidden="true">&gt;</span>
-    <input class="pal-q" id="pal-q" type="text" role="combobox" aria-expanded="true"
+    <input class="pal-q" id="pal-q" type="text" role="combobox" aria-expanded="false"
            aria-controls="pal-list" autocomplete="off" spellcheck="false"
            placeholder="セッションの名前か、やりたいことを打つ">
   </div>

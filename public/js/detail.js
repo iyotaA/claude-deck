@@ -264,6 +264,9 @@ function tabBar(ctx) {
   for (const t of TAB_DEFS) {
     const b = el('button', 'detail-tab', t.label);
     b.type = 'button';
+    // 作り直したあとに焦点を拾い直すための名前（`renderDetail` が使う）。
+    // 付けないと、キーボードでタブを Enter した瞬間に節点が消えて焦点が body へ落ちる
+    b.dataset.refocus = `tab:${t.id}`;
     // 押している印は**実際に組んだタブ**に付ける。store.detailTab で付けると、
     // ログ待ちで「いま」へ倒しているあいだ、押されている札と中身が食い違う
     const on = ctx.tab.id === t.id;
@@ -284,6 +287,9 @@ function tabBar(ctx) {
   const on = isZoomed();
   const zoom = el('button', 'detail-zoom', on ? '縮小' : '拡大');
   zoom.type = 'button';
+  // 押すと札の文字が「拡大」⇄「縮小」に変わるが、**名前は変えない。**
+  // 変えると押した先が見つからず、拡大するたびに焦点が落ちる
+  zoom.dataset.refocus = 'zoom';
   zoom.setAttribute('aria-pressed', on ? 'true' : 'false');
   zoom.title = on ? '元の大きさに戻す' : '詳細を大きく開く';
   zoom.addEventListener('click', toggleZoom);
@@ -515,7 +521,30 @@ function syncComposer(row) {
   dom.composer.hidden = !node;
 }
 
+/**
+ * 詳細ペインを組み直す。**焦点は名前で拾い直す。**
+ *
+ * この関数は `dom.detail` を丸ごと作り直すので、中に焦点があると `body` へ落ちる。
+ * とくに困るのがタブ帯で、**キーボードでタブを Enter した瞬間に押した札が消える**
+ * ―― `setDetailTab()` がここを呼ぶため、押すたびに焦点を失って連続操作ができない。
+ *
+ * 拾い直しは時系列の絞り込み帯（`timeline/view.js` の `paintPicks`）と同じ作法。
+ * 印は `data-refocus` で、**探すのは `document` から**（拡大しているあいだ
+ * ペインの節点は `<dialog>` の中へ運ばれていて、`dom.detail` の子ではない）。
+ *
+ * 中身を組むのは `renderDetailInner`。早期 return が4本あるので、
+ * 前後の処理はこちらで包む（各 return の前に書き足す形にすると必ずどれかが漏れる）。
+ */
 export function renderDetail() {
+  const refocus = document.activeElement?.dataset?.refocus ?? null;
+  renderDetailInner();
+  if (!refocus) return;
+  // 消えていれば何もしない（焦点は body のまま）。無理に別の場所へ移さない
+  document.querySelector(`[data-refocus="${CSS.escape(refocus)}"]`)?.focus();
+}
+
+/** 詳細ペインの中身を組む。焦点の持ち回しは呼び出し元（`renderDetail`）が持つ。 */
+function renderDetailInner() {
   const t0 = performance.now();
   // row と呼んでいるのは一覧の行と同じ形のもの。一覧に居なければ詳細から組む
   const row = headOf(store.selected);

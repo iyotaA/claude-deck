@@ -230,6 +230,37 @@ function initialMode() {
 }
 
 /**
+ * 数値（横断）の絞り込みを URL から読む。
+ *
+ * **書いてあるキーだけを返す。** 返した項目が `USAGE_DEFAULTS` の上に重なるので、
+ * 指定の無いものは既定のままになる（「絞り込みを外す」の行き先も動かない）。
+ *
+ * 長くここが無く、説明モーダルが「絞り込みはそのままアドレスに乗ります」と
+ * 謳っているのに数値モードだけ乗っていなかった。**この集計を見て、と人に渡せない**
+ * のが実害で、`?mode=usage` で開いても既定（30本・期間なし・全モデル）に戻っていた。
+ *
+ * 知らない値は黙って落とす（サーバ側も範囲外を 400 にせず丸める。それに合わせる）。
+ *
+ * @returns {object} 重ねる項目だけを持つ
+ */
+function initialUsage() {
+  const out = {};
+
+  const limit = Number(query.get('ulimit'));
+  // 上限はサーバ側（USAGE_SCAN_MAX）が 60。ここで超えても向こうが切るが、
+  // 画面の <select> に無い数を選択状態にしないよう、こちらでも範囲を見る
+  if (Number.isInteger(limit) && limit >= 1 && limit <= 60) out.limit = limit;
+
+  const days = Number(query.get('udays'));
+  if (Number.isInteger(days) && days >= 1 && days <= 3650) out.days = days;
+
+  const model = (query.get('umodel') ?? '').trim();
+  if (model) out.model = model;
+
+  return out;
+}
+
+/**
  * 詳細ペインの中央に出せるもの。知らない値は 'now' に落とす。
  *
  * 以前は11枚のパネルを縦に積んでいた。同時に置きうる情報の塊が多すぎて、
@@ -383,6 +414,13 @@ export const store = {
     days: ARCHIVE_DAYS.has(query.get('adays')) ? query.get('adays') : null,
     /** 使ったスキルの絞り込み。サーバ側の索引から引く */
     skill: (query.get('askill') ?? '').trim() || null,
+    /**
+     * 中身も探すか。**URL に載せる。**
+     *
+     * `hasFilter()` はこれを絞り込みとして数えるのに、長く URL に載っていなかった。
+     * 深い検索の結果を人に渡しても、相手には浅い検索が走っていた
+     */
+    deep: query.get('adeep') === '1',
     /** 置き場所の候補。サーバが meta.projects で渡してくる */
     projects: [],
     /** スキルの候補。サーバが meta.skills で渡してくる */
@@ -397,7 +435,6 @@ export const store = {
     usage: new Map(),
     /** 索引の様子（meta.skillIndex）。まだ作っている最中かをここで見る */
     skillIndex: null,
-    deep: false,
     meta: null,
     loading: false,
     error: null,
@@ -427,6 +464,9 @@ export const store = {
     // 絞り込みの3つは USAGE_DEFAULTS が正。**ここに数を書き写さない**
     // （「絞り込みを外す」の行き先と食い違う）
     ...USAGE_DEFAULTS,
+    // URL の指定があればそちらが勝つ。**既定を書き換えるのではなく上から重ねる**ので、
+    // 「絞り込みを外す」の行き先（USAGE_DEFAULTS）は動かない
+    ...initialUsage(),
     loading: false,
     error: null,
     /** 1度でも引けたか。「まだ引いていない」と「0件だった」を区別するため */
@@ -450,8 +490,16 @@ export const store = {
  * pushState は使わない。検索欄は1文字ごとにここを通るので、履歴が入力の回数だけ積まれ、
  * 戻るボタンが使えなくなる。replaceState なら今のアドレスだけが差し替わる。
  *
- * 触るキーは session / only / tq / hide / mode / aq / asort / aproj / askill / adays / dtab / insp。
- * ほかに tab を消しに行くだけの行が1つある（書庫が左のペインのタブだった名残）。
+ * **モードごとに、その画面に関係するキーだけを書く。**
+ *
+ *   作業台 … session / only / tq / hide / dtab / insp
+ *   書庫   … aq / asort / aproj / askill / adays / adeep
+ *   数値   … ulimit / udays / umodel
+ *
+ * 3つは大枠の画面の分かれ目で、書庫と数値では詳細ペインごと消えている。
+ * 見えないものの指定を引きずったアドレスを人に渡さないよう、その場に無いキーは落とす。
+ *
+ * ほかに mode と、tab を消しに行くだけの行が1つある（書庫が左のペインのタブだった名残）。
  * theme と nolive は「開くときの指定」なので、こちらから書き換えない
  */
 export function syncQuery() {
@@ -461,13 +509,25 @@ export function syncQuery() {
     else params.set(key, value);
   };
 
-  set('session', store.selected);
-  set('only', store.onlyDecisions ? '1' : null);
-  set('tq', store.tq);
+  // **作業台のキーは作業台にいるときだけ書く。**
+  //
+  // 書庫と数値では詳細ペインごと消えている（`archive.css` / `usage-mode.css` が
+  // `.detail-pane` を畳む）ので、選んでいるセッションも時系列の絞り込みも
+  // 画面のどこにも出ていない。それでも URL に残っていると、
+  // **見えないものの指定を引きずったアドレスを渡すことになる。**
+  //
+  // モードは大枠の画面の分かれ目で、書庫と数値は「1本を読む」画面ではない。
+  // 落としても失うものは無い ―― 作業台へ戻れば `store` 側に選択は残っている
+  // （URL はそのとき書き直される）。
+  const work = store.mode === 'work';
+
+  set('session', work ? store.selected : null);
+  set('only', work && store.onlyDecisions ? '1' : null);
+  set('tq', work ? store.tq : null);
   // 隠している種類は「既定と同じなら書かない」。空の指定（何も隠さない）は空文字のまま残す。
   // set() は空文字を消してしまうので、ここだけ直に書く。
   // 既定と同じかどうかの判断は timeline/kinds.js 側（既定の中身を知っているのはあちら）
-  const hide = hideQueryValue(store.hiddenKinds);
+  const hide = work ? hideQueryValue(store.hiddenKinds) : null;
   if (hide === null) params.delete('hide');
   else params.set('hide', hide);
   // 既定（作業台）のときだけキーを落とす。tab と同じ扱い
@@ -482,11 +542,20 @@ export function syncQuery() {
   set('aproj', store.mode === 'archive' ? store.archive.project : null);
   set('askill', store.mode === 'archive' ? store.archive.skill : null);
   set('adays', store.mode === 'archive' ? store.archive.days : null);
+  // 「中身も探す」も絞り込みの1つ（`hasFilter()` が数えている）。
+  // 既定（浅い）のときはキーを付けない
+  set('adeep', store.mode === 'archive' && store.archive.deep ? '1' : null);
+  // 数値（横断）の絞り込み3つ。**既定と同じならキーを落とす**（書庫の並び順と同じ扱い）。
+  // 出どころは USAGE_DEFAULTS で、ここに数を書き写さない
+  const u = store.mode === 'usage' ? store.usageTab : null;
+  set('ulimit', u && u.limit !== USAGE_DEFAULTS.limit ? u.limit : null);
+  set('udays', u ? u.days : null);
+  set('umodel', u ? u.model : null);
   // 既定（経過）のときだけキーを落とす。既定が「いま」から替わったので、
-  // これからは ?dtab=now が URL に載る
-  set('dtab', store.detailTab === 'log' ? null : store.detailTab);
+  // これからは ?dtab=now が URL に載る。**これも作業台のときだけ**（上を見よ）
+  set('dtab', work && store.detailTab !== 'log' ? store.detailTab : null);
   // 閉じているときはキーを付けない。null は set() が消してくれる
-  set('insp', store.inspector);
+  set('insp', work ? store.inspector : null);
 
   const qs = params.toString();
   const next = qs ? `${location.pathname}?${qs}` : location.pathname;

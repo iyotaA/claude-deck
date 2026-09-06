@@ -49,6 +49,30 @@ body {
   outline-offset: 2px;
 }
 
+/* 本文へ跳ぶ口。**焦点が当たるまで見えない。**
+   `display: none` にはしない ―― あれは焦点も受けられないので、
+   タブで辿り着けず口ごと無くなる。画面の外へ逃がして、来たときだけ引き戻す。 */
+.skip {
+  position: fixed;
+  top: .5rem;
+  left: .5rem;
+  z-index: 100;
+  padding: .45rem .8rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-2);
+  color: var(--fg);
+  font-size: var(--fs-1);
+  text-decoration: none;
+}
+
+.skip:not(:focus) {
+  /* 画面の外へ。`clip-path` で潰すと Windows のハイコントラストで残ることがあるので、
+     位置ごと飛ばす昔ながらの手を採る */
+  left: -999px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .01ms !important;

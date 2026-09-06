@@ -433,6 +433,9 @@ export function initArchive({ onPick = null } = {}) {
   // 意図した1クリックなので、こちらは即時に引き直す
   dom.archiveDeep.addEventListener('change', () => {
     store.archive.deep = dom.archiveDeep.checked;
+    // 他の絞り込みと同じく URL へ載せる。`hasFilter()` はこれを絞り込みとして
+    // 数えているので、載せないと深い検索の URL を渡しても相手には浅い検索が走る
+    syncQuery();
     loadArchive();
   });
 

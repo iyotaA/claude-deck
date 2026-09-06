@@ -86,14 +86,55 @@ function initTheme() {
     document.documentElement.removeAttribute('data-theme');
   }
 
+  syncThemeTitle();
+
+  // **3値で巡回する。自動 → 明 → 暗 → 自動。**
+  //
+  // 2値のトグルだと、一度押した時点で `localStorage` に焼き付いて
+  // **OS 追従へ戻す手段が画面から消える**（消すには開発者ツールが要った）。
+  // 巡回の起点を「自動」にしてあるので、2回押せば元の状態を通り過ぎない。
   dom.themeToggle.addEventListener('click', () => {
     const root = document.documentElement;
-    const now = root.getAttribute('data-theme')
-      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    const next = now === 'dark' ? 'light' : 'dark';
-    root.setAttribute('data-theme', next);
-    localStorage.setItem(LS.theme, next);
+    const now = root.getAttribute('data-theme') ?? 'auto';
+    const next = { auto: 'light', light: 'dark', dark: 'auto' }[now] ?? 'auto';
+
+    if (next === 'auto') {
+      root.removeAttribute('data-theme');
+      localStorage.removeItem(LS.theme);
+    } else {
+      root.setAttribute('data-theme', next);
+      localStorage.setItem(LS.theme, next);
+    }
+    syncThemeTitle();
   });
+}
+
+/**
+ * 配色ボタンの名前を、いまの状態と次に押したときの行き先に合わせる。
+ *
+ * 絵だけのボタンなので、いまが「自動」なのか「暗いに固定」なのかは
+ * **触らないと分からない。** 3値になったぶん、そこを名前で補う。
+ *
+ * **`?theme=` があるときはそう言う。** あれは URL が勝つ指定で、押しても
+ * 次のリロードで元に戻る（`initTheme` が URL を先に見る）。黙っていると
+ * 「押したのに戻った」に見えるので、断りを名前に混ぜる。
+ */
+function syncThemeTitle() {
+  const now = document.documentElement.getAttribute('data-theme') ?? 'auto';
+  const label = { auto: 'システムに従う', light: '明るい', dark: '暗い' }[now] ?? 'システムに従う';
+  const next = { auto: '明るい', light: '暗い', dark: 'システムに従う' }[now] ?? '明るい';
+  const forced = query.get('theme') === 'dark' || query.get('theme') === 'light';
+  const note = forced ? '（URL の ?theme= が優先されるので、次に開くと戻ります）' : '';
+  const text = `配色: ${label} — 押すと「${next}」へ${note}`;
+  dom.themeToggle.title = text;
+  dom.themeToggle.setAttribute('aria-label', text);
+
+  // **いまどれなのかを絵で示す。** 3値になったので、`title` だけだと
+  // カーソルを乗せるまで分からない（`prefers-color-scheme` が暗いときの「自動」と
+  // 「暗いに固定」は、画面の色がまったく同じになる）。
+  // 半分塗り＝システムに従う／太陽＝明るい／月＝暗い
+  const mark = { auto: 'contrast', light: 'sun', dark: 'moon' }[now] ?? 'contrast';
+  dom.themeToggle.replaceChildren(icon(mark));
 }
 
 /**
@@ -218,7 +259,9 @@ for (const box of document.querySelectorAll('.selectbox')) {
 dom.aboutOpen.append(icon('info'));
 dom.reload.append(icon('refresh'));
 dom.settingsOpen.append(icon('gear'));
-dom.themeToggle.append(icon('contrast'));
+// **配色だけはここで差さない。** いまの状態で絵が変わるので、
+// `syncThemeTitle()` が `replaceChildren` で入れ替える（`initTheme` が呼ぶ）。
+// ここでも足すと、初回だけ絵が2つ並ぶ
 
 fetchOnce().then(() => {
   // つなぎっぱなしの接続があるとヘッドレスブラウザがロード完了を待ち続ける。

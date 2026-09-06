@@ -512,13 +512,23 @@ export function render({ reset = false } = {}) {
 
     const more = el('button', 'btn tl-more', `続きを出す（残り ${num(rest)} 件）`);
     more.type = 'button';
+    // 作り直したあとに焦点を拾い直すための名前（下で使う）。**押すたびに節点が消える**ので、
+    // 付けないとキーボードでの連続クリックができない（絞り込みの帯と同じ話）
+    more.dataset.refocus = 'tl-more';
     more.addEventListener('click', () => {
       store.tlShown = shown.length + TL_MORE;
       render();
     });
     nodes.push(more);
   }
+
+  // **焦点を名前で拾い直す。** `paintPicks` と同じ作法で、こちらは
+  // 「続きを出す」だけが対象（他は押しても組み直しを呼ばない）。
+  // 全部出し切って札が消えたときは何もしない ―― 焦点は body へ落ちるが、
+  // 押す先が無くなったのだから移す先も無い
+  const refocus = document.activeElement?.dataset?.refocus ?? null;
   tlRef.host.replaceChildren(...nodes);
+  if (refocus) tlRef.host.querySelector(`[data-refocus="${CSS.escape(refocus)}"]`)?.focus();
 
   // 見出しの件数。窓で切っているときは「出している数 / 当てはまった数」を出す。
   // 全体の数だけを出すと、下に「続きを出す」がある理由が読めない

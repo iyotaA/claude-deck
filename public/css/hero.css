@@ -175,29 +175,13 @@
 
 .hero-act { display: flex; gap: .4rem; flex-wrap: wrap; }
 
-/* 溢れたぶんへ渡す札。**破線にしてある** ―― この画面の破線は但し書きと区切り専用で、
-   これは「札そのものではない」ことを示す側。押すと一覧の先頭へ送る */
-.hero-more {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: .15rem;
-  min-width: 6.5rem;
-  padding: .8rem 1rem;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--r-lg);
-  background: none;
-  color: var(--fg-muted);
-  font: inherit;
-  cursor: pointer;
-  transition: background .15s ease, color .15s ease;
-}
+/* **「ほか N 件」の札（`.hero-more`）は落とした。**
+   26行ぶんの見た目だけがあって、`js/` に実装が1行も無かった。
 
-.hero-more:hover { background: var(--bg-hi); color: var(--fg); }
-.hero-more b { font-family: var(--font-mono); font-size: var(--fs-5); font-weight: 700; line-height: 1; }
-.hero-more span { font-size: var(--fs-0); }
+   実装しなかったのではなく、**実装できない**。あの札の行き先は「一覧の先頭」だが、
+   帯に出したぶんは一覧から外してある（`renderList` が `HERO_STATES` を除く）ので、
+   送った先に当のセッションが居ない。溢れたぶんは横スクロールで見る作りで、
+   端まで送れることは膜（`data-edge`）が示している。 */
 
 /* 0 件のとき。**空の帯を置かない**が、場所そのものは残す。
    帯ごと消すと、静かな日に画面の一等地が何も言わずに消える */

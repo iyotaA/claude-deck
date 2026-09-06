@@ -13,7 +13,7 @@
  */
 import { el, shortModel, num } from './util.js';
 import { icon } from './icons.js';
-import { store, USAGE_DEFAULTS } from './store.js';
+import { store, syncQuery, USAGE_DEFAULTS } from './store.js';
 import { dom } from './dom.js';
 import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
@@ -684,6 +684,12 @@ function renderUsage() {
 async function loadUsage() {
   const u = store.usageTab;
   if (u.unavailable) return;
+
+  // **絞り込みを URL に載せる。** 引き直す口はここ1本に集まっているので、
+  // 押しボタンごとに書き足すより漏れない（4箇所ある）。
+  // 長くこれが無く、説明モーダルが「絞り込みはそのままアドレスに乗ります」と
+  // 謳っているのに数値モードだけ乗っていなかった ―― この集計を見て、と人に渡せない
+  syncQuery();
 
   const token = ++usageToken;
   u.loading = true;
