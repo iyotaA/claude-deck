@@ -136,10 +136,12 @@
    **分母も単位も問いも違う4つ**が、同じ顔で縦一列に並んでいた */
 .usage-sec { display: none; }
 
-.usage-pane[data-sec="over"]   .usage-sec[data-sec="over"],
-.usage-pane[data-sec="tools"]  .usage-sec[data-sec="tools"],
-.usage-pane[data-sec="skills"] .usage-sec[data-sec="skills"],
-.usage-pane[data-sec="rows"]   .usage-sec[data-sec="rows"] { display: block; }
+.usage-pane[data-sec="over"]     .usage-sec[data-sec="over"],
+.usage-pane[data-sec="daily"]    .usage-sec[data-sec="daily"],
+.usage-pane[data-sec="projects"] .usage-sec[data-sec="projects"],
+.usage-pane[data-sec="tools"]    .usage-sec[data-sec="tools"],
+.usage-pane[data-sec="skills"]   .usage-sec[data-sec="skills"],
+.usage-pane[data-sec="rows"]     .usage-sec[data-sec="rows"] { display: block; }
 
 /* 節ナビ。**見た目は list.css の `.tab`（下線式）を借りる。**
 

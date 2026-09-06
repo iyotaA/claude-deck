@@ -752,7 +752,89 @@ export function aggregateUsage(recs) {
     skillsOmitted,
     // 実消費の多い順。いま見て効くのは「どれが重かったか」なので、新しい順にはしない
     rows: recs.map(publicRow).sort((a, b) => b.ite - a.ite),
+    // 日ごとの推移。**「今週は先週より食ったか」に答えるためのもの。**
+    // `?days=` は候補を絞るだけで、いつ何を使ったかは今までどこにも出ていなかった。
+    //
+    // **名前は `daily`。`days` にしない。** 応答には既に `days`（絞り込みの指定。
+    // `q.days` をそのまま返している）が居て、後から重なって消える
+    // ―― 実際に踏んだ（`aggregateUsage` の戻りを展開したあとに `days: q.days` が来る）
+    daily: mergeDays(list),
+    // 置き場所ごとの合計。**材料は既に手元にある**（`publicRow` が project を持つ）のに、
+    // セッション単位の並びしか無かった。「どの案件にいくら掛かっているか」は
+    // 目視で足し算するしかなかった
+    projects: mergeProjects(recs),
   };
+}
+
+/**
+ * 日ごとの実消費を、セッションを跨いで足す。
+ *
+ * **穴を埋めない。** 使わなかった日は行ごと出さない ―― 0 を並べると
+ * 「その日は0だった」と「その日は測っていない」が同じ顔になる
+ * （上限で切っているので、後者は普通に起きる）。
+ *
+ * @param {Array<object>} list 1本ぶんの集計の配列
+ * @returns {{list: Array<object>, undated: number}}
+ */
+function mergeDays(list) {
+  /** @type {Map<string, {day: string, ite: number, requests: number}>} */
+  const byDay = new Map();
+  let undated = 0;
+
+  for (const u of list) {
+    const d = u.days;
+    if (!d) continue;
+    undated += d.undated ?? 0;
+    for (const row of d.list ?? []) {
+      const cur = byDay.get(row.day);
+      if (cur) {
+        cur.ite += row.ite;
+        cur.requests += row.requests;
+      } else {
+        byDay.set(row.day, { ...row });
+      }
+    }
+  }
+
+  return {
+    list: [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day)),
+    undated,
+  };
+}
+
+/**
+ * 置き場所ごとに足す。
+ *
+ * 名前は `publicRow` と同じ組み方（cwd が読めていればその末尾、駄目なら
+ * 置き場所のフォルダ名）。**ここで組み直さない** ―― `projectNameOf` を
+ * 通した結果が行に載っているので、それを鍵にする。
+ *
+ * @param {Array<object>} recs 1本ぶんの集計（見出しつき）
+ * @returns {Array<{project: string, sessions: number, requests: number, ite: number}>}
+ */
+function mergeProjects(recs) {
+  /** @type {Map<string, {project: string, sessions: number, requests: number, ite: number}>} */
+  const byProject = new Map();
+
+  for (const r of recs) {
+    const key = r.project ?? r.projectDir ?? '(不明)';
+    const cur = byProject.get(key);
+    if (cur) {
+      cur.sessions += 1;
+      cur.requests += r.usage.requests;
+      cur.ite += r.usage.totals.ite;
+    } else {
+      byProject.set(key, {
+        project: key,
+        sessions: 1,
+        requests: r.usage.requests,
+        ite: r.usage.totals.ite,
+      });
+    }
+  }
+
+  // 実消費の多い順。同じなら名前順にして、引くたびに並びが揺れないようにする
+  return [...byProject.values()].sort((a, b) => b.ite - a.ite || a.project.localeCompare(b.project, 'ja'));
 }
 
 /**
