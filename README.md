@@ -78,4 +78,5 @@
 
 - [使い方](docs/usage.md) … 一覧・詳細の見方、画面からセッションを起こす、自動起動、更新
 - [Slack 通知の設定](docs/notifications.md) … 席を外しているときに知らせる
+  - [Webhook の作り方](docs/slack-webhook-setup.html) … 画面つきの手順（ブラウザで開く）
 - [開発者向け情報](docs/development.md) … 読んでいるデータ、セキュリティ上の注意、配布物の作り方、リポジトリから動かす方法

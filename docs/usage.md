@@ -108,6 +108,52 @@ setx CLAUDE_DECK_UPDATE_OFF 1
 画面からは止められません。
 自分で自分を締め出せる口は作らない、という決まりにしています。
 
+### 前の版に戻す
+
+新しい版で困ったときは、戻せます。
+
+1. [Releases](https://github.com/iyotaA/claude-deck/releases) から、戻したい版の
+   `ClaudeDeckApp-<版>-full.nupkg` を落とす
+2. ClaudeDeck を止める（画面を閉じるだけでは止まりません。タスクトレイからか、
+   コマンドで `%LOCALAPPDATA%\ClaudeDeckApp\ClaudeDeck.exe --stop`）
+3. 落としたファイルを当てる
+
+```
+%LOCALAPPDATA%\ClaudeDeckApp\Update.exe apply --package C:\path\to\ClaudeDeckApp-1.0.0-full.nupkg
+```
+
+当て終わると、その版で起き直します。
+
+設定（Webhook や作業フォルダー）は別の場所（`%LOCALAPPDATA%\ClaudeDeck\`）にあるので、
+版を戻しても消えません。
+
+戻したあとも、新しい版が出れば更新の帯はまた出ます。
+しばらく上げたくないときは、上の `CLAUDE_DECK_UPDATE_OFF` で確認ごと止めてください。
+
+### うまく動かないとき
+
+まず状態を出します。何がどこまで動いているかが1画面で読めます。
+
+```
+%LOCALAPPDATA%\ClaudeDeckApp\ClaudeDeck.exe --status
+```
+
+更新の確認だけを手で走らせることもできます。
+
+```
+%LOCALAPPDATA%\ClaudeDeckApp\ClaudeDeck.exe --check-update
+```
+
+記録は `%LOCALAPPDATA%\ClaudeDeck\` にあります。
+
+| ファイル | 中身 |
+|---|---|
+| `launcher.log` | 窓を出す・更新を当てる側の記録 |
+| `server.log` | サーバー側の記録 |
+
+どちらも**起動のたびに上書き**されます。
+うまくいかなかった直後に見てください（もう一度起動すると消えます）。
+
 ## 画面からセッションを起こす
 
 上のバーの「起こす」を押すと、その場で新しいセッションを始められます。

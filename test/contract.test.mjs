@@ -302,14 +302,45 @@ test('配布物の許可リストが、実行時に要るものを欠かさな�
   // src/ と public/ の中は丸ごとコピーされるので、そちらの改名はここに現れない。
   // 逆に、ここに並ぶ名前を動かすと release がその場で止まる（それが狙いの形）
   const ps1 = src('scripts/release.ps1');
-  const list = ps1.slice(ps1.indexOf('$APP_INCLUDE'), ps1.indexOf('$APP_INCLUDE') + 600);
+  const at = ps1.indexOf('$APP_INCLUDE');
+  const list = ps1.slice(at, ps1.indexOf(')', at));
 
   for (const name of ["'server.mjs'", "'cli.mjs'", "'package.json'", "'src'", "'public'"]) {
     assert.ok(list.includes(name), `$APP_INCLUDE から ${name} が消えている`);
   }
-  // 実行時にしか要らないので忘れやすい2つ
+  // 実行時にしか要らないので忘れやすい
   assert.ok(list.includes('focus.ps1'), '窓の前面化に要る focus.ps1 が配布物から外れている');
-  assert.ok(list.includes('slack-webhook-setup.html'), 'README から案内している手引きが配布物から外れている');
+});
+
+test('README が指す先が、配布物にすべて入っている', () => {
+  // **前はここが抜けていた。** `$APP_INCLUDE` は README.md を含むのに
+  // `docs/` は slack-webhook-setup.html の1枚だけで、README の「もっと詳しく」が
+  // 指す3枚（usage / notifications / development）が入っていなかった。
+  // インストール版の README を開いた人は、**3本ともリンク切れ**に当たる。
+  //
+  // しかも唯一入れていた手引きを案内しているのは notifications.md のほうで、
+  // それが入っていない以上、同梱した 934 行に辿り着く道が1本も無かった
+  // （`server.mjs` の静的配信は public/ だけなので、ブラウザからも開けない）。
+  const ps1 = src('scripts/release.ps1');
+  const at = ps1.indexOf('$APP_INCLUDE');
+  const list = ps1.slice(at, ps1.indexOf(')', at));
+
+  // README から相対で指しているローカルのファイルを全部拾う
+  const readme = src('README.md');
+  const linked = [...readme.matchAll(/\]\((docs\/[\w.-]+)\)/g)].map((m) => m[1]);
+  assert.ok(linked.length >= 3, `README の docs/ へのリンクが少なすぎる（${linked.length} 本）`);
+
+  for (const rel of linked) {
+    assert.ok(
+      fs.existsSync(path.join(ROOT, rel)),
+      `README が指す ${rel} がリポジトリに無い`,
+    );
+    const name = rel.split('/').pop();
+    assert.ok(
+      list.includes(name),
+      `README が指す ${rel} が配布物に入っていない。インストール版でリンクが切れる`,
+    );
+  }
 });
 
 test('パック名とリポジトリの URL を変えない。既存の更新が永久に止まる', () => {
@@ -447,4 +478,67 @@ test('.ps1 は UTF-8 BOM 付きで保存する', () => {
       `scripts/${file} に UTF-8 BOM が無い（旧 powershell.exe で構文ごと壊れる）`,
     );
   }
+});
+
+/* ── Node ↔ 画面側 ───────────────────────────────────── */
+
+/*
+ * ここから下は「Node ↔ C#/PowerShell」ではない。
+ *
+ * この網の対象は**別言語で定数を共有できない約束**だが、同じ性質のものが
+ * Node と画面側のあいだにもある ―― `public/js/` は Node から import できないので
+ * （DOM を触る）、値を突き合わせる場所がテストの中に無い。
+ * 「片方だけ直しても何のエラーも出ない」という点は同じなので、ここへ寄せる。
+ */
+
+test('更新の見張りの長さが、サーバー側と画面側で揃っている', () => {
+  // server.mjs は APPLY_GUARD_MS のあいだ「当てている最中」として扱い、
+  // 画面側は STUCK_MS を過ぎたら「押したのに何も起きない」と諦める。
+  // **片方だけ変えると、見張りが先に切れるか後に切れるかで静かに壊れる**
+  //   - 画面が先に切れる … まだ当てている最中なのに「失敗した」と出る
+  //   - サーバーが先に切れる … 押せる顔に戻っているのに画面は待ち続ける
+  //
+  // update.js のコメント自身が「server.mjs の APPLY_GUARD_MS と同じ 120 秒にしてある」
+  // と宣言しているのに、突き合わせるものがどこにも無かった
+  const server = code('server.mjs').match(/APPLY_GUARD_MS\s*=\s*(\d+)/);
+  const view = code('public/js/update.js').match(/STUCK_MS\s*=\s*(\d+)/);
+  assert.ok(server, 'server.mjs に APPLY_GUARD_MS が無い');
+  assert.ok(view, 'public/js/update.js に STUCK_MS が無い');
+  assert.equal(
+    view[1], server[1],
+    `更新の見張りが食い違っている（server ${server[1]}ms / 画面 ${view[1]}ms）。`
+    + '片方だけ直すと、当てている最中に失敗と出るか、終わっても待ち続けるかになる',
+  );
+});
+
+test('依存パッケージを増やしていない', () => {
+  // **このリポジトリでいちばん重い制約。** 同僚にフォルダごと渡して動くことが要件で、
+  // README も CLAUDE.md も最初に挙げている。それなのに、確かめるものが無かった。
+  //
+  // 破っても `npm test` は通る（むしろ入れたパッケージのぶん通りやすくなる）ので、
+  // ここに置くのがいちばん筋が合う ―― 「破っても何のエラーも出ない約束」そのもの
+  const pkg = JSON.parse(src('package.json'));
+
+  for (const key of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    const got = pkg[key];
+    assert.ok(
+      got === undefined || Object.keys(got).length === 0,
+      `package.json の ${key} が空でない（${Object.keys(got ?? {}).join(', ')}）。`
+      + '同僚にフォルダごと渡して動くことが要件なので、依存は増やさない',
+    );
+  }
+
+  // ロックファイルも無いことを見る。あると「入れた覚えのないものが入っている」合図になる
+  for (const lock of ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml']) {
+    assert.equal(
+      fs.existsSync(path.join(ROOT, lock)), false,
+      `${lock} がある。依存を入れていないなら要らない`,
+    );
+  }
+
+  // node_modules も同じ。**あっても `.gitignore` されるので git では気づけない**
+  assert.equal(
+    fs.existsSync(path.join(ROOT, 'node_modules')), false,
+    'node_modules がある。何かを install した形跡なので、意図したものか確かめる',
+  );
 });

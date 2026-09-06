@@ -88,8 +88,19 @@ $APP_INCLUDE = @(
   'src',
   'public',
   'scripts\focus.ps1',             # 実行時に src/os/focus.mjs が呼ぶ。無いと窓の前面化が死ぬ
-  'docs\slack-webhook-setup.html'  # README から案内している
+  # README の「もっと詳しく」が指す3枚。**入れないとリンクが全部切れる。**
+  # 前は slack-webhook-setup.html だけを入れていたが、あれを案内しているのは
+  # notifications.md のほうで、その notifications.md が入っていなかった
+  # （＝同梱した 934 行の手引きに、配布物から辿り着く道が1本も無かった）
+  'docs\usage.md',
+  'docs\notifications.md',
+  'docs\development.md',
+  'docs\slack-webhook-setup.html'
 )
+
+# **docs をフォルダごと入れない。** design-proposal.html と design-proposal_V2.html が
+# 合わせて 254KB あり、どちらもリポジトリのどこからも参照されていない
+# （作るときの検討資料で、渡された人が読むものではない）。
 
 # ---- 置き場所 ----
 
@@ -359,6 +370,62 @@ function Invoke-Stage([string]$Version) {
 
 # ---- 3. パッケージを作る ----
 
+# 前のタグから HEAD までのコミット件名を、更新のお知らせ用の Markdown にする。
+#
+# **CHANGELOG.md を手で書く形にしない。** 書く場所が増えると必ず書き忘れる（版を
+# 上げるコミットも手作業で、それすら忘れることがある）。git log は必ず在るので、
+# そこから作れば「空のノート」に戻る道が無い。
+#
+# 拾うのは件名だけ（`%s`）。このリポジトリのコミットは本文が厚く、
+# そのまま入れると更新の帯に何十行も出ることになる。
+#
+# **失敗しても止めない。** ノートが無いのは前と同じ状態で、それで pack を
+# 落とすほうが困る（金の掛かる作業ではないが、やり直しの手間は同じ）。
+function New-ReleaseNotes([string]$Version) {
+  $prev = "$(git -C $repoRoot describe --tags --abbrev=0 2>$null)".Trim()
+  $range = if ($prev) { "$prev..HEAD" } else { 'HEAD' }
+
+  # **git の出力を UTF-8 として受ける。**
+  #
+  # 旧 powershell.exe (5.1) は、外部コマンドの出力を [Console]::OutputEncoding
+  # （既定は OS のコードページ。日本語環境なら shift-jis）で解釈する。
+  # git は UTF-8 で吐くので、**日本語のコミット件名がそのまま化ける**（実測）。
+  # このスクリプトの他の git 呼び出しが無事なのは、返ってくるのが
+  # ハッシュやパスで ASCII の範囲に収まっているからにすぎない。
+  #
+  # 元へ戻すのは finally で。ここで落ちても、後続の Write-Host が壊れないように
+  $prevEnc = [Console]::OutputEncoding
+  try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    # マージコミットは落とす（PR 運用なので「Merge pull request …」が並ぶだけ）。
+    # squash merge の件名は残る ―― あちらが実際の変更の説明になっている
+    $lines = @(git -C $repoRoot log $range --no-merges --pretty=format:'%s' 2>$null)
+  } finally {
+    [Console]::OutputEncoding = $prevEnc
+  }
+
+  if ($LASTEXITCODE -ne 0 -or $lines.Count -eq 0) {
+    Write-Warn '変更の一覧が取れませんでした。お知らせは空のままにします'
+    return $null
+  }
+
+  $body = @("## $Version", '')
+  foreach ($line in $lines) {
+    $t = "$line".Trim()
+    if (-not $t) { continue }
+    # PR 番号の尻尾（` (#70)`）は残す。押した人が元を辿れる
+    $body += "- $t"
+  }
+  if ($prev) { $body += @('', "（$prev からの変更）") }
+
+  $path = Join-Path $buildDir 'release-notes.md'
+  # **UTF-8 BOM 無しで書く。** vpk が読んで Markdown として配るものなので、
+  # BOM が付くと先頭の見出しに見えない文字が混ざる（.ps1 の約束とは逆向き）
+  [System.IO.File]::WriteAllText($path, ($body -join "`n"), [System.Text.UTF8Encoding]::new($false))
+  Write-Note "変更の一覧: $($lines.Count) 件（$range）"
+  return $path
+}
+
 function Invoke-Pack([string]$Version) {
   Write-Step "パッケージを作ります（版 $Version）"
 
@@ -385,7 +452,14 @@ function Invoke-Pack([string]$Version) {
     Write-Warn '前の版が取れませんでした。今回は丸ごと1本になります（初回ならこれで正しい）'
   }
 
-  Invoke-Tool 'vpk' @(
+  # 何が変わったかを添える。**前は渡していなかった。**
+  #
+  # Updates.cs は target.NotesMarkdown を読んで update.json の notes に載せ、
+  # 画面の帯がそれを出す ―― という配線が全部あるのに、**中身が常に空**だった。
+  # CHANGELOG.md も無いので、渡された人は何が変わったのか知る手段が1つも無い。
+  $notesFile = New-ReleaseNotes -Version $Version
+
+  $packArgs = @(
     'pack',
     '--packId', $PACK_ID,
     '--packTitle', $PACK_TITLE,
@@ -396,6 +470,10 @@ function Invoke-Pack([string]$Version) {
     '--icon', (Join-Path $repoRoot 'public\favicon.ico'),
     '--outputDir', $releasesDir
   )
+  # 作れなかったときは付けない（前と同じ「空」に落ちるだけで、pack は止めない）
+  if ($notesFile) { $packArgs += @('--releaseNotes', $notesFile) }
+
+  Invoke-Tool 'vpk' $packArgs
 }
 
 # ---- 4. 上げる ----
