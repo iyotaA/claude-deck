@@ -533,3 +533,83 @@ test('親の圧縮はサブエージェント側の集計に混ざらない', ()
   assert.deepEqual(buildUsage(entries).compact, { count: 1, dropped: 162000 });
   assert.deepEqual(buildUsage(entries, { sidechain: true }).compact, { count: 1, dropped: 5000 });
 });
+
+/* ── 日ごとの集計 ─────────────────────────────────────── */
+
+test('要求を日ごとにまとめる', () => {
+  const usage = { in: 10, cr: 0, cw: 0, out: 10 };
+  const u = buildUsage([
+    reply('a', { ms: 0, requestId: 'r1', usage }),
+    reply('b', { ms: 60_000, requestId: 'r2', usage }),
+    // 翌日ぶん
+    reply('c', { ms: 26 * 3_600_000, requestId: 'r3', usage }),
+  ]);
+
+  assert.equal(u.days.list.length, 2, '2日ぶんに分かれる');
+  assert.equal(u.days.list[0].requests, 2);
+  assert.equal(u.days.list[1].requests, 1);
+  assert.equal(u.days.undated, 0);
+});
+
+test('日ごとの合計は totals とほぼ一致する（ずれは丸めのぶんだけ）', () => {
+  // **完全一致はしない。** 日ごとは各日を丸めて返し（画面に小数を出さないため）、
+  // `totals.ite` は合計を1回丸める。ITE には 0.5 が出る（1要求 182.5 など）ので、
+  // 日数ぶんの端数が食い違う。
+  //
+  // ここで見たいのは「**誤差が積み上がらない**」こと ―― 1日あたり 0.5 を超えて
+  // ずれるなら、それは丸めではなく数え落としか二重計上。
+  const usage = { in: 10, cr: 100, cw: 50, out: 20 };
+  const u = buildUsage([
+    reply('a', { ms: 0, requestId: 'r1', usage }),
+    reply('b', { ms: 26 * 3_600_000, requestId: 'r2', usage }),
+    reply('c', { ms: 52 * 3_600_000, requestId: 'r3', usage }),
+  ]);
+
+  const sum = u.days.list.reduce((a, d) => a + d.ite, 0);
+  const gap = Math.abs(sum - u.totals.ite);
+  assert.ok(
+    gap <= u.days.list.length * 0.5 + 0.5,
+    `日ごとの合計 ${sum} と totals ${u.totals.ite} が ${gap} ずれた（丸めでは説明できない）`,
+  );
+});
+
+test('1日にまとまるなら、日ごとの合計は totals と一致する', () => {
+  // 日をまたがなければ丸めるのも1回なので、ここは一致しないとおかしい
+  const usage = { in: 10, cr: 100, cw: 50, out: 20 };
+  const u = buildUsage([
+    reply('a', { ms: 0, requestId: 'r1', usage }),
+    reply('b', { ms: 60_000, requestId: 'r2', usage }),
+  ]);
+
+  assert.equal(u.days.list.length, 1);
+  assert.equal(u.days.list[0].ite, u.totals.ite);
+});
+
+test('日付は地方時で丸める', () => {
+  // **UTC で切ると、日本時間の朝までの作業が前日に積まれる**
+  // （「昨日はあまり使っていない」が嘘になる）
+  const usage = { in: 10, cr: 0, cw: 0, out: 10 };
+  const u = buildUsage([reply('a', { ms: 0, requestId: 'r1', usage })]);
+
+  const d = new Date(Date.parse('2026-08-04T09:00:00.000Z'));
+  const want = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  assert.equal(u.days.list[0].day, want);
+});
+
+test('日付の並びは昇順', () => {
+  const usage = { in: 10, cr: 0, cw: 0, out: 10 };
+  // わざと新しいほうを先に置く（ログは追記順だが、時刻の無い行が混ざると崩れる）
+  const u = buildUsage([
+    reply('b', { ms: 26 * 3_600_000, requestId: 'r2', usage }),
+    reply('a', { ms: 0, requestId: 'r1', usage }),
+  ]);
+
+  const days = u.days.list.map((x) => x.day);
+  assert.deepEqual(days, [...days].sort(), '昇順になっていない');
+});
+
+test('要求が1件も無ければ日ごとも空', () => {
+  const u = buildUsage([]);
+  assert.deepEqual(u.days.list, []);
+  assert.equal(u.days.undated, 0);
+});

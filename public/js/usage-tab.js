@@ -76,6 +76,22 @@ const TREND_MAX = 3;
 const ROWS_MAX = 6;
 
 /**
+ * 推移の棒に出す日数。残りは表で読む。
+ *
+ * 2週間ぶん。棒を30本並べても上から順に見るだけになるし、
+ * 「先週と比べてどうか」を読むには2週あれば足りる。
+ */
+const DAILY_MAX = 14;
+
+/**
+ * 置き場所の棒に出す数。残りは表で読む。
+ *
+ * 実測で 445 本に対して 19 種。上位6件で全体の大半を占めるので、
+ * 残りは棒の長さでは差が読めない（ツールの BARS_MAX と同じ判断）。
+ */
+const PROJECTS_MAX = 6;
+
+/**
  * 節の並びと名前。**ここを1行足すだけで節が増える。**
  *
  * 出し分けは CSS が `data-sec` で行うので、JS は名前を書くだけでよい
@@ -83,6 +99,8 @@ const ROWS_MAX = 6;
  */
 const SECTIONS = [
   { id: 'over', label: '概要' },
+  { id: 'daily', label: '推移', count: (d) => d.daily?.list?.length },
+  { id: 'projects', label: '置き場所', count: (d) => d.projects?.length },
   { id: 'tools', label: 'ツール', count: (d) => d.tools?.length },
   { id: 'skills', label: 'スキル', count: (d) => d.skills?.length },
   { id: 'rows', label: 'セッション', count: (d) => d.rows?.length },
@@ -483,6 +501,87 @@ function usageCard(row) {
  * @param {object} d
  * @returns {HTMLElement|null}
  */
+/**
+ * 日ごとの推移。**「今週は先週より食ったか」に答える節。**
+ *
+ * `?days=` は候補を絞るだけで、いつ何を使ったかはどこにも出ていなかった。
+ *
+ * **使わなかった日は行ごと出さない。** 0 を並べると「その日は0だった」と
+ * 「その日は測っていない」が同じ顔になる（上限で切っているので後者は普通に起きる）。
+ *
+ * @param {object} d `/api/usage` の応答
+ * @returns {HTMLElement|null}
+ */
+function dailyBlock(d) {
+  const list = d.daily?.list ?? [];
+  if (!list.length) return null;
+
+  const box = block('日ごとの実消費');
+
+  // 新しいほうを上に。**棒は日付順に並べない** ―― ここで見たいのは
+  // 「いつ重かったか」で、直近から遡って読むほうが速い
+  const recent = [...list].reverse().slice(0, DAILY_MAX);
+  box.append(barList(recent.map((x) => ({
+    label: x.day.slice(5).replace('-', '/'),
+    value: x.ite,
+    text: `${tokensStrict(x.ite)}　${numStrict(x.requests)} 回`,
+  }))));
+
+  const notes = [
+    '同じ期間に走ったセッションを全部足したものです。',
+    '使わなかった日は行ごと出しません（0 と「読んでいない」を同じ顔にしないため）。',
+  ];
+  // 時刻の取れなかった要求。**0 でも黙らない**のではなく、有るときだけ言う
+  // （0 件は「測って0」なので、わざわざ書くと読む量が増えるだけ）
+  if (d.daily?.undated > 0) {
+    notes.push(`${numStrict(d.daily.undated)} 件の要求は時刻が取れず、どの日にも入っていません。`);
+  }
+  const read = readNote(notes);
+  if (read) box.append(read);
+
+  box.append(tableDetails(
+    `${list.length} 日ぶんを表で見る`,
+    ['日', '実消費', '要求'],
+    // 表は日付順（古い順）。**棒とは逆**にする ―― あちらは「いつ重かったか」を
+    // 探す絵で、こちらは並べて読むもの
+    list.map((x) => [x.day, numStrict(x.ite), numStrict(x.requests)]),
+  ));
+  return box;
+}
+
+/**
+ * 置き場所ごとの合計。**「どの案件にいくら掛かっているか」に答える節。**
+ *
+ * 材料は前から手元にあった（`publicRow` が `project` を持つ）のに、
+ * セッション単位の並びしか無く、足し算は目視でやるしかなかった。
+ *
+ * @param {object} d `/api/usage` の応答
+ * @returns {HTMLElement|null}
+ */
+function projectsBlock(d) {
+  const list = d.projects ?? [];
+  if (!list.length) return null;
+
+  const box = block('置き場所別');
+  box.append(barList(list.slice(0, PROJECTS_MAX).map((p) => ({
+    label: p.project,
+    value: p.ite,
+    text: `${tokensStrict(p.ite)}　${numStrict(p.sessions)} 本`,
+  }))));
+
+  const read = readNote([
+    '作業フォルダーの名前でまとめています。同じ名前の別フォルダーは分けられません。',
+  ]);
+  if (read) box.append(read);
+
+  box.append(tableDetails(
+    `置き場所 ${list.length} 件を表で見る`,
+    ['置き場所', '実消費', 'セッション', '要求'],
+    list.map((p) => [p.project, numStrict(p.ite), numStrict(p.sessions), numStrict(p.requests)]),
+  ));
+  return box;
+}
+
 function rowsBlock(d) {
   if (!d.rows.length) return null;
 
@@ -663,6 +762,8 @@ function renderUsage() {
   // ここは「どの節に何を入れるか」だけを決める（settings.js と同じ作法）
   for (const [name, node] of [
     ['over', overviewBlock(d, setUsageSec)],
+    ['daily', dailyBlock(d)],
+    ['projects', projectsBlock(d)],
     ['tools', toolsBlock(d)],
     ['skills', skillsBlock(d)],
     ['rows', rowsBlock(d)],

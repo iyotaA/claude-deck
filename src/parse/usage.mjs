@@ -610,6 +610,7 @@ export function buildUsage(entries, { sidechain = false } = {}) {
     omitted: skillsOmitted,
   } = attributeSkills(requests);
   const compact = collectCompactions(list, sidechain);
+  const days = groupByDay(requests);
 
   return {
     model,
@@ -653,5 +654,50 @@ export function buildUsage(entries, { sidechain = false } = {}) {
     // 横断側は 24 種に対して上限があるので実際に切れる
     skillsOmitted,
     compact,
+    // 日ごとの実消費。**同じ走査の副産物**なので、読み直しは1回も増えていない。
+    // 時刻を持たない要求は `undated` に寄せる（0 と不明を分ける）
+    days,
   };
+}
+
+/**
+ * 要求を日ごとにまとめる。
+ *
+ * **`days` は「絞り込みの材料」ではなく「並べる材料」。** `/api/usage` の
+ * `?days=` は候補を絞るだけで、いつ何を使ったかは今までどこにも出ていなかった。
+ * 「今週は先週より食ったか」に答えられないのはそのため。
+ *
+ * **地方時で丸める。** UTC で切ると、日本時間の朝9時までの作業が前日に積まれる
+ * （「昨日はあまり使っていない」が嘘になる）。`toLocaleDateString` ではなく
+ * 自前で組むのは、区切り文字と桁が環境で変わらないようにするため。
+ *
+ * @param {Array<object>} requests 時刻順に並んだ要求
+ * @returns {{list: Array<{day: string, ite: number, requests: number}>, undated: number}}
+ *          list は日付の昇順。undated は時刻が取れなかった要求の数
+ */
+export function groupByDay(requests) {
+  /** @type {Map<string, {day: string, ite: number, requests: number}>} */
+  const byDay = new Map();
+  let undated = 0;
+
+  for (const r of requests) {
+    if (!Number.isFinite(r.at)) {
+      undated += 1;
+      continue;
+    }
+    const d = new Date(r.at);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const cur = byDay.get(day);
+    if (cur) {
+      cur.ite += r.ite;
+      cur.requests += 1;
+    } else {
+      byDay.set(day, { day, ite: r.ite, requests: 1 });
+    }
+  }
+
+  const list = [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
+  // 端数を残さない。合計（totals.ite）が丸めた値なので、日ごとも揃える
+  for (const d of list) d.ite = Math.round(d.ite);
+  return { list, undated };
 }
