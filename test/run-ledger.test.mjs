@@ -1217,9 +1217,16 @@ test('同じ要求が二度来ても上書きしない', () => {
   assert.equal(led.rows()[0].asks[0].at, T + 10);
 });
 
-test('答えが無いまま時間切れになったら断って、あなたの番へ落とす', () => {
-  const { led, id } = asked();
-  const late = T + 1000 + PERMISSION_TIMEOUT_MS + 1;
+/**
+ * 上限を入れたときの長さ。**既定（`PERMISSION_TIMEOUT_MS`）は 0 ＝ 上限なし**なので、
+ * 時間切れの筋道を見るテストはここから明示的に渡す。
+ * 使う人が上限を入れたときに、掃く側が前と同じに動くことを担保する。
+ */
+const TIMEOUT = 600000;
+
+test('上限を入れてあれば、答えが無いまま時間切れになったら断って、あなたの番へ落とす', () => {
+  const { led, id } = asked({ permissionTimeoutMs: TIMEOUT });
+  const late = T + 1000 + TIMEOUT + 1;
   const { changed, events } = led.tick(late);
 
   assert.deepEqual(changed, [id]);
@@ -1234,27 +1241,44 @@ test('答えが無いまま時間切れになったら断って、あなたの�
 
 test('時間切れのあとすぐ無音に落とさない', () => {
   // lastLineAt を戻さないと、待たせたぶんがそのまま無音として数えられる
-  const { led, id } = asked();
-  const late = T + 1000 + PERMISSION_TIMEOUT_MS + 1;
+  const { led } = asked({ permissionTimeoutMs: TIMEOUT });
+  const late = T + 1000 + TIMEOUT + 1;
   led.tick(late);
   assert.deepEqual(led.tick(late + 1000).changed, []);
   assert.equal(led.rows()[0].state, 'waiting');
 });
 
 test('時間切れは要求ごとに測る', () => {
-  const { led, id } = started();
+  const { led, id } = started({ permissionTimeoutMs: TIMEOUT });
   feed(led, id, sPermission({ requestId: 'a' }), T + 1000);
-  feed(led, id, sPermission({ requestId: 'b' }), T + 1000 + PERMISSION_TIMEOUT_MS);
+  feed(led, id, sPermission({ requestId: 'b' }), T + 1000 + TIMEOUT);
 
-  led.tick(T + 1000 + PERMISSION_TIMEOUT_MS + 1);
+  led.tick(T + 1000 + TIMEOUT + 1);
   assert.deepEqual(led.rows()[0].asks.map((x) => x.id), ['b'], '新しいほうは残る');
   assert.equal(led.rows()[0].state, 'needs-permission');
 });
 
-test('待つ長さの既定は10分', () => {
-  // STALL_MS（2分）より十分長く、Slack で気づいて戻ってこられる長さ
-  assert.equal(PERMISSION_TIMEOUT_MS, 600000);
-  assert.ok(PERMISSION_TIMEOUT_MS > STALL_MS);
+test('既定は上限なし。何時間経っても勝手に断らない', () => {
+  // **CLI 本体は時間で質問を閉じない。** ここだけが 10 分で断っていたので、
+  // 別の作業から戻ってきたときに同じ指示をやり直すことになっていた
+  const { led } = asked();
+  assert.equal(PERMISSION_TIMEOUT_MS, 0, '既定は 0（＝上限なし）');
+
+  for (const hours of [1, 6, 24]) {
+    const { changed } = led.tick(T + 1000 + hours * 3600000);
+    assert.deepEqual(changed, [], `${hours}時間で状態が動いた`);
+    assert.equal(led.rows()[0].state, 'needs-permission', `${hours}時間で許可待ちが外れた`);
+    assert.equal(led.rows()[0].asks.length, 1, `${hours}時間で要求が消えた`);
+  }
+  assert.deepEqual(led.takeOutbox(), [], '断りを1件も積んでいない');
+});
+
+test('上限を 0 にしても、来た瞬間に断らない', () => {
+  // `quiet >= 0` は常に真なので、早期 return が無いと全部その場で断ることになる
+  const { led } = asked({ permissionTimeoutMs: 0 });
+  led.tick(T + 1001);
+  assert.equal(led.rows()[0].state, 'needs-permission');
+  assert.deepEqual(led.takeOutbox(), []);
 });
 
 test('許可待ちの無音は無音にしない', () => {
