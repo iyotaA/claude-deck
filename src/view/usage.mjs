@@ -110,6 +110,21 @@ const CACHE_MAX = 300;
 const cache = createLru(CACHE_MAX);
 
 /**
+ * 集計 memo の印。
+ *
+ * **size が 0（＝読めなかった＝不明）なら印を作らない。** 0 と不明を分ける原則を、
+ * キャッシュの印にも同じように当てる（不明のまま焼き付くと、取り直す機会が消える）。
+ *
+ * @param {string} sessionId
+ * @param {number} size
+ * @param {number} mtimeMs
+ * @returns {string|null} 印にできなければ null
+ */
+function stampKey(sessionId, size, mtimeMs) {
+  return size > 0 ? `${sessionId}:${size}:${mtimeMs}` : null;
+}
+
+/**
  * ログ1本を読んで集計する。memo に載るのはここが返す形。
  *
  * 見出し（title / cwd）も一緒に持つ。entries はもう手元にあるので、
@@ -117,18 +132,34 @@ const cache = createLru(CACHE_MAX);
  * 横断集計の表がセッションを名前で指せるようになるのは、この1回のおかげ。
  *
  * @param {string} sessionId
- * @param {{file: string, projectDir: string, mtimeMs: number}} transcript 索引の1件
+ * @param {{file: string, projectDir: string, size?: number, mtimeMs: number}} transcript 索引の1件
  * @param {{shared?: boolean}} [options] shared: true なら read/cache.mjs の memo も使う
  * @returns {Promise<object>}
  */
 async function usageForTranscript(sessionId, transcript, { shared = false } = {}) {
+  // **読む前に memo を引く。**
+  //
+  // 印に要る size と mtimeMs は `indexTranscripts` が既に stat 済みで持っている
+  // （read/transcript.mjs:indexTranscripts）。会話ログは追記しか起きないので、
+  // 印が同じなら「前に読んだときのまま」と言い切れる ―― `readAll` / `readAllOnce` が
+  // 返す size も同じ `fs.stat` 由来なので、突き合わせて食い違わない。
+  //
+  // 前はこの照合が読んだ**後**にしかなく、memo は集計を省くだけだった。
+  // 読みと JSON.parse は毎回走るので **2回目も 584ms 掛かっていた**（実測）。
+  // 索引が持っている数を捨てずに持ち回すだけで、2回目以降は読まずに済む。
+  const pre = stampKey(sessionId, transcript.size ?? 0, transcript.mtimeMs);
+  if (pre) {
+    const hit = cache.get(pre);
+    if (hit) return hit;
+  }
+
   // 横断集計では共有 memo を避ける（理由は read/transcript.mjs:readAllOnce）。
   // 1本だけ引くときは詳細ビューと同じ memo に乗せたほうが、両方開いても1回しか読まない
   const log = shared ? await readAll(transcript.file) : await readAllOnce(transcript.file);
 
-  // logSize が 0 は「読めなかった＝不明」なので、印にせず毎回組み直す。
-  // 0 と不明を分ける原則を、キャッシュの印にも同じように当てる
-  const key = log.size > 0 ? `${sessionId}:${log.size}:${log.mtimeMs}` : null;
+  // 読んだ結果の印。索引を取ってから読むまでのあいだにログが伸びていれば pre と食い違うので、
+  // ここでもう一度引く（索引の側を持たない呼び出し元に備える意味もある）
+  const key = stampKey(sessionId, log.size, log.mtimeMs);
   if (key) {
     const hit = cache.get(key);
     if (hit) return hit;
@@ -318,7 +349,14 @@ async function baselineFor(sessionId, index, model) {
   const all = [];
   for (const [id, rec] of index) {
     if (id === sessionId) continue;
-    all.push({ sessionId: id, file: rec.file, projectDir: rec.projectDir, mtimeMs: rec.mtimeMs });
+    // **size を落とさない。** usageForTranscript が読む前に memo を引く印にする
+    all.push({
+      sessionId: id,
+      file: rec.file,
+      projectDir: rec.projectDir,
+      size: rec.size,
+      mtimeMs: rec.mtimeMs,
+    });
   }
 
   all.sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -732,7 +770,15 @@ export async function listUsage(q, now = Date.now()) {
 
   const all = [];
   for (const [sessionId, rec] of index) {
-    all.push({ sessionId, file: rec.file, projectDir: rec.projectDir, mtimeMs: rec.mtimeMs });
+    // **size を落とさない。** usageForTranscript が読む前に memo を引く印にする
+    // （ここが 60 本ぶん効くので、2回目以降の /api/usage がほぼ読まずに返る）
+    all.push({
+      sessionId,
+      file: rec.file,
+      projectDir: rec.projectDir,
+      size: rec.size,
+      mtimeMs: rec.mtimeMs,
+    });
   }
 
   let candidates = all;

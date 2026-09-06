@@ -70,24 +70,42 @@ export async function indexTranscripts() {
       if (ent.isDirectory()) subdirs.add(ent.name);
     }
 
-    for (const { name } of ents) {
-      if (!name.endsWith('.jsonl')) continue;
-      const file = path.join(dir, name);
-      let stat;
+    // **stat は1本ずつ await しない。**
+    //
+    // ここは一覧の経路（毎秒走る）でいちばん高い。実測で indexTranscripts が 39.0ms、
+    // 一覧全体が 48.8ms なので、**一覧コストの8割がこの走査**にある。
+    // その中身は 445 本ぶんの逐次 stat で、待っているだけの時間がほとんどを占めていた。
+    //
+    // 並べるのは**1プロジェクトの中まで**にする。全プロジェクトを一度に開くと
+    // 同時に出す stat が際限なく増えるので、そこは今までどおり順に回す
+    // （実測で 19 種・445 本なので、1回あたり 20 数本ずつのまとまりになる）。
+    //
+    // memo は掛けていない。印にできるのはディレクトリの mtime だが、NTFS は
+    // 既存ファイルが太ったときに変わらない（`listSubagents` に memo を掛けない理由と同じ）。
+    // 「staleness のバグを買うより syscall を払う」という既存の判断をここでも保つ。
+    const names = ents.map((e) => e.name).filter((n) => n.endsWith('.jsonl'));
+    const stats = await Promise.all(names.map(async (name) => {
       try {
-        stat = await fs.stat(file);
+        return await fs.stat(path.join(dir, name));
       } catch {
-        continue;
+        return null;
       }
-      if (!stat.isFile()) continue;
+    }));
 
+    // **入れる順は names の順のまま。** 同じ sessionId が2箇所にある場合の決め方
+    // （新しい方を採る）が並列化で変わらないよう、判定はここで順に回す
+    for (let i = 0; i < names.length; i += 1) {
+      const stat = stats[i];
+      if (!stat || !stat.isFile()) continue;
+
+      const name = names[i];
       const sessionId = name.slice(0, -'.jsonl'.length);
       const prev = index.get(sessionId);
       // 同じ sessionId が複数プロジェクトに出た場合は新しい方を採る（cwd 移動後の再開など）
       if (prev && prev.mtimeMs >= stat.mtimeMs) continue;
 
       index.set(sessionId, {
-        file,
+        file: path.join(dir, name),
         projectDir: projectName,
         size: stat.size,
         mtimeMs: stat.mtimeMs,

@@ -430,6 +430,29 @@ function Assert-ReadyToUpload([string]$Version) {
   }
   # ${} で囲む。$tag: と書くと「スコープ付きの変数」と読まれて構文ごと壊れる
   Write-Note "タグ ${tag}: まだ使われていない"
+
+  # **上げるものが今回の版かを確かめる。**
+  #
+  # -Action upload は pack をやり直さず、build\releases\ にあるものをそのまま上げる。
+  # ところが上の確認はどれも git の状態しか見ていないので、
+  # 1.0.0 を pack して動作確認したあと package.json を 1.0.1 に上げてコミット・push すると、
+  # **git のチェックは全部通り、1.0.0 の中身が v1.0.1 として公開される。**
+  #
+  # 前の版の nupkg が隣にあるのは正しい（vpk download が delta のために取り込む）。
+  # 見るのは「今回の版のものが有るか」の1点だけにする。
+  $nupkgName = "$PACK_ID-$Version-full.nupkg"
+  if (-not (Test-Path (Join-Path $releasesDir $nupkgName))) {
+    $have = @()
+    if (Test-Path $releasesDir) {
+      $have = @(Get-ChildItem -Path $releasesDir -Filter "$PACK_ID-*-full.nupkg" | ForEach-Object { $_.Name })
+    }
+    $hint = if ($have.Count -gt 0) { "いまあるのは: $($have -join ', ')" } else { 'build\releases\ が空です' }
+    Stop-Release @"
+版 $Version のパッケージがありません（探したもの: $nupkgName）。$hint
+-Action upload は pack をやり直しません。この版を先に -Action pack してください
+"@
+  }
+  Write-Note "パッケージ: $nupkgName あり"
 }
 
 function Invoke-Upload([string]$Version) {

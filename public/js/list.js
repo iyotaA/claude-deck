@@ -371,11 +371,51 @@ function buildRow(row) {
   return li;
 }
 
+/**
+ * 一覧を組み直すかどうかの鍵。**帯の `heroKey()` と同じ考え方。**
+ *
+ * 見るのは「どの行が、どの状態で、どんな題で並んでいるか」だけ。
+ * 経過時間は入れない（毎秒動くので、入れると鍵の意味が消える）。
+ * `store.onlyLive` を混ぜるのは、行が両方 0 件でも空のときの文言が入れ替わるため。
+ *
+ * @param {object[]} rows 一覧へ出す行
+ * @returns {string}
+ */
+function listKey(rows) {
+  const parts = rows.map((r) => `${r.sessionId}:${r.state}:${r.title ?? r.name ?? ''}`);
+  parts.push(store.onlyLive ? 'live' : 'all');
+  return parts.join('|');
+}
+
+/** 前に組んだときの鍵。null は「まだ一度も組んでいない」 */
+let listStamp = null;
+
 export function renderList() {
   renderHero();
   // **帯へ出したぶんは一覧から外す。** 同じセッションが2箇所に出ると、
   // 選んだときの aria-current も二重になる
   const rows = visibleRows().filter((r) => !HERO_STATES.has(r.state));
+
+  // 件数は鍵に関わらず進める。`textContent` を差し替えるだけなので節点は消えない
+  const live = store.rows.filter((r) => r.alive).length;
+  dom.listCount.textContent = `稼働中 ${live} / 表示 ${rows.length}`;
+
+  // **顔ぶれも状態も題も変わっていなければ、節点に触らない。**
+  //
+  // ここは SSE の push（2秒ごと）で呼ばれる。`replaceChildren()` で毎回作り直すと、
+  // - スクロール位置が先頭へ飛ぶ
+  // - 焦点を持っていた `.row` が破棄されて `body` へ落ちる
+  //   ―― `main.js` の上下キーは焦点が `.row` の中にあることが前提なので、
+  //   **矢印キーが push と push の間（〜2秒）しか使えなくなる**
+  //
+  // 帯（`renderHero`）は先に同じ手当てをしてあり、その隣で一覧だけが素朴に
+  // 作り直していた。乗るための土台は既に揃っている ――
+  // 経過時間は `refreshTimes()` が、選んでいる印は `select()` が、
+  // どちらも節点を作り直さずに書き替える。
+  const key = listKey(rows);
+  if (key === listStamp) return;
+  listStamp = key;
+
   dom.list.replaceChildren();
 
   if (rows.length === 0) {
@@ -404,9 +444,6 @@ export function renderList() {
       dom.list.append(buildGroup({ label: 'そのほか', states: ['unknown'] }, rest));
     }
   }
-
-  const live = store.rows.filter((r) => r.alive).length;
-  dom.listCount.textContent = `稼働中 ${live} / 表示 ${rows.length}`;
 }
 
 export function renderSummary() {
