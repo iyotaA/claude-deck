@@ -11,7 +11,7 @@
  * こちらは「出せと言われたら描く」だけで、`showArchive()` がその口
  * （initMode({ onUsage }) と同じ差し方。層7 どうしで向きを持たせずに済む）。
  */
-import { el, kb, shortStamp, stamp, agentTag, num } from './util.js';
+import { el, kb, shortStamp, stamp, agentTag, markUp, num } from './util.js';
 import { icon } from './icons.js';
 import { tokensStrict, pctStrict } from './usage-chart.js';
 import { store, syncQuery, ARCHIVE_SORTS, ARCHIVE_DAYS } from './store.js';
@@ -36,6 +36,34 @@ const ARCHIVE_DEBOUNCE_MS = 200;
 
 let archiveToken = 0;
 let archiveTimer = null;
+
+/**
+ * 本文に当たった場所の抜き書き。
+ *
+ * **`null` と空配列を分ける。** `null` は「本文を探していない」（浅い検索）、
+ * 空配列は「探したが本文には無かった」（見出しで当たった）。
+ * どちらも出すものが無い点は同じだが、混ぜると
+ * 「深い検索なのに抜き書きが出ない」の理由が読めなくなる。
+ *
+ * 当たった語には `<mark>` を付ける。**`innerHTML` は使わない** ――
+ * ログ本文をそのまま出す場所なので、必ず `textContent` で入れる
+ * （`util.js` の `markUp` が時系列で同じことをしている）。
+ *
+ * @param {string[]|null} hits サーバーが返した抜き書き
+ * @param {string|null} needle 検索語
+ * @returns {HTMLElement|null} 出すものが無ければ null
+ */
+function hitsBlock(hits, needle) {
+  if (!Array.isArray(hits) || hits.length === 0) return null;
+
+  const box = el('div', 'card-hits');
+  for (const text of hits) {
+    const line = el('p', 'card-hit');
+    line.append(...markUp(text, needle));
+    box.append(line);
+  }
+  return box;
+}
 
 /**
  * 書庫のカード1枚。
@@ -69,6 +97,11 @@ function buildArchiveCard(row) {
   const agents = agentTag(row.subagentCount);
   if (agents) meta.append(agents);
   closeCardMeta(card, meta);
+
+  // 本文に当たった場所。**深い検索のときだけ出る。**
+  // 「なぜこれが出たか」が読めないと、当たった一覧を上から開き直すことになる
+  const hits = hitsBlock(row.hits, store.archive.q);
+  if (hits) card.append(hits);
 
   // 数値の器。**空のまま置いておく。** 中身は別の窓口（/api/sessions/:id/usage）から
   // 遅れて届く。ここで待つと、探した結果が出るまでが遅くなる
@@ -140,9 +173,14 @@ function renderArchive() {
     const box = el('div', 'empty', a.q
       ? `「${a.q}」に当たるセッションがありません`
       : 'セッションのログが見つかりません');
-    // 既定の検索はタイトルまで見ていない。深い検索という手が残っていることを伝える
+    // 既定の検索は ID と置き場所しか見ていない。本文まで探す手が残っていることを伝える
     if (a.q && !a.deep) {
-      box.append(el('div', 'empty-note', '「中身も探す」を入れると、ログを開いてタイトルまで探します'));
+      box.append(el('div', 'empty-note',
+        '「中身も探す」を入れると、会話の本文まで探します'));
+    } else if (a.q && a.deep && a.meta?.scanLimited) {
+      // 深く探しても出なかったとき。**上限で切れている可能性を言う**
+      box.append(el('div', 'empty-note',
+        `新しい ${a.meta.scanMax} 件までしか本文を読んでいません。期間や置き場所で絞ると、より古いものまで届きます`));
     }
     li.append(box);
     dom.archive.append(li);

@@ -15,13 +15,20 @@
  *
  *  - 既定 … 検索語は sessionId と置き場所のフォルダ名にだけ当てる。
  *           ファイルを読むのは、そのページに出る分（最大 50 件）だけ
- *  - deep=1 … 新しい順に ARCHIVE_SCAN_MAX 件までタイトルを引いて、そこも探す
+ *  - deep=1 … 新しい順に ARCHIVE_SCAN_MAX 件まで**本文を舐める**（read/grep.mjs）。
+ *           当たった場所の抜き書きも一緒に返すので、画面は「どこに当たったか」を出せる
+ *
+ * **長く deep=1 は本文を見ていなかった。** 末尾 64KB を読んでタイトルを埋めるだけで、
+ * 探す範囲は既定と同じだった（画面の札は「中身も探す」と名乗っていたのに）。
+ * いまは検索語を前フィルタにしてストリームで舐める ―― 実測 155 MB/s で、
+ * `JSON.parse` まで届くのは当たった行だけ。
  *
  * ARCHIVE_SCAN_MAX を 120 に抑えているのは read/cache.mjs の LRU が全体で
  * 240 件しか持たないため。ここを 300 にすると深い検索1回で一覧（毎秒走る）の
  * memo を押し出し、次の更新で全ファイルを読み直すことになる。
  */
 import { indexTranscripts, readTail } from '../read/transcript.mjs';
+import { grepTranscript } from '../read/grep.mjs';
 import { countSubagents } from '../read/subagents.mjs';
 import { skillIndex, skillIndexState } from '../read/skills.mjs';
 import { extractMeta } from '../parse/meta.mjs';
@@ -139,6 +146,10 @@ function publicRow(row) {
     // 索引から引いたもの。索引がまだ無ければ null（同じく「見ていない」）
     skills: row.skills,
     read: row.read,
+    // 本文に当たった場所の抜き書き。**深い検索のときだけ入る。**
+    // 空配列は「探したが本文には無かった」（見出しで当たった）、
+    // null は「本文を探していない」―― 0 と不明を分けるのと同じ扱い
+    hits: Array.isArray(row.hits) ? row.hits : null,
   };
 }
 
@@ -247,6 +258,8 @@ export async function listArchive(q, now = Date.now()) {
         ? skills.entries[sessionId].skills
         : null,
       read: false,
+      // 深い検索のときだけ埋まる。null は「本文を探していない」
+      hits: null,
     });
   }
 
@@ -280,9 +293,20 @@ export async function listArchive(q, now = Date.now()) {
     const byRecent = sortArchiveRows(rows, 'recent');
     const scan = byRecent.slice(0, ARCHIVE_SCAN_MAX);
     scanLimited = byRecent.length > scan.length;
-    await Promise.all(scan.map((r) => fillTitle(r)));
+
+    // **本文を舐めるのが先。タイトルを埋めるのは残ったぶんだけ。**
+    // 逆にすると、当たらなかった行の末尾読みまで払うことになる
+    await Promise.all(scan.map(async (r) => {
+      const { hits } = await grepTranscript(r.file, needle);
+      // 抜き書きを行に載せる。画面が「どこに当たったか」を出せる
+      r.hits = hits;
+    }));
     scanned += scan.length;
-    rows = scan.filter((r) => matches(r, needle));
+
+    // 本文に当たったか、見出しに当たったか。**どちらでも拾う** ――
+    // 置き場所や ID で探す使い方は残す（浅い検索で出たものが深い検索で消えると戸惑う）
+    rows = scan.filter((r) => r.hits.length > 0 || matches(r, needle));
+    await Promise.all(rows.map((r) => fillTitle(r)));
   } else if (needle) {
     rows = rows.filter((r) => matches(r, needle));
   }
