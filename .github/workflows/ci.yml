@@ -1,0 +1,90 @@
+# PR と master への push で走る確認。
+#
+# **ここに置く理由。** このリポジトリは PR 運用（#55 以降）なのに、
+# 自動で走るものが1つも無かった。レビューで見落としたものはそのまま master に入る。
+#
+# 見るのは3つ。どれも「壊れていても、実際に動かすまで気づけない」もの。
+#
+#   1. テスト（`npm test`）
+#   2. PowerShell の構文と BOM ―― `.ps1` は BOM が無いと旧 powershell.exe (5.1) が
+#      OS の既定コードページで読み、日本語コメントが化けて構文解析まで壊れる。
+#      BOM の有無は `test/contract.test.mjs` が見ているが、**構文そのものは誰も見ていない**
+#   3. C# のビルド ―― `launcher/*.cs`（2,533行）はコンパイルエラーでも `npm test` が通る。
+#      いま気づけるのは `release.ps1 -Action stage` の `dotnet publish` まで進んだときだけ
+#
+# **Node 側の構文は `test/syntax.test.mjs` が見ているので、ここでは重ねない**
+# （`node --check` を 107 ファイルに通している）。
+#
+# **windows-latest で回す。** `scripts/` は PowerShell、`launcher/` は
+# `net10.0-windows` で、どちらも Linux では確かめられない。
+#
+# **依存は増えない。** `dependencies` は空のままで、CI が入れるのは
+# ランナーに最初から居る Node と .NET だけ（`npm ci` すら要らない ―― lock も無い）。
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# 同じブランチへ続けて push したとき、前の実行を止める。
+# 待ち行列が伸びると、直したつもりの結果を見るまでが長くなる
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # **版ごとにジョブを分ける。** `setup-node` の `node-version` に複数行を渡すと
+  # 「18\n22」という1つの版名として扱われて落ちる（実測。初回の CI がこれで転んだ）。
+  # 分ければ、どちらの版で落ちたのかもチェックの名前で分かる
+  test:
+    name: テスト（Node ${{ matrix.node }}）
+    runs-on: windows-latest
+    strategy:
+      # 片方が落ちても、もう片方の結果は見たい
+      fail-fast: false
+      matrix:
+        # `engines` は ">=18"。**いちばん古い版と、いま手元で使っている版の両方で見る。**
+        # 18 でしか落ちない書き方（新しい構文）が入るのを、ここで止める
+        node: ['18', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --test
+
+  # Windows でしか確かめられない2つ。**Node のテストとは分ける** ――
+  # 版を2つ回すあいだ、同じものを2回ビルドする意味が無い
+  windows:
+    name: PowerShell と C#
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `.ps1` の構文。**BOM の有無は contract.test.mjs が見ているので、ここは中身**
+      - name: PowerShell の構文
+        shell: pwsh
+        run: |
+          $bad = 0
+          foreach ($f in Get-ChildItem -Path scripts -Filter *.ps1 -Recurse) {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $f.FullName, [ref]$null, [ref]$errs) | Out-Null
+            if ($errs.Count -gt 0) {
+              $bad++
+              Write-Host "::error file=$($f.FullName)::$($errs[0].Message)"
+            }
+          }
+          if ($bad -gt 0) { exit 1 }
+          Write-Host 'PowerShell: OK'
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      # **`publish` ではなく `build`。** あちらは node.exe（88MB）の同梱を要求するので、
+      # CI で確かめたいこと（コンパイルが通るか）に対して重すぎる。
+      # 版は release.ps1 が付けるものなので、ここでは既定（0.0.0-dev）のまま
+      - name: C# のビルド
+        run: dotnet build launcher/ClaudeDeck.csproj -c Release --nologo

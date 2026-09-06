@@ -61,6 +61,7 @@ ClaudeDeck.exe --background      窓を出さずに立てる（自動起動が�
 ClaudeDeck.exe --open            窓だけ開く
 ClaudeDeck.exe --stop            POST /api/quit で止める
 ClaudeDeck.exe --status          診断。コンソールへ出す
+ClaudeDeck.exe --check-update    更新の確認だけを手で走らせる。結果をコンソールへ出す
 ClaudeDeck.exe --install-startup / --uninstall-startup
 ```
 
@@ -70,10 +71,17 @@ ClaudeDeck.exe --install-startup / --uninstall-startup
 ポートは既定 4317。`CLAUDE_DECK_PORT` で変えられる。
 埋まっていたら 12 回まで +1 してずらす。
 
-### テスト・リンタ
+### テスト・リンタ・CI
 
 テストは `node:test`（Node 18 以降に入っている標準のもの）。`npm test` で `test/` 配下が走る。
-**リンタは無い。** 設定していない。
+**リンタは無い。** 設定していない。構文として読めるかだけは `test/syntax.test.mjs` が
+`node --check` で見ている（`server.mjs` と `public/js/` は import しているテストが無いため）。
+
+CI は `.github/workflows/ci.yml` の1枚だけ。PR と master への push で
+**windows-latest** で走り、見るのは3つ ―― `npm test`（Node 18 と 22 の両方）・
+`.ps1` の構文・`dotnet build`。あとの2つは Windows でしか確かめられないもので、
+どちらも**壊れていても `npm test` は通る**（C# は release まで、PowerShell は
+走らせるまで気づけない）。**依存は増えない**（ランナーに最初から居るものだけを使う）。
 
 ```
 npm test                         全部走らせる
