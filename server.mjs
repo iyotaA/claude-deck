@@ -84,6 +84,21 @@ let boundPort = 0;
 const POLL_MS = 2000;
 /** 変更通知が連続で飛んでくるのをまとめる。 */
 const DEBOUNCE_MS = 250;
+/**
+ * スキルの索引を追いつかせにいく間隔。
+ *
+ * **索引が古くなると、絞り込みが 0 件になる**（`view/archive.mjs` は索引の無いものを
+ * 全件に化けさせない ―― 絞ったつもりで全部出るほうが危ないため）。
+ * ところが `buildSkillIndex()` を呼ぶ場所が立ち上げの1回しか無く、
+ * **プロセスの中に「2回目」が存在しなかった。**
+ * このアプリはログオン時の自動起動で何日も立ちっぱなしになるので、
+ * 起動後に生まれたセッションはスキルで永久に引けない状態だった。
+ *
+ * 60 秒にしてあるのは、書庫は絞り込みやページ送りのたびに引かれるから。
+ * 差分更新そのものは安い（変わったものだけ読み直す。実測で 2 本 / 1 秒）が、
+ * 押すたびに全件の印を突き合わせる意味は無い。
+ */
+const SKILL_REINDEX_MS = 60000;
 
 const argv = process.argv.slice(2);
 const args = new Set(argv);
@@ -188,6 +203,26 @@ let lastSerialized = '';
 let refreshTimer = null;
 let refreshing = false;
 let pendingRefresh = false;
+
+/**
+ * スキルの索引を追いつかせにいく。**待たない。投げっぱなしにする。**
+ *
+ * 呼ぶのは書庫を引いたときだけ。一覧（毎秒走る）からは呼ばない
+ * ―― あちらに重い処理を足さないのがこのプロジェクトの線で、
+ * スキルは書庫でしか使わないので、見に来た人がいるときだけ追いつけば足りる。
+ *
+ * 二重に走らせない手当ては3つ。`buildSkillIndex()` 自身が走行中なら同じ約束を返し、
+ * ここでも `building` を見て降り、さらに前回から `SKILL_REINDEX_MS` 経つまでは投げない。
+ *
+ * **失敗したときは間隔を待たずに投げ直す**（`built` が false のまま `at` だけ進むと、
+ * 一度転んだ索引が永久に作られなくなる）。
+ */
+function touchSkillIndex() {
+  const st = skillIndexState();
+  if (st.building) return;
+  if (st.built && st.at && Date.now() - st.at < SKILL_REINDEX_MS) return;
+  buildSkillIndex().catch(() => {});
+}
 
 /**
  * 一覧を1回組む。
@@ -1268,6 +1303,11 @@ const server = http.createServer((req, res) => {
 
   // 書庫。一覧と違って毎秒引かれるものではないので、その場で作って返す（push はしない）
   if (pathname === '/api/archive') {
+    // 索引を追いつかせにいく。**待たない。**
+    // 待つと、立ち上げ直後の1回だけ 6 秒かかる窓口になる（`skillIndex()` が
+    // 作りに行かないのと同じ理由）。この応答には間に合わなくてよく、
+    // 次に引いたときに新しいセッションが候補へ出ればそれで足りる
+    touchSkillIndex();
     serveAsync(res, listArchive(parseArchiveQuery(url.searchParams)));
     return;
   }

@@ -160,6 +160,13 @@ export function initListDrawer() {
 
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || !dom.app.classList.contains('is-list-open')) return;
+    // モーダルが開いているあいだの Esc は横取りしない。
+    // `<dialog>` の Esc は cancel で処理されるが keydown は document までバブルするので、
+    // 見ないと**モーダルを閉じただけで一覧まで畳まれる**。しかも remember が既定 true なので
+    // localStorage に焼き付き、次に開いたときも畳まれたままになる。
+    // preventDefault() は dialog の close request を止めないので、こちらが降りるしかない
+    // （palette.js の open() が「重ねない」を決めているのと同じ判定）
+    if (document.querySelector('dialog[open]')) return;
     ev.preventDefault();
     setListOpen(false, dom.listToggle);
   });
