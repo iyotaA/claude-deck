@@ -96,7 +96,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） `usage`（数値） `stream`（実行中の行） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） `usage`（数値） `query`（クエリの読み取り） |
 | `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） |
-| `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `ask`（許可要求カードの組み立て） `merge`（一覧への合流） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） `dirs`（起こしてよいフォルダの登録） `rate`（枠の使用率を紙に1枚） |
+| `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `ask`（許可要求カードの組み立て） `merge`（一覧への合流） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） `dirs`（起こしてよいフォルダの登録） `defaults`（起こすときの既定値） `rate`（枠の使用率を紙に1枚） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
 | `src/startup/` | ランチャが書いた自動起動の紙を読む | `state` |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool` / `isLongRunningTool`） `appdata`（書き込み先） `configfile`（`config.json` の読み書き） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `portclaim`（ポートの取り合いの決め方） `env`（止めるスイッチの読み方） `objects`（`isPlainObject`） `lru`（`createLru`。**store は共有しない**） |
@@ -255,6 +255,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/health` | 生存確認。二重起動の判定にも使う。版・通知の設定と数え・**自動起動の様子**・**claude CLI を掴めたか**・**抱えている実行の数**・**どう立ったか（`startedBy`）**・**スキルの索引ができているか**もここに出る |
 | `GET /api/settings/notify` | 通知の設定。URL はマスク済み。出どころ（`sources` / `envSet`）も返す |
 | `GET /api/settings/rundirs` | 起こしてよいフォルダ。**登録ぶんと環境変数ぶんだけ**（セッション由来のものは消せないので出さない） |
+| `GET /api/settings/rundefaults` | 起こすときの既定値。**選んである値だけ**（語彙・候補・範囲は `/api/runs/options` が持つ） |
 | `GET /api/update` | 更新の状態。ランチャが書いた紙 ＋ `canApply`（いまの起動のされ方で当てられるか） |
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
 | `POST /api/runs` | セッションを1本起こす。202 を返し、以降は速報で追う |
@@ -266,6 +267,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `POST /api/runs/:id/switch` | モデル・思考量・権限モードを替えて `--resume` で続ける。202 |
 | `POST /api/settings/notify` | 保存して即反映。応答は GET と同じ形 |
 | `POST /api/settings/rundirs` | 起こしてよいフォルダを1つ足す（`add`）・消す（`remove`）。応答は GET と同じ形 |
+| `POST /api/settings/rundefaults` | 起こすときの既定値を保存する。**触った項目だけ**送れる（キーが無い＝触らない）。応答は読み直した値なので、丸められたことが画面でその場で見える |
 | `POST /api/settings/notify/test` | テスト送信を1通。3秒のクールダウン付き |
 | `POST /api/update/apply` | ランチャを起こして更新を当てさせる。202 を返して以降は関与しない |
 | `POST /api/quit` | 行儀よく止まる。ランチャが更新前に使う |

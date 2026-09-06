@@ -34,6 +34,7 @@ import {
 import {
   RUN_DIRS_MAX, addRunDir, checkRunDir, dirExists, loadRunDirs, removeRunDir, saveRunDirs,
 } from './src/run/dirs.mjs';
+import { applyRunDefaults, loadRunDefaults, saveRunDefaults } from './src/run/defaults.mjs';
 import { loadUpdateState, parseUpdateState } from './src/update/state.mjs';
 import { loadStartupState, parseStartupState } from './src/startup/state.mjs';
 import { isTrustedWrite } from './src/shared/origin.mjs';
@@ -866,6 +867,55 @@ async function handleRunDirs(req, res) {
 }
 
 /**
+ * 設定画面へ返す、起こすときの既定値。
+ *
+ * **選択肢そのもの（語彙・候補・範囲）はここに載せない。** あれは
+ * `/api/runs/options` が持っていて、起こすフォームが既に引いている。
+ * 2箇所から配ると、語を1つ足した日に片方だけ古くなる。
+ *
+ * @returns {object} GET と POST で同じ形を返す
+ */
+function runDefaultsPayload() {
+  return { defaults: loadRunDefaults() };
+}
+
+/**
+ * 起こすときの既定値を保存する。
+ *
+ * **紙の値をそのまま信じない。** `applyRunDefaults` が語彙と範囲で濾すので、
+ * 知らない語は `null`（指定なし）に、範囲外の数は範囲へ丸めて落ちる。
+ * ここを通ったことは安全の根拠にならない（人が紙を手で書き換えられる）ので、
+ * 実際に起こすときは `spec.mjs` がもう一度確かめる。
+ *
+ * 本文の上限は既定の `BODY_MAX`（8KB）のまま。来るのは語が3つと数が1つだけで、
+ * ここに大きい口を開ける理由が無い。
+ *
+ * @param {object} req リクエスト
+ * @param {object} res レスポンス
+ */
+async function handleRunDefaults(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: errText(err) });
+    return;
+  }
+
+  const next = applyRunDefaults(loadRunDefaults(), body);
+  try {
+    saveRunDefaults(next);
+  } catch (err) {
+    sendJson(res, 500, { ok: false, reason: `保存できませんでした: ${errText(err)}` });
+    return;
+  }
+
+  // 送った値ではなく**読み直した値**を返す。濾された結果が画面へ返るので、
+  // 「入れたのに効いていない」を画面がその場で映せる
+  sendJson(res, 200, { ok: true, ...runDefaultsPayload() });
+}
+
+/**
  * モデルの候補の上限。増えても選ぶのが大変になるだけなので、ここで切る。
  */
 const MODEL_CHOICE_MAX = 12;
@@ -1211,6 +1261,10 @@ function handleWrite(req, res, pathname, url) {
     handleRunDirs(req, res);
     return;
   }
+  if (pathname === '/api/settings/rundefaults') {
+    handleRunDefaults(req, res);
+    return;
+  }
   if (pathname === '/api/quit') {
     handleQuit(res);
     return;
@@ -1402,6 +1456,9 @@ const server = http.createServer((req, res) => {
   // 「そんな実行はありません」と 404 を返すようになる。
   //
   if (pathname === '/api/runs/options') {
+    // **そのつど紙を読む。** 抱えると、設定モーダルで変えたのに
+    // 起こすフォームが古い既定のまま開く（`run.dirs` を毎回読み直すのと同じ理由）
+    const runDefaults = loadRunDefaults();
     sendJson(res, 200, {
       // 並べ直してから返す。allowedRunDirs() は Set の挿入順なので、
       // 一覧の並びが変わるたびに選択肢の順が動く（押す場所が毎回変わって使いにくい）
@@ -1414,12 +1471,22 @@ const server = http.createServer((req, res) => {
         label: PERMISSION_MODE_LABELS[value] ?? value,
         danger: value === BYPASS_MODE,
       })),
-      defaultMode: DEFAULT_PERMISSION_MODE,
+      // 設定で選んであればそれ、無ければ spec.mjs の既定。
+      // **紙の値をそのまま信じない**（`parseRunDefaults` が語彙で濾したうえで来る）
+      defaultMode: runDefaults.permissionMode ?? DEFAULT_PERMISSION_MODE,
       // **選ぶための材料であって、許可リストではない。** 中身は実際に使われたモデルで、
       // ここに無い名前も画面の自由入力から渡せる（recentModels の説明を見ること）
       models: recentModels(),
+      // 設定で選んだモデル。候補（`models`）に無いこともあるので、画面はこれを別に見る
+      defaultModel: runDefaults.model,
       efforts: EFFORTS,
-      budget: { default: DEFAULT_BUDGET_USD, min: BUDGET_MIN_USD, max: BUDGET_MAX_USD },
+      defaultEffort: runDefaults.effort,
+      // `default` が null なら「上限なし」。**0 を入れない**（0 と不明を分ける）
+      budget: {
+        default: runDefaults.budgetUsd ?? DEFAULT_BUDGET_USD,
+        min: BUDGET_MIN_USD,
+        max: BUDGET_MAX_USD,
+      },
       promptMax: PROMPT_MAX,
       // 掴めていなければフォームの時点で分かるようにする。押してから 503 で断るより早い。
       // **path と source は載せない。** 画面に出す用が無いのに、あると
@@ -1450,6 +1517,13 @@ const server = http.createServer((req, res) => {
   // 起こしてよいフォルダ。**セッション由来のぶんは入らない**（runDirsPayload を見よ）
   if (pathname === '/api/settings/rundirs') {
     sendJson(res, 200, runDirsPayload());
+    return;
+  }
+
+  // 起こすときの既定値。選択肢そのもの（語彙・候補・範囲）は
+  // `/api/runs/options` が持っているので、ここは**選んである値だけ**を返す
+  if (pathname === '/api/settings/rundefaults') {
+    sendJson(res, 200, runDefaultsPayload());
     return;
   }
 

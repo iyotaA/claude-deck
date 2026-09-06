@@ -98,6 +98,7 @@
 
 .settings[data-sec="notify"] .settings-pane[data-sec="notify"],
 .settings[data-sec="dirs"] .settings-pane[data-sec="dirs"],
+.settings[data-sec="rundef"] .settings-pane[data-sec="rundef"],
 .settings[data-sec="state"] .settings-pane[data-sec="state"] { display: block; }
 
 /* 足も同じ鍵で絞る。**通知の節でだけ**「テスト送信」「保存」と状態の1行が出る。
@@ -330,6 +331,57 @@
 
 .settings-grid .settings-label,
 .settings-grid .settings-hint { margin: 0; }
+
+/* ラベルと節の見出しに絵を添えたときだけ inline-flex にする。
+   どちらも block なので、素のままだと絵が上の行に乗る。
+   **起こすフォーム（run.css）もこれを借りる。** 同じ宣言を2箇所に持たない
+   ―― あちらは settings.css の後に読むので、そのまま効く。
+   絵を差すのは JS（`data-icon` の印を見て `icon()` を prepend する）。
+
+   **絵は既にその意味で使われているものから選ぶ。** 新しい対応を作ると、
+   同じ絵が画面の場所によって別の意味を指すことになる
+   （`shield` は権限モード、`bell` は通知、`clock` は時間、`folder` は置き場所）。 */
+.settings-label.has-icon,
+.settings-h3.has-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+/* 起こすときの既定だけ2列（ラベル / 欄）にして、ヒントは欄の下へ落とす。
+   **3列のままだと権限モードで崩れる** … `auto mode（Claude が判断・危ないものだけ確認）`
+   のような長いラベルを持つ `<select>` が2列目（`auto`）を中身なりに押し広げ、
+   右のヒントを潰す。通知の節は数の欄と短い `<select>` しか無いので3列のままでよい。
+
+   **1つだけ縦積みにして逃げない。** 同じ節に2つの並べ方が混ざると、
+   崩れてはいないのに視線の運びが揃わず読みづらくなる（実際にそうなった）。
+   4つとも「ラベルは左、欄は残り全幅、ヒントはその下」で揃える。 */
+.settings-pane[data-sec="rundef"] .settings-grid {
+  grid-template-columns: 7rem minmax(0, 1fr);
+  /* 縦の隙間だけ詰める。ヒントが欄の下に来るので、既定の .5rem では離れて見える
+     （`align-items: center` は上の `.settings-grid` のものがそのまま効く） */
+  row-gap: .2rem;
+}
+
+/* ヒントは欄の列（2列目）の下。行を跨がせないので、grid が勝手に次の行へ回さない */
+.settings-pane[data-sec="rundef"] .settings-grid .settings-hint {
+  grid-column: 2;
+  margin-bottom: .5rem;
+}
+
+/* 最後の行の下だけ余白を戻す。節の下端に半端な隙間を作らない */
+.settings-pane[data-sec="rundef"] .settings-grid .settings-hint:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 34rem) {
+  /* 上の1列指定（`.settings-grid`）に詳細度で負けないよう、こちらでも畳む */
+  .settings-pane[data-sec="rundef"] .settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-pane[data-sec="rundef"] .settings-grid .settings-hint { grid-column: 1; }
+}
 
 @media (max-width: 34rem) {
   .settings-grid {
