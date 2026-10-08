@@ -281,6 +281,22 @@
 .updov[data-stage='failed'] .updov-ring::before,
 .updov[data-stage='stuck'] .updov-ring::before { content: '!'; }
 
+/* 取り寄せの進み方が分かるときは、回すのをやめて％で埋める（update.js の fillRing）。
+   埋まった側は --calm、残りは同じ色を薄めたもの。真ん中は器の面（--bg）で抜いて輪にする。
+   新しい色は作らない（color-mix で既存のトークンから作る） */
+.updov-ring[data-pct] {
+  border: 0;
+  animation: none;
+  background:
+    radial-gradient(closest-side, var(--bg) 80%, transparent 82%),
+    conic-gradient(var(--calm) calc(var(--upd-pct, 0) * 1%), color-mix(in srgb, var(--calm) 20%, transparent) 0);
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  font-weight: 700;
+  color: var(--calm);
+  font-variant-numeric: tabular-nums;
+}
+
 .updov-text { min-width: 0; }
 
 .updov-title {

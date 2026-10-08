@@ -54,10 +54,11 @@ static class Updates
     const int CAUSE_DEPTH = 5;
 
     /// <summary>
-    /// 取り寄せの進み方を記録に落とす刻み（％）。
+    /// 取り寄せの進み方を記録と紙（update.json の progress）に落とす刻み（％）。
     ///
     /// Velopack は1％ごとに呼んでくるので、素で書くと1回の更新で100行出る。
     /// 診断に要るのは「どのあたりで止まったか」なので、10行で足りる。
+    /// 画面の輪も 10% 刻みで埋まれば「進んでいる」は伝わる。
     /// </summary>
     const int PROGRESS_STEP = 10;
 
@@ -89,6 +90,10 @@ static class Updates
     /// <param name="ChangedAt">状態が変わった時刻（Unix ミリ秒）。</param>
     /// <param name="Error">失敗の理由。成功なら null。</param>
     /// <param name="PrevPort">止める前に server が使っていたポート。分からなければ 0。</param>
+    /// <param name="Progress">
+    /// 取り寄せの進み方（0〜100、PROGRESS_STEP 刻み）。downloading のときだけ入れる。
+    /// それ以外と、進み方を書かない古い版のランチャが書いた紙では null（画面は輪を回すだけにする）。
+    /// </param>
     public record UpdateState(
         string State,
         string Current,
@@ -98,7 +103,8 @@ static class Updates
         long CheckedAt,
         long ChangedAt,
         string? Error,
-        int PrevPort);
+        int PrevPort,
+        int? Progress = null);
 
     /// <summary>
     /// 確認して update.json を書く。
@@ -244,10 +250,11 @@ static class Updates
             var notes = Paper.Clip(target?.NotesMarkdown, NOTES_MAX);
             Log.Line($"取り寄せます: {requested ?? "(版が読めない)"}");
 
+            // 0% から書いておく。進み方を書く版だと画面に分かるので、輪を％の形で出せる
             previous = Save(previous, Make("downloading", Now(),
-                available: requested, requested: requested, notes: notes));
+                available: requested, requested: requested, notes: notes) with { Progress = 0 });
 
-            await manager.DownloadUpdatesAsync(info, LogProgress(), CancellationToken.None);
+            await manager.DownloadUpdatesAsync(info, ReportProgress(previous), CancellationToken.None);
 
             // 落とす前にポートを控える。port.json は /api/quit で消えるので、止めた後では遅い。
             // この番号で起き直せば、開いたままの Edge の窓が同じ URL に戻ってくる
@@ -341,22 +348,39 @@ static class Updates
     }
 
     /// <summary>
-    /// 取り寄せの進み方を記録に落とす受け皿。
+    /// 取り寄せの進み方を、記録と紙の両方に落とす受け皿。
     ///
-    /// 紙には書かない。update.json を毎パーセント書き換えると、
-    /// 読む側が半端な状態を掴む機会をただ増やすだけになる。
-    /// 進み方が要るのは後から「どこで止まったか」を調べるときなので、記録で足りる。
+    /// 前は記録にしか書いていなかった。画面が「進んでいるのか分からない」の一番の理由が
+    /// いちばん長く待つ取り寄せで、そこに数字が出ないことだった（実測の指摘）。
+    ///
+    /// **紙に書くのは PROGRESS_STEP 刻みだけ**（1回の更新で最大 11 回）。
+    /// 毎パーセント書くと、読む側が書きかけを掴む機会を増やすだけになる
+    /// （書き方は一時ファイル → rename なので、増えても壊れはしない）。
+    ///
+    /// changedAt は Save が据え置く（state と available が同じ）。
+    /// 画面は progress そのものも「紙が動いた」として数えるので、見張りの時計はそちらで巻き戻る。
+    /// checkedAt は書くたびに動かすので、紙の古さはそちらで測れる。
+    ///
+    /// Velopack がどのスレッドから呼んでくるかは決まっていないので、紙を書くところは lock で1本にする。
+    /// 戻る数字が来ても戻さない（画面の輪が逆回りしない）。
     /// </summary>
+    /// <param name="downloading">取り寄せを始めたときに書いた紙。</param>
     /// <returns>Velopack に渡す進捗の受け皿。</returns>
-    static Action<int> LogProgress()
+    static Action<int> ReportProgress(UpdateState downloading)
     {
-        var lastStep = -1;
+        var gate = new object();
+        var paper = downloading;
+        var lastStep = (downloading.Progress ?? 0) / PROGRESS_STEP;
         return percent =>
         {
-            var step = percent / PROGRESS_STEP;
-            if (step == lastStep) return;
-            lastStep = step;
-            Log.Line($"  取り寄せ {percent}%");
+            var step = Math.Clamp(percent, 0, 100) / PROGRESS_STEP;
+            lock (gate)
+            {
+                if (step <= lastStep) return;
+                lastStep = step;
+                Log.Line($"  取り寄せ {percent}%");
+                paper = Save(paper, paper with { Progress = step * PROGRESS_STEP, CheckedAt = Now() });
+            }
         };
     }
 
@@ -428,7 +452,8 @@ static class Updates
                 JsonRead.GetLong(root, "checkedAt"),
                 JsonRead.GetLong(root, "changedAt"),
                 JsonRead.GetString(root, "error"),
-                JsonRead.GetInt(root, "prevPort"));
+                JsonRead.GetInt(root, "prevPort"),
+                JsonRead.GetIntOrNull(root, "progress"));
         }
         catch
         {
@@ -494,6 +519,9 @@ static class Updates
         Paper.Text(writer, "error", state.Error);
         // 読むのは自分だけ（--restarted で戻すポート）。Node 側は運びもしない
         writer.WriteNumber("prevPort", state.PrevPort);
+        // 取り寄せの進み方。無いときもキーごと消さずに null を書く（無いと null を分ける）
+        if (state.Progress is int progress) writer.WriteNumber("progress", progress);
+        else writer.WriteNull("progress");
     });
 
     /// <summary>

@@ -40,6 +40,7 @@ function paper(over = {}) {
     checkedAt: NOW - 1000,
     changedAt: NOW - 1000,
     error: null,
+    progress: null,
     path: 'C:\\dummy\\update.json',
     canApply: true,
     ...over,

@@ -79,6 +79,7 @@ test('CSS が参照しているトークンが、どこかで定義されてい�
   // JS が要素へ直に書く変数。CSS の中には定義が無いので、ここで除く
   const FROM_JS = new Set([
     '--state-color', '--list-w', '--insp-w', '--list-col', '--insp-col',
+    '--upd-pct', // 取り寄せの％（update.js の fillRing）
   ]);
 
   const defined = new Set();

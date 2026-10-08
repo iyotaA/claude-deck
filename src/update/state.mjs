@@ -101,6 +101,19 @@ function stamp(v) {
 }
 
 /**
+ * 取り寄せの進み方（％）として使える値だけを取り出す。
+ *
+ * 0 は「0%」の意味で来る（ランチャは取り寄せを始めた時点で 0 を書く）ので、時刻と違って落とさない。
+ * 取れなかったものは null（画面は輪を回すだけにする）。0 と不明を分ける決まりの、ここでの形。
+ *
+ * @param {*} v 元の値
+ * @returns {number|null} 0〜100 の整数。使えなければ null
+ */
+function percent(v) {
+  return Number.isInteger(v) && v >= 0 && v <= 100 ? v : null;
+}
+
+/**
  * update.json の中身を、画面へ渡せる形に整える。純関数。
  *
  * ランチャが書く状態は9つ（off / not-installed / none / available /
@@ -122,7 +135,7 @@ function stamp(v) {
  * @param {boolean} [opts.missing] 紙がまだ無いか
  * @param {string|null} [opts.path] 紙の置き場所。診断のときに人へ見せる
  * @returns {object} state / label / current / available / requested / notes /
- *                   checkedAt / changedAt / error / path
+ *                   checkedAt / changedAt / error / progress / path
  */
 export function parseUpdateState(raw, { version = null, missing = false, path: file = null } = {}) {
   const base = {
@@ -133,6 +146,7 @@ export function parseUpdateState(raw, { version = null, missing = false, path: f
     checkedAt: null,
     changedAt: null,
     error: null,
+    progress: null,
     path: file,
   };
 
@@ -153,6 +167,9 @@ export function parseUpdateState(raw, { version = null, missing = false, path: f
     checkedAt: stamp(raw.checkedAt),
     changedAt: stamp(raw.changedAt),
     error: str(raw.error),
+    // 取り寄せの進み方。取り寄せのあいだだけ運ぶ。ほかの状態に残っていても意味が無いうえ、
+    // 画面が「入れ替えています 100%」のような食い違いを出しかねない
+    progress: state === 'downloading' ? percent(raw.progress) : null,
   };
 
   if (state !== 'available') return known;

@@ -59,6 +59,7 @@ export const OUTDATED = Object.freeze({
   checkedAt: null,
   changedAt: null,
   error: null,
+  progress: null,
   path: null,
   canApply: false,
 });

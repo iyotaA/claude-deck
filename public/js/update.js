@@ -213,7 +213,9 @@ function fillVersion(up) {
  * @returns {string}
  */
 function paperKey(up) {
-  return up ? `${up.state}:${up.changedAt ?? 0}` : '';
+  // 取り寄せの進み方も混ぜる。ランチャは progress を書いても changedAt を据え置くので、
+  // 混ぜないと 10% ずつ進んでいても「紙が動いていない」と読み、時間切れの時計が巻き戻らない
+  return up ? `${up.state}:${up.changedAt ?? 0}:${up.progress ?? ''}` : '';
 }
 
 /** いま出している帯を「見た」ことにする。閉じるときと、読み込み直す前に通す。 */
@@ -292,8 +294,11 @@ function adopt(up) {
   // 置き去りの紙は拾わない。ランチャが道中で落ちると downloading / applying のまま残り、
   // 開くたびに覆いが出ることになる。見張りの時間切れと同じ長さを古さの線にする。
   // 書いた時刻が読めない紙は拾う（不明を「古い」と読み替えない）
+  // 古さは最後に書かれた時刻で測る。取り寄せの進み方を書くたびに動くのは checkedAt のほう
+  // （changedAt は状態が変わったときだけ動く）。長い取り寄せの最中に開いた窓が「古い」と読まないため
   const limit = up.state === 'downloading' ? STUCK_DOWNLOAD_MS : STUCK_MS;
-  if (up.changedAt && Date.now() - up.changedAt >= limit) return;
+  const wroteAt = Math.max(up.changedAt ?? 0, up.checkedAt ?? 0);
+  if (wroteAt && Date.now() - wroteAt >= limit) return;
   following = true;
   minimized = false;
   startedAt = Date.now();
@@ -327,7 +332,11 @@ function stepTime(i, mark) {
   // 準備は押した瞬間に始まっている。開いた時点で道中だった窓は、押した時刻を知らない
   const from = i === 0 ? (pressed ? startedAt : undefined) : stageAt[STEPS[i].stage];
   if (from === undefined) return '';
-  if (mark === 'now') return mmss(Date.now() - from);
+  if (mark === 'now') {
+    // 取り寄せの最中は進み方を添える。進み方を書かない古いランチャの紙では時間だけ
+    const pct = STEPS[i].stage === 'downloading' ? progressOf() : null;
+    return pct === null ? mmss(Date.now() - from) : `${pct}% ・ ${mmss(Date.now() - from)}`;
+  }
   // 終わった段は、次に見た段（無ければ終わった時刻）までを数える
   const next = STEPS.slice(i + 1).map((s) => stageAt[s.stage]).find((t) => t !== undefined);
   const to = next ?? stageAt.done ?? stageAt.failed ?? stageAt.stuck;
@@ -382,6 +391,7 @@ function fillOverlay(banner) {
   dom.updovTitle.textContent = banner.text;
   dom.updovNote.textContent = banner.note;
   fillSteps(dom.updovSteps, stage);
+  fillRing(stage);
 
   dom.updovBack.textContent = busy ? '裏で続ける' : stage === 'done' ? 'あとで' : '閉じる';
   dom.updovAct.hidden = !banner.act;
@@ -403,6 +413,40 @@ function fillOverlay(banner) {
   fillOverlayTime(busy);
 
   if (!dom.updov.open) dom.updov.showModal();
+}
+
+/**
+ * いまの取り寄せの進み方（％）。取り寄せ中でない・書かれていないときは null。
+ *
+ * @returns {number|null}
+ */
+function progressOf() {
+  const up = store.update;
+  return up?.state === 'downloading' && Number.isInteger(up.progress) ? up.progress : null;
+}
+
+/**
+ * 覆いの大きい輪を書く。取り寄せの進み方が分かるときは、回すのをやめて％で埋める。
+ *
+ * 節点は作り直さない（作り直すと回転が 0 度に戻ってカクつく。fillSteps と同じ理由）。
+ * 形の出し分けは CSS（`.updov-ring[data-pct]`）がやり、ここは値を書くだけ。
+ *
+ * @param {string} stage いまの帯の stage
+ */
+function fillRing(stage) {
+  const ring = dom.updovRing;
+  const pct = stage === 'downloading' ? progressOf() : null;
+  if (pct === null) {
+    if (ring.hasAttribute('data-pct')) {
+      ring.removeAttribute('data-pct');
+      ring.style.removeProperty('--upd-pct');
+      ring.textContent = '';
+    }
+    return;
+  }
+  ring.dataset.pct = String(pct);
+  ring.style.setProperty('--upd-pct', String(pct));
+  ring.textContent = `${pct}%`;
 }
 
 /**
