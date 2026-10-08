@@ -329,13 +329,21 @@
 @keyframes upd-flow { from { background-position: -60% 0; } to { background-position: 160% 0; } }
 @keyframes upd-blink { 50% { opacity: .35; } }
 
-/* 動きを減らしたい人には止める。base.css は時間を潰すだけなので、
-   回る輪が1フレームごとに違う角度で止まってちらつく。止まっていても経過時間が進むので、
-   止まっていないことはそちらで伝わる */
+/* 動きを減らしたい人の扱い。**飾りは止め、進み方を知らせる輪だけはゆっくり回す。**
+ *
+ * 前は輪も全部止めていた。経過時間の数字が進むので伝わると考えたが、
+ * Windows の「アニメーション効果」をオフにしている人（それだけでブラウザは reduce を名乗る）の
+ * 画面では、覆いを出しても輪が止まったままで「進んでいるか分からない」が直っていなかった（実測の指摘）。
+ * 小さい輪がゆっくり回るのは「処理中」という情報で、reduce が避けたい大きな動きや跳ねとは別物。
+ *
+ * base.css が `*::before` まで animation-duration を !important で潰しているので、
+ * 輪の側も !important で戻す（詳細度はこちらが高いので、!important 同士ならこちらが勝つ）。
+ * 流れる線と「更新中」の点滅は飾りなので、設定に従って止める */
 @media (prefers-reduced-motion: reduce) {
   .update[data-busy] .update-text::before,
-  .update[data-busy]::after,
   .upd-step[data-mark='now'] .upd-dot,
-  .updov-ring,
+  .updov-ring { animation-duration: 2.4s !important; }
+
+  .update[data-busy]::after,
   .live[data-live='upd']::before { animation: none; }
 }
