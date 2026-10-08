@@ -81,10 +81,10 @@
 /* 高さの上限を外す。ここは切らずに全部読むための場所なので、
    24rem / 16rem で切られると拡大した意味が無い。
 
-   詳細度で勝つ。.zoom .is-wait .md は (0,3,0) で markdown.css の (0,2,0) に、
+   詳細度で勝つ。.zoom .is-block .md は (0,3,0) で markdown.css の (0,2,0) に、
    .zoom .ask > pre は (0,2,1) で ask.css の (0,1,1) に勝つ。
    **読む順に頼っていない**ので、<link> の位置が動いても効き続ける */
-.zoom .is-wait .md { max-height: none; }
+.zoom .is-block .md { max-height: none; }
 .zoom .ask > pre { max-height: none; }
 
 /* 読む幅の上限も外す。拡大の器は 96rem あるので、66rem のまま運ぶと
