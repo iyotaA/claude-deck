@@ -59,6 +59,7 @@ export const OUTDATED = Object.freeze({
   checkedAt: null,
   changedAt: null,
   error: null,
+  progress: null,
   path: null,
   canApply: false,
 });
@@ -82,13 +83,27 @@ export function isApplyFailure(up) {
  * 並べる順に意味がある。上にあるものほど「いま伝えるべきこと」が強い。
  *
  * @param {object|null} up /api/update の応答
- * @returns {object|null} {key, tone, text, note, keep, act} 出さないなら null
+ * `stage` は更新の道中にある帯だけが持つ（starting / downloading / applying /
+ * done / failed / stuck）。覆い（update.js）と段の並びはこれを見て出し分ける。
+ * 持たない帯（新しい版がある・古いサーバー）は道中ではないので、覆いを出さない。
+ *
+ * @param {object|null} up /api/update の応答
+ * @param {object} [opts]
+ * @param {number} [opts.waits] 入れ替え中に問い合わせが失敗した回数。止まっているあいだも
+ *   見張りが生きていることを数で見せる
+ * @param {boolean} [opts.unmoved] 押してから紙がまだ1度も動いていない。
+ *   このあいだの紙は押す前のもの（失敗のあとの「もう一度」なら failed のまま）なので、
+ *   何と書いてあっても「始めています」を出す
+ * @returns {object|null} {key, stage?, tone, text, note, keep, act} 出さないなら null
  */
-export function bannerOf(up, { stuckAt = null, pressed = false, reloadNow = null, applyNow = null } = {}) {
+export function bannerOf(up, {
+  stuckAt = null, pressed = false, waits = 0, unmoved = false, reloadNow = null, applyNow = null,
+} = {}) {
   // 1. 諦めた。何が起きたか分からないので、確かめ方まで書く
   if (stuckAt !== null) {
     return {
       key: `stuck:${stuckAt}`,
+      stage: 'stuck',
       tone: 'warn',
       text: '更新の返事がありません',
       note: '入れ替わっているかもしれません。読み込み直すか、ClaudeDeck.exe --status で確かめてください',
@@ -112,6 +127,10 @@ export function bannerOf(up, { stuckAt = null, pressed = false, reloadNow = null
     };
   }
 
+  // 押してから紙が動いていない。失敗のあとの「もう一度」で、古い failed を
+  // もう一度「失敗しました」と出してしまわないよう、下の枝より先に見る
+  if (pressed && unmoved) return startingBanner();
+
   // 3. 入れ替わった。ここで自動的に読み込み直さない。
   //    いま見えているのは前の版の画面なので、そのことを言ってから人に押させる
   if (up.state === 'done') {
@@ -119,6 +138,7 @@ export function bannerOf(up, { stuckAt = null, pressed = false, reloadNow = null
     if (!fresh) return null;
     return {
       key: `done:${up.changedAt ?? 0}`,
+      stage: 'done',
       tone: '',
       text: up.current ? `入れ替えました（${up.current}）` : '入れ替えました',
       note: 'この画面はまだ前の版です。読み込み直してください',
@@ -131,6 +151,7 @@ export function bannerOf(up, { stuckAt = null, pressed = false, reloadNow = null
   if (up.state === 'downloading') {
     return {
       key: `downloading:${up.changedAt ?? 0}`,
+      stage: 'downloading',
       tone: 'work',
       text: '新しい版を取り寄せています',
       note: up.requested
@@ -143,9 +164,14 @@ export function bannerOf(up, { stuckAt = null, pressed = false, reloadNow = null
   if (up.state === 'applying') {
     return {
       key: `applying:${up.changedAt ?? 0}`,
+      stage: 'applying',
       tone: 'work',
       text: '入れ替えています',
-      note: 'サーバーがいったん止まって起き直ります。この画面はそのままでお待ちください',
+      // 止まっているあいだの問い合わせは失敗し続ける。黙って握りつぶすと
+      // 「入れ替えています」のまま固まって見えるので、待った回数を数えて出す
+      note: waits > 0
+        ? `サーバーが止まっています。起き直るのを待っています（確認 ${waits}回目）`
+        : 'サーバーがいったん止まって起き直ります。この画面はそのままでお待ちください',
       keep: false,
       act: null,
     };
@@ -156,6 +182,7 @@ export function bannerOf(up, { stuckAt = null, pressed = false, reloadNow = null
   if (isApplyFailure(up)) {
     return {
       key: `failed:${up.changedAt ?? 0}`,
+      stage: 'failed',
       tone: 'warn',
       text: up.label,
       // 理由は括弧で終わることが多い（「…求めた 0.2.1）」）。
@@ -168,16 +195,7 @@ export function bannerOf(up, { stuckAt = null, pressed = false, reloadNow = null
 
   // 6. 押したが、まだランチャが紙を書いていない。
   //    素通りさせると「更新する」がもう一度出て、二度押しを誘う
-  if (pressed && up.state === 'available') {
-    return {
-      key: 'starting',
-      tone: 'work',
-      text: '更新を始めています',
-      note: 'ランチャを起こしています',
-      keep: false,
-      act: null,
-    };
-  }
+  if (pressed && up.state === 'available') return startingBanner();
 
   // 7. 新しい版がある
   //
@@ -243,4 +261,55 @@ export function bannerOf(up, { stuckAt = null, pressed = false, reloadNow = null
   // 確認できなかったことまで帯にすると、回線の細い日に毎回じゃまをする。
   // そちらは版の脇の印と --status に任せる
   return null;
+}
+
+/**
+ * 押したが、まだランチャが紙を書いていないときの帯。
+ *
+ * 出す場面が2つある（押す前の紙が available のとき／押してから紙が動いていないとき）ので、
+ * 形は1箇所で持つ。鍵は使い回す（keep: false なので覚えられない）。
+ *
+ * @returns {object}
+ */
+function startingBanner() {
+  return {
+    key: 'starting',
+    stage: 'starting',
+    tone: 'work',
+    text: '更新を始めています',
+    note: 'ランチャを起こしています',
+    keep: false,
+    act: null,
+  };
+}
+
+/**
+ * 道中の段。覆いと帯の2行目に、この順で並べる。
+ *
+ * 入れ替えと起き直しを1段にまとめてあるのは、画面からは見分けが付かないため。
+ * どちらもサーバーが止まっているあいだに起きるので、こちらに届く知らせが無い。
+ */
+export const STEPS = Object.freeze([
+  Object.freeze({ stage: 'starting', label: '準備' }),
+  Object.freeze({ stage: 'downloading', label: '取り寄せ' }),
+  Object.freeze({ stage: 'applying', label: '入れ替え・起き直し' }),
+]);
+
+/**
+ * 段ごとの様子を決める。
+ *
+ * 失敗したときにどの段で転んだかは、紙からは分からない（failed しか書かれない）。
+ * だから「最後に見た段」を呼ぶ側が覚えておいて渡す。
+ *
+ * @param {string} stage いまの帯の stage
+ * @param {number} reached 最後に見た段の位置（STEPS の添字）。見ていなければ 0
+ * @returns {string[]} 段ごとに 'ok' / 'now' / 'ng' / 'todo'
+ */
+export function stepsOf(stage, reached = 0) {
+  if (stage === 'done') return STEPS.map(() => 'ok');
+  const at = STEPS.findIndex((s) => s.stage === stage);
+  // 転んだ・諦めたは「最後に見た段」で止まる
+  const stop = at >= 0 ? at : Math.max(0, Math.min(reached, STEPS.length - 1));
+  const mark = at >= 0 ? 'now' : 'ng';
+  return STEPS.map((_, i) => (i < stop ? 'ok' : i === stop ? mark : 'todo'));
 }

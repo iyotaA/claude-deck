@@ -175,4 +175,15 @@ export const dom = {
   updateNote: document.getElementById('update-note'),
   updateAct: document.getElementById('update-act'),
   updateClose: document.getElementById('update-close'),
+  updateTime: document.getElementById('update-time'),
+  updateSteps: document.getElementById('update-steps'),
+  // 更新の道中を覆うカード。これも update.js だけが使う
+  updov: document.getElementById('updov'),
+  updovRing: document.getElementById('updov-ring'),
+  updovTitle: document.getElementById('updov-title'),
+  updovNote: document.getElementById('updov-note'),
+  updovSteps: document.getElementById('updov-steps'),
+  updovTime: document.getElementById('updov-time'),
+  updovBack: document.getElementById('updov-back'),
+  updovAct: document.getElementById('updov-act'),
 };

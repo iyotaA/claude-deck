@@ -216,3 +216,33 @@ test('紙が無いだけなら idle。読み取りで投げない', () => {
   assert.equal(got.current, '0.2.0');
   assert.equal(got.path, updateStatePath(env));
 });
+
+test('取り寄せの進み方を運ぶ。0% は 0 のまま', () => {
+  // 時刻と違って 0 に意味がある（ランチャは取り寄せを始めた時点で 0 を書く）
+  for (const p of [0, 40, 100]) {
+    const got = parseUpdateState({ state: 'downloading', progress: p }, { version: '0.2.0' });
+    assert.equal(got.progress, p);
+  }
+});
+
+test('進み方が読めなければ null。輪を回すだけにする', () => {
+  // 進み方を書かない古い版のランチャ・手で書き換えられた紙
+  for (const p of [undefined, null, -1, 101, 12.5, '40', NaN]) {
+    const got = parseUpdateState({ state: 'downloading', progress: p }, { version: '0.2.0' });
+    assert.equal(got.progress, null, String(p));
+  }
+});
+
+test('取り寄せ以外の状態では進み方を運ばない', () => {
+  // 入れ替えに移った紙に 100 が残っていても、「入れ替えています 100%」と出さない
+  for (const state of ['applying', 'done', 'failed', 'available']) {
+    const got = parseUpdateState({ state, current: '0.2.0', progress: 100 }, { version: '0.2.0' });
+    assert.equal(got.progress, null, state);
+  }
+});
+
+test('紙が無い・読めないときも progress のキーはある', () => {
+  // キーごと消すと「この版が運ばない」と「無い」が区別できない
+  assert.ok('progress' in parseUpdateState(null, { missing: true }));
+  assert.ok('progress' in parseUpdateState(null, {}));
+});

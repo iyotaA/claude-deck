@@ -77,9 +77,16 @@ function apply(payload) {
  *
  * 知らない状態が来たら、渡された文をそのまま出す（黙って空にしない）。
  */
-const LIVE_SHORT = { on: '接続', off: '切断', wait: '接続中' };
+const LIVE_SHORT = { on: '接続', off: '切断', wait: '接続中', upd: '更新中' };
 
 export function setLive(state, label) {
+  // 入れ替えのあいだはサーバーが止まるので、切れるのが正常。
+  // 赤い「切断」を出すと壊れたように見えるので、入れ替えを見届けているあいだは言い換える。
+  // 判断は update.js が書く store.updating の1つだけ（置き去りの古い紙では立たない）
+  if (state === 'off' && store.updating) {
+    state = 'upd';
+    label = '更新のためにサーバーを入れ替えています';
+  }
   dom.live.dataset.live = state;
   // **出すのは短い語だけ。** ここは道具（起こす・設定・配色）の並ぶ場所なので、
   // 押せない文が伸びると、押せるものを画面の端へ押しのける

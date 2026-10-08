@@ -16,7 +16,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bannerOf, isApplyFailure, OUTDATED } from '../public/js/update-banner.js';
+import { bannerOf, isApplyFailure, OUTDATED, STEPS, stepsOf } from '../public/js/update-banner.js';
 
 /** 基準時刻。紙の changedAt はここからの相対で考える。 */
 const NOW = Date.now();
@@ -40,6 +40,7 @@ function paper(over = {}) {
     checkedAt: NOW - 1000,
     changedAt: NOW - 1000,
     error: null,
+    progress: null,
     path: 'C:\\dummy\\update.json',
     canApply: true,
     ...over,
@@ -274,4 +275,78 @@ test('出す帯はどれも key と keep を持っている', () => {
     assert.ok(b.key.length > 0, up.state);
     assert.equal(typeof b.keep, 'boolean', up.state);
   }
+});
+
+/* ------------------------------------------------------- 道中（覆いと段） */
+
+test('道中の帯だけが stage を持つ', () => {
+  // 覆い（update.js）は stage の有無で出すかを決める。
+  // 新しい版の知らせや古いサーバーに付くと、押してもいないのに画面が覆われる
+  const cases = [
+    [paper({ state: 'available', available: '0.9.2' }), { pressed: true }, 'starting'],
+    [paper({ state: 'downloading' }), {}, 'downloading'],
+    [paper({ state: 'applying' }), {}, 'applying'],
+    [paper({ state: 'done', changedAt: NOW }), {}, 'done'],
+    [paper({ state: 'failed', requested: '0.9.2' }), {}, 'failed'],
+    [paper(), { stuckAt: NOW }, 'stuck'],
+    [paper({ state: 'available', available: '0.9.2' }), {}, undefined],
+    [OUTDATED, { pressed: true }, undefined],
+    [paper({ state: 'none' }), { pressed: true }, undefined],
+  ];
+  for (const [up, opts, stage] of cases) {
+    assert.equal(bannerOf(up, opts).stage, stage, `${up.state} ${JSON.stringify(opts)}`);
+  }
+});
+
+test('入れ替え中は、待った回数を添え書きに出す', () => {
+  // 止まっているあいだも見張りが生きていることを数で見せる。0 回のうちは数を出さない
+  const quiet = bannerOf(paper({ state: 'applying' }));
+  assert.doesNotMatch(quiet.note, /回目/);
+  const waiting = bannerOf(paper({ state: 'applying' }), { waits: 6 });
+  assert.match(waiting.note, /確認 6回目/);
+  // 待った回数で鍵を変えない。変えると閉じた帯が回数ごとに出直す
+  assert.equal(waiting.key, quiet.key);
+});
+
+test('段は 準備 → 取り寄せ → 入れ替え・起き直し の順', () => {
+  assert.deepEqual(STEPS.map((s) => s.stage), ['starting', 'downloading', 'applying']);
+  assert.ok(Object.isFrozen(STEPS));
+});
+
+test('道中は、いまの段より前が済み・後がまだ', () => {
+  assert.deepEqual(stepsOf('starting'), ['now', 'todo', 'todo']);
+  assert.deepEqual(stepsOf('downloading'), ['ok', 'now', 'todo']);
+  assert.deepEqual(stepsOf('applying'), ['ok', 'ok', 'now']);
+});
+
+test('入れ替わったら全部の段が済み', () => {
+  assert.deepEqual(stepsOf('done', 0), ['ok', 'ok', 'ok']);
+});
+
+test('転んだ・諦めたは、最後に見た段で止める', () => {
+  // 紙には failed としか書かれないので、どの段で転んだかは呼ぶ側が覚えて渡す
+  assert.deepEqual(stepsOf('failed', 1), ['ok', 'ng', 'todo']);
+  assert.deepEqual(stepsOf('stuck', 2), ['ok', 'ok', 'ng']);
+  // 何も見ていなければ最初の段で止める
+  assert.deepEqual(stepsOf('failed'), ['ng', 'todo', 'todo']);
+  // 範囲の外が来ても段の数からはみ出さない
+  assert.deepEqual(stepsOf('failed', 9), ['ok', 'ok', 'ng']);
+});
+
+test('押してから紙が動いていないあいだは、古い紙が何と言っていても「始めています」', () => {
+  // 失敗のあとの「もう一度」。押した直後の紙はまだ failed なので、
+  // そのまま読むと「失敗しました」がもう一度出て、押したのに何も起きなかったように見える
+  const failed = paper({ state: 'failed', requested: '0.9.2', error: 'つながりません' });
+  const b = bannerOf(failed, { pressed: true, unmoved: true });
+  assert.equal(b.key, 'starting');
+  assert.equal(b.stage, 'starting');
+  // 紙が動いたら、来た紙のとおりに出す
+  assert.equal(bannerOf(failed, { pressed: true, unmoved: false }).stage, 'failed');
+  // 押していない窓では見ない（開いた時点で道中だった窓が見張りを始めても、押してはいない）
+  assert.equal(bannerOf(failed, { unmoved: true }).stage, 'failed');
+});
+
+test('諦めたことは、紙が動いていないことより強い', () => {
+  const b = bannerOf(paper({ state: 'failed', requested: '0.9.2' }), { pressed: true, unmoved: true, stuckAt: NOW });
+  assert.equal(b.stage, 'stuck');
 });

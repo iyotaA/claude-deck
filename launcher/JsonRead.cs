@@ -20,6 +20,17 @@ static class JsonRead
     public static int GetInt(JsonElement root, string name) =>
         root.TryGetProperty(name, out var v) && v.TryGetInt32(out var n) ? n : 0;
 
+    /// <summary>
+    /// 整数を読む。無い・null・数でないときは null。
+    ///
+    /// GetInt は取れなかったものを 0 にするので、0 に意味がある値（取り寄せの 0%）には使えない。
+    /// 「0 と不明を分ける」をこちらで守る。
+    /// </summary>
+    /// <param name="root">読む対象のオブジェクト。</param>
+    /// <param name="name">キー。</param>
+    public static int? GetIntOrNull(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var v) && v.TryGetInt32(out var n) ? n : null;
+
     /// <summary>長い整数を読む。時刻（ミリ秒）はこちら。</summary>
     /// <param name="root">読む対象のオブジェクト。</param>
     /// <param name="name">キー。</param>
