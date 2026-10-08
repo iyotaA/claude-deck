@@ -478,8 +478,20 @@ function Invoke-Pack([string]$Version) {
 
 # ---- 4. 上げる ----
 
-# 外へ出す前の確認。ここを通らないものは公開しない
+# 外へ出す前の確認。ここを通らないものは公開しない。
+#
+# **2つに分けてある。** git の確認（作る前にできる）と、パッケージの確認（作った後でないとできない）。
+# 前は1つの関数で、-Action all がそれを pack より前に呼んでいたため、
+# 新しい版では「今回の版のパッケージがありません」で**必ず**中止していた（v1.1.1 で踏んだ）。
+# all は git の確認を作る前に、パッケージの確認を作った後に呼ぶ。
+# upload は両方を続けて呼ぶ（Assert-ReadyToUpload）。
 function Assert-ReadyToUpload([string]$Version) {
+  Assert-GitReady $Version
+  Assert-PackageReady $Version
+}
+
+# git の状態だけを見る。作る前に断れるものはここで断る（作ってから断られるより早い）
+function Assert-GitReady([string]$Version) {
   Write-Step '外へ出す前の確認'
 
   $dirty = @(git -C $repoRoot status --porcelain)
@@ -508,7 +520,10 @@ function Assert-ReadyToUpload([string]$Version) {
   }
   # ${} で囲む。$tag: と書くと「スコープ付きの変数」と読まれて構文ごと壊れる
   Write-Note "タグ ${tag}: まだ使われていない"
+}
 
+# 上げるものが今回の版か。**pack の後でないと成り立たない**ので、git の確認とは分けてある
+function Assert-PackageReady([string]$Version) {
   # **上げるものが今回の版かを確かめる。**
   #
   # -Action upload は pack をやり直さず、build\releases\ にあるものをそのまま上げる。
@@ -606,12 +621,14 @@ switch ($Action) {
   }
   'all' {
     Assert-Tools @('dotnet', 'vpk', 'gh')
-    # 先に確認する。作ってから断られるより、作る前に断られるほうがよい
-    Assert-ReadyToUpload $version
+    # git の確認は先に。作ってから断られるより、作る前に断られるほうがよい。
+    # **パッケージの確認はここに置かない。** まだ作っていないので必ず落ちる（v1.1.1 で踏んだ）
+    Assert-GitReady $version
     Invoke-FetchNode
     Invoke-Stage $version
     Invoke-Pack $version
     Show-Output
+    Assert-PackageReady $version
     Invoke-Upload $version
   }
 }
