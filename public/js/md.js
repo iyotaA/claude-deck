@@ -9,11 +9,10 @@
  * marked や markdown-it が使えないのは、それ以前に innerHTML を使わないから。
  * あれらが返すのは HTML の文字列なので、受け取っても流し込む先が無い。
  *
- * 出す記法は9つ。うち8つは実測で決めた（~/.claude/projects の大きい順 40 ログ・2026-08-23）。
+ * 最初の9つは実測で決めた（~/.claude/projects の大きい順 40 ログ・2026-08-23）。
  * assistant の発言 3,278 件のうち 47.8% が何らかの記法を含み、内訳は
  * インラインコード 41.9% / 太字 23.2% / フェンス 9.5% / 箇条書き 8.2% /
  * 見出し 7.7% / 表 7.1% / 水平線 2.7% / 番号付き 2.1%。
- * リンク 0.2% / 引用 0.3% / 打ち消し 0% は出さない。
  *
  * チェックリスト（`- [ ]` / `- [x]` / `- [~]`）は後から足した。
  * assistant の発言には1件も無いが（0 件 / 2,534 件）、プランの本文と
@@ -21,9 +20,15 @@
  * プラン 40 ログで 5 行・1 件）。承認待ちのプランは切らずに全部描く場所なので、
  * そこに素の `- [ ]` が並ぶと、どこまで終わったのかが読めない。
  *
- * 出さない記法は素の文字として残る。つまり作らなくても「いまと同じ見え方」で、
- * 作らないことによる害が無い。リンクをここに足さないのは、
- * javascript: を弾く検証を 0.2% のために抱えることになるため。
+ * リンク・素の URL・引用・打ち消し・太字の中の記法・表のセルの <br> も後から足した
+ * （実測 2026-10-08。件数は public/CLAUDE.md の「Markdown を描く」の表を見る。
+ * 2箇所に書くと片方だけ古くなる）。前はリンクを「javascript: を弾く検証を 0.2% のために
+ * 抱えたくない」で見送っていたが、表の中の `[表示名](URL)` が記号ごと出ていて読めず、
+ * 素の URL もそれより多かった。弾く検証は http / https だけを通す1本の正規表現で済む。
+ * 引用は assistant にはまれだが、時系列の指示文も Markdown で描いているので効く。
+ *
+ * 出さない記法は素の文字として残る。斜体（* 1つ）・Wiki リンク（[[x]]）・画像・HTML。
+ * 作らなくても「いまと同じ見え方」なので、作らないことによる害が無い。
  *
  * 入力は途中で切られていることがある。サーバ側が clip() で「…（以下省略）」を
  * 足すので、閉じていないコードフェンスが普通に来る。
@@ -34,17 +39,20 @@
  *   { type: 'h',     level, spans }       見出し
  *   { type: 'code',  lang, text, open }   コードフェンス（open は閉じていない印）
  *   { type: 'list',  items }              箇条書き・番号付き
- *   { type: 'table', align, head, rows }  表
+ *   { type: 'table', align, head, rows }  表（head は spans の並び、rows はその並び）
+ *   { type: 'quote', blocks }             引用（中身はブロックの並びそのもの）
  *   { type: 'hr' }                        水平線
  *
  * 項目（list.items の1件）の形。
- *   { depth, ordered, num, task, spans }
+ *   { depth, ordered, num, task, gap, spans }
  *   task は null（ふつうの項目）か 'todo' / 'doing' / 'done'
+ *   gap は空行を1つ挟んだ直後の項目なら true（画面で塊を離す）。それ以外は false
  *
- * 装飾（spans の1件）の形。
- *   { type: 'text',   v }
- *   { type: 'code',   v }
- *   { type: 'strong', v }
+ * 装飾（spans の1件）の形。**平らな run に印を付ける**（木にしない）。
+ *   { type: 'text' | 'code', v, strong?: true, del?: true, href?: string }
+ *   印は真のときだけ持つ。**太字の中のリンク**のような入れ子も、run ごとに印を重ねて表す。
+ *   木にしないのは、spansText / cutSpans（頭出し）/ blocksText（検索件数の物差し）が
+ *   v を繋ぐだけで今のまま動くため。まとめて1つの器に入れるのは md-view.js の仕事。
  */
 
 /** 見出し。# の後の空白は必須。#見出し や #!/bin/sh を見出しにしない */
@@ -75,6 +83,12 @@ const TASK_RE = /^\[([ xX~])\](?:[ \t]+|$)/;
 
 /** 印 → 状態。TODO パネル（pending / in_progress / completed）と同じ3つに寄せる */
 const TASK_STATE = { ' ': 'todo', x: 'done', X: 'done', '~': 'doing' };
+
+/**
+ * 引用。行頭（先行空白 0〜3）の `>`。外すのは `>` と直後の空白1つまで
+ * （それより後ろの空白は中身の字下げなので残す。外すと引用の中の箇条書きの深さが崩れる）。
+ */
+const QUOTE_RE = /^ {0,3}>[ \t]?/;
 
 /** コードフェンスの開き。``` と ~~~ の両方を受け、後ろの語を言語として拾う */
 const FENCE_RE = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)/;
@@ -168,42 +182,159 @@ function dividerCells(line) {
 }
 
 /**
- * 1つの塊の文字を、装飾の区切りへ割る。
+ * リンクとして通してよい URL か。http と https だけ。
  *
- * バッククォートを先に見る。コードの中の ** は装飾しない
- * （** を含むコードを画面に出したときに太字へ化けないため。Markdown の決まりでもある）。
- *
- * 閉じていない記号はただの文字として残す。切られた入力が普通に来るので、
- * 開いたまま終わったものを装飾に化かすと、そこから先が全部太字になる。
- *
- * 斜体（* 1つ）は出さない。箇条書きの記号と衝突するうえ、*.js のような
- * ふつうの文字列が斜体に化ける。実測でも太字ばかりで斜体はほとんど無い。
- *
- * 太字の中の装飾は見ない（**`code`** はバッククォートごと太字になる）。
- * 入れ子まで追うと状態が増えるが、実測でその形はほとんど出ない。
- *
- * @param {string|null} text
- * @returns {Array<object>} spans
+ * javascript: を弾くのが本命。相対パス（`./a.md`）や mailto: も通さない ――
+ * ClaudeDeck は会話ログの置き場所とは別のところから配信しているので、相対パスは開けない。
+ * md-view.js も a を作る直前に同じ式でもう一度確かめる（境界を1枚にしない）。
  */
-export function inlineSpans(text) {
-  const t = String(text ?? '');
-  const out = [];
+export const SAFE_HREF_RE = /^https?:\/\//i;
+
+/**
+ * 素の URL に使う文字。ASCII の URL 文字だけ。
+ *
+ * 日本語の 」 や 、 で自然に止まるので、「〜は https://x.com」のような文が
+ * 句読点ごとリンクに飲まれない。`*` `[` `]` と バッククォートは外してある。
+ * URL に来ることはまれで、来るとすれば `https://x.com/**太字**` のような
+ * 記法との境目なので、そこで止まるほうが外れが小さい。
+ */
+const URL_CHAR_RE = /[A-Za-z0-9\-._~:/?#@!$&'()+,;=%]/;
+
+/** URL の末尾から外す記号。文の句読点と引用符で、URL の一部であることはまれ */
+const URL_TAIL = '.,;:!?\'"';
+
+/** 素の URL の直前に来てはいけない文字。`xhttps://` のような語の途中を拾わない */
+const WORD_CHAR_RE = /[A-Za-z0-9]/;
+
+/** 何でも読む。太字・打ち消し・リンクの中では、そこで使ったものを1つずつ外していく */
+const ALL_INLINE = { strong: true, del: true, link: true, url: true };
+
+/**
+ * リンクの表示名と URL を探しに行く長さの上限。
+ *
+ * 無いと `[a](x[a](x[a](x…` のような入力で、`[` のたびに行末まで走査して
+ * 2乗の時間になる（1行が長いログ本文は普通に来る）。実物の表示名と URL はこれより十分短い。
+ */
+const LINK_LABEL_MAX = 1000;
+const LINK_URL_MAX = 2048;
+
+/**
+ * `[表示名](URL)` を読む。読めなければ null。
+ *
+ * 表示名は同じ行の `]` まで（中に `[` `]` は来ない前提。来たら読まない）。
+ * URL は `(` の直後から、**対応の取れた** `)` までで、空白を含まない。
+ * `[Foo](https://en.wikipedia.org/wiki/Foo_(bar))` を最初の `)` で切ると、
+ * 別のページへリンクしてしまう（readUrl が括弧の対応を見るのと同じ流儀）。
+ * スキームの判断はここではしない（呼ぶ側が http / https だけをリンクにする）。
+ *
+ * @param {string} t 塊の文字
+ * @param {number} i `[` の位置
+ * @returns {{label: string, url: string, end: number}|null} end は `)` の次
+ */
+function readLink(t, i) {
+  const labelEnd = Math.min(t.length, i + 1 + LINK_LABEL_MAX);
+  let j = i + 1;
+  while (j < labelEnd && t[j] !== ']' && t[j] !== '[' && t[j] !== '\n') j += 1;
+  if (t[j] !== ']' || j === i + 1 || t[j + 1] !== '(') return null;
+
+  const urlEnd = Math.min(t.length, j + 2 + LINK_URL_MAX);
+  let depth = 0;
+  let k = j + 2;
+  for (; k < urlEnd; k += 1) {
+    const c = t[k];
+    // 空白なら URL ではない。ASCII は字の番号で見て、正規表現は非 ASCII（全角空白など）にだけ使う
+    // （1文字ごとに正規表現を通すと、上限まで走る入力でこの1行が時間の大半を食う）
+    const code = t.charCodeAt(k);
+    if (code <= 32 || (code > 127 && /\s/.test(c))) return null;
+    if (c === '(') depth += 1;
+    else if (c === ')') {
+      if (depth === 0) break;
+      depth -= 1;
+    }
+  }
+  if (t[k] !== ')' || k === j + 2 || k >= urlEnd) return null;
+  return { label: t.slice(i + 1, j), url: t.slice(j + 2, k), end: k + 1 };
+}
+
+/**
+ * 素の URL を読む。読めなければ null。
+ *
+ * 末尾の句読点と、対応する `(` の無い `)` は外す。
+ * `（https://x.com）` や `(https://x.com)` の閉じ括弧までリンクに飲まないため
+ * （括弧の入った URL ―― Wikipedia の `Foo_(bar)` など ―― は対応が取れているので残る）。
+ *
+ * @param {string} t 塊の文字
+ * @param {number} i 読み始める位置
+ * @returns {string|null} URL
+ */
+function readUrl(t, i) {
+  // 1文字目で先に断る（地の文の1文字ごとに呼ばれるので、slice を作らずに済ませる）
+  if (t[i] !== 'h' && t[i] !== 'H') return null;
+  // スキームの判断は SAFE_HREF_RE の1つに寄せる（md-view.js が確かめるのと同じ式）
+  const head = t.slice(i, i + 8);
+  if (!SAFE_HREF_RE.test(head)) return null;
+  if (i > 0 && WORD_CHAR_RE.test(t[i - 1])) return null;
+  const schemeLen = head[4] === ':' ? 7 : 8;
+
+  let j = i;
+  let open = 0;
+  let close = 0;
+  while (j < t.length && URL_CHAR_RE.test(t[j])) {
+    if (t[j] === '(') open += 1;
+    else if (t[j] === ')') close += 1;
+    j += 1;
+  }
+  // 末尾を1文字ずつ外す。括弧の数は先に数えておき、外すたびに差し引く
+  // （外すたびに数え直すと、`)` が何万も並んだ入力で2乗の時間になる）
+  let end = j;
+  while (end > i) {
+    const last = t[end - 1];
+    if (URL_TAIL.includes(last)) {
+      end -= 1;
+      continue;
+    }
+    if (last === ')' && open < close) {
+      end -= 1;
+      close -= 1;
+      continue;
+    }
+    break;
+  }
+  // `https://` だけで中身が無いものはリンクにしない
+  return end - i > schemeLen ? t.slice(i, end) : null;
+}
+
+/**
+ * 1つの塊を読んで、印つきの run を out へ積む。
+ *
+ * mark はこの塊の全 run に付ける印（太字の中なら { strong: true }）。
+ * allow は読む記法。太字の中では太字を、リンクの表示名の中ではリンクと素の URL を外して呼ぶ。
+ *
+ * @param {string} t 塊の文字
+ * @param {object} allow { strong, del, link, url }
+ * @param {object} mark 付ける印
+ * @param {Array<object>} out 積む先
+ */
+function readInline(t, allow, mark, out) {
   let buf = '';
   const flush = () => {
-    if (buf) out.push({ type: 'text', v: buf });
+    if (buf) out.push({ type: 'text', v: buf, ...mark });
     buf = '';
   };
 
   let i = 0;
   while (i < t.length) {
-    if (t[i] === '`') {
-      // ``code`` のように2本以上で囲む形もある。開いた本数と同じ並びで閉じる
+    const ch = t[i];
+
+    if (ch === '`') {
+      // ``code`` のように2本以上で囲む形もある。開いた本数と同じ並びで閉じる。
+      // コードの中は何も解釈しない（リンクも素の URL も読まない）
       let n = 1;
       while (t[i + n] === '`') n += 1;
       const close = t.indexOf('`'.repeat(n), i + n);
       if (close > i + n) {
         flush();
-        out.push({ type: 'code', v: t.slice(i + n, close) });
+        out.push({ type: 'code', v: t.slice(i + n, close), ...mark });
         i = close + n;
         continue;
       }
@@ -211,23 +342,101 @@ export function inlineSpans(text) {
       i += n;
       continue;
     }
-    if (t[i] === '*' && t[i + 1] === '*') {
-      const close = t.indexOf('**', i + 2);
+
+    // 太字と打ち消しは同じ形。閉じがあれば中身をもう一度インラインとして読む。
+    // 閉じが無ければ素の文字（切られた入力で、そこから先が全部太字になるのを防ぐ）
+    const pair = (allow.strong && ch === '*' && t[i + 1] === '*' && 'strong')
+      || (allow.del && ch === '~' && t[i + 1] === '~' && 'del');
+    if (pair) {
+      const close = t.indexOf(ch + ch, i + 2);
       if (close > i + 2) {
         flush();
-        out.push({ type: 'strong', v: t.slice(i + 2, close) });
+        readInline(t.slice(i + 2, close), { ...allow, [pair]: false }, { ...mark, [pair]: true }, out);
         i = close + 2;
         continue;
       }
-      buf += '**';
+      buf += ch + ch;
       i += 2;
       continue;
     }
-    buf += t[i];
+
+    if (allow.link && ch === '[') {
+      // 画像（![alt](url)）は丸ごと素の文字にする。中の URL を素の URL として拾うと、
+      // 画像を描かないのに URL だけがリンクになって半端に見える
+      const link = readLink(t, i);
+      if (link && t[i - 1] === '!') {
+        buf += t.slice(i, link.end);
+        i = link.end;
+        continue;
+      }
+      // Wiki リンク（[[x]]）は readLink が `[` の重なりで断るので、素の文字のまま
+      if (link) {
+        flush();
+        const inner = { ...allow, link: false, url: false };
+        // http / https 以外は表示名だけを出す。記号と URL は捨てる
+        const href = SAFE_HREF_RE.test(link.url) ? { href: link.url } : {};
+        readInline(link.label, inner, { ...mark, ...href }, out);
+        i = link.end;
+        continue;
+      }
+    }
+
+    if (allow.url) {
+      const url = readUrl(t, i);
+      if (url) {
+        flush();
+        out.push({ type: 'text', v: url, ...mark, href: url });
+        i += url.length;
+        continue;
+      }
+    }
+
+    buf += ch;
     i += 1;
   }
   flush();
+}
+
+/**
+ * 1つの塊の文字を、装飾の区切りへ割る。
+ *
+ * バッククォートを先に見る。コードの中の ** は装飾しない
+ * （** を含むコードを画面に出したときに太字へ化けないため。Markdown の決まりでもある）。
+ *
+ * 太字（**）と打ち消し（~~）は中身をもう一度読む。`**チェッカー（`x.py`）**` の形が
+ * assistant の 4.4% にあり、前はバッククォートがそのまま太字で出ていた。
+ * 太字の中の太字は見ない（閉じは最初の ** なので、来ようがない）。
+ *
+ * リンクは http / https だけ。素の URL もリンクにする（太字の中でも）。
+ *
+ * 閉じていない記号はただの文字として残す。切られた入力が普通に来るので、
+ * 開いたまま終わったものを装飾に化かすと、そこから先が全部太字になる。
+ *
+ * 斜体（* 1つ）は出さない。箇条書きの記号と衝突するうえ、*.js のような
+ * ふつうの文字列が斜体に化ける。実測でも太字ばかりで斜体はほとんど無い。
+ *
+ * @param {string|null} text
+ * @returns {Array<object>} spans（印つきの平らな run）
+ */
+export function inlineSpans(text) {
+  const out = [];
+  readInline(String(text ?? ''), ALL_INLINE, {}, out);
   return out;
+}
+
+/**
+ * 表のセルを読む。インラインに加えて、テキストの `<br>` を改行にする。
+ *
+ * 表の1セルの中で改行したいとき、Markdown には書き方が無いので `<br>` が使われる
+ * （実測 assistant・指示文で各1件）。HTML としては描かないが、改行の意味だけは拾う。
+ * コードの中の `<br>` は書いたとおりに出す（コードの中は何も解釈しない、と同じ）。
+ *
+ * @param {string} cell セルの文字
+ */
+function cellSpans(cell) {
+  return inlineSpans(cell).map((s) => (
+    s.type === 'text' ? { ...s, v: s.v.replace(/<br\s*\/?>/gi, '\n') } : s
+  ));
 }
 
 /**
@@ -239,6 +448,10 @@ export function inlineSpans(text) {
  * 記号の無い継続行（字下げされた文の続き）は、直前の項目へ足す。
  * 空行は1つだけ飲む。2つ続いたらリストの終わり
  * （項目のあいだに空行を1つ挟む書き方が実際にあるため、1つで切ると ul が分かれる）。
+ *
+ * 飲んだ空行の直後の項目には gap を立てる。書いた人は空行で塊を分けているので、
+ * 画面でもそこだけ離す（項目の間は詰めてあるので、離さないと区切りが消える）。
+ * リストは分けない。番号付きの番号も続けたまま。
  *
  * @param {Array<string>} lines 全行
  * @param {number} from 開始行
@@ -256,6 +469,7 @@ function readList(lines, from) {
     const ol = ul ? null : OL_RE.exec(line);
 
     if (ul || ol) {
+      const gap = blank > 0 && items.length > 0;
       blank = 0;
       const m = ul ?? ol;
       const indent = m[1].length;
@@ -268,6 +482,7 @@ function readList(lines, from) {
         ordered: !!ol,
         num: ol ? Number(ol[2]) : null,
         task: task ? TASK_STATE[task[1]] : null,
+        gap,
         // 印は本文から剥がす。残すと画面に `□ [ ] やること` と二重に出るうえ、
         // blocksText（切る予算と「一致 N 件」の物差し）にも入ってしまう
         text: task ? text.slice(task[0].length) : text,
@@ -295,6 +510,7 @@ function readList(lines, from) {
         ordered: it.ordered,
         num: it.num,
         task: it.task,
+        gap: it.gap,
         spans: inlineSpans(it.text),
       })),
     },
@@ -303,12 +519,32 @@ function readList(lines, from) {
 }
 
 /**
+ * 引用の入れ子の上限。これより深い `>` は引用にせず、素の文字の段落として残す。
+ *
+ * 引用は中身を再帰で読むので、上限が無いと `>>>>…` を数千並べた1行で
+ * 呼び出しが深くなり、RangeError で時系列の描画ごと落ちる（描く側も再帰で積むので同じ）。
+ * 実物の入れ子は2〜3段なので、8 で困ることはない。
+ */
+const MAX_QUOTE_DEPTH = 8;
+
+/**
  * Markdown を1本読んで、ブロックの並びを返す。
  *
  * @param {string|null} text 本文。null / 空なら空配列
  * @returns {Array<object>} ブロックの並び
  */
 export function parseMarkdown(text) {
+  return parseBlocks(text, 0);
+}
+
+/**
+ * parseMarkdown の本体。depth は引用の入れ子の深さ（外が 0）。
+ *
+ * @param {string|null} text 本文
+ * @param {number} depth 引用の深さ
+ * @returns {Array<object>} ブロックの並び
+ */
+function parseBlocks(text, depth) {
   const src = String(text ?? '');
   if (!src.trim()) return [];
 
@@ -350,6 +586,23 @@ export function parseMarkdown(text) {
       continue;
     }
 
+    // 引用。続いている `>` の行を集めて、中身をもう一度 Markdown として読む。
+    // 空行か `>` の無い行で終わる（`>` の無い続きの行を引用へ含める書き方は読まない。
+    // 切れ目が見た目で分からず、指示文の地の文を引用へ飲み込むほうが害が大きい）。
+    // フェンスの中の `>` は上のフェンスの処理が先に飲むので、ここへは来ない。
+    // 上限より深いぶんは読まずに下へ流す（段落の素の文字になる）
+    if (depth < MAX_QUOTE_DEPTH && QUOTE_RE.test(line)) {
+      flushPara();
+      const inner = [];
+      for (; i < lines.length && QUOTE_RE.test(lines[i]); i += 1) {
+        inner.push(lines[i].replace(QUOTE_RE, ''));
+      }
+      i -= 1;
+      const quoted = parseBlocks(inner.join('\n'), depth + 1);
+      if (quoted.length) blocks.push({ type: 'quote', blocks: quoted });
+      continue;
+    }
+
     if (HR_RE.test(line)) {
       flushPara();
       blocks.push({ type: 'hr' });
@@ -368,12 +621,12 @@ export function parseMarkdown(text) {
       const align = dividerCells(lines[i + 1]);
       if (align) {
         flushPara();
-        const headCells = splitRow(line).map(inlineSpans);
+        const headCells = splitRow(line).map(cellSpans);
         const rows = [];
         i += 2;
         for (; i < lines.length; i += 1) {
           if (!lines[i].trim() || !lines[i].includes('|')) break;
-          rows.push(splitRow(lines[i]).map(inlineSpans));
+          rows.push(splitRow(lines[i]).map(cellSpans));
         }
         i -= 1;
         blocks.push({ type: 'table', align, head: headCells, rows });
@@ -423,6 +676,7 @@ function blockText(b) {
   if (b.type === 'list') return b.items.map((it) => spansText(it.spans)).join('\n');
   // 表はセルを \t で繋ぐ。空文字で繋ぐと、隣のセルと跨いだ語が一致してしまう
   if (b.type === 'table') return [b.head, ...b.rows].map((r) => r.map(spansText).join('\t')).join('\n');
+  if (b.type === 'quote') return blocksText(b.blocks);
   return spansText(b.spans);
 }
 
@@ -446,6 +700,13 @@ export function blocksText(blocks) {
  * @param {object} b ブロック
  */
 function blockSize(b) {
+  // 引用は中のブロックを足し合わせる。中の hr も1行と数えるため（外と同じ数え方になる）
+  if (b.type === 'quote') {
+    return b.blocks.map(blockSize).reduce(
+      (a, x) => ({ chars: a.chars + x.chars, lines: a.lines + x.lines }),
+      { chars: 0, lines: 0 },
+    );
+  }
   const t = blockText(b);
   // hr は文字を持たないが、1行ぶんの場所は取る
   return { chars: t.length, lines: b.type === 'hr' ? 1 : countLines(t) };
@@ -477,7 +738,8 @@ function roomChars(text, room) {
  * spans を頭から n 文字ぶんだけ取る。
  *
  * 返すのは必ず新しい span なので、呼ぶ側が中身を書き換えてよい
- * （末尾の空白を落とすのに使う）。
+ * （末尾の空白を落とすのに使う）。印（strong / del / href）は `...s` で持っていく。
+ * 落とすと、頭出しだけリンクや太字が消えて「全文」と見え方が食い違う。
  *
  * 装飾の途中で切れることはある。**太字** の途中で切れれば途中まで太字で描かれるが、
  * それは描いた結果を切っているだけで、記号が本文へ漏れることはない。
@@ -491,12 +753,12 @@ function cutSpans(spans, n) {
   let left = n;
   for (const s of spans) {
     if (s.v.length <= left) {
-      out.push({ type: s.type, v: s.v });
+      out.push({ ...s });
       left -= s.v.length;
       continue;
     }
     const v = s.v.slice(0, left);
-    if (v) out.push({ type: s.type, v });
+    if (v) out.push({ ...s, v });
     break;
   }
 
@@ -572,15 +834,26 @@ function trimBlock(b, room) {
     // 見出しの行は予算を超えても残す。見出しの無い表は表として読めない
     const rows = [];
     let chars = blockText({ ...b, rows: [] }).length;
-    let lines = 1;
+    // 行数は blockSize と同じく countLines で数える。セルの <br>（\n に直したもの）があると
+    // 1行が何行にもなるので、1行 = 1 と数えると頭出しの予算が blockSize と食い違う。
+    // 空のセルだけの行も1行ぶんの場所は取るので、0 にはしない
+    const rowLines = (r) => Math.max(1, countLines(r.map(spansText).join('\t')));
+    let lines = rowLines(b.head);
     for (const row of b.rows) {
       const t = row.map(spansText).join('\t');
-      if (chars + t.length > room.chars || lines + 1 > room.lines) break;
+      const n = rowLines(row);
+      if (chars + t.length > room.chars || lines + n > room.lines) break;
       rows.push(row);
       chars += t.length;
-      lines += 1;
+      lines += n;
     }
     return { type: 'table', align: b.align, head: b.head, rows };
+  }
+
+  if (b.type === 'quote') {
+    // 中身はブロックの並びそのものなので、頭出しと同じ切り方を中へ当てる
+    const inner = headBlocks(b.blocks, room.chars, room.lines);
+    return inner.blocks.length ? { type: 'quote', blocks: inner.blocks } : null;
   }
 
   return null;

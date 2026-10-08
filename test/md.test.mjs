@@ -11,10 +11,23 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMarkdown, inlineSpans, headBlocks, blocksText } from '../public/js/md.js';
+import { parseMarkdown, inlineSpans, headBlocks, blocksText, SAFE_HREF_RE } from '../public/js/md.js';
 
-/** spans を「装飾の種類:中身」の並びに畳む。読みやすさのため */
-const flat = (spans) => spans.map((s) => `${s.type}:${s.v}`);
+/**
+ * spans を「印:中身」の並びに畳む。読みやすさのため。
+ *
+ * spans は平らな run に印（strong / del / href）を付けた形なので、印を + で繋いで頭に出す。
+ * 太字の地の文は `strong:太字`、太字の中のコードは `strong+code:x`、
+ * リンクは `link(URL):表示名`。印の無い地の文だけが `text:` になる。
+ */
+const flat = (spans) => spans.map((s) => {
+  const tags = [];
+  if (s.href) tags.push(`link(${s.href})`);
+  if (s.strong) tags.push('strong');
+  if (s.del) tags.push('del');
+  if (s.type === 'code') tags.push('code');
+  return `${tags.length ? tags.join('+') : 'text'}:${s.v}`;
+});
 
 /* ------------------------------------------------------------------ 空 */
 
@@ -423,4 +436,304 @@ test('blocksText は表のセルをタブで繋ぐ', () => {
   // 空文字で繋ぐと、隣のセルと跨いだ語が一致してしまう
   const src = '| a | b |\n|---|---|\n| 1 | 2 |';
   assert.equal(blocksText(parseMarkdown(src)), 'a\tb\n1\t2');
+});
+
+test('blocksText はリンクの URL を数えず、表示名だけを数える', () => {
+  // URL は画面に文字として出ない（title に入るだけ）。数えると「一致 N 件」と色が食い違う。
+  // 素の URL は画面にそのまま出るので数える
+  const src = '[資料](https://example.com/doc) と https://a.example/x';
+  assert.equal(blocksText(parseMarkdown(src)), '資料 と https://a.example/x');
+});
+
+/* ------------------------------------------------------------------ リンク */
+
+test('http / https のリンクは表示名に href を付ける', () => {
+  assert.deepEqual(flat(inlineSpans('[資料](https://example.com/a?b=1) を見る')), [
+    'link(https://example.com/a?b=1):資料',
+    'text: を見る',
+  ]);
+  assert.deepEqual(flat(inlineSpans('[x](HTTP://example.com)')), ['link(HTTP://example.com):x']);
+});
+
+test('表の中のリンクも読む', () => {
+  // 実測で来たのはこの形（表の1列目に [表示名](URL)）。前は記号ごと出ていた
+  const b = parseMarkdown('| 参考 | 何を |\n|---|---|\n| [gist](https://gist.github.com/x) | 元ネタ |');
+  assert.deepEqual(flat(b[0].rows[0][0]), ['link(https://gist.github.com/x):gist']);
+});
+
+test('javascript: と相対パスはリンクにせず、表示名だけを出す', () => {
+  // javascript: を通したら終わり。相対パスは ClaudeDeck から開けない
+  assert.deepEqual(flat(inlineSpans('[押す](javascript:alert) だけ')), ['text:押す', 'text: だけ']);
+  assert.deepEqual(flat(inlineSpans('[手順](./docs/a.md)')), ['text:手順']);
+  assert.deepEqual(flat(inlineSpans('[宛先](mailto:a@example.com)')), ['text:宛先']);
+  // 表示名の中の記法は描く
+  assert.deepEqual(flat(inlineSpans('[`a.md`](a.md)')), ['code:a.md']);
+});
+
+test('href を付けてよいかの式は http / https だけを通す', () => {
+  // md-view.js も a を作る直前にこの式で確かめる
+  assert.ok(SAFE_HREF_RE.test('https://x'));
+  assert.ok(SAFE_HREF_RE.test('http://x'));
+  assert.ok(!SAFE_HREF_RE.test('javascript:alert(1)'));
+  assert.ok(!SAFE_HREF_RE.test(' https://x'));
+  assert.ok(!SAFE_HREF_RE.test('//example.com'));
+});
+
+test('画像記法は丸ごと素の文字（中の URL もリンクにしない）', () => {
+  assert.deepEqual(flat(inlineSpans('![図](https://example.com/a.png)')), ['text:![図](https://example.com/a.png)']);
+});
+
+test('Wiki リンク [[x]] は素の文字', () => {
+  assert.deepEqual(flat(inlineSpans('[[設計の判断]] を見る')), ['text:[[設計の判断]] を見る']);
+});
+
+test('閉じていない [ や、( の続かない [ ] は素の文字', () => {
+  assert.deepEqual(flat(inlineSpans('[途中で切れた')), ['text:[途中で切れた']);
+  assert.deepEqual(flat(inlineSpans('[注] 補足')), ['text:[注] 補足']);
+  // URL に空白があればリンクではない
+  assert.deepEqual(flat(inlineSpans('[a](b c)')), ['text:[a](b c)']);
+  // ) で閉じていなければリンクではない。中の URL は素の URL として拾う
+  assert.deepEqual(flat(inlineSpans('[表示名](https://example.com')), [
+    'text:[表示名](',
+    'link(https://example.com):https://example.com',
+  ]);
+});
+
+/* ------------------------------------------------------------------ 素の URL */
+
+test('素の URL をリンクにする', () => {
+  assert.deepEqual(flat(inlineSpans('見て https://example.com/a/b?c=1#d です')), [
+    'text:見て ',
+    'link(https://example.com/a/b?c=1#d):https://example.com/a/b?c=1#d',
+    'text: です',
+  ]);
+});
+
+test('素の URL は日本語の 」 や 、 で止まる', () => {
+  assert.deepEqual(flat(inlineSpans('「https://example.com/x」、次へ')), [
+    'text:「',
+    'link(https://example.com/x):https://example.com/x',
+    'text:」、次へ',
+  ]);
+});
+
+test('素の URL の末尾の句読点と、対応しない ) は外す', () => {
+  assert.deepEqual(flat(inlineSpans('https://example.com/x.')), [
+    'link(https://example.com/x):https://example.com/x',
+    'text:.',
+  ]);
+  assert.deepEqual(flat(inlineSpans('(https://example.com/x)')), [
+    'text:(',
+    'link(https://example.com/x):https://example.com/x',
+    'text:)',
+  ]);
+  // 対応の取れた括弧は URL の一部
+  assert.deepEqual(flat(inlineSpans('https://en.wikipedia.org/wiki/Foo_(bar)')), [
+    'link(https://en.wikipedia.org/wiki/Foo_(bar)):https://en.wikipedia.org/wiki/Foo_(bar)',
+  ]);
+});
+
+test('直前が英数字なら素の URL として読まない', () => {
+  assert.deepEqual(flat(inlineSpans('xhttps://example.com')), ['text:xhttps://example.com']);
+  // スキームだけで中身が無いものも読まない
+  assert.deepEqual(flat(inlineSpans('https://')), ['text:https://']);
+});
+
+test('コードの中の URL はリンクにしない', () => {
+  assert.deepEqual(flat(inlineSpans('`https://example.com`')), ['code:https://example.com']);
+});
+
+/* ------------------------------------------------------------------ 太字の中 */
+
+test('太字の中のコードを読む', () => {
+  // 実測で assistant の 4.4%。前はバッククォートがそのまま太字で出ていた
+  assert.deepEqual(flat(inlineSpans('**チェッカー（`x.py`）**')), [
+    'strong:チェッカー（',
+    'strong+code:x.py',
+    'strong:）',
+  ]);
+});
+
+test('太字の中のリンクと素の URL を読む', () => {
+  assert.deepEqual(flat(inlineSpans('**[資料](https://example.com) と https://a.example**')), [
+    'link(https://example.com)+strong:資料',
+    'strong: と ',
+    'link(https://a.example)+strong:https://a.example',
+  ]);
+});
+
+test('リンクの表示名の中の太字とコードを読む', () => {
+  assert.deepEqual(flat(inlineSpans('[**`a.js`** を開く](https://example.com)')), [
+    'link(https://example.com)+strong+code:a.js',
+    'link(https://example.com): を開く',
+  ]);
+});
+
+/* ------------------------------------------------------------------ 打ち消し */
+
+test('打ち消しを読む。中の記法も読む', () => {
+  assert.deepEqual(flat(inlineSpans('~~古い案~~ 新しい案')), ['del:古い案', 'text: 新しい案']);
+  assert.deepEqual(flat(inlineSpans('~~`a.js`~~')), ['del+code:a.js']);
+  assert.deepEqual(flat(inlineSpans('**~~消した~~**')), ['strong+del:消した']);
+});
+
+test('閉じていない ** と ~~ は素の文字のまま', () => {
+  assert.deepEqual(flat(inlineSpans('~~切れた')), ['text:~~切れた']);
+  assert.deepEqual(flat(inlineSpans('**太字の `x` 切れ')), ['text:**太字の ', 'code:x', 'text: 切れ']);
+  assert.deepEqual(flat(inlineSpans('~~~~')), ['text:~~~~']);
+});
+
+/* ------------------------------------------------------------------ 引用 */
+
+test('続いている > の行を1つの引用にまとめる', () => {
+  const b = parseMarkdown('> 一行目\n> 二行目\n\n地の文');
+  assert.deepEqual(b.map((x) => x.type), ['quote', 'p']);
+  assert.deepEqual(b[0].blocks.map((x) => x.type), ['p']);
+  assert.deepEqual(flat(b[0].blocks[0].spans), ['text:一行目\n二行目']);
+});
+
+test('引用の中の記法も読む', () => {
+  const b = parseMarkdown('> ## 見出し\n> - `a.js` を **消す**\n>\n> [資料](https://example.com)');
+  assert.deepEqual(b[0].blocks.map((x) => x.type), ['h', 'list', 'p']);
+  assert.deepEqual(flat(b[0].blocks[1].items[0].spans), ['code:a.js', 'text: を ', 'strong:消す']);
+  assert.deepEqual(flat(b[0].blocks[2].spans), ['link(https://example.com):資料']);
+});
+
+test('引用は > の無い行で終わる。前の段落も切る', () => {
+  const b = parseMarkdown('地の文\n> 引用\n続き');
+  assert.deepEqual(b.map((x) => x.type), ['p', 'quote', 'p']);
+});
+
+test('引用の中の引用も読む', () => {
+  const b = parseMarkdown('> 外\n>\n> > 中');
+  assert.deepEqual(b[0].blocks.map((x) => x.type), ['p', 'quote']);
+  assert.deepEqual(flat(b[0].blocks[1].blocks[0].spans), ['text:中']);
+});
+
+test('フェンスの中の > は引用にしない', () => {
+  const b = parseMarkdown('```\n> そのまま\n```');
+  assert.deepEqual(b, [{ type: 'code', lang: null, text: '> そのまま', open: false }]);
+});
+
+test('blocksText は引用の記号を含まない', () => {
+  assert.equal(blocksText(parseMarkdown('> **あ**\n>\n> い')), 'あ\nい');
+});
+
+test('引用は途中で切っても引用のまま', () => {
+  const r = headBlocks(parseMarkdown('> あいうえお\n>\n> かきくけこ\n\n後ろ'), 7, 10);
+  assert.equal(r.cut, true);
+  assert.equal(r.blocks.length, 1);
+  assert.equal(r.blocks[0].type, 'quote');
+  assert.deepEqual(r.blocks[0].blocks.map((b) => flat(b.spans)), [['text:あいうえお'], ['text:かき']]);
+});
+
+test('引用の中身が1文字も入らなければ引用ごと落とす', () => {
+  const r = headBlocks(parseMarkdown('あいう\n\n> えお'), 3, 10);
+  assert.deepEqual(heads(r), ['p:あいう']);
+  assert.equal(r.cut, true);
+});
+
+/* ------------------------------------------------------------ 表のセルの <br> */
+
+test('表のセルの <br> を改行にする（見出し行も、大小も問わない）', () => {
+  const b = parseMarkdown('| 上<br>下 | a<BR/>b |\n|---|---|\n| 1<br />2 | x |');
+  assert.deepEqual(b[0].head.map(flat), [['text:上\n下'], ['text:a\nb']]);
+  assert.deepEqual(flat(b[0].rows[0][0]), ['text:1\n2']);
+});
+
+test('コードの中の <br> は変えない', () => {
+  const b = parseMarkdown('| 書き方 |\n|---|\n| `<br>` で改行 |');
+  assert.deepEqual(flat(b[0].rows[0][0]), ['code:<br>', 'text: で改行']);
+});
+
+test('表の外の <br> は素の文字のまま', () => {
+  assert.deepEqual(flat(parseMarkdown('a<br>b')[0].spans), ['text:a<br>b']);
+});
+
+/* ------------------------------------------------------------ 空行で離す */
+
+test('空行を1つ挟んだ直後の項目に gap を立てる', () => {
+  const b = parseMarkdown('- 一\n- 二\n\n- 三\n- 四');
+  assert.equal(b.length, 1);
+  assert.deepEqual(b[0].items.map((i) => i.gap), [false, false, true, false]);
+});
+
+test('gap を立てても番号付きの番号は振り直さない', () => {
+  const b = parseMarkdown('1. 一\n\n2. 二');
+  assert.deepEqual(b[0].items.map((i) => [i.num, i.gap]), [[1, false], [2, true]]);
+});
+
+test('継続行のあとの空行も gap になる', () => {
+  const b = parseMarkdown('- 一\n  続き\n\n- 二');
+  assert.deepEqual(b[0].items.map((i) => i.gap), [false, true]);
+});
+
+/* ------------------------------------------------------------ 頭出しが印を保つ */
+
+test('頭出しで切っても印（太字・リンク・打ち消し）を落とさない', () => {
+  // cutSpans が { type, v } だけを作り直すと、頭出しだけリンクや太字が消える
+  const r = headBlocks(parseMarkdown('**[とても長い表示名](https://example.com)** と ~~消した~~'), 4, 10);
+  assert.deepEqual(flat(r.blocks[0].spans), ['link(https://example.com)+strong:とても長']);
+
+  const list = headBlocks(parseMarkdown('- ~~済~~ [a](https://x.example) の続きがとても長い\n- 次'), 5, 10);
+  assert.deepEqual(flat(list.blocks[0].items[0].spans), ['del:済', 'text: ', 'link(https://x.example):a', 'text: の']);
+});
+
+/* ------------------------------------------------------------ レビューの手当て */
+
+test('リンクの URL は対応の取れた ) で閉じる', () => {
+  // 最初の ) で切ると Foo_(bar の別ページへリンクしてしまう
+  assert.deepEqual(flat(inlineSpans('[Foo](https://en.wikipedia.org/wiki/Foo_(bar)) を見る')), [
+    'link(https://en.wikipedia.org/wiki/Foo_(bar)):Foo',
+    'text: を見る',
+  ]);
+});
+
+test('括弧を含む javascript: もリンクにならず、表示名だけが残る', () => {
+  // 対応を数えるので、閉じ括弧が本文へ漏れない
+  assert.deepEqual(flat(inlineSpans('[押す](javascript:alert(1)) だけ')), ['text:押す', 'text: だけ']);
+});
+
+test('リンクの URL の ( が閉じていなければリンクにしない', () => {
+  assert.deepEqual(flat(inlineSpans('[a](https://x.example/(b c')), ['text:[a](', 'link(https://x.example/(b):https://x.example/(b', 'text: c']);
+});
+
+test('引用の入れ子は上限（8段）まで。超えたぶんは素の文字', () => {
+  // 上限が無いと、> を数千並べた1行で再帰が深くなって落ちる
+  const deep = parseMarkdown(`${'>'.repeat(5000)} 深い`);
+  let b = deep[0];
+  let n = 0;
+  while (b.type === 'quote') {
+    n += 1;
+    b = b.blocks[0];
+  }
+  assert.equal(n, 8);
+  assert.equal(b.type, 'p');
+  assert.ok(blocksText(deep).endsWith('> 深い'));
+
+  // 上限より浅いものは今までどおり
+  const two = parseMarkdown('> > 中');
+  assert.equal(two[0].blocks[0].type, 'quote');
+});
+
+test('長い悪意ある入力でも時間が掛からない', () => {
+  // [a](x の繰り返しは [ のたびに行末まで、) の連なりは外すたびに全体を数え直すと2乗になる
+  const links = '[a](x'.repeat(10000);
+  const parens = `https://a${')'.repeat(200000)}`;
+  const t0 = Date.now();
+  assert.equal(inlineSpans(links).length, 1);
+  assert.deepEqual(flat(inlineSpans(parens)).slice(0, 1), ['link(https://a):https://a']);
+  // 単体なら 0.1 秒ほど。npm test は他のファイルと並んで走るので、余裕を大きく取る
+  assert.ok(Date.now() - t0 < 3000, `${Date.now() - t0}ms`);
+});
+
+test('<br> のある表は、頭出しの行数を blockSize と同じく改行で数える', () => {
+  // 1行目が3行ぶんの高さを取る。予算 4 なら見出しと1行目まで、予算 3 なら見出しだけ
+  const src = '| 見出し |\n|---|\n| 一<br>二<br>三 |\n| 次 |';
+  const r = headBlocks(parseMarkdown(src), 1000, 4);
+  assert.equal(r.cut, true);
+  assert.equal(r.blocks[0].rows.length, 1);
+
+  const tight = headBlocks(parseMarkdown(src), 1000, 3);
+  assert.equal(tight.blocks[0].rows.length, 0);
 });

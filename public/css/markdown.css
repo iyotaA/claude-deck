@@ -1,7 +1,7 @@
 /* Markdown の見た目。md-view.js が組んだ `.md` の中だけを塗る。
  *
- * 色は新しく作らない。使うのは既にある意味トークン（--border / --code-bg /
- * --bg-elev / --fg-faint / --accent / --done）だけ。足すと tokens.css の二重定義
+ * 色は新しく作らない。使うのは既にある意味トークン（--border / --border-strong / --code-bg /
+ * --bg-elev / --fg / --fg-muted / --fg-faint / --accent / --accent-soft / --done）だけ。足すと tokens.css の二重定義
  * （prefers-color-scheme 側と [data-theme="dark"] 側）を両方直す義務が生まれる。
  *
  * detail.css より後に読む。`pre` と `code` はあちらが裸のセレクタで持っているので、
@@ -180,21 +180,30 @@
 
 .md-list { margin: 0; }
 
+/* 入れ子のリストも含めて margin は 0（前は入れ子の上に .4em 空けていた） */
 .md-ul {
   margin: 0;
   padding-left: 1.4rem;
 }
 
-/* 入れ子。項目（li）の中に入るので、上に少し空ける */
-.md-ul .md-ul { margin-top: .4em; }
-
+/* 項目の間は詰める。**margin ではなく行間で詰めている。**
+   前は `li + li` に .4em を足していたが、見た目の隙間の大半は行間（.md の 1.78）から
+   来ていた。margin だけ半分にしても約18px → 15px で、ほとんど変わって見えない。
+   margin を 0 にして行間を表と同じ 1.55 に落とすと約8px になる（モックで3案を比べた案C）。
+   前後のブロックとの間（.md > :not(:first-child) の .85em）は変えない。
+   項目の間の margin を書かないのは、`.md-list li { margin: 0 }` で足りるため
+   （`li + li` を残すと、下の .is-gap と詳細度を比べる相手が1つ増える） */
 .md-list li {
   margin: 0;
+  line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.md-list li + li { margin-top: .4em; }
+/* 空行を1つ挟んだ直後の項目（md.js の gap）。書いた人が空行で塊を分けているので、
+   ブロックの間と同じだけ離す。項目の間を詰めたぶん、離さないと区切りが消える。
+   詳細度は (0,2,1) で、上の `.md-list li`（0,1,1）に勝つ */
+.md-list li.is-gap { margin-top: .85em; }
 
 /* 点と番号は強調色。見出しの線と同じ「目印だけ色」の線（上の見出しの節）。
    チェックリストの印は下の `li[data-task]::marker`（0,2,2）が詳細度で勝つので、
@@ -254,18 +263,44 @@
   overflow-wrap: anywhere;
 }
 
+/* セルの中の改行（md.js が `<br>` を \n に直したもの）を出す。
+   pre-line は改行だけを残し、続く空白は畳んで、折り返しもする */
+.md-table td { white-space: pre-line; }
+
 /* 見出し行の面は --accent-soft を重ねる。**color-mix で 10% を書かない**
-   （timeline.css の `.tl-mark` と同じ理由。暗いほうだけ 16% という割り当てが効かなくなる） */
+   （timeline.css の `.tl-mark` と同じ理由。暗いほうだけ 16% という割り当てが効かなくなる）
+
+   見出しは折り返さない（前は nowrap）まま、`<br>` の改行だけを効かせたいので pre にする。
+   pre は空白も残すが、md.js がセルの前後の空白を落としているので、残るのは中の空白だけ */
 .md-table th {
   background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg-elev);
   font-weight: 600;
-  white-space: nowrap;
+  white-space: pre;
 }
+
+/* ------------------------------------------------------- 引用 */
+
+/* 左の線 ＋ 字を1段落とす。線は --accent にしない。時系列では --accent の左の縦棒が
+   「あなたの発言」の印なので、同じ形を色まで揃えると見分けが付かない。
+   指示文の 12% に引用がある（実測）ので、時系列の中でよく出る */
+.md-quote {
+  margin: 0;
+  padding: .1em 0 .1em .9em;
+  border-left: .2em solid var(--border-strong);
+  color: var(--fg-muted);
+}
+
+/* 引用の中のブロックの間も、外（`.md > :not(:first-child)`）と同じだけ空ける。
+   詳細度は同じ (0,2,0) にしてある。(0,1,0) で書くと、中の `.md-p { margin: 0 }` や
+   `.md-list { margin: 0 }` に読む順で負けて、上の「段落と箇条書きの上だけ 0px」と同じ罠を踏む */
+.md-quote > :not(:first-child) { margin-top: .85em; }
 
 /* ------------------------------------------------------- 水平線 */
 
-/* ブロックの間（`.md > :not(:first-child)`）と同じ (0,2,0)。あちらより後に書いてあるので勝つ */
-.md > .md-hr {
+/* ブロックの間（`.md > :not(:first-child)`）と同じ (0,2,0)。あちらより後に書いてあるので勝つ。
+   引用の中の hr も同じ見た目にする（`.md-quote > :not(:first-child)` も (0,2,0) で前に書いてある） */
+.md > .md-hr,
+.md-quote > .md-hr {
   margin: 1.3em 0;
   border: 0;
   border-top: 1px solid var(--border);
@@ -275,6 +310,27 @@
 
 /* 700 だと日本語が潰れて読みにくい。600 にする */
 .md-strong { font-weight: 600; }
+
+/* ------------------------------------------------------- 打ち消し */
+
+/* 線に加えて字を1段落とす。線だけだと日本語では読み飛ばしにくい（実測2件なので凝らない） */
+.md-del { color: var(--fg-faint); }
+
+/* ------------------------------------------------------- リンク */
+
+/* 下線 ＋ 強調色（モックで比べた案A）。下線は薄く引いて、触れたら字と同じ濃さにする。
+   色は文中のコードと同じ --accent 系で、新しいトークンは作らない。
+   長い URL を素のまま出すことがあるので、狭いペインで溢れないよう折る */
+.md-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: .2em;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.md-link:hover { text-decoration-color: currentColor; }
 
 /* ------------------------------------------------------- 頭出しの切り跡 */
 

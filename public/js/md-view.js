@@ -9,19 +9,56 @@
  * 検索の目印（<mark>）は装飾の中でも効かせる。**太字** の中や `コード` の中に
  * 当たった語が入ったとき、記法を描いたせいで目印が消えると、
  * 「一致 3 件」と出ているのに画面のどこにも色が付いていない状態になる。
- * だから地の文だけでなく、太字・コード・表のセルも markUp を通す。
+ * だから地の文だけでなく、太字・打ち消し・リンク・コード・表のセルも markUp を通す。
+ *
+ * リンク（a）は http / https のものだけを作り、href はプロパティで代入する（linkNode）。
  *
  * 逆に、記号そのものを検索したときは数と見た目が食い違う。
  * ** で検索すると countHits は素の文字列を数えるので「一致 2 件」と出るが、
  * 画面には ** が出ていない。これは承知の上で、記法を描く側を採っている。
  */
 import { el, marked, markUp } from './util.js';
-import { parseMarkdown } from './md.js';
+import { parseMarkdown, SAFE_HREF_RE } from './md.js';
+
+/**
+ * リンクの器を作る。通せない URL なら null（呼ぶ側は a を作らずに中身だけ出す）。
+ *
+ * md.js が http / https 以外を落としているが、ここでも同じ式で確かめる。
+ * javascript: を通したら終わりの場所なので、境界を1枚にしない。
+ *
+ * href は**プロパティで代入する**。文字列を組み立てて流し込む口（innerHTML や
+ * setAttribute に連結した文字列を渡す形）を作らない。
+ * 別のタブで開くのは、このページを置き換えると一覧と詳細の状態が消えるため。
+ * noopener で開いた先から window.opener を触らせない。title に URL を出すのは、
+ * 表示名だけでは行き先が読めないため（押す前に確かめられる）。
+ *
+ * @param {string} href URL
+ * @returns {HTMLAnchorElement|null}
+ */
+function linkNode(href) {
+  if (!SAFE_HREF_RE.test(href)) return null;
+  const a = el('a', 'md-link');
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.title = href;
+  return a;
+}
+
+/** 印（href / strong / del）が同じ run か。同じものは1つの器にまとめる */
+function sameMarks(a, b) {
+  return a.href === b.href && !!a.strong === !!b.strong && !!a.del === !!b.del;
+}
 
 /**
  * 装飾（spans）を節点の並びへ。
  *
- * 太字とコードは1つの要素、地の文は markUp が返す並びをそのまま広げる。
+ * md.js の spans は平らな run に印を付けた形なので、ここで器へ組み直す。
+ * 続いている run のうち印が同じものを1つの器に入れる。そうしないと
+ * `**[`a.js` を開く](https://…)**` が a を2つに割って描かれ、下線が途切れる。
+ *
+ * 入れ子は外から a > strong > del。中身はコードなら code.md-code、地の文は markUp。
+ * どちらも検索の目印（<mark>）を通すので、リンクや太字の中でも当たった語に色が付く。
  *
  * @param {Array<object>} spans md.js の spans
  * @param {string|null} needle 検索語
@@ -29,10 +66,35 @@ import { parseMarkdown } from './md.js';
  */
 function spanNodes(spans, needle) {
   const out = [];
-  for (const s of spans) {
-    if (s.type === 'code') out.push(marked('code', 'md-code', s.v, needle));
-    else if (s.type === 'strong') out.push(marked('strong', 'md-strong', s.v, needle));
-    else out.push(...markUp(s.v, needle));
+  let i = 0;
+  while (i < spans.length) {
+    const head = spans[i];
+    let j = i + 1;
+    while (j < spans.length && sameMarks(spans[j], head)) j += 1;
+
+    let nodes = [];
+    for (const s of spans.slice(i, j)) {
+      if (s.type === 'code') nodes.push(marked('code', 'md-code', s.v, needle));
+      else nodes.push(...markUp(s.v, needle));
+    }
+    // 内側から包む。並びは外から a > strong > del になる
+    if (head.del) {
+      const d = el('del', 'md-del');
+      d.append(...nodes);
+      nodes = [d];
+    }
+    if (head.strong) {
+      const b = el('strong', 'md-strong');
+      b.append(...nodes);
+      nodes = [b];
+    }
+    const a = head.href ? linkNode(head.href) : null;
+    if (a) {
+      a.append(...nodes);
+      nodes = [a];
+    }
+    out.push(...nodes);
+    i = j;
   }
   return out;
 }
@@ -75,6 +137,9 @@ function listNode(block, needle) {
     }
 
     const li = el('li');
+    // 空行を挟んだ直後の項目だけ離す（markdown.css の li.is-gap）。
+    // リストは割らないので、番号付きの番号は続いたまま
+    if (it.gap) li.classList.add('is-gap');
     // チェックリストの印は CSS の ::marker が出す（markdown.css）。
     // 文字を節点に入れないのは、本文を選択してコピーしたときに混ざるため
     // （.md.is-cut::after の「…」と同じ理由）。印は md.js が本文から剥がしてある
@@ -156,6 +221,13 @@ function blockNode(b, needle) {
   if (b.type === 'list') return listNode(b, needle);
   if (b.type === 'table') return tableNode(b, needle);
   if (b.type === 'hr') return el('hr', 'md-hr');
+
+  if (b.type === 'quote') {
+    // 中身はブロックの並びなので、同じ blockNode で積む（引用の中の引用もこれで描ける）
+    const q = el('blockquote', 'md-quote');
+    for (const inner of b.blocks) q.append(blockNode(inner, needle));
+    return q;
+  }
 
   const p = el('p', 'md-p');
   p.append(...spanNodes(b.spans, needle));
