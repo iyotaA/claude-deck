@@ -7,7 +7,7 @@
  * 以前は bodyText で 1,400 字・18 行の頭出しにして残りを畳んでいたが、ここは
  * 承認するかどうかを決める場所なので、読むのに1手増えるのが惜しい。
  * 記法の途中で切った断片を Markdown として描くと崩れる、という事情もある。
- * 画面が埋まらないよう、高さの上限は markdown.css の `.is-wait .md` が持つ。
+ * 画面が埋まらないよう、高さの上限は markdown.css の `.is-block .md` が持つ。
  */
 import { el } from './util.js';
 import { mdView } from './md-view.js';

@@ -32,8 +32,15 @@
    読む面と同じ尺で組むと1画面に入る件数が半分になる */
 .md.tl-text { font-size: var(--fs-3); }
 
-/* ブロックの間。日本語の本文なので詰めすぎない */
-.md > * + * { margin-top: .7rem; }
+/* ブロックの間。日本語の本文なので詰めすぎない。
+
+   **詳細度は (0,2,0) にしてある。** 前は `.md > * + *`（0,1,0）で、後ろに書いた
+   `.md-p { margin: 0 }` と `.md-list { margin: 0 }`（どちらも 0,1,0）に読む順で負けていた。
+   段落と箇条書きの上だけ 0px になり、表の上（`.md-tablewrap` は margin を持たない）だけが
+   空くという状態で、「詰まって見える」の正体はこれだった（実測。段落→箇条書き 0px・表→段落 0px）。
+   `:not(:first-child)` は `* + *` と同じ範囲を指し、詳細度だけが1段上がる。
+   下の見出し・hr の指定も (0,2,0) で、あとに書いてあるのでそちらが勝つ */
+.md > :not(:first-child) { margin-top: .85em; }
 
 /* 見出しの前は段の深さで空ける。浅い段ほど大きく空けると、どこで話題が変わったかが
    線を増やさずに読める。プランの本文は h1〜h3 の3段が揃って来て、1件で最大118個の
@@ -41,15 +48,15 @@
    本文より罫線のほうが目立つ。
    どれも詳細度は (0,2,0) で並ぶので、深い段から浅い段の順に書いて後を勝たせる
    （`.md > .md-hr` と同じ形） */
-.md > * + .md-h  { margin-top: 1rem; }
-.md > * + .md-h3 { margin-top: 1.35rem; }
-.md > * + .md-h2 { margin-top: 1.85rem; }
-.md > * + .md-h1 { margin-top: 2.3rem; }
+.md > * + .md-h  { margin-top: 1.1em; }
+.md > * + .md-h3 { margin-top: 1.45em; }
+.md > * + .md-h2 { margin-top: 1.95em; }
+.md > * + .md-h1 { margin-top: 2.4em; }
 
 /* 見出しと直後の中身はくっつける。上を空けて下を詰めると、見出しがその下の塊のものだと
    余白だけで読める。見出しが続くとき（## の次に ###）もここが当たって詰まるが、
    段の頭が2行に見えるほうが読みやすいので、そのままにする */
-.md > .md-h + * { margin-top: .3rem; }
+.md > .md-h + * { margin-top: .45em; }
 
 /* ------------------------------------------------------- 段落 */
 
@@ -116,20 +123,31 @@
 }
 
 /* 線は上2段だけ。全部に引くと本文より罫線のほうが目立つ（118個並ぶプランではより効く）。
-   h1 は太く、h2 は細くして、線の有無ではなく太さで2つを分ける */
+   h1 は太く、h2 は細くして、線の有無ではなく太さで2つを分ける。
+
+   線は強調色に寄せる（h1 は 60%、h2 は 30%）。**見出しの字は塗らない。**
+   字まで --accent にすると、選んでいるタブや「全文」の畳み（押せるもの）と同じ色になり、
+   見出しが押せそうに見える。色が付くのは線・点・番号・表の頭・文中のコードの
+   「目印」だけにしてある（モックで3案を比べて決めた）。
+   新しい色トークンは作らない（color-mix と --accent-soft で足りる） */
 .md-h1 {
   padding-bottom: .3rem;
-  border-bottom: 2px solid var(--border-strong);
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 60%, var(--border));
 }
 
 .md-h2 {
   padding-bottom: .22rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
 }
 
 /* ------------------------------------------------------- コード */
 
-.md-code { overflow-wrap: anywhere; }
+/* 文中のコード（パス・関数名）は字を強調色に寄せる。日本語の本文の中で拾いやすくするため。
+   フェンスの中の code には md-code が付かない（md-view.js）ので、ブロックは塗られない */
+.md-code {
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--accent) 65%, var(--fg));
+}
 
 /* フェンス。detail.css の `pre` に乗るので、変えるのは寸法だけ。
    高さの上限は持たせない（畳んだ中に入れるときは、その器の側が持つ） */
@@ -168,7 +186,7 @@
 }
 
 /* 入れ子。項目（li）の中に入るので、上に少し空ける */
-.md-ul .md-ul { margin-top: .25rem; }
+.md-ul .md-ul { margin-top: .4em; }
 
 .md-list li {
   margin: 0;
@@ -176,7 +194,13 @@
   overflow-wrap: anywhere;
 }
 
-.md-list li + li { margin-top: .25rem; }
+.md-list li + li { margin-top: .4em; }
+
+/* 点と番号は強調色。見出しの線と同じ「目印だけ色」の線（上の見出しの節）。
+   チェックリストの印は下の `li[data-task]::marker`（0,2,2）が詳細度で勝つので、
+   □ ■ ✓ の色は TODO パネルから借りたまま変わらない */
+.md-list li::marker { color: var(--accent); }
+.md-list ol > li::marker { font-weight: 600; }
 
 /* ---- チェックリスト ---- */
 
@@ -230,17 +254,19 @@
   overflow-wrap: anywhere;
 }
 
+/* 見出し行の面は --accent-soft を重ねる。**color-mix で 10% を書かない**
+   （timeline.css の `.tl-mark` と同じ理由。暗いほうだけ 16% という割り当てが効かなくなる） */
 .md-table th {
-  background: var(--bg-elev);
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg-elev);
   font-weight: 600;
   white-space: nowrap;
 }
 
 /* ------------------------------------------------------- 水平線 */
 
-/* `.md > * + *`（0,1,0）と同じ詳細度なので、子の指定（0,2,0）で確実に勝たせる */
+/* ブロックの間（`.md > :not(:first-child)`）と同じ (0,2,0)。あちらより後に書いてあるので勝つ */
 .md > .md-hr {
-  margin: 1rem 0;
+  margin: 1.3em 0;
   border: 0;
   border-top: 1px solid var(--border);
 }
@@ -272,20 +298,27 @@
 
 /* ------------------------------------------------------- 「全文」の畳んだ中 */
 
-/* timeline.css の `details.more > pre` と同じ寸法を引き継ぐ。
-   背景は敷かない。中のフェンスが --code-bg で塗られているので、
-   同じ系統の色を下にも敷くと枠だけが浮いて、どこからがコードか読めなくなる */
-details.more > .md {
-  margin-top: .4rem;
-  max-height: 30rem;
-  overflow: auto;
-}
+/* 背景は敷かない。中のフェンスが --code-bg で塗られているので、
+   同じ系統の色を下にも敷くと枠だけが浮いて、どこからがコードか読めなくなる。
+
+   **高さの上限は持たせない。** 前は 30rem の箱の中でスクロールさせていて、
+   ページのスクロールと二重になっていた。開いた人は全部読みたくて開いているので、
+   ページのスクロールだけで読ませる（timeline.css の `details.more > pre` は別の話で、
+   あちらはツールの出力なので上限を残してある） */
+details.more > .md { margin-top: .4rem; }
 
 /* ------------------------------------------------------- 「あなたの番」の中 */
 
-/* プランと最後の応答は切らずに全部描くので、器に高さの上限を付ける。
-   これが無いと長いプラン1本で画面が埋まり、下のパネルが押し出される */
-.is-wait .md {
+/* 答えないと1行も進まない待ち（`.is-block`）だけ、器に高さの上限を付ける。
+   あれは**タブの帯より上**に出るので、長いプラン1本（実測で最大 10,000 字台）で
+   タブの帯と下のパネルが画面の外まで押し出される。
+
+   **返信待ち（「いま」タブの中）には付けない。** あちらはタブの中なので押し出す相手が居ないうえ、
+   最後の応答を読むのがそのタブの主役で、24rem の箱だとページと二重にスクロールさせることになる。
+
+   `.is-wait` ではなく `.is-block` で絞る。許可要求カード（run-ask.js）も `.is-block` を付けているので、
+   帯より上に出るものはこの1行で全部拾える */
+.is-block .md {
   max-height: 24rem;
   overflow: auto;
 }

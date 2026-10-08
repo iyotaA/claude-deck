@@ -328,7 +328,7 @@ function askCard(runId, ask) {
   // ── 何を訊かれているか
   if (ask.kind === 'plan') {
     // プランは Markdown のまま来る。切らずに全部描く（承認するかを決める場所なので）。
-    // 画面が埋まらないよう、高さの上限は markdown.css の `.is-wait .md` が持つ
+    // 画面が埋まらないよう、高さの上限は markdown.css の `.is-block .md` が持つ
     if (ask.body) card.append(mdView(ask.body));
   } else if (questions) {
     // 質問文も選択肢もフォームが出す。ここで `detail` を出すと1問目が二重に並ぶ
