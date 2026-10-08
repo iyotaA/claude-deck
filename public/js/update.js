@@ -337,19 +337,33 @@ function stepTime(i, mark) {
 /**
  * 段の並びを書く。帯の2行目と覆いの中で同じものを使う。
  *
+ * **節点は1回だけ作り、あとは印と時間の字だけを書き換える。**
+ * 前は呼ぶたびに `replaceChildren` で組み直していた。これは毎秒の時計と
+ * 1.5秒ごとの見張りの両方から呼ばれるので、そのたびに「いま」の丸が作り直され、
+ * 回転が 0 度からやり直しになって、丸がカクついて見えた（実測の指摘）。
+ * `data-mark` に同じ値を入れ直しても回転は途切れない。
+ *
  * @param {HTMLElement} list 書き込む先（<ol>）
  * @param {string} stage いまの帯の stage
  */
 function fillSteps(list, stage) {
+  if (list.children.length !== STEPS.length) {
+    list.replaceChildren(...STEPS.map((step) => {
+      const li = el('li', 'upd-step');
+      const dot = el('span', 'upd-dot');
+      dot.setAttribute('aria-hidden', 'true');
+      li.append(dot, el('span', 'upd-name', step.label), el('span', 'upd-time'));
+      return li;
+    }));
+  }
   const marks = stepsOf(stage, reached);
-  list.replaceChildren(...STEPS.map((step, i) => {
-    const li = el('li', 'upd-step');
-    li.dataset.mark = marks[i];
-    const dot = el('span', 'upd-dot');
-    dot.setAttribute('aria-hidden', 'true');
-    li.append(dot, el('span', 'upd-name', step.label), el('span', 'upd-time', stepTime(i, marks[i])));
-    return li;
-  }));
+  STEPS.forEach((_, i) => {
+    const li = list.children[i];
+    if (li.dataset.mark !== marks[i]) li.dataset.mark = marks[i];
+    const time = stepTime(i, marks[i]);
+    const span = li.lastElementChild;
+    if (span.textContent !== time) span.textContent = time;
+  });
 }
 
 /**
