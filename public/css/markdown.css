@@ -123,20 +123,31 @@
 }
 
 /* 線は上2段だけ。全部に引くと本文より罫線のほうが目立つ（118個並ぶプランではより効く）。
-   h1 は太く、h2 は細くして、線の有無ではなく太さで2つを分ける */
+   h1 は太く、h2 は細くして、線の有無ではなく太さで2つを分ける。
+
+   線は強調色に寄せる（h1 は 60%、h2 は 30%）。**見出しの字は塗らない。**
+   字まで --accent にすると、選んでいるタブや「全文」の畳み（押せるもの）と同じ色になり、
+   見出しが押せそうに見える。色が付くのは線・点・番号・表の頭・文中のコードの
+   「目印」だけにしてある（モックで3案を比べて決めた）。
+   新しい色トークンは作らない（color-mix と --accent-soft で足りる） */
 .md-h1 {
   padding-bottom: .3rem;
-  border-bottom: 2px solid var(--border-strong);
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 60%, var(--border));
 }
 
 .md-h2 {
   padding-bottom: .22rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
 }
 
 /* ------------------------------------------------------- コード */
 
-.md-code { overflow-wrap: anywhere; }
+/* 文中のコード（パス・関数名）は字を強調色に寄せる。日本語の本文の中で拾いやすくするため。
+   フェンスの中の code には md-code が付かない（md-view.js）ので、ブロックは塗られない */
+.md-code {
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--accent) 65%, var(--fg));
+}
 
 /* フェンス。detail.css の `pre` に乗るので、変えるのは寸法だけ。
    高さの上限は持たせない（畳んだ中に入れるときは、その器の側が持つ） */
@@ -184,6 +195,12 @@
 }
 
 .md-list li + li { margin-top: .4em; }
+
+/* 点と番号は強調色。見出しの線と同じ「目印だけ色」の線（上の見出しの節）。
+   チェックリストの印は下の `li[data-task]::marker`（0,2,2）が詳細度で勝つので、
+   □ ■ ✓ の色は TODO パネルから借りたまま変わらない */
+.md-list li::marker { color: var(--accent); }
+.md-list ol > li::marker { font-weight: 600; }
 
 /* ---- チェックリスト ---- */
 
@@ -237,8 +254,10 @@
   overflow-wrap: anywhere;
 }
 
+/* 見出し行の面は --accent-soft を重ねる。**color-mix で 10% を書かない**
+   （timeline.css の `.tl-mark` と同じ理由。暗いほうだけ 16% という割り当てが効かなくなる） */
 .md-table th {
-  background: var(--bg-elev);
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg-elev);
   font-weight: 600;
   white-space: nowrap;
 }
