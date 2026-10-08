@@ -28,7 +28,7 @@ import { idleOf } from './rows.js';
 import { setListOpen } from './drawer.js';
 import { openZoom } from './zoom.js';
 import { focusTerminal } from './detail-head.js';
-import { TAB_DEFS, INSP_DEFS, setDetailTab, setInspector } from './detail.js';
+import { TAB_DEFS, INSP_DEFS, setDetailTab, setInspector, pickedTab } from './detail.js';
 import { select } from './session.js';
 import { openRunForm } from './run-form.js';
 import { setMode } from './mode.js';
@@ -148,7 +148,7 @@ function buildAll() {
     }
     for (const t of TAB_DEFS) {
       // いま見ているタブは出さない。押しても何も起きない（setDetailTab が弾く）
-      if (store.detailTab === t.id) continue;
+      if (pickedTab() === t.id) continue;
       out.push({
         group: '出す・畳む',
         verb: t.label,

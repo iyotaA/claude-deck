@@ -104,9 +104,51 @@ export const TAB_DEFS = [
  * @param {string|null} error 取れなかった理由（あれば失敗の表示へ倒す）
  */
 function effectiveTab(d, error) {
+  if (autoNowOn()) return TAB_DEFS.find((t) => t.id === 'now');
   const def = TAB_DEFS.find((t) => t.id === store.detailTab) ?? TAB_DEFS[0];
   if (!def.needsDetail || d || error) return def;
   return TAB_DEFS.find((t) => t.id === 'now') ?? def;
+}
+
+/**
+ * 返信待ちを選んだ瞬間だけ「いま」を出す。その判断を、選んだセッションごとに1回だけ下す。
+ *
+ * 返信待ちのとき見たいのは「Claude が最後に何を言ったか」で、それは「いま」タブにある。
+ * 既定の「経過」のままだと、毎回タブを押し替えることになる。
+ *
+ * **選んだ瞬間に1回だけ決める。** 状態を毎回見て倒すと、経過を眺めているあいだに
+ * Claude が返し終えた瞬間、読んでいた画面が勝手に「いま」へ飛ぶ。
+ * 行（状態）がまだ届いていなければ決めずに待つ（?session= で開いた直後は一覧が空のことがある）。
+ *
+ * 答えないと進まない待ち（blocking）はタブ帯より上に出ているので、ここでは見ない
+ *
+ * @param {object|null} row 選んでいるセッションの行
+ */
+function settleAutoNow(row) {
+  if (!store.selected || !row || store.autoNow?.id === store.selected) return;
+  // ?dtab= を明示して開いたときは、最初の1回だけ URL の指定のほうを守る。
+  // **経路（selectedFrom）では見分けない。** ?session= で開いたものでも一覧に居れば
+  // stream.js が 'live' と書くので、そちらで絞ると指定が素通りする（実測で踏んだ）
+  const pinned = store.dtabPinned;
+  store.dtabPinned = false;
+  store.autoNow = { id: store.selected, on: !pinned && row.state === 'awaiting-reply' };
+}
+
+/** いま「いま」へ倒しているか。選び直した直後の古い値は id で弾く */
+function autoNowOn() {
+  return store.autoNow?.id === store.selected && store.autoNow.on;
+}
+
+/**
+ * 人が見ているつもりのタブ（倒しているあいだは「いま」）。
+ *
+ * パレットの「いま見ているタブは出さない」に使う。store.detailTab を直に見ると、
+ * 倒しているあいだ「経過」が候補から消え、「いま」が候補に出る（逆になる）
+ *
+ * @returns {string}
+ */
+export function pickedTab() {
+  return autoNowOn() ? 'now' : store.detailTab;
 }
 
 /**
@@ -174,6 +216,8 @@ function detailKeyOf() {
     detailErrorNow() ?? '',
     // 開いているタブ。混ぜないと、押しても renderDetailIfNeeded() が素通りする
     store.detailTab,
+    // 返信待ちで「いま」へ倒しているか（detailTab とは別に持っている）
+    autoNowOn() ? 'auto-now' : '',
     // 右のインスペクタ（閉じているときは空文字）。いまは setInspector() が
     // 自分で renderDetail() を呼ぶので無くても動くが、混ぜておかないと
     // 別の経路（Ctrl+K など）から store.inspector を動かしたときに黙って素通りする
@@ -240,8 +284,18 @@ export function renderDetailIfNeeded() {
  * @param {string} id TAB_DEFS の id
  */
 export function setDetailTab(id) {
-  if (store.detailTab === id) return;
   if (!TAB_DEFS.some((t) => t.id === id)) return;
+  // 返信待ちで「いま」へ倒しているあいだは、出ているタブと store.detailTab が食い違う。
+  // 見えている「いま」を押したなら何もしない（押したことで既定まで「いま」にしない）。
+  // 別のタブを押したら倒すのをやめて、このセッションのあいだはそちらを守る。
+  // **同じ値の早期 return より前に置く。** 既定が「経過」のまま倒しているとき、
+  // 「経過」を押しても store.detailTab が同じなので素通りしてしまう
+  if (autoNowOn()) {
+    if (id === 'now') return;
+    store.autoNow.on = false;
+  } else if (store.detailTab === id) {
+    return;
+  }
   store.detailTab = id;
   syncQuery();
   renderDetail();
@@ -548,6 +602,9 @@ function renderDetailInner() {
   const t0 = performance.now();
   // row と呼んでいるのは一覧の行と同じ形のもの。一覧に居なければ詳細から組む
   const row = headOf(store.selected);
+  // **鍵（lastDetailRender）を取るより前に決める。** 後に置くと、倒した直後の鍵が
+  // 倒す前の値で残り、次の push で同じ中身をもう一度組むことになる
+  settleAutoNow(row);
   // 出すものが無いなら拡大を畳む。膜の裏で一覧が触れないまま
   // 「左の一覧から選ぶと…」だけが出る状態を作らない。
   //

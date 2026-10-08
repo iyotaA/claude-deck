@@ -392,6 +392,20 @@ export const store = {
    */
   detailTab: initialDetailTab(),
   /**
+   * 返信待ちを選んだ瞬間に「いま」へ倒しているか。`{ id, on }` または null。
+   *
+   * **detailTab とは別に持つ。** 書き換えると URL（?dtab=）と、次に別のセッションを
+   * 選んだときの戻り先まで「いま」になる。倒すのは選んだそのセッションのあいだだけ。
+   * 決めるのは detail.js の settleAutoNow() の1箇所、外すのは setDetailTab()（自分で押した）
+   */
+  autoNow: null,
+  /**
+   * ?dtab= が URL で明示されていたか。開いて最初に選ばれた1本だけは、
+   * 返信待ちでも「いま」へ倒さずにこちらを守る（ブックマークした人の意図のほう）。
+   * **使い切り。** settleAutoNow() が最初の判断で false に落とす
+   */
+  dtabPinned: DETAIL_TABS.has(query.get('dtab')),
+  /**
    * 右のインスペクタ。INSPECTOR_TABS のどれか、または null で閉じている。
    *
    * **開閉と「どれを見ているか」を1つの値で持つ。** 2つに分けると
