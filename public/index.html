@@ -90,11 +90,15 @@
     <div class="update" id="update" role="status" hidden>
       <span class="update-text" id="update-text"></span>
       <span class="update-note" id="update-note"></span>
+      <!-- 道中だけ出す経過時間。止まっていないことを数字の動きで見せる -->
+      <span class="update-time" id="update-time" hidden></span>
       <!-- 押せることは状態によって変わる（更新する／もう一度／読み込み直す）。
            ボタンを3つ置いて出し分けるより、1つの札を書き換えるほうが
            「いま押せるのはこれ1つ」が形で伝わる -->
       <button class="btn update-act" id="update-act" type="button" hidden></button>
       <button class="btn update-close" id="update-close" type="button">閉じる</button>
+      <!-- 道中の段（準備・取り寄せ・入れ替え）。覆いを畳んだあとも、どこまで来たかをここで見せる -->
+      <ol class="upd-steps update-steps" id="update-steps" hidden></ol>
     </div>
 
     <!-- 下段。ボールの所在だけを置く帯。
@@ -782,6 +786,25 @@
     <button class="settings-x" id="zoom-close" type="button" aria-label="拡大をやめる">&#215;</button>
   </div>
   <div class="zoom-body" id="zoom-body"></div>
+</dialog>
+<!-- 更新の道中を覆うカード。showModal() で開く。
+     入れ替えのあいだはサーバーが止まっていて、何を押しても効かない。
+     覆ってしまうほうが正直なので、帯ではなくここで見せる。
+     Esc と「裏で続ける」で畳むと、同じ中身が上の帯へ移る（update.js） -->
+<dialog class="updov" id="updov" aria-labelledby="updov-title">
+  <div class="updov-head">
+    <div class="updov-ring" id="updov-ring" aria-hidden="true"></div>
+    <div class="updov-text">
+      <h2 class="updov-title" id="updov-title"></h2>
+      <p class="updov-note" id="updov-note"></p>
+    </div>
+  </div>
+  <ol class="upd-steps updov-steps" id="updov-steps"></ol>
+  <div class="updov-foot">
+    <span class="updov-time" id="updov-time"></span>
+    <button class="btn" id="updov-back" type="button">裏で続ける</button>
+    <button class="btn is-lead updov-act" id="updov-act" type="button" hidden></button>
+  </div>
 </dialog>
 <!-- ESM なので読み込む順を人が守る必要はない。import が解決の順を決める。
      読むのはこの1本だけ。増やすと、また順番が意味を持ってしまう -->

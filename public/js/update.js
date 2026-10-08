@@ -20,9 +20,9 @@
  */
 import { query, store } from './store.js';
 import { dom } from './dom.js';
-import { stamp } from './util.js';
+import { el, stamp } from './util.js';
 import { postJson } from './api.js';
-import { OUTDATED, bannerOf } from './update-banner.js';
+import { OUTDATED, STEPS, bannerOf, stepsOf } from './update-banner.js';
 
 /**
  * 開いてすぐ、もう1回だけ引き直すまでの間。
@@ -55,6 +55,17 @@ const STUCK_MS = 120000;
  * 「返事がありません」を出すことになる。
  */
 const STUCK_DOWNLOAD_MS = 600000;
+
+/**
+ * 入れ替わったあと、自分で読み込み直すまでの秒数。
+ *
+ * すぐに読み込み直さないのは、何が起きたかを一度は見せるため。
+ * 長くすると、前の版の画面で何かを押してしまう隙が広がる。
+ */
+const RELOAD_SECONDS = 5;
+
+/** 経過時間とカウントダウンを書き直す間隔 */
+const TICK_MS = 1000;
 
 /** 閉じたお知らせを覚える鍵 */
 const SEEN_KEY = 'claude-deck.updateSeen';
@@ -102,8 +113,46 @@ let watch = 0;
 let watchKey = null;
 let watchSince = 0;
 
+/**
+ * 見張りを始めたときの紙の鍵。紙がここから動くまでは「落ち着いた」と読まない。
+ *
+ * 失敗のあとの「もう一度」がこれで止まっていた。押した直後の紙はまだ failed のままなので、
+ * 1拍目で「もう終わっている」と読んで見張りを畳み、そのあとランチャが書いた
+ * downloading も applying も、次の30分おきの確認まで画面に届かなかった（実測）
+ */
+let watchFrom = null;
+
 /** いま札を押したときに走らせる仕事。null なら札を出さない */
 let actRun = null;
+
+/**
+ * この窓で道中を追いかけているか。
+ *
+ * 押したときのほか、開いた時点で既に取り寄せ・入れ替えの最中だったときも立てる
+ * （別の窓が押した・途中で読み込み直した）。覆いを出すのと、終わったら読み込み直すのは
+ * これが立っているときだけ。**立っていない窓で done を見ても読み込み直さない。**
+ * 読み込み直した先でも done の紙は10分残るので、ここで止めないと読み込みが止まらなくなる
+ */
+let following = false;
+
+/** 覆いを畳んだか（Esc・「裏で続ける」・「あとで」・「閉じる」）。畳んだら帯で見せる */
+let minimized = false;
+
+/** 追いかけ始めた時刻と、段ごとに初めて見た時刻 */
+let startedAt = 0;
+let stageAt = {};
+
+/** 最後に見た段の位置（STEPS の添字）。転んだときにどの段で止まったかを出すのに使う */
+let reached = 0;
+
+/** 入れ替え中に問い合わせが失敗した回数。止まっているあいだも見張っていることを数で見せる */
+let waits = 0;
+
+/** 経過時間とカウントダウンの時計。0 は「回していない」 */
+let ticker = 0;
+
+/** 読み込み直すまでの残り秒数。null は「数えていない」 */
+let countLeft = null;
 
 /**
  * 版の脇に出す印。
@@ -189,6 +238,220 @@ function fillBanner(banner) {
     dom.updateAct.textContent = banner.act.label;
     dom.updateAct.disabled = false;
   }
+
+  // 道中は回る印と経過時間を付ける。止まっていないことを形で見せる。
+  // 追いかけていない窓（置き去りの古い紙を見ているだけ）では付けない ――
+  // 始まった時刻を知らないうえ、本当に動いているのかも分からない。閉じる口も残す
+  const busy = following && isBusy(banner);
+  dom.update.toggleAttribute('data-busy', busy);
+  dom.updateTime.hidden = !busy;
+  if (busy) dom.updateTime.textContent = mmss(Date.now() - startedAt);
+  // 道中は閉じさせない。閉じると、進んでいることを知る手がかりが画面から消える
+  dom.updateClose.hidden = busy;
+
+  // 段は追いかけているときだけ。追いかけていない窓は、どの段を通ったかを知らない
+  const steps = following && Boolean(banner.stage);
+  dom.updateSteps.hidden = !steps;
+  if (steps) fillSteps(dom.updateSteps, banner.stage);
+}
+
+/**
+ * まだ終わっていない道中の帯か。
+ *
+ * @param {object} banner bannerOf の戻り
+ * @returns {boolean}
+ */
+function isBusy(banner) {
+  return banner.stage === 'starting' || banner.stage === 'downloading' || banner.stage === 'applying';
+}
+
+/**
+ * 経過を「分:秒」にする。
+ *
+ * @param {number} ms 経過ミリ秒。負は 0 に丸める
+ * @returns {string}
+ */
+function mmss(ms) {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+/**
+ * 開いた時点で既に道中だったら、この窓でも追いかけ始める。
+ *
+ * 押していない窓（別の窓が押した・途中で読み込み直した）でも、
+ * 30分おきの見張りのままだと何も動かない帯が残るので、ここで見張りを速める。
+ *
+ * @param {object|null} up /api/update の応答
+ */
+function adopt(up) {
+  // 見張っている最中と、諦めたあと（紙が動くまで）は拾い直さない。
+  // 諦めたあとに拾うと、時間切れを出した直後に見張りが始まり直して時間切れが消える
+  if (following && (watch || stuckAt !== null)) return;
+  if (up?.state !== 'downloading' && up?.state !== 'applying') return;
+  // 置き去りの紙は拾わない。ランチャが道中で落ちると downloading / applying のまま残り、
+  // 開くたびに覆いが出ることになる。見張りの時間切れと同じ長さを古さの線にする。
+  // 書いた時刻が読めない紙は拾う（不明を「古い」と読み替えない）
+  const limit = up.state === 'downloading' ? STUCK_DOWNLOAD_MS : STUCK_MS;
+  if (up.changedAt && Date.now() - up.changedAt >= limit) return;
+  following = true;
+  minimized = false;
+  startedAt = Date.now();
+  stageAt = {};
+  reached = 0;
+  beginWatch();
+  startTicker();
+}
+
+/**
+ * 段を初めて見た時刻を控える。段ごとの所要時間と、転んだ段の位置に使う。
+ *
+ * @param {string|undefined} stage 帯の stage
+ */
+function noteStage(stage) {
+  if (!following || !stage) return;
+  if (stageAt[stage] === undefined) stageAt[stage] = Date.now();
+  const at = STEPS.findIndex((s) => s.stage === stage);
+  if (at > reached) reached = at;
+}
+
+/**
+ * 1段ぶんの所要時間。まだ始まっていない段と、始まりを見ていない段は空にする。
+ *
+ * @param {number} i STEPS の添字
+ * @param {string} mark stepsOf の値
+ * @returns {string}
+ */
+function stepTime(i, mark) {
+  if (mark === 'todo') return '';
+  // 準備は押した瞬間に始まっている。開いた時点で道中だった窓は、押した時刻を知らない
+  const from = i === 0 ? (pressed ? startedAt : undefined) : stageAt[STEPS[i].stage];
+  if (from === undefined) return '';
+  if (mark === 'now') return mmss(Date.now() - from);
+  // 終わった段は、次に見た段（無ければ終わった時刻）までを数える
+  const next = STEPS.slice(i + 1).map((s) => stageAt[s.stage]).find((t) => t !== undefined);
+  const to = next ?? stageAt.done ?? stageAt.failed ?? stageAt.stuck;
+  return to === undefined ? '' : mmss(to - from);
+}
+
+/**
+ * 段の並びを書く。帯の2行目と覆いの中で同じものを使う。
+ *
+ * @param {HTMLElement} list 書き込む先（<ol>）
+ * @param {string} stage いまの帯の stage
+ */
+function fillSteps(list, stage) {
+  const marks = stepsOf(stage, reached);
+  list.replaceChildren(...STEPS.map((step, i) => {
+    const li = el('li', 'upd-step');
+    li.dataset.mark = marks[i];
+    const dot = el('span', 'upd-dot');
+    dot.setAttribute('aria-hidden', 'true');
+    li.append(dot, el('span', 'upd-name', step.label), el('span', 'upd-time', stepTime(i, marks[i])));
+    return li;
+  }));
+}
+
+/**
+ * 覆いを書いて、閉じていれば開く。
+ *
+ * 入れ替わったら数え始め、数え終わったら読み込み直す。
+ * 帯のときは人に押させているが、覆いは「この窓で押して見届けている」場面なので、
+ * 押す手間を省いてよい。止めたければ「あとで」で畳む。
+ *
+ * @param {object} banner bannerOf の戻り（stage を持つもの）
+ */
+function fillOverlay(banner) {
+  const stage = banner.stage;
+  const busy = isBusy(banner);
+  dom.updov.dataset.stage = stage;
+  dom.updovTitle.textContent = banner.text;
+  dom.updovNote.textContent = banner.note;
+  fillSteps(dom.updovSteps, stage);
+
+  dom.updovBack.textContent = busy ? '裏で続ける' : stage === 'done' ? 'あとで' : '閉じる';
+  dom.updovAct.hidden = !banner.act;
+  if (banner.act) {
+    dom.updovAct.textContent = stage === 'done' ? '今すぐ読み込み直す' : banner.act.label;
+    dom.updovAct.disabled = false;
+  }
+
+  if (stage !== 'done') {
+    countLeft = null;
+  } else if (countLeft === null) {
+    countLeft = RELOAD_SECONDS;
+    // 時計を回し直して、拍を数え始めに揃える。揃えないと最初の1秒が
+    // 前の拍の残りぶん（実測 0.5 秒）縮んで、5秒と言いながら 4.5 秒で読み込み直す
+    clearInterval(ticker);
+    ticker = 0;
+    startTicker();
+  }
+  fillOverlayTime(busy);
+
+  if (!dom.updov.open) dom.updov.showModal();
+}
+
+/**
+ * 覆いの足の字を書く。経過時間か、読み込み直すまでの残りか。
+ *
+ * @param {boolean} busy 道中か
+ */
+function fillOverlayTime(busy) {
+  if (busy) dom.updovTime.textContent = `経過 ${mmss(Date.now() - startedAt)}`;
+  else if (countLeft !== null) dom.updovTime.textContent = `${countLeft}秒後に読み込み直します`;
+  else dom.updovTime.textContent = '';
+}
+
+/** 覆いを閉じる。数えていたら止める */
+function closeOverlay() {
+  countLeft = null;
+  if (dom.updov.open) dom.updov.close();
+}
+
+/** 覆いを畳んで帯へ移す。Esc・「裏で続ける」・「あとで」・「閉じる」が通る */
+function minimize() {
+  minimized = true;
+  render();
+}
+
+/** 経過時間とカウントダウンの時計を回す。追いかけ始めたら回しっぱなしでよい（字を書くだけ） */
+function startTicker() {
+  if (ticker) return;
+  ticker = setInterval(tick, TICK_MS);
+}
+
+/**
+ * 時計の1拍。
+ *
+ * 紙を読み直すのは見張り（pulse）の仕事で、ここは字を書き直すだけ。
+ * 帯や覆いを丸ごと組み直さないのは、押そうとしている札の焦点を奪わないため。
+ */
+function tick() {
+  const banner = showing;
+  if (!banner?.stage) return;
+
+  if (dom.updov.open) {
+    if (countLeft !== null) {
+      countLeft -= 1;
+      if (countLeft <= 0) {
+        // 時計を止めてから離れる。止めないと、再起動直後のサーバーが遅くて
+        // 読み込みが1秒を超えたとき、次の拍でもう一度 reload が走り、毎秒やり直しになる
+        countLeft = null;
+        clearInterval(ticker);
+        ticker = 0;
+        reloadNow();
+        return;
+      }
+    }
+    fillOverlayTime(isBusy(banner));
+    // いまの段の所要時間だけが伸びる
+    fillSteps(dom.updovSteps, banner.stage);
+    return;
+  }
+
+  if (dom.update.hidden || !isBusy(banner)) return;
+  dom.updateTime.textContent = mmss(Date.now() - startedAt);
+  if (!dom.updateSteps.hidden) fillSteps(dom.updateSteps, banner.stage);
 }
 
 /** 応答を画面へ反映する。出すか出さないかもここで決める。 */
@@ -204,9 +467,28 @@ function render() {
     watchSince = Date.now();
     stuckAt = null;
     refused = null;
+    waits = 0;
   }
 
-  const banner = refused ?? bannerOf(up, { stuckAt, pressed, reloadNow, applyNow });
+  adopt(up);
+  // 入れ替えを見届けているあいだは、SSE が切れても「更新中」と言い換えてもらう（stream.js）
+  store.updating = following && up?.state === 'applying';
+  // 見張っていて、紙が始めたときのままなら「まだ動いていない」
+  const unmoved = watch !== 0 && key === watchFrom;
+  const banner = refused ?? bannerOf(up, { stuckAt, pressed, waits, unmoved, reloadNow, applyNow });
+  noteStage(banner?.stage);
+
+  // 道中は覆いで見せる。閉じた帯の鍵（dismissed）はここでは見ない ――
+  // 前に同じ鍵の帯を閉じていても、いま追いかけている道中は隠さない
+  if (following && banner?.stage && !minimized) {
+    dom.update.hidden = true;
+    showing = banner;
+    actRun = banner.act?.run ?? null;
+    fillOverlay(banner);
+    return;
+  }
+  closeOverlay();
+
   const show = banner !== null && banner.key !== dismissed;
 
   dom.update.hidden = !show;
@@ -222,6 +504,7 @@ function render() {
 function beginWatch() {
   stuckAt = null;
   watchKey = paperKey(store.update);
+  watchFrom = watchKey;
   watchSince = Date.now();
   if (watch) return;
   watch = setInterval(pulse, BUSY_POLL_MS);
@@ -248,8 +531,9 @@ function pulse() {
   if (Date.now() - watchSince >= limit) {
     stuckAt = watchKey;
     endWatch();
-  } else if (up && !PENDING.has(up.state)) {
-    // 落ち着いた。あとはふだんの間隔でよい
+  } else if (up && !PENDING.has(up.state) && paperKey(up) !== watchFrom) {
+    // 落ち着いた。あとはふだんの間隔でよい。
+    // 始めたときの紙のままなら、まだランチャが書いていないだけなので待つ
     endWatch();
   }
 
@@ -266,8 +550,16 @@ function pulse() {
 async function applyNow() {
   // 押した瞬間に止める。返事が来るまでのあいだの二度押しを防ぐ
   dom.updateAct.disabled = true;
+  dom.updovAct.disabled = true;
   pressed = true;
+  following = true;
+  minimized = false;
+  startedAt = Date.now();
+  stageAt = {};
+  reached = 0;
+  waits = 0;
   beginWatch();
+  startTicker();
   render();
 
   try {
@@ -293,6 +585,8 @@ async function applyNow() {
  */
 function failNow(reason) {
   pressed = false;
+  // 始まってもいないので、道中を追いかける話にしない。断りは帯に出す
+  following = false;
   endWatch();
   stuckAt = null;
   refused = {
@@ -332,12 +626,30 @@ async function fetchUpdate() {
       render();
       return;
     }
-    if (!res.ok) return;
+    if (!res.ok) {
+      countWait();
+      return;
+    }
     store.update = await res.json();
+    // 届いた。サーバーは戻っているので「止まっています（確認 N回目）」を下ろす
+    waits = 0;
     render();
   } catch {
     // 取れなかった。前の内容をそのまま残す
+    countWait();
   }
+}
+
+/**
+ * 入れ替え中の問い合わせの失敗を数える。
+ *
+ * 入れ替えのあいだはサーバーが止まっているので、失敗するのが正常。
+ * 黙って捨てると画面が固まって見えるので、待っている回数として出す。
+ */
+function countWait() {
+  if (!following || store.update?.state !== 'applying') return;
+  waits += 1;
+  render();
 }
 
 /** 更新のお知らせを配線する。main.js から1回だけ呼ぶ。 */
@@ -347,6 +659,20 @@ export function initUpdate() {
     if (!run) return;
     // async の窓口に受け皿を必ず付ける。付け忘れると拾われない拒否になる
     Promise.resolve().then(run).catch(() => {});
+  });
+
+  // 覆いの札。帯の札と同じ仕事（actRun）を走らせる
+  dom.updovAct.addEventListener('click', () => {
+    const run = actRun;
+    if (!run) return;
+    Promise.resolve().then(run).catch(() => {});
+  });
+  dom.updovBack.addEventListener('click', minimize);
+  // Esc は閉じずに畳む。閉じるだけだと、次の render でまた開いてしまう。
+  // 実測（Chrome）では Esc で cancel しか来ないので、cancel で受ける（public/CLAUDE.md の拡大と同じ）
+  dom.updov.addEventListener('cancel', (ev) => {
+    ev.preventDefault();
+    minimize();
   });
 
   dom.updateClose.addEventListener('click', () => {

@@ -99,3 +99,243 @@
 
 /* 閉じるは右端へ寄せる */
 .update-close { margin-left: auto; }
+
+/* ------------------------------------------------- 道中（取り寄せ・入れ替え） */
+
+/* 帯の道中の印。文字だけだと、止まっているのか進んでいるのか見分けが付かない
+   （実測の指摘：「更新中に何もフィードバックが無い」）。
+   回る輪と下辺を流れる線の2つで、止まっていないことを形で見せる */
+.update[data-busy] { position: relative; }
+
+.update[data-busy] .update-text {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+}
+
+.update[data-busy] .update-text::before {
+  content: '';
+  flex: none;
+  width: .85rem;
+  height: .85rem;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--calm) 25%, transparent);
+  border-top-color: var(--calm);
+  animation: upd-spin .8s linear infinite;
+}
+
+/* 下辺を流れる線。帯の角丸に食い込まないよう、左右を角丸ぶん内側へ寄せる。
+   overflow: hidden で切る手は採らない ―― 中の札の焦点の輪まで切れる */
+.update[data-busy]::after {
+  content: '';
+  position: absolute;
+  left: var(--r-md);
+  right: var(--r-md);
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--calm), transparent) no-repeat;
+  background-size: 35% 100%;
+  animation: upd-flow 1.6s ease-in-out infinite;
+}
+
+/* 経過時間。桁が動いても横にずれないよう等幅で */
+.update-time {
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 帯の2行目の段。幅いっぱいを取って自分の行へ折り返す */
+.update-steps {
+  flex: 0 0 100%;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: .3rem 1.2rem;
+}
+
+/* display を宣言したので [hidden] を必ず添える（flex は hidden 属性に勝つ） */
+.update-steps[hidden] { display: none; }
+
+/* 段の並び。帯と覆いで同じ部品を使い、並べる向きだけ器が決める */
+.upd-steps {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-1);
+}
+
+.upd-step {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.upd-step[data-mark='now'] { color: var(--fg); font-weight: 600; }
+.upd-step[data-mark='ok'] { color: var(--fg-muted); }
+.upd-step[data-mark='ng'] { color: var(--warn); font-weight: 600; }
+
+.upd-time {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 段の印。まだ＝細い輪、いま＝回る輪、済み＝✓、転んだ＝！。
+   **形でも分ける。** 色だけだと、済み（--done）と転んだ（--warn）が隣り合ったとき弱い */
+.upd-dot {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: .8rem;
+  height: .8rem;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--bg);
+}
+
+.upd-step[data-mark='now'] .upd-dot {
+  border-color: color-mix(in srgb, var(--calm) 25%, transparent);
+  border-top-color: var(--calm);
+  animation: upd-spin .8s linear infinite;
+}
+
+.upd-step[data-mark='ok'] .upd-dot { border-color: var(--done); background: var(--done); }
+.upd-step[data-mark='ok'] .upd-dot::before { content: '✓'; }
+.upd-step[data-mark='ng'] .upd-dot { border-color: var(--warn); background: var(--warn); }
+.upd-step[data-mark='ng'] .upd-dot::before { content: '!'; }
+
+/* 上のバーの「更新中」。入れ替えのあいだは切れるのが正常なので、
+   赤い「切断」ではなく「いま動いている」の色で点滅させる（stream.js の setLive） */
+.live[data-live='upd']::before {
+  color: var(--calm);
+  animation: upd-blink 1.2s ease-in-out infinite;
+}
+
+/* ------------------------------------------------------------------ 覆い */
+
+/* 器は他のモーダルと同じ段（面 --bg・影 --sh-3・角丸 --r-lg）。
+   背面を押して閉じる口は持たない（閉じると次の render でまた開く）ので、
+   余白を dialog 自身に持たせてよい（settings.css の「padding を持たせない」は背面クリックの判定のため） */
+.updov {
+  width: min(26rem, calc(100vw - 2rem));
+  padding: 1.3rem 1.4rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--sh-3);
+}
+
+.updov::backdrop { background: var(--scrim); }
+
+.updov[open] {
+  display: flex;
+  flex-direction: column;
+  gap: .9rem;
+}
+
+.updov-head {
+  display: flex;
+  align-items: center;
+  gap: .9rem;
+}
+
+/* 大きい輪。道中は回り、終わったら印に変わる。形は data-stage で出し分ける */
+.updov-ring {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--calm) 22%, transparent);
+  border-top-color: var(--calm);
+  animation: upd-spin .9s linear infinite;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--bg);
+}
+
+.updov[data-stage='done'] .updov-ring,
+.updov[data-stage='failed'] .updov-ring,
+.updov[data-stage='stuck'] .updov-ring {
+  border: 0;
+  animation: none;
+}
+
+.updov[data-stage='done'] .updov-ring { background: var(--done); }
+.updov[data-stage='done'] .updov-ring::before { content: '✓'; }
+.updov[data-stage='failed'] .updov-ring,
+.updov[data-stage='stuck'] .updov-ring { background: var(--warn); }
+.updov[data-stage='failed'] .updov-ring::before,
+.updov[data-stage='stuck'] .updov-ring::before { content: '!'; }
+
+.updov-text { min-width: 0; }
+
+.updov-title {
+  margin: 0;
+  font-size: var(--fs-4);
+  font-weight: 700;
+}
+
+.updov-note {
+  margin: .15rem 0 0;
+  color: var(--fg-muted);
+  font-size: var(--fs-2);
+  line-height: 1.6;
+}
+
+/* 段は縦に並べ、所要時間を右端へ寄せる */
+.updov-steps {
+  flex-direction: column;
+  gap: .45rem;
+  padding: .7rem .8rem;
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
+  font-size: var(--fs-2);
+}
+
+.updov-steps .upd-time { margin-left: auto; }
+
+.updov-foot {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+/* .btn.is-lead は display: inline-flex を持つので、hidden に勝つ。自分で消す */
+.updov-act[hidden] { display: none; }
+
+.updov-time {
+  margin-right: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes upd-spin { to { transform: rotate(360deg); } }
+@keyframes upd-flow { from { background-position: -60% 0; } to { background-position: 160% 0; } }
+@keyframes upd-blink { 50% { opacity: .35; } }
+
+/* 動きを減らしたい人には止める。base.css は時間を潰すだけなので、
+   回る輪が1フレームごとに違う角度で止まってちらつく。止まっていても経過時間が進むので、
+   止まっていないことはそちらで伝わる */
+@media (prefers-reduced-motion: reduce) {
+  .update[data-busy] .update-text::before,
+  .update[data-busy]::after,
+  .upd-step[data-mark='now'] .upd-dot,
+  .updov-ring,
+  .live[data-live='upd']::before { animation: none; }
+}
