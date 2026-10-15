@@ -38,6 +38,7 @@ import { dom } from './dom.js';
 import { headOf, detailErrorNow } from './rows.js';
 import { panel } from './panel.js';
 import { detailActions, summaryBlock } from './detail-head.js';
+import { setPin, openMemo } from './marks.js';
 import { waitingBlock } from './detail-wait.js';
 import {
   decisionsPanel, todoPanel, compactionPanel, timelinePanel, filesPanel, basicsPanel,
@@ -245,6 +246,9 @@ function detailKeyOf() {
     row?.alive ? '1' : '0',
     row?.pid ?? '',
     row?.contextTokens ?? '',
+    // ピンとメモ。頭の ☆ とメモの文に出る。混ぜないと付けても頭が古いまま
+    row?.pinned ? 'pin' : '',
+    row?.memo ?? '',
     w ? `${w.tool ?? ''}${w.detail ?? ''}` : '',
     // 数値は詳細より遅れて届く。入れておかないと、届いてもパネルが出ない。
     // contextTokens が既に入っているので、稼働中は元から毎ターン作り直している。
@@ -644,9 +648,11 @@ function renderHead(row) {
   if (!row) return;
 
   const inner = el('div', 'detail-head-in');
+  const top = el('div', 'detail-title');
   const title = el('h2', null, titleOf(row));
   title.title = titleOf(row);
-  inner.append(title);
+  top.append(title, pinButton(row), memoButton(row));
+  inner.append(top);
 
   const line = el('div', 'detail-sub');
   // stateLabel が無いときに空の .state を出すと、色の点だけが残って意味を持たない
@@ -665,7 +671,60 @@ function renderHead(row) {
   }
   line.append(detailActions(row));
   inner.append(line);
+  // メモは事実の1行の下に、そのまま見せる（書くのは ✎ の窓）
+  if (row.memo) {
+    const memo = el('p', 'detail-memo');
+    memo.append(el('span', 'k', 'メモ'), document.createTextNode(row.memo));
+    inner.append(memo);
+  }
   dom.detailHead.append(inner);
+}
+
+/**
+ * ピンの ☆。押すとサーバーに頼み、結果は次の push で戻ってくる（先に塗り替えない）。
+ * **作り直しで消えても焦点が戻るよう data-refocus を付ける**（タブ帯と同じ作法）。
+ * @param {object} row
+ * @returns {HTMLElement}
+ */
+function pinButton(row) {
+  const on = row.pinned === true;
+  const btn = el('button', 'ibtn detail-pin');
+  btn.type = 'button';
+  btn.dataset.refocus = 'pin';
+  btn.classList.toggle('is-pinned', on);
+  btn.setAttribute('aria-pressed', String(on));
+  btn.title = on ? 'ピンを外す' : 'ピン留めする（終わっても作業台のいちばん上に残す）';
+  btn.setAttribute('aria-label', on ? 'ピンを外す' : 'ピン留めする');
+  btn.append(icon('star', 16));
+  // 二度押しは旗で止める。**disabled にしない** … 押せなくした瞬間に焦点が body へ落ち、
+  // 作り直しの拾い直し（data-refocus）が効かなくなる（実測）
+  let busy = false;
+  btn.addEventListener('click', async () => {
+    if (busy) return;
+    busy = true;
+    btn.setAttribute('aria-busy', 'true');
+    const r = await setPin(row.sessionId, !on);
+    busy = false;
+    btn.removeAttribute('aria-busy');
+    if (!r.ok) btn.title = `できませんでした: ${r.reason}`;
+  });
+  return btn;
+}
+
+/**
+ * メモの ✎。窓を開く（頭は2秒ごとに作り直すので、ここで直接は書かせない）。
+ * @param {object} row
+ * @returns {HTMLElement}
+ */
+function memoButton(row) {
+  const btn = el('button', 'ibtn detail-memo-btn');
+  btn.type = 'button';
+  btn.dataset.refocus = 'memo';
+  btn.title = row.memo ? 'メモを直す' : 'メモを書く';
+  btn.setAttribute('aria-label', btn.title);
+  btn.append(icon('pencil', 15));
+  btn.addEventListener('click', () => openMemo({ sessionId: row.sessionId, memo: row.memo, title: titleOf(row) }));
+  return btn;
 }
 
 /** 詳細ペインの中身を組む。焦点の持ち回しは呼び出し元（`renderDetail`）が持つ。 */

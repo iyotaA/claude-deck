@@ -795,6 +795,34 @@
   </p>
 </dialog>
 
+<!-- メモを書く窓。詳細の頭の ✎ と Ctrl+K から開く（marks.js）。
+     **頭で直接書かせない。** 頭は2秒ごとに作り直すので、打ちかけの文と入力位置が消える。
+     中身は設定モーダルのクラスを借りる（起こすフォームと同じ借り方）。<form> で囲まない
+     （囲むと Enter で閉じるだけになる。保存は marks.js が Enter を拾う） -->
+<dialog class="memo-win" id="memo" aria-labelledby="memo-title">
+  <div class="settings-head">
+    <h2 id="memo-title">メモ</h2>
+    <button class="settings-x" id="memo-close" type="button" aria-label="閉じる">&#215;</button>
+  </div>
+  <div class="settings-body">
+    <section class="settings-sec">
+      <label class="settings-label has-icon" data-icon="pencil" for="memo-input">
+        <span class="memo-for" id="memo-for"></span>
+      </label>
+      <div class="settings-row">
+        <input class="settings-text" id="memo-input" type="text" autocomplete="off"
+               placeholder="例：明日 PR を出す">
+      </div>
+      <p class="settings-hint">自分だけのメモです。この PC の %LOCALAPPDATA%\ClaudeDeck\marks.json に置きます。200 字まで</p>
+    </section>
+  </div>
+  <div class="settings-foot">
+    <p class="settings-msg" id="memo-msg" role="status"></p>
+    <button class="btn" id="memo-clear" type="button">消す</button>
+    <button class="btn is-lead" id="memo-save" type="button">保存</button>
+  </div>
+</dialog>
+
 <!-- 詳細ペインの拡大。showModal() で開くと Esc・背面の膜・焦点の閉じ込めがタダで付く。
      **中身をここに書かない。** zoom.js が上の .detail-pane を節点ごと運んでくる。
      2枚目を組むと、許可要求のカードがどちらの節点で動いているかを管理する話が増える

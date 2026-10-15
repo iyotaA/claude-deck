@@ -122,9 +122,14 @@ function buildGroup(group, rows, limit = Infinity) {
   li.style.setProperty('--state-color', colorOf(group.states[0]));
 
   const head = el('div', 'group-head');
-  const mark = el('span', 'state');
-  mark.dataset.s = toneOf(group.states[0]);
-  head.append(mark, el('span', null, group.label));
+  // 状態のまとまりは状態の点。状態でないまとまり（ピン留め）は絵で示す
+  if (group.icon) {
+    head.append(icon(group.icon, 13), el('span', null, group.label));
+  } else {
+    const mark = el('span', 'state');
+    mark.dataset.s = toneOf(group.states[0]);
+    head.append(mark, el('span', null, group.label));
+  }
   // 0 のときも 0 と書く。数を消すと「見ていない」と「無い」が同じに見える
   head.append(el('span', 'n', String(rows.length)));
   li.append(head);
@@ -549,6 +554,14 @@ function buildRow(row) {
   if (row.lastActivityAt) idle.title = stamp(row.lastActivityAt);
   node.append(idle);
   if (nowLine) node.append(nowLine);
+  // メモ（ピン留めとメモの段8）。付いている行だけ2行目に出す。
+  // 変わるのは画面から書いたときだけなので、一覧の鍵（listKey）に混ぜて組み直す
+  if (row.memo) {
+    const memo = el('span', 'memo');
+    memo.append(el('span', 'k', 'メモ'), document.createTextNode(row.memo));
+    memo.title = row.memo;
+    node.append(memo);
+  }
 
   node.addEventListener('click', () => {
     select(row.sessionId, 'live');
@@ -636,7 +649,7 @@ let endedOpen = false;
  * @returns {string}
  */
 function listKey(rows) {
-  const parts = rows.map((r) => `${r.sessionId}:${r.state}:${r.title ?? r.name ?? ''}:${r.project ?? ''}`);
+  const parts = rows.map((r) => `${r.sessionId}:${r.state}:${r.title ?? r.name ?? ''}:${r.project ?? ''}:${r.pinned ? 'p' : ''}:${r.memo ?? ''}`);
   parts.push(store.onlyLive ? 'live' : 'all');
   // 畳んでいるかで出す行が変わる。混ぜないと「残りを出す」を押しても組み直されない
   parts.push(endedOpen ? 'ended-open' : 'ended-first');
@@ -694,6 +707,16 @@ export function renderList() {
       const g = STATE_GROUPS.find((x) => x.states.includes(row.state));
       if (g) bins.get(g.id).push(row);
       else rest.push(row);
+    }
+
+    // **ピンを付けた行は、状態に関わらずいちばん上の「ピン留め」にまとめる**（段8。作者の判断）。
+    // 状態の見出しからは外す（同じ行が2か所に出ると aria-current も二重になる）。
+    // 止まっているもの（帯へ出したもの）はここにも来ない ―― 帯が受け持つ
+    const pinned = rows.filter((r) => r.pinned);
+    if (pinned.length) {
+      dom.list.append(buildGroup({ label: 'ピン留め', states: [], icon: 'star' }, pinned));
+      for (const g of STATE_GROUPS) bins.set(g.id, bins.get(g.id).filter((r) => !r.pinned));
+      rest.splice(0, rest.length, ...rest.filter((r) => !r.pinned));
     }
 
     for (const g of STATE_GROUPS) {

@@ -45,6 +45,9 @@ import {
 } from './src/shared/portfile.mjs';
 import { sessionsDir, projectsDir, configDir } from './src/read/paths.mjs';
 import { errText } from './src/shared/text.mjs';
+import {
+  loadMarks, saveMarks, validateMark, applyMark, withMarks, keepIds,
+} from './src/marks/index.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, 'public');
@@ -210,6 +213,11 @@ const clients = new Set();
  */
 const notifier = createNotifier({ viaLauncher: Boolean(launcherPath()) });
 /**
+ * ピン留めとメモ（%LOCALAPPDATA%ClaudeDeckmarks.json）。起動時に1回読み、
+ * 画面から変えたら書いてここも差し替える。毎秒の経路で fs を叩かない（通知の設定と同じ）
+ */
+let marks = loadMarks();
+/**
  * 画面から起こしたセッションの係。
  *
  * 一覧（`view/`）とは別の経路。合流させるのは `refresh()` の仕事で、
@@ -248,8 +256,10 @@ function touchSkillIndex() {
  * @returns {Promise<{rows:object[], meta:object}>} 行と、上のバーに出す要約
  */
 async function computeSessions() {
-  const { rows, meta } = await listSessions();
-  return { rows, meta };
+  // ピンを付けたセッションは古くても入れる（keep）。ピンとメモは行に載せて返す。
+  // 読む口は全部ここを通るので、混ぜる場所はここ1つ（mergeRuns を withRuns に置いたのと同じ考え）
+  const { rows, meta } = await listSessions(Date.now(), { keep: keepIds(marks) });
+  return { rows: withMarks(rows, marks), meta };
 }
 
 /**
@@ -575,6 +585,44 @@ function readJsonBody(req, limit = BODY_MAX) {
  * @param {object} req リクエスト
  * @param {object} res レスポンス
  */
+/**
+ * ピンとメモを1件変える。書いたら一覧を組み直して push する（ピンの行が上へ動く）。
+ *
+ * 長すぎるメモは切らずに断る（validateMark）。上限を超える新しい1件も断る（applyMark の full）。
+ * どちらも理由を返す ―― 黙って切る・捨てると、付けたつもりのものが無いことに気づけない。
+ *
+ * @param {object} req 要求
+ * @param {object} res 応答
+ */
+async function handleSaveMark(req, res) {
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    sendJson(res, 400, { ok: false, reason: errText(err) });
+    return;
+  }
+  const checked = validateMark(body);
+  if (!checked.ok) {
+    sendJson(res, 400, { ok: false, reason: checked.error });
+    return;
+  }
+  const r = applyMark(marks, checked.sessionId, checked.patch, Date.now());
+  if (r.full) {
+    sendJson(res, 409, { ok: false, reason: 'ピンとメモは 200 件までです。いらないものを外してください' });
+    return;
+  }
+  try {
+    saveMarks(r.marks);
+  } catch (err) {
+    sendJson(res, 500, { ok: false, reason: `保存できませんでした: ${errText(err)}` });
+    return;
+  }
+  marks = r.marks;
+  queueRefresh(0);
+  sendJson(res, 200, { ok: true, mark: r.mark });
+}
+
 async function handleSaveSettings(req, res) {
   let body;
   try {
@@ -1345,6 +1393,10 @@ function handleWrite(req, res, pathname, url) {
 
   if (pathname === '/api/focus') {
     handleFocus(res, Number(url.searchParams.get('pid')));
+    return;
+  }
+  if (pathname === '/api/marks') {
+    handleSaveMark(req, res);
     return;
   }
   if (pathname === '/api/reveal') {

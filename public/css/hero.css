@@ -407,6 +407,28 @@
 
 .row .now[hidden] { display: none; }
 
+/* メモ（段8 のピン留めとメモ）。付いている行だけ2行目に出す。「メモ」の字だけ強調色で、
+   文は添え物の濃さ。面は塗らない（押せないので） */
+.row .memo {
+  grid-column: 2 / -1;
+  margin-top: -.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-0);
+  color: var(--fg-muted);
+}
+
+.row .memo .k {
+  margin-right: .35rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* 「ピン留め」の見出しの星は塗って、強調色にする（詳細の頭の ☆ と同じ形・同じ色） */
+.group-head .icon { color: var(--accent); }
+.group-head .icon path { fill: currentColor; }
+
 /* 終了済みの「残り N 件を出す」。行と同じ左端に揃えて、押せる字（--accent）で出す。
    枠も面も持たない ―― 行の並びの中に箱が1つだけ浮くと、別の種類のものに見える */
 .row-more {

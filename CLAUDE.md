@@ -96,7 +96,7 @@ node --test test/state.test.mjs  1ファイルだけ走らせる
 
 ## ファイルの置き場所
 
-`src/` は役割ごとに8つに分けてある。
+`src/` は役割ごとに9つに分けてある。
 import は上から下へ一方向にだけ流れる。逆向きに import したくなったら、置き場所が間違っている。
 
 | 場所 | 役割 | 中身 |
@@ -108,6 +108,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `ask`（許可要求カードの組み立て） `merge`（一覧への合流） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） `dirs`（起こしてよいフォルダの登録） `defaults`（起こすときの既定値） `rate`（枠の使用率を紙に1枚） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
 | `src/startup/` | ランチャが書いた自動起動の紙を読む | `state` |
+| `src/marks/` | ピン留めとメモの紙（`marks.json`）を読み書きする | `index`（判断の純関数 ＋ 読み書きの薄い殻） |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool` / `isLongRunningTool`） `appdata`（書き込み先） `configfile`（`config.json` の読み書き） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `portclaim`（ポートの取り合いの決め方） `env`（止めるスイッチの読み方） `objects`（`isPlainObject`） `lru`（`createLru`。**store は共有しない**） |
 | `src/os/` | OS を叩く | `focus` `claude`（CLI を探す・版を読む・行を割る） `toast`（Windows の通知を1枚出す） |
 
@@ -135,6 +136,11 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 やるのは「紙を1枚読んで、画面に出せる形に整える」だけ。
 **判断はしない。** 更新を当てるかどうかも、自動起動を登録するかどうかも決めるのは C# 側で、
 こちらは結果を読むだけにしてある。理由は「更新」の節に書いた。
+
+`marks/` も末端で、`shared/` しか import しない。こちらは**読むだけでなく書く**
+（ピンとメモは画面から変えるので）が、書き先は `%LOCALAPPDATA%\ClaudeDeck\marks.json` だけ。
+一覧へ混ぜるのは `server.mjs` の `computeSessions()`（読む口が全部通る場所）で、
+`view/` は `marks/` を import しない（`listSessions` には残すセッションの集合 `keep` を渡すだけ）。
 
 入口は12。ここの名前と応答の形は変えない。
 
@@ -267,6 +273,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/settings/rundefaults` | 起こすときの既定値。**選んである値だけ**（語彙・候補・範囲は `/api/runs/options` が持つ） |
 | `GET /api/update` | 更新の状態。ランチャが書いた紙 ＋ `canApply`（いまの起動のされ方で当てられるか） |
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
+| `POST /api/marks` | ピンとメモを1件変える（`{ sessionId, pinned?, memo? }`。キーが無い＝触らない）。書いたら一覧を組み直して push する。長すぎるメモと 200 件を超える新しい1件は理由つきで断る |
 | `POST /api/reveal?session=<id>` | 開いている窓に「このセッションを出して」を速報（`reveal`）で伝える。Windows の通知を押したときにランチャが叩く。応答の `clients` は受け取った窓の数（0 ならランチャが `?session=` 付きで新しく開く） |
 | `POST /api/runs` | セッションを1本起こす。202 を返し、以降は速報で追う |
 | `POST /api/runs/:id/input` | 走っている（または待っている）ものへ1行送る |
@@ -427,7 +434,7 @@ Node 18 以降はプロセスごと終わる。画面が死ぬだけでなく通
 | `manual` / `launcher` の語 | 相乗りの判断が黙って無効化（実測で踏んだ。原因を掴むのに `netstat` からプロセスの親まで辿った） |
 | 既定のポート **4317**（`server.mjs` / `ServerProcess.cs` / `autostart.ps1` の3箇所） | ランチャが古い番号を探して「動いていない」と判断し、二重に立てようとして10秒で諦める。旧方式の自動起動は違う番号を案内する |
 | 紙に書く**状態の語**（更新9つ・自動起動4つ＋旧方式4つ） | C# が書いて Node がラベルを引く。改名すると画面が「状態が分かりません」になるだけで、どこにもエラーが出ない |
-| `%LOCALAPPDATA%\ClaudeDeck\` の紙6つの**ファイル名** | 旧ファイルが**永久に残る**。消すコードを誰も持っていない |
+| `%LOCALAPPDATA%\ClaudeDeck\` の紙7つの**ファイル名**（`marks.json` を含む） | 旧ファイルが**永久に残る**。消すコードを誰も持っていない |
 | `config.json` の既存キー名 | **移行コードが1行も無い。** Slack の Webhook と「起こしてよいフォルダ」が黙って消える |
 | `claude-deck://`（押した先の口）と `ClaudeDeck`（通知の差出人の登録名）と `--open-url`（登録したコマンドの命令） | ランチャが Windows に登録し、Node が同じ名前で通知を出す（`notify/toast.mjs` の `PROTOCOL` / `TOAST_APP_ID`、`launcher/Toast.cs`）。変えると**通知が黙って出なくなる**（登録の無い名前のトーストは Windows が捨てる）か、押しても何も起きなくなる |
 | `update.json` の `requested` / `prevPort` | 更新のあとの版の照合と、窓の復帰が死ぬ |

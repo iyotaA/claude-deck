@@ -85,6 +85,35 @@
   text-align: center;
 }
 
+/* 題名と、その横のピン（☆）とメモ（✎）。ボタンは題名の1行目の高さに揃える */
+.detail-title {
+  display: flex;
+  align-items: flex-start;
+  gap: .25rem;
+}
+
+.detail-title h2 { flex: 1; min-width: 0; }
+
+.detail-title .ibtn { flex: none; margin-top: .15rem; }
+
+/* ピンが付いているときは星を塗る。色は強調（--accent）。状態色は使わない */
+.detail-pin.is-pinned { color: var(--accent); }
+.detail-pin.is-pinned .icon path { fill: currentColor; }
+
+/* メモ。事実の1行の下に、そのまま見せる。書くのは ✎ の窓（marks.js） */
+.detail-memo {
+  margin: .35rem 0 0;
+  font-size: var(--fs-1);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.detail-memo .k {
+  margin-right: .45rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
 /* 題名は2行で切る。全文は title 属性（detail.js の renderHead）。
    前は最初の指示がそのまま3行以上の題になり、頭だけで画面の上を食っていた */
 .detail-head h2 {
