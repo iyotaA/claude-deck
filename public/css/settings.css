@@ -221,6 +221,9 @@
   color: var(--fg-muted);
 }
 
+/* 行ごとに意味が分かれる添え書き（いまの様子の、送り先ごとの1行）。改行は JS が入れる */
+.settings-hint.is-lines { white-space: pre-line; }
+
 /* いまの状態。点で表す。面は塗らない */
 .settings-state {
   display: flex;

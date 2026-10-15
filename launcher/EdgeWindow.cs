@@ -62,10 +62,18 @@ static partial class EdgeWindow
         return null;
     }
 
-    /// <summary>窓を開く。開けたら true。すでに開いていれば、それを前面に出すだけ。</summary>
-    public static bool Open(int port)
+    /// <summary>
+    /// 窓を開く。開けたら true。すでに開いていれば、それを前面に出すだけ。
+    ///
+    /// <paramref name="query"/> は新しく開くときだけ効く（例：<c>?session=…</c>）。
+    /// 開いている窓へは URL を渡せないので、どのセッションを出すかは呼ぶ側が
+    /// サーバー経由（/api/reveal）で別に伝える。
+    /// </summary>
+    /// <param name="port">サーバーのポート。</param>
+    /// <param name="query">URL の後ろに付けるもの。先頭の ? を含む。無ければ空。</param>
+    public static bool Open(int port, string query = "")
     {
-        var url = $"http://127.0.0.1:{port}/";
+        var url = $"http://127.0.0.1:{port}/{query}";
 
         if (RaiseExisting()) return true;
 

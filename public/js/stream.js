@@ -107,6 +107,23 @@ export async function fetchOnce() {
   }
 }
 
+/**
+ * 「このセッションを出して」を受けたときに呼ぶ口。main.js が差す。
+ *
+ * Windows の通知を押すと、ランチャ（またはサーバー）が `POST /api/reveal` を叩き、
+ * サーバーが速報の `reveal` を流す。何をするか（作業台へ移る・選ぶ）は main.js が決める。
+ * ここから mode.js を import しない（層7 の中に向きを1本増やすことになる）。
+ */
+let revealHook = () => {};
+
+/**
+ * 「このセッションを出して」の受け口を差す。
+ * @param {(sessionId: string) => void} fn
+ */
+export function onReveal(fn) {
+  revealHook = fn;
+}
+
 export function connect() {
   let source;
   try {
@@ -136,6 +153,14 @@ export function connect() {
       }
     } catch {
       /* 無視 */
+    }
+  });
+  source.addEventListener('reveal', (ev) => {
+    try {
+      const { sessionId } = JSON.parse(ev.data);
+      if (typeof sessionId === 'string' && sessionId) revealHook(sessionId);
+    } catch {
+      /* 壊れたフレームは捨てる */
     }
   });
   source.addEventListener('error', () => setLive('off', '切れました。再接続中'));

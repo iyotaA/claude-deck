@@ -289,3 +289,30 @@ test('知らない状態名は落とす', () => {
   const c = parseNotifyConfig({ env: {}, file: { notify: { states: { 'needs-coffee': false } } } });
   assert.equal('needs-coffee' in c.states, false);
 });
+
+/* ------------------------------------------------------- Windows の通知 */
+
+test('Windows の通知は既定で入り（Windows のとき）', () => {
+  const c = parseNotifyConfig({ env: {}, file: null, platform: 'win32' });
+  assert.deepEqual(c.toast, { wanted: true, enabled: true, reason: null });
+  // Slack を設定していなくても入る
+  assert.equal(c.enabled, false);
+});
+
+test('画面で切ったら出さない（理由は言わない。本人が切ったので）', () => {
+  const c = parseNotifyConfig({ env: {}, file: { notify: { toast: false } }, platform: 'win32' });
+  assert.deepEqual(c.toast, { wanted: false, enabled: false, reason: null });
+});
+
+test('止めるスイッチは Windows の通知にも効く', () => {
+  const c = parseNotifyConfig({ env: { CLAUDE_DECK_NOTIFY_OFF: '1' }, file: null, platform: 'win32' });
+  assert.equal(c.toast.enabled, false);
+  assert.match(c.toast.reason, /CLAUDE_DECK_NOTIFY_OFF/);
+});
+
+test('Windows 以外では出さない。選んだ値（wanted）は残す', () => {
+  const c = parseNotifyConfig({ env: {}, file: null, platform: 'linux' });
+  assert.equal(c.toast.wanted, true);
+  assert.equal(c.toast.enabled, false);
+  assert.match(c.toast.reason, /Windows/);
+});

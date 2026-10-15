@@ -512,3 +512,143 @@ test('上限で止めたことは1通だけ知らせる', async () => {
   for (const at of [T0 + 2000, T0 + 3000, T0 + 4000]) await n.flush(at);
   assert.equal(s.calls.length, afterPause, '止まっているあいだは何も送らない');
 });
+
+/* ------------------------------------------------------- Windows の通知 */
+
+/** Windows の通知を数える偽物。出した XML と差出人を覚える */
+function toastSpy(verdict = { ok: true }) {
+  const calls = [];
+  return {
+    calls,
+    fn: async (xml, appId) => {
+      calls.push({ xml, appId });
+      return verdict;
+    },
+  };
+}
+
+/** Slack を設定していない、Windows の通知だけ入った設定 */
+const toastOnly = (over = {}) => on({
+  enabled: false, url: null, urlMasked: null,
+  toast: { wanted: true, enabled: true, reason: null },
+  ...over,
+});
+
+test('Slack を設定していなくても、Windows の通知は出る', async () => {
+  const s = spy();
+  const t = toastSpy();
+  const n = createNotifier({ config: toastOnly(), bootAt: 0, post: s.fn, show: t.fn, viaLauncher: true });
+  n.setBaseUrl('http://127.0.0.1:4317/');
+
+  n.observe([{ ...row('toolu_1'), title: '冊①のレビュー' }], T0);
+  await n.flush(T0);
+  assert.equal(t.calls.length, 1);
+  assert.equal(s.calls.length, 0, 'Slack には送らない');
+  // 題名が載る（Slack には載せないもの）。差出人はランチャが登録した名前
+  assert.match(t.calls[0].xml, /冊①のレビュー/);
+  assert.equal(t.calls[0].appId, 'ClaudeDeck');
+  assert.match(t.calls[0].xml, /claude-deck:\/\/open\?session=sess-a/);
+  assert.equal(n.active(), true);
+});
+
+test('ランチャが無ければ PowerShell の名前で出し、押すとブラウザで開く', async () => {
+  const t = toastSpy();
+  const n = createNotifier({ config: toastOnly(), bootAt: 0, post: spy().fn, show: t.fn, viaLauncher: false });
+  n.setBaseUrl('http://127.0.0.1:4317/');
+  n.observe([row('toolu_1')], T0);
+  await n.flush(T0);
+  assert.match(t.calls[0].appId, /powershell\.exe$/);
+  assert.match(t.calls[0].xml, /http:\/\/127\.0\.0\.1:4317\/\?session=sess-a/);
+});
+
+test('Slack の題名には載せない（安全装置はそのまま）', async () => {
+  const s = spy();
+  const t = toastSpy();
+  const n = createNotifier({
+    config: on({ toast: { wanted: true, enabled: true, reason: null } }),
+    bootAt: 0, post: s.fn, show: t.fn,
+  });
+  n.setBaseUrl('http://127.0.0.1:4317/');
+  n.observe([{ ...row('toolu_1'), title: '秘密の題名' }], T0);
+  await n.flush(T0);
+  assert.equal(t.calls.length, 1);
+  assert.equal(s.calls.length, 1);
+  assert.match(t.calls[0].xml, /秘密の題名/);
+  assert.doesNotMatch(s.calls[0].text, /秘密の題名/, 'Slack の本文に題名が乗っている');
+});
+
+test('Slack の再送で戻った待ちを、右下に2回出さない', async () => {
+  // 1回目は Slack が 503（再送）。2回目に同じ待ちが戻ってくる
+  const s = spy({ ok: false, retry: true, stop: false, reason: '503' });
+  const t = toastSpy();
+  const n = createNotifier({
+    config: on({ toast: { wanted: true, enabled: true, reason: null } }),
+    bootAt: 0, post: s.fn, show: t.fn,
+  });
+  n.setBaseUrl('http://127.0.0.1:4317/');
+  n.observe([row('toolu_1')], T0);
+  await n.flush(T0);
+  await n.flush(T0 + 5000);
+  assert.equal(s.calls.length, 2, 'Slack は再送した');
+  assert.equal(t.calls.length, 1, 'Windows の通知は1回だけ');
+});
+
+test('Windows の通知が続けて失敗したら止める（Slack は止めない）', async () => {
+  const s = spy();
+  const t = toastSpy({ ok: false, reason: 'PowerShell が無い' });
+  const n = createNotifier({
+    config: on({ toast: { wanted: true, enabled: true, reason: null } }),
+    bootAt: 0, post: s.fn, show: t.fn,
+  });
+  n.setBaseUrl('http://127.0.0.1:4317/');
+  for (let i = 0; i < 6; i += 1) {
+    n.observe([{ ...row(`toolu_${i}`), sessionId: `sess-${i}` }], T0 + i * 1000);
+    await n.flush(T0 + i * 1000);
+  }
+  assert.equal(t.calls.length, 5, '5回で止まる');
+  assert.equal(n.health().toast.state, 'disabled');
+  assert.match(n.health().toast.reason, /PowerShell が無い/);
+  assert.equal(n.health().state, 'ok', 'Slack は巻き添えで止めない');
+});
+
+test('一度に多いときは3枚まで出し、残りは1枚にまとめる', async () => {
+  const t = toastSpy();
+  const n = createNotifier({ config: toastOnly(), bootAt: 0, post: spy().fn, show: t.fn });
+  n.setBaseUrl('http://127.0.0.1:4317/');
+  const rows = [1, 2, 3, 4, 5].map((i) => ({ ...row(`toolu_${i}`), sessionId: `sess-${i}` }));
+  n.observe(rows, T0);
+  await n.flush(T0);
+  assert.equal(t.calls.length, 4);
+  assert.match(t.calls[3].xml, /ほか 2 件/);
+});
+
+test('Windows の通知も Slack も無ければ、何も見ない（見回りを間引ける）', () => {
+  const n = createNotifier({
+    config: on({ enabled: false, url: null, toast: { wanted: false, enabled: false, reason: null } }),
+    bootAt: 0, post: spy().fn, show: toastSpy().fn,
+  });
+  assert.equal(n.active(), false);
+});
+
+test('画面から Windows の通知を入れたら、いま待っているぶんは鳴らさない（種まき）', async () => {
+  const t = toastSpy();
+  const n = createNotifier({
+    config: toastOnly({ toast: { wanted: false, enabled: false, reason: null } }),
+    bootAt: 0, post: spy().fn, show: t.fn,
+  });
+  n.setBaseUrl('http://127.0.0.1:4317/');
+  // 何時間も待っているセッション
+  n.applyConfig(toastOnly(), T0);
+  n.observe([row('toolu_1')], T0);
+  await n.flush(T0);
+  assert.equal(t.calls.length, 0, '入れた瞬間に一斉に鳴らさない');
+});
+
+test('設定の画面へ返す形に Windows の通知の値が入る', () => {
+  const n = createNotifier({ config: toastOnly(), bootAt: 0, post: spy().fn, show: toastSpy().fn });
+  const st = n.settings();
+  assert.equal(st.toast, true);
+  assert.equal(st.toastEnabled, true);
+  assert.equal(st.toastReason, null);
+  assert.equal(n.health().toast.enabled, true);
+});

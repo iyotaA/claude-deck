@@ -117,6 +117,9 @@ export const dom = {
   setRemind: document.getElementById('set-remind'),
   setDetail: document.getElementById('set-detail'),
   setStates: document.getElementById('set-states'),
+  // Windows の通知の入り切りと、その添え書き（出せない理由もここ）
+  setToast: document.getElementById('set-toast'),
+  setToastNote: document.getElementById('set-toast-note'),
   // 起こしてよいフォルダ（settings.js）。**足した時点で保存する**ので、
   // 下の「保存」ボタン（通知のぶん）とは経路が別
   runDirs: document.getElementById('run-dirs'),

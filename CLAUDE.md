@@ -63,6 +63,7 @@ ClaudeDeck.exe --stop            POST /api/quit で止める
 ClaudeDeck.exe --status          診断。コンソールへ出す
 ClaudeDeck.exe --check-update    更新の確認だけを手で走らせる。結果をコンソールへ出す
 ClaudeDeck.exe --install-startup / --uninstall-startup
+ClaudeDeck.exe --open-url <URL>  Windows の通知を押したときに Windows が渡してくる。窓を前に出してそのセッションを開く
 ```
 
 置き場所は `%LOCALAPPDATA%\ClaudeDeckApp\ClaudeDeck.exe`。
@@ -103,12 +104,12 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` `plans` `subagents` `skills`（索引） `grep`（本文を探す） |
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） `usage`（数値） `stream`（実行中の行） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） `usage`（数値） `query`（クエリの読み取り） |
-| `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） |
+| `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） `toast`（Windows の通知の本文と行き先） |
 | `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `ask`（許可要求カードの組み立て） `merge`（一覧への合流） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） `dirs`（起こしてよいフォルダの登録） `defaults`（起こすときの既定値） `rate`（枠の使用率を紙に1枚） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
 | `src/startup/` | ランチャが書いた自動起動の紙を読む | `state` |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool` / `isLongRunningTool`） `appdata`（書き込み先） `configfile`（`config.json` の読み書き） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `portclaim`（ポートの取り合いの決め方） `env`（止めるスイッチの読み方） `objects`（`isPlainObject`） `lru`（`createLru`。**store は共有しない**） |
-| `src/os/` | OS を叩く | `focus` `claude`（CLI を探す・版を読む・行を割る） |
+| `src/os/` | OS を叩く | `focus` `claude`（CLI を探す・版を読む・行を割る） `toast`（Windows の通知を1枚出す） |
 
 流れは `read` → `parse` → `view` → `notify`。
 `shared` はどこからでも使えるが、逆に `shared` から他を import してはいけない。
@@ -254,7 +255,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/sessions/:id/usage/baseline` | 直近24本の中央値。**これも `/usage` と分けてある**（400〜700ms 掛かるため） |
 | `GET /api/usage` | 数値の横断集計。`limit` `days` `model`。上限60件で切り詰め、切ったことを `scanLimited` で返す |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `skill` `days`。置き場所とスキルの候補は `meta` に載る |
-| `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
+| `GET /api/stream` | SSE。`sessions` / `tick` / `error` / `reveal` イベント |
 | `GET /api/runs` | 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている。枠の使用率（`rate`）は行ではなく**封筒に1つ**（アカウント共通の値なので） |
 | `GET /api/runs/options` | 起こすフォームの選択肢。cwd の候補・権限モード・**モデルの候補**・思考量・予算の範囲・CLI の様子・いまの本数 |
 | `GET /api/runs/events?from=<seq>` | 取りこぼしの穴埋め。SSE が切れているあいだの速報を拾う |
@@ -266,6 +267,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/settings/rundefaults` | 起こすときの既定値。**選んである値だけ**（語彙・候補・範囲は `/api/runs/options` が持つ） |
 | `GET /api/update` | 更新の状態。ランチャが書いた紙 ＋ `canApply`（いまの起動のされ方で当てられるか） |
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
+| `POST /api/reveal?session=<id>` | 開いている窓に「このセッションを出して」を速報（`reveal`）で伝える。Windows の通知を押したときにランチャが叩く。応答の `clients` は受け取った窓の数（0 ならランチャが `?session=` 付きで新しく開く） |
 | `POST /api/runs` | セッションを1本起こす。202 を返し、以降は速報で追う |
 | `POST /api/runs/:id/input` | 走っている（または待っている）ものへ1行送る |
 | `POST /api/runs/:id/answer` | 許可要求に答える。許可・拒否と、続けて撃つ権限モードと、選択式の質問へ選んだ札（`choices`）。**質問用の窓口を分けない**（実体は同じ `can_use_tool` の1本の道） |
@@ -427,6 +429,7 @@ Node 18 以降はプロセスごと終わる。画面が死ぬだけでなく通
 | 紙に書く**状態の語**（更新9つ・自動起動4つ＋旧方式4つ） | C# が書いて Node がラベルを引く。改名すると画面が「状態が分かりません」になるだけで、どこにもエラーが出ない |
 | `%LOCALAPPDATA%\ClaudeDeck\` の紙6つの**ファイル名** | 旧ファイルが**永久に残る**。消すコードを誰も持っていない |
 | `config.json` の既存キー名 | **移行コードが1行も無い。** Slack の Webhook と「起こしてよいフォルダ」が黙って消える |
+| `claude-deck://`（押した先の口）と `ClaudeDeck`（通知の差出人の登録名）と `--open-url`（登録したコマンドの命令） | ランチャが Windows に登録し、Node が同じ名前で通知を出す（`notify/toast.mjs` の `PROTOCOL` / `TOAST_APP_ID`、`launcher/Toast.cs`）。変えると**通知が黙って出なくなる**（登録の無い名前のトーストは Windows が捨てる）か、押しても何も起きなくなる |
 | `update.json` の `requested` / `prevPort` | 更新のあとの版の照合と、窓の復帰が死ぬ |
 | `$PACK_ID` / `$REPO_URL` / `$MAIN_EXE`（`scripts/release.ps1`） | **いま使っている人の手元で、更新が二度と当たらなくなる** |
 

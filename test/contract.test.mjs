@@ -310,6 +310,7 @@ test('配布物の許可リストが、実行時に要るものを欠かさな�
   }
   // 実行時にしか要らないので忘れやすい
   assert.ok(list.includes('focus.ps1'), '窓の前面化に要る focus.ps1 が配布物から外れている');
+  assert.ok(list.includes('toast.ps1'), 'Windows の通知に要る toast.ps1 が配布物から外れている');
 });
 
 test('README が指す先が、配布物にすべて入っている', () => {
@@ -442,6 +443,27 @@ test('自動起動の状態語も、C# と Node で食い違っていない', ()
   for (const word of switchArms('launcher/Startup.cs', 'DescribeLegacy')) {
     assert.ok(word in LEGACY_LABELS, `C# が書く旧方式の様子 '${word}' が LEGACY_LABELS に無い`);
   }
+});
+
+test('Windows の通知の名前（押した先・差出人・命令）が、C# と Node で食い違っていない', () => {
+  // ランチャが Windows に登録し、Node が同じ名前で通知を出す。
+  // **片方だけ変えると何のエラーも出ない。** 差出人が違えば通知は黙って捨てられ、
+  // 押した先が違えば押しても何も起きない
+  const cs = code('launcher/Toast.cs');
+  const node = code('src/notify/toast.mjs');
+  assert.ok(cs.includes('PROTOCOL = "claude-deck"'), 'Toast.cs の PROTOCOL が claude-deck でない');
+  assert.ok(node.includes("PROTOCOL = 'claude-deck'"), 'toast.mjs の PROTOCOL が claude-deck でない');
+  assert.ok(cs.includes('APP_ID = "ClaudeDeck"'), 'Toast.cs の APP_ID が ClaudeDeck でない');
+  assert.ok(node.includes("TOAST_APP_ID = 'ClaudeDeck'"), 'toast.mjs の TOAST_APP_ID が ClaudeDeck でない');
+  // 登録したコマンドに入る命令。Program.cs の振り分けが同じ定数を見ていること
+  assert.ok(cs.includes('OPEN_URL_FLAG = "--open-url"'), 'Toast.cs の OPEN_URL_FLAG が --open-url でない');
+  assert.ok(code('launcher/Program.cs').includes('Toast.OPEN_URL_FLAG =>'), 'Program.cs が --open-url を振り分けていない');
+  // 押した先の形（open?session=）。Node が組み、C# が読む
+  assert.ok(node.includes('://open'), 'toast.mjs が claude-deck://open を組んでいない');
+  assert.ok(cs.includes('"open"') && cs.includes('"session"'), 'Toast.cs が open?session= を読んでいない');
+  // C# が叩く窓口がサーバーに在ること
+  assert.ok(code('launcher/ServerProcess.cs').includes('/api/reveal'));
+  assert.ok(code('server.mjs').includes("'/api/reveal'"), 'server.mjs に /api/reveal が無い');
 });
 
 // ---------------------------------------------------------------------------

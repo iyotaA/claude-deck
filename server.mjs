@@ -200,12 +200,15 @@ async function serveStatic(res, pathname) {
 
 const clients = new Set();
 /**
- * 回答待ちを Slack へ知らせる係。
+ * 回答待ちを Slack と Windows の通知へ知らせる係。
  *
  * 設定が無ければ全部が空振りになるので、有効かどうかをここで分岐しない。
  * 起動時に1回だけ設定を読む（毎秒の経路で fs を叩かないため）。
+ *
+ * ランチャ経由かどうかで、Windows の通知の差出人（登録した ClaudeDeck か PowerShell か）と
+ * 押した先（claude-deck:// か http://）が変わる。判定の出どころは launcherPath() の1つ
  */
-const notifier = createNotifier();
+const notifier = createNotifier({ viaLauncher: Boolean(launcherPath()) });
 /**
  * 画面から起こしたセッションの係。
  *
@@ -415,6 +418,32 @@ async function handleFocus(res, pid) {
   } catch (err) {
     sendJson(res, 500, { ok: false, reason: errText(err) });
   }
+}
+
+/**
+ * 開いている窓に「このセッションを出して」と伝える。Windows の通知を押したときの行き先。
+ *
+ * 押すと `claude-deck://open?session=<id>` でランチャが起き、ここを叩いてから窓を前へ出す。
+ * ランチャの窓（Edge）は「開いていれば前に出すだけ」で URL を渡せないので、
+ * どのセッションを選ぶかは速報（SSE の `reveal`）で画面に伝える。
+ *
+ * **返す `clients` は受け取った窓の数。** 0 ならランチャは `?session=<id>` 付きで窓を新しく開く
+ * （受け取る窓が1枚も無いのに前へ出すだけだと、何も起きないように見える）。
+ *
+ * **一覧に居ないセッションでも断らない。** 書庫にしか居ない終わったセッションもあり得るし、
+ * 選ぶ側（画面）は詳細を取りに行けば開ける。形だけを確かめる（`/api/sessions/:id` と同じ）。
+ * 書き込みの門番（`isTrustedWrite`）の内側にあるので、他所のページからは叩けない。
+ *
+ * @param {object} res 応答
+ * @param {string|null} sessionId 出してほしいセッション
+ */
+function handleReveal(res, sessionId) {
+  if (typeof sessionId !== 'string' || !/^[\w-]{1,64}$/.test(sessionId)) {
+    sendJson(res, 400, { ok: false, reason: 'セッションの指定が不正です' });
+    return;
+  }
+  broadcast('reveal', { sessionId });
+  sendJson(res, 200, { ok: true, clients: clients.size });
 }
 
 /* -------------------------------------------------------------- 書き込み口 */
@@ -1318,6 +1347,10 @@ function handleWrite(req, res, pathname, url) {
     handleFocus(res, Number(url.searchParams.get('pid')));
     return;
   }
+  if (pathname === '/api/reveal') {
+    handleReveal(res, url.searchParams.get('session'));
+    return;
+  }
   if (pathname === '/api/settings/notify') {
     handleSaveSettings(req, res);
     return;
@@ -1428,8 +1461,10 @@ function pollTick() {
   // 子がいるかは `livePids()` で見る。**台帳の状態で判定しない** ――
   // 終端の見方が2つある（`isRunOver` と `isChildDone`）ので、
   // ここで選ぶと `run/` の判断をサーバー側へ書き写すことになる
+  // 通知は Slack と Windows の通知のどちらか一方でも生きていれば落とさない
+  // （settings().enabled は Slack だけを見るので、Windows の通知だけの人が最大 30 秒遅れる）
   const busy = clients.size > 0
-    || notifier.settings().enabled
+    || notifier.active()
     || runner.livePids().length > 0;
   if (busy) {
     idleTicks = 0;

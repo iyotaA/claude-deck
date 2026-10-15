@@ -117,7 +117,7 @@ function clampNum(n, min, max) {
  * @returns {object} enabled / url / urlMasked / source / settleMs / idleSettleMs /
  *                   remindMs / detail / states / sources / envSet / off / configPath / error
  */
-export function parseNotifyConfig({ env = {}, file = null, configPath = null } = {}) {
+export function parseNotifyConfig({ env = {}, file = null, configPath = null, platform = process.platform } = {}) {
   const notify = (file && typeof file.notify === 'object' && file.notify) || {};
 
   const fromEnv = str(env.CLAUDE_DECK_SLACK_WEBHOOK);
@@ -143,6 +143,21 @@ export function parseNotifyConfig({ env = {}, file = null, configPath = null } =
   // 止めるスイッチ。環境変数だけに置く（画面から自分を締め出せてしまうため）。
   // 値の書き方は他のスイッチと共通なので shared/env.mjs に寄せてある
   const off = isSwitchOn(env.CLAUDE_DECK_NOTIFY_OFF);
+
+  // Windows の通知（トースト）。**既定で入り**（外へ何も送らないので、設定なしで届くのが
+  // いちばん効く。作者の判断 2026-10-15）。切るのは画面（config.json の notify.toast）だけ。
+  // 止めるスイッチ（CLAUDE_DECK_NOTIFY_OFF）は Slack と同じく効く。
+  // **Windows 以外では出せない。** wanted（選んだ値）と enabled（実際に出すか）を分けて持つ
+  // ―― 分けないと、Windows 以外で画面を開いたとき「入れたのに切れている」と区別できない
+  const toastWanted = notify.toast !== false;
+  const toastReason = off
+    ? '環境変数 CLAUDE_DECK_NOTIFY_OFF で止めています'
+    : (platform !== 'win32' ? 'Windows でのみ出せます' : null);
+  const toast = {
+    wanted: toastWanted,
+    enabled: toastWanted && toastReason === null,
+    reason: toastWanted ? toastReason : null,
+  };
 
   const base = {
     source: webhookSource,
@@ -170,6 +185,7 @@ export function parseNotifyConfig({ env = {}, file = null, configPath = null } =
     },
     off,
     configPath,
+    toast,
   };
 
   if (!url) return { ...base, enabled: false, url: null, urlMasked: null, error: null };

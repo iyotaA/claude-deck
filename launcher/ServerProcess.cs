@@ -369,6 +369,32 @@ static class ServerProcess
     }
 
     /// <summary>
+    /// 開いている窓に「このセッションを出して」と頼む（POST /api/reveal）。
+    /// Windows の通知を押したときに使う。**投げない。** 通らなくても窓は開く。
+    /// </summary>
+    /// <param name="port">サーバーのポート。</param>
+    /// <param name="sessionId">出してほしいセッション（Toast.SessionFromUrl で形を確かめ済み）。</param>
+    /// <returns>頼めたら true。</returns>
+    public static async Task<bool> RevealAsync(int port, string sessionId)
+    {
+        try
+        {
+            // content-type を付けないと書き込みの門番（isTrustedWrite）に断られる
+            using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+            var url = $"http://127.0.0.1:{port}/api/reveal?session={Uri.EscapeDataString(sessionId)}";
+            using var res = await Http.PostAsync(url, content);
+            if (!res.IsSuccessStatusCode) Log.Line($"セッションを出すよう頼めませんでした: HTTP {(int)res.StatusCode}");
+            return res.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            // 古いサーバーには /api/reveal が無い。そのときは窓が開くだけになる
+            Log.Line($"セッションを出すよう頼めませんでした: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
     /// 止める。行儀よく頼んでから、聞かなければ力ずくで。
     ///
     /// 動いていなかった場合も true（望みの状態にはなっている）。
