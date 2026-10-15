@@ -255,7 +255,26 @@
 
 /* 最初の節（.stats のすぐ下）には区切り線を引かない。
    器の上端に線が近すぎて、ヘッダの下線と二重に見える */
-.usage-pane > .stats + .usage-block {
+/* 概要の「この期間の内訳」と「いちばん重いもの」を2列に並べる。
+   前は縦に積んでいて、全幅の器では右半分が空いていた（UI レビューの F9）。
+   列の幅は器で決まるので、窓ではなく器の幅で折り返す（auto-fit の下限 26rem。820px の窓では1列。22rem だと2列のまま右が窮屈だった）。
+   左右で背が揃わなくても上へ詰める（align-items: start） */
+.usage-two {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(26rem, 100%), 1fr));
+  gap: 0 1.5rem;
+  align-items: start;
+}
+
+/* 札の下の推移の線。札は沈めた面（--bg-sunk）なので、.spark（同じ面を敷く）は使えない。
+   器の高さだけ持ち、面は札のものを使う。線と面の色は .spark-line / .spark-area のまま */
+.stat-spark {
+  height: 1.6rem;
+  margin-top: .35rem;
+}
+
+.usage-pane > .stats + .usage-block,
+.usage-pane > .stats + .usage-two > .usage-block:first-child {
   border-top: 0;
   padding-top: .2rem;
 }
