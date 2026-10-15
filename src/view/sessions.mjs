@@ -185,7 +185,12 @@ export function summarizeRows(rows) {
  * @param {number} now
  * @returns {Promise<{rows: Array, meta: object}>}
  */
-export async function listSessions(now = Date.now()) {
+/**
+ * @param {number} [now] いまの時刻
+ * @param {{keep?: Set<string>}} [opts] keep は古くても・上限を超えても必ず入れるセッション
+ *   （ピンを付けたもの。src/marks の keepIds）。**任意の引数として足しただけで、応答の形は変えない**
+ */
+export async function listSessions(now = Date.now(), { keep = null } = {}) {
   const [{ entries: registryEntries, readErrors }, index] = await Promise.all([
     readRegistry(),
     indexTranscripts(),
@@ -203,13 +208,21 @@ export async function listSessions(now = Date.now()) {
 
   // 登録簿に無く、直近で動いていたログ＝終了済みセッション
   const ended = [];
+  // ピンを付けた終了済み。**期間（RECENT_MS）にも上限（MAX_ROWS）にも数えない。**
+  // 外すまで作業台に残すと決めたもの（作者の判断 2026-10-15）。数えると、終了済みが多い日に
+  // ピンのほうが押し出される
+  const kept = [];
   for (const [sessionId, rec] of index) {
     if (claimed.has(sessionId)) continue;
+    if (keep?.has(sessionId)) {
+      kept.push(rec);
+      continue;
+    }
     if (now - rec.mtimeMs > RECENT_MS) continue;
     ended.push(rec);
   }
   ended.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  for (const rec of ended.slice(0, MAX_ROWS)) {
+  for (const rec of [...kept, ...ended.slice(0, MAX_ROWS)]) {
     jobs.push({ registry: null, transcript: rec });
   }
   // **切ったことを数える。** 終了済みが多い日に「あるはずの行が無い」になるのに、
