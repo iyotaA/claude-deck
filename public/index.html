@@ -141,6 +141,9 @@
          探す帯は .list-head を借りる（クラス単体のセレクタなのでここでも効く）。
          絞り込みの札は archive.js が組む（候補が応答から決まるため。器だけ置く） -->
     <div class="list-head archive-head" id="archive-head" hidden>
+      <!-- 今日のまとめの入口（today.js）。**書庫の頭のいちばん前に置く。** 書庫は過去を探す場所で、
+           「きょう何をしたか」はその手前の問い。新しいモードは作らず、窓（#today）で開く -->
+      <button class="btn today-open" id="today-open" type="button">今日のまとめ</button>
       <!-- 検索欄。絵（虫めがね）は archive.js が差す。
            打つ前に「ここが検索欄」と分かる合図が、いままで placeholder しか無かった -->
       <span class="archive-field is-q">
@@ -820,6 +823,23 @@
     <p class="settings-msg" id="memo-msg" role="status"></p>
     <button class="btn" id="memo-clear" type="button">消す</button>
     <button class="btn is-lead" id="memo-save" type="button">保存</button>
+  </div>
+</dialog>
+
+<!-- 今日のまとめ（today.js）。入口は書庫の頭のボタンと Ctrl+K。
+     中身は開いたときに /api/today から1回だけ引いて組む。頭と足は設定モーダルのクラスを借りる -->
+<dialog class="today-win" id="today" aria-labelledby="today-title">
+  <div class="settings-head today-head">
+    <h2 id="today-title">まとめ</h2>
+    <span class="archive-field selectbox">
+      <select id="today-ago" aria-label="どの日を見るか"></select>
+    </span>
+    <button class="btn" id="today-copy" type="button" disabled>Markdown でコピー</button>
+    <button class="settings-x" id="today-close" type="button" aria-label="閉じる">&#215;</button>
+  </div>
+  <div class="today-body" id="today-body"></div>
+  <div class="settings-foot">
+    <p class="settings-msg" id="today-msg" role="status"></p>
   </div>
 </dialog>
 

@@ -20,6 +20,7 @@ import { buildSkillIndex, skillIndexState } from './src/read/skills.mjs';
 import { getRawEntry } from './src/view/entry.mjs';
 import { getSubagentDetail } from './src/view/subagent.mjs';
 import { getSessionBaseline, getSessionUsage, listUsage, parseUsageQuery } from './src/view/usage.mjs';
+import { listToday, parseTodayQuery } from './src/view/today.mjs';
 import { focusTerminal } from './src/os/focus.mjs';
 import { claudeInfo, killTreeSync, probeClaude } from './src/os/claude.mjs';
 import { createNotifier, FLUSH_MS } from './src/notify/index.mjs';
@@ -503,7 +504,7 @@ const inFlight = new Map();
 /**
  * 同じ読み取りが重なったら、走っているものに相乗りする。
  *
- * **重い窓口が3本ある**（`/api/usage`・`/api/archive?deep=1`・`/usage/baseline`）。
+ * **重い窓口が4本ある**（`/api/usage`・`/api/archive?deep=1`・`/usage/baseline`・`/api/today`）。
  * どれもログを全文読むので、タブを2枚開いて両方が引くと、
  * **同じファイルを2回読んで2回 `JSON.parse` する。**
  * `refresh()` には直列化があるのに、こちらには何も無かった。
@@ -1572,6 +1573,14 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/usage') {
     const q = [...url.searchParams].sort().map(([k, v]) => `${k}=${v}`).join('&');
     serveAsync(res, coalesce(`usage:${q}`, () => listUsage(parseUsageQuery(url.searchParams))));
+    return;
+  }
+
+  // 今日のまとめ。その日に動いたログを全文読むので、数値と同じく重い窓口として合流させる。
+  // 鍵は丸めたあとの日数（`?ago=abc` と `?ago=0` は同じもの）
+  if (pathname === '/api/today') {
+    const q = parseTodayQuery(url.searchParams);
+    serveAsync(res, coalesce(`today:${q.ago}`, () => listToday(q)));
     return;
   }
 

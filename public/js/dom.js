@@ -45,6 +45,14 @@ export const dom = {
   memoSave: document.getElementById('memo-save'),
   memoClear: document.getElementById('memo-clear'),
   memoClose: document.getElementById('memo-close'),
+  // 今日のまとめの窓と、書庫の頭の入口。today.js だけが使う
+  today: document.getElementById('today'),
+  todayOpen: document.getElementById('today-open'),
+  todayAgo: document.getElementById('today-ago'),
+  todayCopy: document.getElementById('today-copy'),
+  todayClose: document.getElementById('today-close'),
+  todayBody: document.getElementById('today-body'),
+  todayMsg: document.getElementById('today-msg'),
   // 詳細の頭（題名・状態・場所・ボタン）。入力欄より前。detail.js が組む
   detailHead: document.getElementById('detail-head'),
   // 中央下の入力欄の器。詳細ペインの外に置いてあるので replaceChildren() で消えない

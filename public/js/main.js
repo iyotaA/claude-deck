@@ -64,6 +64,7 @@ import { initRuns, subscribeRuns } from './runs.js';
 import { renderDetail, renderDetailIfNeeded, initInspector } from './detail.js';
 import { renderList, renderRate, initHero } from './list.js';
 import { initArchive, showArchive } from './archive.js';
+import { initToday } from './today.js';
 import { showUsage, initUsageTab } from './usage-tab.js';
 import { initMode, setMode } from './mode.js';
 import { select, detailCache } from './session.js';
@@ -188,6 +189,7 @@ initResize();
 // **書庫にいたまま詳細を出す。** 作業台へ飛ばすと、探していた結果がその場で消える。
 // 中身は組み直さず、詳細ペインの節点をモーダルへ運ぶだけ（理由は zoom.js の冒頭）
 initArchive({ onPick: () => openZoom() });
+initToday();
 // 数値モードの絞り込みを配線してから initMode に渡す。あちらの setMode は
 // ?mode=usage で開いたときに onUsage（= showUsage）をその場で呼ぶので、
 // 先に配線しておかないと <select> の初期値が当たる前に引き始める

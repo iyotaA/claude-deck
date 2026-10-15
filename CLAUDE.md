@@ -103,7 +103,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 |---|---|---|
 | `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` `plans` `subagents` `skills`（索引） `grep`（本文を探す） |
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） `usage`（数値） `stream`（実行中の行） |
-| `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） `usage`（数値） `query`（クエリの読み取り） |
+| `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） `usage`（数値） `today`（今日のまとめ） `query`（クエリの読み取り） |
 | `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） `toast`（Windows の通知の本文と行き先） |
 | `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `ask`（許可要求カードの組み立て） `merge`（一覧への合流） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） `dirs`（起こしてよいフォルダの登録） `defaults`（起こすときの既定値） `rate`（枠の使用率を紙に1枚） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
@@ -260,6 +260,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/sessions/:id/usage` | 1本ぶんの数値。詳細（`/api/sessions/:id`）には**混ぜない** |
 | `GET /api/sessions/:id/usage/baseline` | 直近24本の中央値。**これも `/usage` と分けてある**（400〜700ms 掛かるため） |
 | `GET /api/usage` | 数値の横断集計。`limit` `days` `model`。上限60件で切り詰め、切ったことを `scanLimited` で返す |
+| `GET /api/today` | 今日のまとめ。`ago`（0〜6日前）。その日に動いたセッションの決めたことと書き換えたファイル。**その日の行だけ**で digest を組み直す（全文の digest から拾うと前の日のぶんが混ざる）。上限60本で切り、切ったことを `scanLimited` で返す |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `skill` `days`。置き場所とスキルの候補は `meta` に載る |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` / `reveal` イベント |
 | `GET /api/runs` | 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている。枠の使用率（`rate`）は行ではなく**封筒に1つ**（アカウント共通の値なので） |
@@ -379,7 +380,7 @@ Node 18 以降はプロセスごと終わる。画面が死ぬだけでなく通
 子が走っているときは落とさない ―― とくに通知は「返事待ちに気づけない」を埋める仕組みで、
 遅らせると鳴るのが遅れる。
 
-**重い GET 3本（`/api/usage`・`/api/archive`・`/usage/baseline`）は合流する**（`coalesce`）。
+**重い GET 4本（`/api/usage`・`/api/archive`・`/usage/baseline`・`/api/today`）は合流する**（`coalesce`）。
 同じ読み取りが重なったら走っているものに相乗りする。読み取り専用なので正しさは損なわれない。
 タブを複数開いたときのほか、**外からの連打**にも効く（GET は書き込みの門番を通らないので、
 他所のページから `fetch(mode:'no-cors')` で撃てる）。
