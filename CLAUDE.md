@@ -254,7 +254,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/sessions/:id/usage/baseline` | 直近24本の中央値。**これも `/usage` と分けてある**（400〜700ms 掛かるため） |
 | `GET /api/usage` | 数値の横断集計。`limit` `days` `model`。上限60件で切り詰め、切ったことを `scanLimited` で返す |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `skill` `days`。置き場所とスキルの候補は `meta` に載る |
-| `GET /api/stream` | SSE。`sessions` / `tick` / `error` イベント |
+| `GET /api/stream` | SSE。`sessions` / `tick` / `error` / `reveal` イベント |
 | `GET /api/runs` | 画面から起こしたぶんの台帳。まだ会話ログが無い時期でも、ここには最初から出ている。枠の使用率（`rate`）は行ではなく**封筒に1つ**（アカウント共通の値なので） |
 | `GET /api/runs/options` | 起こすフォームの選択肢。cwd の候補・権限モード・**モデルの候補**・思考量・予算の範囲・CLI の様子・いまの本数 |
 | `GET /api/runs/events?from=<seq>` | 取りこぼしの穴埋め。SSE が切れているあいだの速報を拾う |
@@ -266,6 +266,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/settings/rundefaults` | 起こすときの既定値。**選んである値だけ**（語彙・候補・範囲は `/api/runs/options` が持つ） |
 | `GET /api/update` | 更新の状態。ランチャが書いた紙 ＋ `canApply`（いまの起動のされ方で当てられるか） |
 | `POST /api/focus?pid=N` | ターミナルの窓を前面に出す |
+| `POST /api/reveal?session=<id>` | 開いている窓に「このセッションを出して」を速報（`reveal`）で伝える。Windows の通知を押したときにランチャが叩く。応答の `clients` は受け取った窓の数（0 ならランチャが `?session=` 付きで新しく開く） |
 | `POST /api/runs` | セッションを1本起こす。202 を返し、以降は速報で追う |
 | `POST /api/runs/:id/input` | 走っている（または待っている）ものへ1行送る |
 | `POST /api/runs/:id/answer` | 許可要求に答える。許可・拒否と、続けて撃つ権限モードと、選択式の質問へ選んだ札（`choices`）。**質問用の窓口を分けない**（実体は同じ `can_use_tool` の1本の道） |

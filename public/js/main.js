@@ -57,7 +57,7 @@ import { dom } from './dom.js';
 import { icon } from './icons.js';
 import { visibleRows } from './rows.js';
 import { initListDrawer, setListOpen, initialListOpen } from './drawer.js';
-import { initZoom, openZoom } from './zoom.js';
+import { initZoom, openZoom, closeZoom } from './zoom.js';
 import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
 import { renderDetail, renderDetailIfNeeded, initInspector } from './detail.js';
@@ -66,7 +66,7 @@ import { initArchive, showArchive } from './archive.js';
 import { showUsage, initUsageTab } from './usage-tab.js';
 import { initMode, setMode } from './mode.js';
 import { select, detailCache } from './session.js';
-import { setLive, fetchOnce, connect } from './stream.js';
+import { setLive, fetchOnce, connect, onReveal } from './stream.js';
 import { initSettings } from './settings.js';
 import { initAbout } from './about.js';
 import { initUpdate } from './update.js';
@@ -271,6 +271,20 @@ fetchOnce().then(() => {
     setLive('off', '自動更新なし');
     return;
   }
+  // Windows の通知を押したとき（POST /api/reveal → 速報 reveal）。
+  // **作業台へ移ってから選ぶ。** 書庫や数値のままだと、選んでも詳細が見えない。
+  // 書庫から拡大で開いていたら先に畳む（「作業台で開く」と同じ順。逆にすると中央が空で出る）。
+  // 選ぶのは 'query'（一覧に居ない終わったセッションでも、次の push で外されない）
+  onReveal((sessionId) => {
+    if (store.mode !== 'work') {
+      closeZoom();
+      setMode('work');
+    }
+    select(sessionId, 'query');
+    // 窓を前に出すのはランチャの仕事（ブラウザは裏の窓からの focus を無視する）。
+    // 前に出ている窓では、読み始められるよう詳細へ焦点を移す
+    dom.detail.focus({ preventScroll: true });
+  });
   connect();
   // 実行の速報は一覧とは別の SSE。あちらは全タブが常時つないでいる経路なので
   // 相乗りさせない（1ターン数百行の速報に一覧の更新が引きずられる）
