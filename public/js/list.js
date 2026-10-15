@@ -138,7 +138,7 @@ function buildGroup(group, rows) {
 /**
  * 一覧を組む。
  *
- * **並べ替えない。** store.rows はサーバ側が STATE_RANK と idleMs で並べたものなので、
+ * **並べ替えない。** store.rows はサーバ側が STATE_RANK と開始時刻で並べたものなので、
  * 上から読めば手をつける順になる。見出しは「状態が変わる位置」に差し込むだけで、
  * 比較器を画面側に持たない（監視盤が列へ振り分けていたのと同じ考え）。
  *
@@ -150,7 +150,7 @@ function buildGroup(group, rows) {
 /**
  * 帯へ出す行。**並べ替えない。切り出すだけ。**
  *
- * `store.rows` はサーバ側が `STATE_RANK` と `idleMs` で並べたものなので、
+ * `store.rows` はサーバ側が `STATE_RANK` と開始時刻（終了済みは idleMs）で並べたものなので、
  * 前から順に拾えばそのまま「先に手をつけるべき順」になる。
  * 比較器を画面側に持つと、2箇所に並び順ができる。
  *
@@ -285,7 +285,9 @@ function buildHeroCard(row) {
  */
 export function renderHero() {
   const rows = heroRows();
-  const key = heroKey(rows);
+  const replies = rows.length === 0 ? visibleRows().filter((r) => r.state === 'awaiting-reply') : [];
+  // 空のときは返信待ちの数も鍵に混ぜる。混ぜないと、数が変わっても1行が古いまま残る
+  const key = rows.length > 0 ? heroKey(rows) : `none:${replies.length}`;
   // 顔ぶれも押せることも変わっていなければ、節点に触らない。
   // 触ると横へ送った位置が戻る（この関数がある理由そのもの）
   if (key === heroStamp) return;
@@ -295,14 +297,44 @@ export function renderHero() {
   dom.heroBand.replaceChildren();
 
   if (rows.length === 0) {
-    // 帯としては組まない（横スクロールも膜も要らない）。器に1行だけ置く
-    dom.heroBand.append(el('div', 'hero-none', 'いま、あなたの返事を待っているセッションはありません'));
+    // 帯としては組まない（横スクロールも膜も要らない）。器に1行だけ置く。
+    // data-empty で帯の余白を落とし、1行ぶんの高さに畳む（hero.css）
+    dom.heroBand.append(heroQuiet(replies));
+    dom.heroWrap.dataset.empty = '';
     dom.heroWrap.dataset.edge = 'none';
     return;
   }
 
+  delete dom.heroWrap.dataset.empty;
   for (const row of rows) dom.heroBand.append(buildHeroCard(row));
   syncHeroEdge();
+}
+
+/**
+ * 帯が空のときの1行。
+ *
+ * **帯が見ているものだけを「ありません」と言う。** 帯に出すのは承認・質問・プランの
+ * 3つ（`HERO_STATES`）で、返信待ちはわざと外してある（答えなくても誰も止まっていない）。
+ * 前の文言は「あなたの返事を待っているセッションはありません」で、
+ * 上のバーの「返信待ち 1」と同じ画面で食い違って見えた。
+ * 返信待ちがあるときは、その数をこの1行に添えて、帯の外にあることを示す。
+ *
+ * 返信待ちの呼び名は行の `stateLabel`（サーバ由来）を使う。画面側に状態の日本語を持たない。
+ *
+ * @param {object[]} replies 返信待ちの行
+ * @returns {HTMLElement}
+ */
+function heroQuiet(replies) {
+  const line = el('div', 'hero-none');
+  line.append(el('span', 'hero-none-dot'), el('span', null, '承認や質問で止まっているセッションはありません'));
+  if (replies.length > 0) {
+    const label = replies[0].stateLabel ?? replies[0].state;
+    line.append(
+      el('span', 'hero-none-reply', `― ${label} ${replies.length}`),
+      el('span', 'hero-none-note', '（返事をすると続きが始まるもの。一覧にあります）'),
+    );
+  }
+  return line;
 }
 
 /**

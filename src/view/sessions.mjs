@@ -76,10 +76,35 @@ function idleForSort(row) {
 }
 
 /**
+ * 並び替え用に startedAt を数値へ落とす。
+ *
+ * idleForSort と同じく、取れなかったものは 0 ではなく末尾へ寄せる。
+ *
+ * @param {{startedAt?: number|null}} row
+ * @returns {number}
+ */
+function startedForSort(row) {
+  return Number.isFinite(row.startedAt) ? row.startedAt : Number.POSITIVE_INFINITY;
+}
+
+/**
  * 一覧の並び順を決める。
  *
  * **比較器をここ1箇所に置く。** `server.mjs` が実行中のセッションを重ねたあと
  * 並べ直す必要があるので、そちらへ写すと同じ規則が2箇所に生きることになる。
+ *
+ * **動いているものは、同じ状態の中で始めた順に固定する。**
+ * 前は「動きが新しい順」（idleMs）で並べていた。2本が同時に動いていると
+ * 毎秒のように上下が入れ替わり、押そうとした行が直前に動いて
+ * 別のセッションを開いてしまう（実測：2秒おきに撮った画面で順番が逆転していた）。
+ * 並びが動くのは「作業中 → 承認待ち」のように**状態が変わったときだけ**にする。
+ * 状態の順（STATE_RANK）は先に効くので、ボールの所在で上下する作りは変わらない。
+ *
+ * 終了済みだけは今までどおり新しい順。もう動かないので入れ替わりが起きず、
+ * 直近に終わったものを上に置くほうが探しやすい。
+ *
+ * 最後の比較を sessionId にするのは、startedAt が同じ・不明どうしでも
+ * 毎回同じ順を返すため（ここが揺れると、固定した意味が無くなる）。
  *
  * 受け取った配列をその場で並べ替えて返す（`Array.prototype.sort` と同じ）。
  *
@@ -90,9 +115,13 @@ export function sortRows(rows) {
   return rows.sort((a, b) => {
     const rank = (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9);
     if (rank !== 0) return rank;
-    // 同じ状態なら動きが新しい順。放置が長いものほど下に沈む。
-    // idleMs が取れないものは「不明」なので末尾に置く（0 と混ぜない）
-    return idleForSort(a) - idleForSort(b);
+    // 取れないものは「不明」なので末尾に置く（0 と混ぜない）。
+    // Infinity どうしの引き算は NaN になるので、差ではなく大小で比べる
+    const [x, y] = a.state === 'ended'
+      ? [idleForSort(a), idleForSort(b)]
+      : [startedForSort(a), startedForSort(b)];
+    if (x !== y) return x < y ? -1 : 1;
+    return String(a.sessionId ?? '').localeCompare(String(b.sessionId ?? ''));
   });
 }
 

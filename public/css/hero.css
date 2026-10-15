@@ -186,11 +186,33 @@
 /* 0 件のとき。**空の帯を置かない**が、場所そのものは残す。
    帯ごと消すと、静かな日に画面の一等地が何も言わずに消える */
 .hero-none {
-  padding: .7rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-height: 36px;
+  padding: 0 1rem;
   font-size: var(--fs-1);
-  color: var(--fg-faint);
-  text-align: center;
+  color: var(--fg-muted);
+  white-space: nowrap;
 }
+
+/* **空のときは帯の余白を落として1行に畳む。** 前は帯の余白（.9rem×2）と
+   この1行の余白が重なって、何も無いのに 70px を取っていた（実測）。
+   待ちが無い時間のほうが長いので、ほとんどの時間はただの余白になる。
+   印は JS（list.js の renderHero）が data-empty で付け外しする */
+.hero-wrap[data-empty] .hero-band { padding: 0; }
+
+/* 止まっているものが無い、の印。状態の点と同じ大きさで、色は「通っている」 */
+.hero-none-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--done);
+  flex: none;
+}
+
+.hero-none-reply { color: var(--warn); font-weight: 700; }
+.hero-none-note { color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; }
 
 /* -------------------------------------------------------- 圧縮した行 */
 
