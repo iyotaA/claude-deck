@@ -84,11 +84,27 @@ const NOW_TONE = {
 export const TAB_DEFS = [
   { id: 'log', label: '経過', needsDetail: true, count: (c) => c.d?.digest.items.length ?? null },
   // 数はファイルの件数。決めたことと TODO を足した合計にはしない（種類の違う3つを足した数は読めない）。
-  // ファイルにしたのは、芯の「どんな作業をしたか」の主指標で、いちばん動く数だから
-  { id: 'out', label: '成果', needsDetail: true, count: (c) => c.d?.digest.files.length ?? null },
+  // ファイルにしたのは、芯の「どんな作業をしたか」の主指標で、いちばん動く数だから。
+  // **空かどうかは数と別に見る**（empty）。ファイルが 0 件でも決めたことや TODO があれば空ではない
+  {
+    id: 'out', label: '成果', needsDetail: true,
+    count: (c) => c.d?.digest.files.length ?? null,
+    empty: (c) => c.d ? isOutEmpty(c.d) : null,
+  },
   { id: 'now', label: 'いま' },
   { id: 'agents', label: '調査', needsDetail: true, count: (c) => c.d?.subagents?.items?.length ?? null },
 ];
+
+/**
+ * 成果タブに出すものが1つも無いか。fillTab の 'out' が積む3つ（決めたこと・TODO・
+ * 書き換えたファイル）と同じ条件で見る。**読めていないとき（d が無い）は呼ばない。**
+ * @param {object} d 詳細
+ * @returns {boolean}
+ */
+function isOutEmpty(d) {
+  const decided = d.digest.items.some((i) => i.kind === 'answer' || i.kind === 'plan');
+  return !decided && !(d.tasks?.items?.length) && !d.digest.files.length;
+}
 
 /**
  * いま実際に組むタブ。
@@ -327,8 +343,15 @@ function tabBar(ctx) {
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
     // 「いま」だけは、別のタブを見ているあいだも手が要ることが分かるように色を付ける
     if (t.id === 'now' && NOW_TONE[ctx.row.state]) b.classList.add(NOW_TONE[ctx.row.state]);
+    // **0 も「0」と書き、タブを薄くする。** 前は 0 だと数ごと消えていて、
+    // 押してみないと空か分からなかった（UI レビューの F7）。
+    // 読めていない（null）は数を出さない ―― 0 と「不明」を分ける。
+    // 空かどうかは empty があればそちらで決める（成果は数と空が一致しない）
     const n = t.count ? t.count(ctx) : null;
-    if (n) b.append(el('span', 'n', num(n)));
+    if (n !== null && n !== undefined) b.append(el('span', 'n', num(n)));
+    const empty = t.empty ? t.empty(ctx) : (n === 0);
+    // 選んでいるタブは薄くしない（いま見ている場所が沈むと、どこに居るか見失う）
+    if (empty === true && !on) b.classList.add('is-empty');
     b.addEventListener('click', () => setDetailTab(t.id));
     bar.append(b);
   }
@@ -597,6 +620,54 @@ export function renderDetail() {
   document.querySelector(`[data-refocus="${CSS.escape(refocus)}"]`)?.focus();
 }
 
+/** 詳細の題名。一覧の行と同じ順で拾う */
+function titleOf(row) {
+  return row.title ?? row.name ?? row.sessionId;
+}
+
+/**
+ * 詳細の頭を組む。**入力欄（.composer）より前に置く。**
+ *
+ * 前は流れる箱（.detail）の先頭にあり、入力欄はペインの1行目（流れる箱の外）に居たので、
+ * 「続きを起こす」欄が題名より上に出ていた。何のセッションかを読む前に書く場所が
+ * 目に入る（UI レビューの F5）。入力欄はペインの直下から動かせない
+ * （作り直しで打ちかけが消える）ので、頭のほうを流れる箱の外へ出した。
+ *
+ * 頭は流れないので、**場所を取りすぎないように詰める。**
+ * 題名は2行で切り（全文は title 属性）、状態・場所・ボタンは1行に並べる。
+ *
+ * @param {object|null} row 一覧の行と同じ形のもの
+ */
+function renderHead(row) {
+  dom.detailHead.replaceChildren();
+  dom.detailHead.hidden = !row;
+  if (!row) return;
+
+  const inner = el('div', 'detail-head-in');
+  const title = el('h2', null, titleOf(row));
+  title.title = titleOf(row);
+  inner.append(title);
+
+  const line = el('div', 'detail-sub');
+  // stateLabel が無いときに空の .state を出すと、色の点だけが残って意味を持たない
+  if (row.stateLabel) {
+    const state = el('span', 'state', row.stateLabel);
+    state.style.color = colorOf(row.state);
+    state.dataset.s = toneOf(row.state);
+    // 予算切れだけは点ではなく印にする（理由は list.js の buildCard 側に書いた）
+    if (row.run?.state === 'budget') state.dataset.mark = 'budget';
+    line.append(state);
+  }
+  if (row.cwd) {
+    const path = el('span', 'path', row.cwd);
+    path.title = row.cwd;
+    line.append(path);
+  }
+  line.append(detailActions(row));
+  inner.append(line);
+  dom.detailHead.append(inner);
+}
+
 /** 詳細ペインの中身を組む。焦点の持ち回しは呼び出し元（`renderDetail`）が持つ。 */
 function renderDetailInner() {
   const t0 = performance.now();
@@ -620,6 +691,8 @@ function renderDetailInner() {
   RunView.detach();
   RunResume.detach();
   dom.detail.replaceChildren();
+  // 頭は入力欄より前（ペインの1行目）。選んでいないあいだは出すものが無いので畳む
+  renderHead(row);
   // 右も同じ材料で組み直す。中央だけ差し替えると、選び直したあとも
   // 右に前のセッションの数字が残ったままになる
   dom.inspBody.replaceChildren();
@@ -659,27 +732,12 @@ function renderDetailInner() {
   }
 
   const wrap = el('div', 'detail');
-  wrap.append(el('h2', null, row.title ?? row.name ?? row.sessionId));
-
-  const sub = el('div', 'detail-sub');
-  // stateLabel が無いときに空の .state を出すと、色の点だけが残って意味を持たない
-  if (row.stateLabel) {
-    const state = el('span', 'state', row.stateLabel);
-    state.style.color = colorOf(row.state);
-    state.dataset.s = toneOf(row.state);
-    // 予算切れだけは点ではなく印にする（理由は list.js の buildCard 側に書いた）
-    if (row.run?.state === 'budget') state.dataset.mark = 'budget';
-    sub.append(state);
-  }
-  if (row.cwd) sub.append(el('span', 'path', row.cwd));
-  wrap.append(sub);
-  wrap.append(detailActions(row));
-
   const d = store.detail?.sessionId === store.selected ? store.detail : null;
 
-  // なぜこの作業をしているか。どのタブを見ていても要るので、帯より上に置く
+  // なぜこの作業をしているか。どのタブを見ていても要るので、帯より上に置く。
+  // 題名を渡すのは、同じ文なら見出しを出さないため（題名は頭に出ている）
   if (d) {
-    const summary = summaryBlock(d.summary);
+    const summary = summaryBlock(d.summary, titleOf(row));
     if (summary) wrap.append(summary);
   }
 

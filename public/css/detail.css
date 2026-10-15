@@ -17,14 +17,39 @@
    上下を入れ替えても中身に残る高さは同じ（実測で 869px のまま） */
 .detail-pane {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  /* 頭（題名・状態・ボタン）／入力欄／流れる箱。
+     **頭を入力欄より前に置く。** 前は頭が流れる箱の中にあり、入力欄の下に来ていた
+     （続きを起こす欄が題名より上に出た。UI レビューの F5） */
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
+}
+
+/* 詳細の頭。流れないので、**場所を取りすぎないように詰める**
+   （題名は2行まで、状態・場所・ボタンは1行）。
+   読む幅の上限は中身（.detail）・入力欄（.composer-in）と同じ --read-max で揃える。
+   左右の余白も流れる箱（.detail-scroll）と同じ 1.3rem。
+   display を宣言したので [hidden] を必ず添える */
+.detail-head {
+  padding: 1rem 1.3rem .55rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.detail-head[hidden] { display: none; }
+
+.detail-head-in {
+  min-width: 0;
+  max-width: var(--read-max);
+  margin-inline: auto;
 }
 
 /* 上の余白はここに置かない。中身（.detail）側に持たせる。
    スクロールする箱に padding-top があると、上に貼り付けた目次がその分だけ下で止まり、
    空いた隙間から下の中身が透けて流れていく */
 .detail-scroll {
+  /* 3行目（1fr）に明示して置く。入力欄が hidden のとき、置かないと2行目（auto）へ
+     繰り上がり、1fr の行が空のまま残る（.app の .deck と同じ話） */
+  grid-row: 3;
   min-height: 0;
   overflow-y: auto;
   padding: 0 1.3rem 3rem;
@@ -60,19 +85,27 @@
   text-align: center;
 }
 
-.detail h2 {
-  margin: 0 0 .2rem;
+/* 題名は2行で切る。全文は title 属性（detail.js の renderHead）。
+   前は最初の指示がそのまま3行以上の題になり、頭だけで画面の上を食っていた */
+.detail-head h2 {
+  margin: 0 0 .35rem;
   font-size: var(--fs-5);
   font-weight: 700;
   line-height: 1.4;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
+/* 状態・場所・ボタンの1行。ボタンは右へ寄せ、場所は長ければ「…」で切る
+   （全文は title 属性）。狭い窓では折り返して2行になる */
 .detail-sub {
   display: flex;
   flex-wrap: wrap;
-  gap: .3rem .6rem;
-  margin-bottom: .7rem;
+  align-items: center;
+  gap: .3rem .8rem;
   font-size: var(--fs-1);
   color: var(--fg-muted);
 }
@@ -98,7 +131,8 @@
   flex-wrap: wrap;
   align-items: center;
   gap: .4rem .6rem;
-  margin-bottom: 1rem;
+  /* 頭の1行の右端へ寄せる */
+  margin-left: auto;
 }
 
 .detail-actions .hint {
@@ -107,7 +141,14 @@
   overflow-wrap: anywhere;
 }
 
-.detail-sub .path { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.detail-sub .path {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
 
 /* このセッションの目的。枠を付けず、左の罫線だけで本文と区別する。
    上のバーの .summary とは名前を分ける（同名だと両方に当たって縦積みが崩れる） */
@@ -233,6 +274,11 @@
 
 /* 「いま」だけ色を変える。別のタブを見ているあいだも手が要ることが分かるように。
    全部に色を付けると差が読めなくなるので、ここ1つに絞る */
+/* 中身が空のタブ。押せるままにして、字だけ1段落とす（押せば「何が出る場所か」が読める）。
+   前は 0 件だと数ごと消え、押してみないと空か分からなかった（UI レビューの F7） */
+.detail-tab.is-empty { color: var(--fg-faint); }
+.detail-tab.is-empty .n { color: var(--fg-faint); }
+
 .detail-tab.is-hot { color: var(--hot); }
 .detail-tab.is-warn { color: var(--warn); }
 .detail-tab.is-hot[aria-pressed="true"] { border-bottom-color: var(--hot); }
