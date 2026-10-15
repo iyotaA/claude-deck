@@ -88,6 +88,7 @@ $APP_INCLUDE = @(
   'src',
   'public',
   'scripts\focus.ps1',             # 実行時に src/os/focus.mjs が呼ぶ。無いと窓の前面化が死ぬ
+  'scripts\toast.ps1',             # 実行時に src/os/toast.mjs が呼ぶ。無いと Windows の通知が黙って出ない
   # README の「もっと詳しく」が指す3枚。**入れないとリンクが全部切れる。**
   # 前は slack-webhook-setup.html だけを入れていたが、あれを案内しているのは
   # notifications.md のほうで、その notifications.md が入っていなかった

@@ -193,3 +193,19 @@ test('元のファイルを書き換えない', () => {
   mergeSettings(before, { idleMin: 9, states: { 'awaiting-reply': false } });
   assert.deepEqual(before, { notify: { idleMin: 5 } });
 });
+
+/* ------------------------------------------------------- Windows の通知 */
+
+test('Windows の通知の入り切りは真偽だけを受ける', () => {
+  assert.deepEqual(validateSettings({ toast: false }), { ok: true, patch: { toast: false } });
+  assert.deepEqual(validateSettings({ toast: true }), { ok: true, patch: { toast: true } });
+  // 文字の "false" を真に読まない
+  assert.equal(validateSettings({ toast: 'false' }).ok, false);
+  assert.equal(validateSettings({ toast: 0 }).ok, false);
+});
+
+test('Windows の通知を切っても、ほかの設定（Webhook）は消えない', () => {
+  const merged = mergeSettings({ notify: { slackWebhookUrl: OK_URL } }, { toast: false });
+  assert.equal(merged.notify.slackWebhookUrl, OK_URL);
+  assert.equal(merged.notify.toast, false);
+});

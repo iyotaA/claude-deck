@@ -151,7 +151,31 @@ Webhook の作り方は `docs/slack-webhook-setup.html` にある。
 両方が立っているときは「環境変数もあるが画面の値が勝っている」と書く。
 黙って勝つと、前に踏んだ「設定したのに鳴らない」と同じ迷い方をすることになる。
 
+### Windows の通知（トースト）
+
+**Slack と横に並ぶ、もう1つの送り先。** いつ鳴らすか（`watch.mjs`）は共有するので、
+同じ待ちが Slack と右下の両方に出る。外へ何も送らないので**既定で入り**
+（作者の判断 2026-10-15。`config.json` の `notify.toast` が `false` のときだけ切れる）。
+
+| 何を | どこで |
+|---|---|
+| 何を出すか（XML・押した先） | `notify/toast.mjs`（判断。テストあり） |
+| 出す | `os/toast.mjs` → `scripts/toast.ps1`（PowerShell で `Windows.UI.Notifications`） |
+| 誰に出すか・失敗の数え方 | `notify/index.mjs` の `sendToasts` |
+
+- **題名を載せる。** Slack とは違う（この PC の右下に出るだけなので）。ただし `snapshot()` には足さない ―― あちらは Slack の安全装置で、足すと Slack にも乗る。`index.mjs` が `observe()` で一覧の行から `sessionId → title` を別に写し取る
+- **差出人と押した先はランチャの有無で変わる。** ランチャ経由（`CLAUDE_DECK_LAUNCHER` あり）なら、ランチャが登録した `ClaudeDeck` から出し、押すと `claude-deck://open?session=<id>` でランチャが起きて窓を出す。`npm start` なら Windows PowerShell の名前を借り、押すと既定のブラウザで `<baseUrl>?session=<id>` を開く
+- **本文は base64 で PowerShell に渡す。** 素の引数や標準入力だと、5.1 は OEM のコードページで読んで日本語が化ける
+- **Slack の再送で戻った待ちは出さない。** `giveBack()` は `attempts` を増やした写しを戻すので、`attempts` の無い（初めて出てきた）待ちだけを出す
+- **1回に3枚まで。** 超えたぶんは「ほか N 件」の1枚にまとめる（右下が埋まらないように）
+- **続けて5回失敗したら、Windows の通知だけ止める。** Slack は巻き添えにしない。理由は `/api/health` の `notify.toast` に出る。設定を保存し直すと解ける
+- **見回りの間引き（`server.mjs` の 30 秒）は `notifier.active()` で決める。** Slack か Windows の通知のどちらかが生きていれば落とさない。既定で入りなので、Windows では常に 2 秒で見回る（「通知が有効なときは落とさない」の約束どおり）
+
 ## 触るときに壊してはいけないこと（通知）
+
+- **Windows の通知の題名を `watch.mjs` の `snapshot()` に足さない。** 足すと Slack の本文にも題名が乗る（Slack は題名を載せない約束）。題名は `index.mjs` の `titles` から引く
+- **`notify/toast.mjs` の `PROTOCOL`（`claude-deck`）と `TOAST_APP_ID`（`ClaudeDeck`）を変えない。** ランチャが同じ名前で Windows に登録している（凍結。ルートの `CLAUDE.md` の表）
+- **Windows の通知の失敗で Slack を止めない。逆も同じ。** 止め方（`state` と `toastStopped`）は送り先ごとに持つ
 
 - **通知の本文に `cwd`・`logFile`・`gitBranch`・`title`・`lastPrompt` を載せない。** 載せてよいのは `project`（フォルダ名だけ）まで。`watch.mjs` の `snapshot()` が写し取る時点で落としてあるので、`message.mjs` からは載せようがない。安全装置がそこにあることを知らずに `snapshot()` へ項目を足さない
 - **Webhook の URL を戻り値のどこにも入れない。** 表に出るのは `maskWebhook()` を通したものだけ。`fetch` の失敗メッセージには URL が埋め込まれ得るので、`postToSlack` は理由を返す前に自分で `scrubError()` を通す（呼ぶ側に伏せ忘れの余地を残さない）。弾いた URL も返さない。別サービスの鍵を貼り間違えている可能性がある

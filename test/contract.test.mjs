@@ -310,6 +310,7 @@ test('配布物の許可リストが、実行時に要るものを欠かさな�
   }
   // 実行時にしか要らないので忘れやすい
   assert.ok(list.includes('focus.ps1'), '窓の前面化に要る focus.ps1 が配布物から外れている');
+  assert.ok(list.includes('toast.ps1'), 'Windows の通知に要る toast.ps1 が配布物から外れている');
 });
 
 test('README が指す先が、配布物にすべて入っている', () => {

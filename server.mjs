@@ -200,12 +200,15 @@ async function serveStatic(res, pathname) {
 
 const clients = new Set();
 /**
- * 回答待ちを Slack へ知らせる係。
+ * 回答待ちを Slack と Windows の通知へ知らせる係。
  *
  * 設定が無ければ全部が空振りになるので、有効かどうかをここで分岐しない。
  * 起動時に1回だけ設定を読む（毎秒の経路で fs を叩かないため）。
+ *
+ * ランチャ経由かどうかで、Windows の通知の差出人（登録した ClaudeDeck か PowerShell か）と
+ * 押した先（claude-deck:// か http://）が変わる。判定の出どころは launcherPath() の1つ
  */
-const notifier = createNotifier();
+const notifier = createNotifier({ viaLauncher: Boolean(launcherPath()) });
 /**
  * 画面から起こしたセッションの係。
  *
@@ -1428,8 +1431,10 @@ function pollTick() {
   // 子がいるかは `livePids()` で見る。**台帳の状態で判定しない** ――
   // 終端の見方が2つある（`isRunOver` と `isChildDone`）ので、
   // ここで選ぶと `run/` の判断をサーバー側へ書き写すことになる
+  // 通知は Slack と Windows の通知のどちらか一方でも生きていれば落とさない
+  // （settings().enabled は Slack だけを見るので、Windows の通知だけの人が最大 30 秒遅れる）
   const busy = clients.size > 0
-    || notifier.settings().enabled
+    || notifier.active()
     || runner.livePids().length > 0;
   if (busy) {
     idleTicks = 0;

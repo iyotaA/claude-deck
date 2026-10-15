@@ -84,6 +84,14 @@ export function validateSettings(body) {
     patch.detail = d;
   }
 
+  // Windows の通知の入り切り。真偽だけを受ける（"false" の文字を真に読まない）
+  if ('toast' in body) {
+    if (typeof body.toast !== 'boolean') {
+      return { ok: false, error: 'Windows の通知は true か false で入れてください' };
+    }
+    patch.toast = body.toast;
+  }
+
   if ('states' in body) {
     const raw = body.states;
     if (!isPlainObject(raw)) {

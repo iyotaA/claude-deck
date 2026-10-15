@@ -50,7 +50,8 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `notify-config.test.mjs` | 設定の優先順と URL の検証 |
 | `notify-settings.test.mjs` | 画面から来た設定の検証と併合。書き込む側の本丸 |
 | `notify-slack.test.mjs` | Slack の応答をどう読むか |
-| `notify-index.test.mjs` | 通知の配線。とくに失敗したときのふるまい |
+| `notify-toast.test.mjs` | Windows の通知に何を出すか（`notify/toast.mjs`）。ログ由来の文字を逃がすこと・押した先がランチャの有無で分かれること（`claude-deck://open` と `baseUrl`）・「質問文を載せない」を守ること・凍結の名前（`claude-deck` / `ClaudeDeck`）。出す殻（`os/toast.mjs`）は実物で確かめる |
+| `notify-index.test.mjs` | 通知の配線。とくに失敗したときのふるまい。**Windows の通知**は Slack と横に並ぶ送り先として見る（Slack 無しでも出る・Slack の本文に題名を載せない・再送で2回出さない・続けて失敗したら自分だけ止まる・入れた瞬間に一斉に鳴らさない） |
 | `update-state.test.mjs` | 更新の紙の読み方。stale の判定と、無い紙を異常にしないこと |
 | `startup-state.test.mjs` | 自動起動の紙の読み方。紙が無いことを「動いていない」と読まないこと |
 | `update-banner.test.mjs` | 更新の帯の組み立て（`bannerOf`）。枝の順・鍵（`key`）の粒度・押したときに走らせる仕事の配線。**押せる知らせと押せない知らせで鍵を分けること**が本丸 |

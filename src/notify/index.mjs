@@ -14,8 +14,12 @@
 import { loadNotifyConfig } from './config.mjs';
 import { createNotifyWatch } from './watch.mjs';
 import { errText } from '../shared/text.mjs';
-import { buildText, scrubError } from './message.mjs';
+import { buildText, scrubError, waitLabel } from './message.mjs';
 import { postToSlack, TIMEOUT_MS } from './slack.mjs';
+import {
+  buildToastXml, buildRestXml, toastLaunchUrl, TOAST_APP_ID, POWERSHELL_APP_ID, TOAST_MAX,
+} from './toast.mjs';
+import { showToast } from '../os/toast.mjs';
 
 /** 送信タイマの間隔。refresh() とは別の時計で回す。 */
 export const FLUSH_MS = 1000;
@@ -39,6 +43,8 @@ const TEST_COOLDOWN_MS = 3000;
  * @param {object} [opts.config] 設定。テストから差し替える
  * @param {number} [opts.bootAt] 起動時刻。種まきの基準
  * @param {Function} [opts.post] 送信関数。テストから差し替える
+ * @param {Function} [opts.show] Windows の通知を出す関数。テストから差し替える
+ * @param {boolean} [opts.viaLauncher] ランチャ経由で動いているか。通知の差出人と押した先が変わる
  * @returns {object} observe / flush / setBaseUrl / health / banner /
  *                   applyConfig / settings / sendTest
  */
@@ -46,6 +52,8 @@ export function createNotifier({
   config = loadNotifyConfig(),
   bootAt = Date.now(),
   post = postToSlack,
+  show = showToast,
+  viaLauncher = false,
   // 1時間に送れる通数。**設定の紙には出さない**（暴走の歯止めで、人が緩める値ではない）。
   // 引数で受けるのは、上限に達した先の筋道をテストから通すため
   // ―― 既定の 30 通を実際に送らせると、テストが送信の回数を数える話になる
@@ -67,6 +75,24 @@ export function createNotifier({
   let reportedDropped = 0;
   /** 最後にテスト送信した時刻。連打止め */
   let lastTestAt = 0;
+
+  // ---- Windows の通知（トースト）。Slack とは別の送り先 ----
+  //
+  // **Slack の止め方（state / failStreak / 再送）とは混ぜない。** 送り先が2つになっても、
+  // Slack の側の筋道は1行も変えないで済むように、横に並べて持つ。
+  // いつ鳴らすか（watch）は共有する。同じ待ちが Slack と右下の両方に出る
+  let toastSent = 0;
+  let toastFailed = 0;
+  let toastStreak = 0;
+  let toastLastError = null;
+  /** 続けて失敗して止めた理由。null なら止めていない */
+  let toastStopped = null;
+  /**
+   * セッション → 題名。**通知専用の写し。**
+   * watch の snapshot() は Slack の安全装置として題名を落とすので、そちらへは足さない
+   * （足すと Slack にも題名が乗る）。observe() で一覧の行から引いておく
+   */
+  const titles = new Map();
 
   // watch は設定が無くても必ず作る。有効かどうかの分岐は state だけで見る。
   // 画面から設定されたときに作り直さずに済ませるための形で、作り直すと
@@ -92,6 +118,19 @@ export function createNotifier({
     reason = why;
   }
 
+  /** Windows の通知を出すか。設定で入っていて、続けて失敗して止めていないとき */
+  function toastOn() {
+    return config.toast?.enabled === true && toastStopped === null;
+  }
+
+  /**
+   * watch に一覧を見せるか。**どちらか一方の送り先が生きていれば見せる。**
+   * 前は Slack の state だけで決めていたので、Slack を設定していない人には何も鳴らなかった
+   */
+  function watching() {
+    return state === 'ok' || toastOn();
+  }
+
   /**
    * ClaudeDeck の URL を教える。listen のコールバックから呼ぶ。
    *
@@ -108,8 +147,65 @@ export function createNotifier({
    * @param {number} [now] いまの時刻
    */
   function observe(rows, now = Date.now()) {
-    if (state !== 'ok') return;
+    if (!watching()) return;
+    // 題名の写しは Windows の通知のためだけ。入れ替えて持つ（消えたセッションを残さない）
+    if (toastOn()) {
+      titles.clear();
+      for (const row of rows ?? []) {
+        if (row?.sessionId && row.title) titles.set(row.sessionId, row.title);
+      }
+    }
     watch.observe(rows, now);
+  }
+
+  /**
+   * Windows の通知を出す。**例外を投げない。** 失敗は数えて、続けば止める。
+   *
+   * 出すのは**初めて出てきた待ちだけ**（attempts が無いもの）。Slack が再送のために
+   * watch へ返した待ち（giveBack は attempts を増やした写しを戻す）を、右下に2回出さない。
+   *
+   * @param {Array<object>} items watch.takeReady() の戻り
+   * @returns {Promise<void>}
+   */
+  async function sendToasts(items) {
+    if (!toastOn()) return;
+    const fresh = items.filter((it) => !it.attempts);
+    if (fresh.length === 0) return;
+
+    const appId = viaLauncher ? TOAST_APP_ID : POWERSHELL_APP_ID;
+    const xmls = fresh.slice(0, TOAST_MAX).map((it) => {
+      const wait = waitLabel(it.idleMs);
+      return buildToastXml(it, {
+        title: titles.get(it.sessionId) ?? null,
+        launchUrl: toastLaunchUrl({ sessionId: it.sessionId, baseUrl, viaLauncher }),
+        waitText: wait ? `${wait} 待っています` : null,
+        detail: config.detail,
+      });
+    });
+    // 上限を超えたぶんは1枚にまとめる。右下が通知で埋まらないように
+    const rest = fresh.length - TOAST_MAX;
+    if (rest > 0) xmls.push(buildRestXml(rest, toastLaunchUrl({ baseUrl, viaLauncher })));
+
+    for (const xml of xmls) {
+      let r;
+      try {
+        r = await show(xml, appId);
+      } catch (err) {
+        r = { ok: false, reason: `例外が出ました: ${errText(err)}` };
+      }
+      if (r?.ok) {
+        toastSent += 1;
+        toastStreak = 0;
+        continue;
+      }
+      toastFailed += 1;
+      toastStreak += 1;
+      toastLastError = r?.reason ?? '理由が取れませんでした';
+      if (toastStreak >= FAIL_LIMIT) {
+        toastStopped = `${FAIL_LIMIT} 回続けて出せませんでした。${toastLastError}`;
+        return;
+      }
+    }
   }
 
   /**
@@ -136,7 +232,7 @@ export function createNotifier({
       reason = null;
     }
 
-    if (state !== 'ok' || sending) return;
+    if (!watching() || sending) return;
 
     let items = [];
     try {
@@ -147,10 +243,24 @@ export function createNotifier({
     }
 
     if (items.length === 0) {
-      // 上限に達していたら止める。止めたこと自体は1通だけ知らせる
-      if (watch.stats(now).overLimit) await pauseOverLimit(now);
+      // 上限に達していたら止める。止めたこと自体は1通だけ知らせる。
+      // **Slack が生きているときだけ。** 知らせる先が Slack なので、無いのに止めると
+      // 送れない Slack へ投げることになる（state を 'paused' にする道がここしか無い）
+      if (state === 'ok' && watch.stats(now).overLimit) await pauseOverLimit(now);
       return;
     }
+
+    sending = true;
+    // Windows の通知は Slack より先に出す。こちらは手元なので速く、Slack の応答待ち
+    // （最大 5 秒＋再送）に引きずられない
+    try {
+      await sendToasts(items);
+    } finally {
+      sending = false;
+    }
+    // Slack を設定していない（または止めている）なら、ここで終わり。
+    // 待ちは watch から取り出し済みなので、Slack のぶんとして返さない
+    if (state !== 'ok') return;
 
     sending = true;
     try {
@@ -237,7 +347,27 @@ export function createNotifier({
       lastOkAt,
       lastErrorAt,
       lastError,
+      // Windows の通知。Slack とは別に数える
+      toast: {
+        enabled: config.toast?.enabled === true,
+        wanted: config.toast?.wanted !== false,
+        state: toastStopped ? 'disabled' : (toastOn() ? 'ok' : 'off'),
+        reason: toastStopped ?? config.toast?.reason ?? null,
+        sent: toastSent,
+        failed: toastFailed,
+        lastError: toastLastError,
+      },
     };
+  }
+
+  /**
+   * watch に一覧を見せているか。server.mjs の見回りの間引き（30秒に落とすか）に使う。
+   * Slack だけで判断すると、Windows の通知しか入れていない人の通知が最大 30 秒遅れる
+   *
+   * @returns {boolean}
+   */
+  function active() {
+    return watching();
   }
 
   /**
@@ -249,12 +379,22 @@ export function createNotifier({
    * @returns {string|null} 設定が無ければ null（黙る）
    */
   function banner() {
-    if (!config.enabled) {
+    const lines = [];
+    if (config.enabled) {
+      const where = config.source === 'env' ? '環境変数' : '設定ファイル';
+      lines.push(`Slack 通知: 有効（${where} / ${config.urlMasked}）`);
+    } else if (config.error) {
       // 設定していないなら黙る。書き間違えているときだけ言う
-      return config.error ? `Slack 通知: 無効（${config.error}）` : null;
+      lines.push(`Slack 通知: 無効（${config.error}）`);
     }
-    const where = config.source === 'env' ? '環境変数' : '設定ファイル';
-    return `Slack 通知: 有効（${where} / ${config.urlMasked}）`;
+    // Windows の通知は既定で入りなので、入っているときは必ず言う（鳴る理由が分かるように）
+    if (config.toast?.enabled) {
+      lines.push(`Windows の通知: 有効（差出人 ${viaLauncher ? 'ClaudeDeck' : 'Windows PowerShell'}）`);
+    } else if (config.toast?.wanted && config.toast?.reason) {
+      lines.push(`Windows の通知: 無効（${config.toast.reason}）`);
+    }
+    // 複数行は server.mjs の字下げ（2字）に揃えて返す
+    return lines.length ? lines.join('\n  ') : null;
   }
 
   /**
@@ -270,8 +410,13 @@ export function createNotifier({
    * @param {number} [now] いまの時刻
    */
   function applyConfig(next, now = Date.now()) {
-    const wasOn = state === 'ok';
+    // 「見ていたか」で比べる。Slack だけで比べると、Windows の通知だけ入っていた人が
+    // Slack を足した瞬間に種まきし直して、いま待っているぶんを落とすことになる
+    const wasOn = watching();
     config = next;
+    // 設定を直したのだから、続けて失敗して止めていた Windows の通知も解く
+    toastStopped = null;
+    toastStreak = 0;
     watch.configure({
       settleMs: config.settleMs,
       idleSettleMs: config.idleSettleMs,
@@ -284,11 +429,13 @@ export function createNotifier({
       state = 'ok';
       reason = null;
       failStreak = 0;
-      if (!wasOn) watch.rearm(now);
     } else {
       state = 'off';
       reason = config.error ?? null;
     }
+    // 見ていなかったのが見るようになったときだけ種まきし直す。
+    // これが無いと、すでに何時間も待っているセッションが一斉に飛ぶ
+    if (!wasOn && watching()) watch.rearm(now);
   }
 
   /**
@@ -307,6 +454,10 @@ export function createNotifier({
       idleMin: Math.round(config.idleSettleMs / 60000),
       remindMin: Math.round(config.remindMs / 60000),
       detail: config.detail,
+      // Windows の通知。選んだ値（toast）と、実際に出せるか（toastEnabled / toastReason）を分けて返す
+      toast: config.toast?.wanted !== false,
+      toastEnabled: config.toast?.enabled === true,
+      toastReason: config.toast?.reason ?? null,
       states: { ...config.states },
       sources: { ...config.sources },
       envSet: { ...config.envSet },
@@ -372,5 +523,5 @@ export function createNotifier({
     }
   }
 
-  return { observe, flush, setBaseUrl, health, banner, applyConfig, settings, sendTest };
+  return { observe, flush, setBaseUrl, health, banner, applyConfig, settings, sendTest, active };
 }

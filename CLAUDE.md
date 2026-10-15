@@ -103,12 +103,12 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `src/read/` | `~/.claude` を読む | `paths` `cache` `registry` `transcript` `tasks` `plans` `subagents` `skills`（索引） `grep`（本文を探す） |
 | `src/parse/` | ログを解釈する | `entries` `meta` `state` `digest` ＋ `digest/`（`limits` `answers` `waits` `trim`） `usage`（数値） `stream`（実行中の行） |
 | `src/view/` | API 応答を組む | `sessions`（一覧） `detail` `summary` `shape` `archive`（書庫） `entry`（原文） `plans`（プランの系譜） `subagent`（調査記録） `usage`（数値） `query`（クエリの読み取り） |
-| `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） |
+| `src/notify/` | 回答待ちを外へ知らせる | `index`（配線） `watch`（状態機械） `message`（本文） `config`（読む） `settings`（書く） `slack`（送信） `toast`（Windows の通知の本文と行き先） |
 | `src/run/` | 画面から起こすセッション | `index`（配線） `ledger`（台帳と状態機械） `ask`（許可要求カードの組み立て） `merge`（一覧への合流） `spec`（起動指定の検証と argv） `event`（速報1件の畳み方） `dirs`（起こしてよいフォルダの登録） `defaults`（起こすときの既定値） `rate`（枠の使用率を紙に1枚） |
 | `src/update/` | ランチャが書いた更新の紙を読む | `state` |
 | `src/startup/` | ランチャが書いた自動起動の紙を読む | `state` |
 | `src/shared/` | どの層からも使う小道具 | `text`（`oneLine` / `clip`） `tools`（`describeTool` / `isLongRunningTool`） `appdata`（書き込み先） `configfile`（`config.json` の読み書き） `origin`（書き込み口の門番） `appinfo`（版） `portfile`（`port.json`） `portclaim`（ポートの取り合いの決め方） `env`（止めるスイッチの読み方） `objects`（`isPlainObject`） `lru`（`createLru`。**store は共有しない**） |
-| `src/os/` | OS を叩く | `focus` `claude`（CLI を探す・版を読む・行を割る） |
+| `src/os/` | OS を叩く | `focus` `claude`（CLI を探す・版を読む・行を割る） `toast`（Windows の通知を1枚出す） |
 
 流れは `read` → `parse` → `view` → `notify`。
 `shared` はどこからでも使えるが、逆に `shared` から他を import してはいけない。
@@ -427,6 +427,7 @@ Node 18 以降はプロセスごと終わる。画面が死ぬだけでなく通
 | 紙に書く**状態の語**（更新9つ・自動起動4つ＋旧方式4つ） | C# が書いて Node がラベルを引く。改名すると画面が「状態が分かりません」になるだけで、どこにもエラーが出ない |
 | `%LOCALAPPDATA%\ClaudeDeck\` の紙6つの**ファイル名** | 旧ファイルが**永久に残る**。消すコードを誰も持っていない |
 | `config.json` の既存キー名 | **移行コードが1行も無い。** Slack の Webhook と「起こしてよいフォルダ」が黙って消える |
+| `claude-deck://`（押した先の口）と `ClaudeDeck`（通知の差出人の登録名） | ランチャが Windows に登録し、Node が同じ名前で通知を出す（`notify/toast.mjs` の `PROTOCOL` / `TOAST_APP_ID`）。変えると**通知が黙って出なくなる**（登録の無い名前のトーストは Windows が捨てる）か、押しても何も起きなくなる |
 | `update.json` の `requested` / `prevPort` | 更新のあとの版の照合と、窓の復帰が死ぬ |
 | `$PACK_ID` / `$REPO_URL` / `$MAIN_EXE`（`scripts/release.ps1`） | **いま使っている人の手元で、更新が二度と当たらなくなる** |
 
