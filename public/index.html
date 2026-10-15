@@ -329,6 +329,20 @@
       <!-- 通知。ここだけが足の「保存」で効く -->
       <div class="settings-pane" data-sec="notify">
 
+        <!-- 通知先。Windows の通知は既定で入り（外へ何も送らない）。Slack は下の URL を入れると加わる。
+             見た目は「鳴らす状態」のチェックボックス（.settings-states）を借りる。
+             出せないとき（止めるスイッチ・Windows 以外）の理由は settings.js が添え書きに入れる -->
+        <section class="settings-sec">
+          <h3 class="settings-h3 has-icon" data-icon="bell">通知先</h3>
+          <ul class="settings-states">
+            <li><label>
+              <input type="checkbox" id="set-toast">
+              <span>Windows の通知</span>
+              <span class="note" id="set-toast-note"></span>
+            </label></li>
+          </ul>
+        </section>
+
         <!-- 入力欄は常に空で開き、いまの値は placeholder にマスクで出す。
              「変えない」を空欄で表せるので、****  のような偽の値を置かずに済む。
              偽の値を置くと、それをそのまま保存して URL を壊す事故が起きる -->
@@ -467,7 +481,8 @@
 
         <section class="settings-sec settings-read">
           <h3 class="settings-h3 has-icon" data-icon="bell">通知の様子</h3>
-          <p class="settings-hint" id="settings-health"></p>
+          <!-- 送り先ごとに1行（Slack と Windows の通知）。改行は settings.js が入れ、pre-line で効かせる -->
+          <p class="settings-hint is-lines" id="settings-health"></p>
           <p class="settings-path" id="settings-path"></p>
         </section>
       </div>

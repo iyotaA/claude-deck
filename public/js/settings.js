@@ -127,9 +127,12 @@ function fillStatus(s) {
 
   // 足の1行。**短く保つ。** 隣に結果のメッセージとボタン2つが並ぶので、
   // 理由まで書くとボタンが押し出される
+  // 送り先が2つ（Slack と Windows の通知）。どちらが生きているかを短く並べる
+  const t = h.toast ?? {};
   dom.settingsState.textContent =
-    `${s.enabled ? '有効' : '無効'} / 送信 ${h.sent ?? 0} / 失敗 ${h.failed ?? 0}`;
-  dom.settingsState.dataset.on = s.enabled ? '1' : '0';
+    `Slack ${s.enabled ? '有効' : '無効'}・Windows ${s.toastEnabled ? '有効' : '無効'}`
+    + ` / 送信 ${(h.sent ?? 0) + (t.sent ?? 0)} / 失敗 ${(h.failed ?? 0) + (t.failed ?? 0)}`;
+  dom.settingsState.dataset.on = s.enabled || s.toastEnabled ? '1' : '0';
 
   // 「いまの様子」の節。**鳴らない理由はこちらに置く。**
   // 足は通知の節でしか出ないので、そこだけに書くと他の節から辿り着けない。
@@ -141,8 +144,14 @@ function fillStatus(s) {
     why.push(`停止中: ${h.reason}`);
   }
   why.push(`送信 ${h.sent ?? 0}`, `失敗 ${h.failed ?? 0}`);
+  // Windows の通知は別の送り先。止めた理由（続けて失敗した・出せない）も別に言う
+  const toastWhy = [];
+  if (t.state === 'disabled' && t.reason) toastWhy.push(`停止中: ${t.reason}`);
+  else if (!s.toastEnabled && s.toastReason) toastWhy.push(s.toastReason);
+  toastWhy.push(`出した ${t.sent ?? 0}`, `失敗 ${t.failed ?? 0}`);
   dom.settingsHealth.textContent =
-    `${s.enabled ? '通知は有効' : '通知は無効'} / ${why.join(' / ')}`;
+    `Slack ${s.enabled ? '有効' : '無効'} / ${why.join(' / ')}\n`
+    + `Windows の通知 ${s.toastEnabled ? '有効' : '無効'} / ${toastWhy.join(' / ')}`;
 
   // マスク済みしか来ない。生の URL はサーバが返さないので、ここに現れようがない
   dom.setUrl.placeholder = s.target ?? 'まだ設定されていません';
@@ -199,6 +208,12 @@ function fill(s) {
   dom.setIdle.value = s.idleMin ?? '';
   dom.setRemind.value = s.remindMin ?? '';
   dom.setDetail.value = s.detail === 'none' ? 'none' : 'full';
+  // 選んだ値（toast）と、実際に出せるか（toastEnabled / toastReason）は別。
+  // 入れていても出せないとき（止めるスイッチ・Windows 以外）は、その理由を添え書きに出す
+  dom.setToast.checked = s.toast !== false;
+  dom.setToastNote.textContent = s.toast !== false && s.toastReason
+    ? `出せません: ${s.toastReason}`
+    : 'この PC の右下に出す。外へは何も送らない。押すとそのセッションを開く';
 }
 
 /** いまの設定を引いて画面へ入れる。 */
@@ -555,6 +570,7 @@ function collect() {
   }
 
   body.detail = dom.setDetail.value;
+  body.toast = dom.setToast.checked;
 
   body.states = {};
   for (const box of dom.setStates.querySelectorAll('input[type="checkbox"]')) {
