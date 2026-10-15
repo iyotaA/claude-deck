@@ -17,6 +17,7 @@
 | `EdgeWindow.cs` | Edge を探してアプリモードで開く。無ければ既定のブラウザ |
 | `Updates.cs` | 確認・落とす・当てる。`update.json` を書く |
 | `Startup.cs` | HKCU Run への登録と、前の方式の `.lnk` の無効化 |
+| `Toast.cs` | Windows の通知の登録（押した先 `claude-deck://` と差出人 `ClaudeDeck`）と、押された URL の読み取り |
 | `Log.cs` | `launcher.log` と、人が押したときだけ出すダイアログ |
 | `Paper.cs` | 紙を書く（一時ファイル → rename）。紙に載せる前に切る（`Clip` / `ERROR_MAX`）もここ |
 | `JsonRead.cs` | 紙を読む（`JsonDocument`） |
@@ -132,7 +133,32 @@ package.json "version"
 3つが同期するのではなく、**2つが1つから派生する。**
 C# 側に版を書き写さない。`vpk` に手で打たない。
 
+### Windows の通知を押したとき
+
+通知を出すのは Node（`src/notify/toast.mjs`）。ランチャは**登録と、押されたあと**を受け持つ。
+
+```
+押す → Windows が "<スタブ>" --open-url "claude-deck://open?session=<id>" で起こす
+     → Toast.SessionFromUrl で id を取り出す（形が違えば窓を開くだけ）
+     → EnsureRunningAsync → POST /api/reveal?session=<id>（速報で画面が選ぶ）
+     → EdgeWindow.Open(port, "?session=<id>")（開いていれば前に出すだけ）
+```
+
+登録先はどちらも HKCUSoftwareClasses の下（管理者権限は要らない）。
+
+| キー | 中身 |
+|---|---|
+| `claude-deckshellopencommand` | `"<スタブ>" --open-url "%1"` |
+| `AppUserModelIdClaudeDeck` | `DisplayName` と `IconUri`（`public/favicon-192.png`）。**これが無いと Windows はトーストを黙って捨てる** |
+
+入れるのは `OnFirstRun` と、ふつうの起動のたびの `Toast.Sync()`（同じ値なら書かない）。
+消すのは `OnBeforeUninstallFastCallback`（自分を指している口だけ）。
+**入れた版でないときは登録しない**（`Startup.Sync` と同じ割り切り）。そのため開発中のランチャ経由では通知が出ない（`npm start` なら PowerShell の名前で出る）。
+
 ## 触るときに壊してはいけないこと（ランチャ・配布）
+
+- **`Toast.PROTOCOL`（`claude-deck`）・`Toast.APP_ID`（`ClaudeDeck`）・`--open-url` を変えない。** Node 側と同じ文字列で照合している（`test/contract.test.mjs`）。登録はふつうの起動のたびに直るが、**古い登録を消すコードは誰も持たない**
+- **押された URL を形も見ずにサーバーへ渡さない。** URL は他のアプリからも叩ける。`Toast.SessionFromUrl` は `open?session=` の形と、id の文字（英数字・`_`・`-` で 64 字まで）を確かめる。サーバーの `/api/reveal` も同じ形で確かめる（境界を1枚にしない）
 
 - **packId を `ClaudeDeck` にしない。** Velopack の既定の入れ先は `%LocalAppData%\{packId}` なので、書き込み先の `%LOCALAPPDATA%\ClaudeDeck\` とまるかぶりになり、アンインストールで `config.json`（**生の Webhook URL 入り**）が黙って消える。`--packId ClaudeDeckApp` ＋ `--packTitle ClaudeDeck` で分ける
 - **Edge の窓を閉じない。** 他アプリの窓を勝手に殺すのは行儀が悪い。`CLAUDE_DECK_PORT` に前のポートを渡して立て直し、開いたままの窓が自力で戻れるようにする

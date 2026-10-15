@@ -63,6 +63,7 @@ ClaudeDeck.exe --stop            POST /api/quit で止める
 ClaudeDeck.exe --status          診断。コンソールへ出す
 ClaudeDeck.exe --check-update    更新の確認だけを手で走らせる。結果をコンソールへ出す
 ClaudeDeck.exe --install-startup / --uninstall-startup
+ClaudeDeck.exe --open-url <URL>  Windows の通知を押したときに Windows が渡してくる。窓を前に出してそのセッションを開く
 ```
 
 置き場所は `%LOCALAPPDATA%\ClaudeDeckApp\ClaudeDeck.exe`。
@@ -428,7 +429,7 @@ Node 18 以降はプロセスごと終わる。画面が死ぬだけでなく通
 | 紙に書く**状態の語**（更新9つ・自動起動4つ＋旧方式4つ） | C# が書いて Node がラベルを引く。改名すると画面が「状態が分かりません」になるだけで、どこにもエラーが出ない |
 | `%LOCALAPPDATA%\ClaudeDeck\` の紙6つの**ファイル名** | 旧ファイルが**永久に残る**。消すコードを誰も持っていない |
 | `config.json` の既存キー名 | **移行コードが1行も無い。** Slack の Webhook と「起こしてよいフォルダ」が黙って消える |
-| `claude-deck://`（押した先の口）と `ClaudeDeck`（通知の差出人の登録名） | ランチャが Windows に登録し、Node が同じ名前で通知を出す（`notify/toast.mjs` の `PROTOCOL` / `TOAST_APP_ID`）。変えると**通知が黙って出なくなる**（登録の無い名前のトーストは Windows が捨てる）か、押しても何も起きなくなる |
+| `claude-deck://`（押した先の口）と `ClaudeDeck`（通知の差出人の登録名）と `--open-url`（登録したコマンドの命令） | ランチャが Windows に登録し、Node が同じ名前で通知を出す（`notify/toast.mjs` の `PROTOCOL` / `TOAST_APP_ID`、`launcher/Toast.cs`）。変えると**通知が黙って出なくなる**（登録の無い名前のトーストは Windows が捨てる）か、押しても何も起きなくなる |
 | `update.json` の `requested` / `prevPort` | 更新のあとの版の照合と、窓の復帰が死ぬ |
 | `$PACK_ID` / `$REPO_URL` / `$MAIN_EXE`（`scripts/release.ps1`） | **いま使っている人の手元で、更新が二度と当たらなくなる** |
 

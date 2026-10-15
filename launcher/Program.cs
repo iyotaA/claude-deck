@@ -40,7 +40,8 @@ static class Program
         //
         // これは引数の解析ではないので、すぐ下のきまりには触れない。
         Log.Open();
-        Log.Line($"ClaudeDeck {Paths.Version} 引数=[{string.Join(' ', args)}]");
+        // 引数には Windows の通知から来た URL（外から叩ける）が入るので、改行を除いて切ってから書く
+        Log.Line($"ClaudeDeck {Paths.Version} 引数=[{Toast.ForLog(string.Join(' ', args))}]");
         Log.Line($"  自分    : {Environment.ProcessPath}");
         Log.Line($"  app     : {Paths.AppDir ?? "(見つからない)"}");
         Log.Line($"  node    : {Paths.NodeExe ?? "(見つからない)"}{(Paths.NodeBundled ? "（同梱）" : "")}");
@@ -61,9 +62,18 @@ static class Program
         // OnBeforeUninstallFastCallback は走り終えると Velopack が
         // そのまま Environment.Exit を呼ぶ（30秒の制限つき）。
         // Log は AutoFlush なので、Close を通らなくても記録は残る。
+        // 通知の登録（Toast）も同じ2か所で入れて消す。Toast 側も投げない作り
         VelopackApp.Build()
-            .OnFirstRun(_ => Startup.Install())
-            .OnBeforeUninstallFastCallback(_ => Startup.Uninstall())
+            .OnFirstRun(_ =>
+            {
+                Startup.Install();
+                Toast.Register();
+            })
+            .OnBeforeUninstallFastCallback(_ =>
+            {
+                Startup.Uninstall();
+                Toast.Unregister();
+            })
             .Run();
 
         return MainAsync(args).GetAwaiter().GetResult();
@@ -109,6 +119,8 @@ static class Program
             "--restarted" => await RunRestartedAsync(),
             "--install-startup" => RunStartup(install:true),
             "--uninstall-startup" => RunStartup(install:false),
+            // Windows の通知を押したとき。Windows が登録したコマンド（Toast.Command）で起こす
+            Toast.OPEN_URL_FLAG => await RunOpenUrlAsync(args),
 
             _ => NotImplemented(command),
         };
@@ -155,6 +167,43 @@ static class Program
         return ok ? ExitCode.OK : ExitCode.STARTUP_FAILED;
     }
 
+    /// <summary>
+    /// Windows の通知を押したとき。窓を前に出して、そのセッションを開く。
+    ///
+    /// 窓（Edge）は「開いていれば前に出すだけ」で URL を渡せないので、どのセッションを
+    /// 選ぶかはサーバーに頼む（POST /api/reveal → 速報で画面へ）。窓が無ければ
+    /// ?session= 付きで新しく開くので、どちらの経路でもそのセッションが出る。
+    ///
+    /// URL の形が違う（セッションが取れない）ときは、窓を開くだけにする。
+    /// </summary>
+    static async Task<int> RunOpenUrlAsync(string[] args)
+    {
+        var at = Array.IndexOf(args, Toast.OPEN_URL_FLAG);
+        var url = at >= 0 && at + 1 < args.Length ? args[at + 1] : null;
+        var session = Toast.SessionFromUrl(url);
+        Log.Line(session is null
+            ? $"通知から起こされましたが、セッションが読めませんでした: {Toast.ForLog(url)}"
+            : $"通知から起こされました: セッション {session}");
+
+        int port;
+        try
+        {
+            port = await ServerProcess.EnsureRunningAsync(preferPort: 0);
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal(ex);
+            Log.Box("ClaudeDeck を起動できませんでした", ex.Message);
+            return ExitCode.SERVER_FAILED;
+        }
+
+        // 先に頼んでから窓を前へ出す。逆だと、前に出た窓が一瞬だけ前のセッションを映す
+        if (session is not null) await ServerProcess.RevealAsync(port, session);
+
+        var query = session is null ? "" : $"?session={Uri.EscapeDataString(session)}";
+        return EdgeWindow.Open(port, query) ? ExitCode.OK : ExitCode.WINDOW_FAILED;
+    }
+
     /// <summary>ふつうの起動。立っていなければ立てて、必要なら窓を開く。</summary>
     static async Task<int> RunNormalAsync(bool openWindow)
     {
@@ -163,6 +212,8 @@ static class Program
         // 旧方式が残っていると次のログオンで node が二重に立ち、
         // 後から立ったほうが 4318 へずれて「画面は出るのに設定が反映されない」になる
         Startup.Sync();
+        // 通知の行き先と差出人。食い違っていれば直す（同じなら書かない）
+        Toast.Sync();
 
         int port;
         try
