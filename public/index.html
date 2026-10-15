@@ -507,8 +507,8 @@
      （run-form.js が借りたのと同じ作法。器の寸法だけ about.css に書いてある）。
      左で節を選び右に中身を出す形も同じで、出し分けは CSS が data-sec でやる。
 
-     **中身のほとんどは静的に置く。** JS が組むのは凡例2つ（状態の点・経過の印）と
-     版の1行だけで、どれも既にある表から引く ―― 種類や状態が1つ増えた日に
+     **中身のほとんどは静的に置く。** JS が組むのは凡例4つ（状態の点・経過の印・札・上のバーのメーター）と
+     版の1行と本文の絵だけで、どれも既にある表から引く ―― 種類や状態が1つ増えた日に
      凡例だけが古くなることを防ぐため -->
 <dialog class="settings about" id="about" data-sec="what" aria-labelledby="about-title">
 
@@ -524,6 +524,7 @@
     <div class="settings-nav" id="about-nav" role="group" aria-label="説明の節">
       <button class="settings-navb" type="button" data-sec="what" aria-pressed="true">このアプリは</button>
       <button class="settings-navb" type="button" data-sec="screen" aria-pressed="false">画面の見かた</button>
+      <button class="settings-navb" type="button" data-sec="can" aria-pressed="false">できること</button>
       <button class="settings-navb" type="button" data-sec="marks" aria-pressed="false">印の意味</button>
       <button class="settings-navb" type="button" data-sec="words" aria-pressed="false">数値の言葉</button>
       <button class="settings-navb" type="button" data-sec="about" aria-pressed="false">この版について</button>
@@ -547,14 +548,24 @@
           <h3 class="settings-h3">安全のために決めてあること</h3>
           <p class="settings-hint">
             Claude Code が <code>~/.claude</code> に書いたファイルを<strong>読むだけ</strong>です。
-            あそこへは1バイトも書きません。
+            このアプリがあそこへ書くことはありません。
+          </p>
+          <!-- 画面から起こせるようになってから、「1バイトも書かない」だけでは足りなくなった。
+               書くのは Claude Code 本人で、どこで起こせるかは人が決める、までを言う -->
+          <p class="settings-hint">
+            画面からセッションを起こしたときに動くのは <strong>Claude Code 本人</strong>です。
+            会話ログや作業フォルダへ書くのはそちらで、起こせるのは設定の「作業フォルダ」に足した場所だけです。
           </p>
           <p class="settings-hint">
             受け付けるのは <code>127.0.0.1</code> だけです。
             会話ログには仕事の中身が入るので、社内ネットからは見えません。
           </p>
           <p class="settings-hint">
-            このアプリが書くのは <code>%LOCALAPPDATA%\ClaudeDeck\</code> の下だけです。
+            このアプリが自分で書くのは <code>%LOCALAPPDATA%\ClaudeDeck\</code> の下だけです（設定・ピンとメモ・更新の記録）。
+          </p>
+          <p class="settings-hint">
+            入れた版（<code>ClaudeDeck.exe</code>）は、ほかに Windows へ3つだけ登録します。
+            ログオン時の自動起動・通知の差出人「ClaudeDeck」・通知を押したときの開き口 <code>claude-deck://</code>。
           </p>
           <p class="settings-hint">
             依存パッケージはゼロ。Node.js 18 以降の標準モジュールだけで動きます。
@@ -568,6 +579,17 @@
           <p class="settings-hint"><strong>作業台</strong> — いま動いているものを見て、答える場所。</p>
           <p class="settings-hint"><strong>書庫</strong> — 終わったものも含めて、過去を探す場所。</p>
           <p class="settings-hint"><strong>数値</strong> — セッションを跨いで、何が文脈を食っているかを見る場所。</p>
+        </section>
+
+        <section class="settings-sec">
+          <h3 class="settings-h3">作業台は上から5つ</h3>
+          <p class="settings-hint"><strong>上のバー</strong> — 状態ごとの数と、枠の使用率（5時間・7日）。</p>
+          <p class="settings-hint"><strong>あなたの番の帯</strong> — 答えないと1行も進まないものだけが並びます。
+            「開く」「答える」を押すと1行に畳み、右上の ⌄ で広げます。</p>
+          <p class="settings-hint"><strong>左の一覧</strong> — いちばん上にピン留め、その下は状態ごと。終わったものは新しい5件だけ出します。</p>
+          <p class="settings-hint"><strong>中央の詳細</strong> — 題・メモ・☆ の頭、入力欄、タブ（経過・成果・いま・調査）の順。
+            「拡大」で大きく開けます。</p>
+          <p class="settings-hint"><strong>右のレール</strong> — そのセッションの数値と診断。</p>
         </section>
 
         <section class="settings-sec">
@@ -592,11 +614,63 @@
         </section>
       </div>
 
+      <!-- できること。**機能を足したらここにも1つ足す。** 長く「画面の見かた」がモード3つだけで、
+           通知・ピンとメモ・今日のまとめがどこにも書かれていなかった（2026-10-15 に見直した）。
+           見出しの絵は about.js が data-icon から差す -->
+      <div class="settings-pane" data-sec="can">
+        <section class="settings-sec">
+          <h3 class="settings-h3 has-icon" data-icon="plus">起こす・答える</h3>
+          <p class="settings-hint">上のバーの <strong>＋起こす</strong> で、作業フォルダに新しいセッションを起こせます。
+            この画面から起こしたもの（札「この画面から」）は、許可や質問にここから答えられ、
+            止める・モデルを替えて続けるもできます。</p>
+          <p class="settings-hint">ターミナルで動いているものは、<strong>窓を前に出すところまで</strong>です。</p>
+        </section>
+        <section class="settings-sec">
+          <h3 class="settings-h3 has-icon" data-icon="front">待ちを順に片づける</h3>
+          <p class="settings-hint">拡大で開いているとき、頭の <strong>← 前／次の待ち →</strong> で、
+            止まっているセッションを帯と同じ順に回れます。</p>
+        </section>
+        <section class="settings-sec">
+          <h3 class="settings-h3 has-icon" data-icon="bell">通知</h3>
+          <p class="settings-hint">答えないと進まないセッションが出たら、<strong>Windows の通知</strong>と Slack で知らせます
+            （設定の「通知」で選べます）。Windows の通知を押すと、そのセッションを開きます。</p>
+        </section>
+        <section class="settings-sec">
+          <h3 class="settings-h3 has-icon" data-icon="star">ピン留めとメモ</h3>
+          <p class="settings-hint">詳細の頭の ☆ でピン留め、✎ でひとことメモ。
+            ピンを付けたものは<strong>終わっても作業台のいちばん上に残ります。</strong>メモはこの PC だけに置きます。</p>
+        </section>
+        <section class="settings-sec">
+          <h3 class="settings-h3 has-icon" data-icon="doc">今日のまとめ</h3>
+          <p class="settings-hint">書庫の頭の <strong>今日のまとめ</strong> か Ctrl+K から。
+            その日に決めたことと書き換えたファイルを1枚に並べ、Markdown でコピーできます。</p>
+        </section>
+      </div>
+
       <!-- 凡例は about.js が組む。**画面側に表を持たない** -->
       <div class="settings-pane" data-sec="marks">
         <section class="settings-sec">
           <h3 class="settings-h3">一覧の点 — いま誰の番か</h3>
           <ul class="about-legend is-state" id="about-states"></ul>
+        </section>
+
+        <!-- 行に足されるもの。絵は about.js が data-icon から差す。
+             **メーターの段（何 % で色が変わるか）は about.js が runs.js の RATE_WARN / RATE_HOT から組む**
+             （しきい値を2箇所に書かない） -->
+        <section class="settings-sec">
+          <h3 class="settings-h3">一覧の行に足されるもの</h3>
+          <ul class="about-legend">
+            <li><span class="lg-star" data-icon="star"></span><span><span class="lg-name">ピン留め</span><span class="lg-kinds">終わっても作業台のいちばん上に残します</span></span></li>
+            <li><span class="lg-memo">メモ</span><span><span class="lg-name">メモ</span><span class="lg-kinds">自分で書いたひとこと。行の2行目と詳細の頭に出ます</span></span></li>
+            <li><span class="lg-now">4/7</span><span><span class="lg-name">いま何をしているか</span><span class="lg-kinds">動いている行だけの2行目。TODO の進みと、いま走っている手</span></span></li>
+          </ul>
+        </section>
+
+        <section class="settings-sec">
+          <h3 class="settings-h3">上のバーのメーター — 枠の使用率</h3>
+          <ul class="about-legend is-meter" id="about-meters"></ul>
+          <p class="settings-hint">5h は5時間ごとの枠、7d は7日の枠。アカウントで1つなので、上のバーにだけ出します。
+            古い値には「いつ測ったか」を添えます。</p>
         </section>
 
         <section class="settings-sec">
@@ -632,6 +706,13 @@
             （数え方が違うため）。上でモデルを1つ選ぶと出ます。
           </p>
         </section>
+        <section class="settings-sec">
+          <h3 class="settings-h3">古い N 本より ±x%</h3>
+          <p class="settings-hint">
+            概要の札に添える差です。読んだセッションを時刻で前と後ろに半分ずつ分け、
+            1本あたりで比べています。<strong>多いのが悪いとは限りません</strong>（長く働いた日かもしれません）。
+          </p>
+        </section>
         <section class="settings-sec settings-read">
           <h3 class="settings-h3">スキルの割合は「原因」ではありません</h3>
           <p class="settings-hint">
@@ -658,12 +739,15 @@
           <h3 class="settings-h3">置き場所</h3>
           <p class="settings-hint">読んでいるところ　<code>~/.claude</code>（読み取りのみ）</p>
           <p class="settings-hint">書いているところ　<code>%LOCALAPPDATA%\ClaudeDeck\</code></p>
+          <p class="settings-hint">　└ <code>config.json</code>　通知・作業フォルダ・起こすときの既定</p>
+          <p class="settings-hint">　└ <code>marks.json</code>　ピンとメモ</p>
+          <p class="settings-hint">入れた版の置き場所　<code>%LOCALAPPDATA%\ClaudeDeckApp\</code></p>
         </section>
 
         <section class="settings-sec">
           <p class="settings-hint">
-            通知（Slack）や、画面から起こしてよいフォルダの設定は
-            <strong>設定</strong>（歯車）から変えられます。
+            通知（Slack・Windows の通知）・作業フォルダ・起こすときの既定は
+            <strong>設定</strong>（歯車）から変えられます。いまの様子（自動起動・通知が鳴らない理由）もそこで見られます。
           </p>
         </section>
       </div>
@@ -671,9 +755,11 @@
     </div>
   </div>
 
-  <!-- 足は1行だけ。**読み取り専用であることを常設で出す** ―― 節を移っても消えない -->
+  <!-- 足は1行だけ。**~/.claude を読むだけであることを常設で出す** ―― 節を移っても消えない。
+       長く「読み取り専用で動いています」だったが、起こす・答える・ピンとメモを足してから
+       アプリ全体としては読み取り専用ではなくなった。正しく言えるのは ~/.claude の側だけ -->
   <div class="settings-foot">
-    <p class="settings-hint">読み取り専用で動いています</p>
+    <p class="settings-hint"><code>~/.claude</code> は読むだけです</p>
   </div>
 
 </dialog>

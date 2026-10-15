@@ -4,7 +4,7 @@
  * `<dialog>` ＋ `showModal()`（Esc・背面の膜・焦点の閉じ込めがタダで付く）。
  *
  * **中身のほとんどは `index.html` に静的に置いてある。**
- * ここが組むのは凡例2つ（状態の点・経過の印）と版の1行だけ。
+ * ここが組むのは凡例4つ（状態の点・経過の印・札・上のバーのメーター）と版の1行、本文の絵だけ。
  *
  * ## 凡例を画面側に持たない
  *
@@ -20,6 +20,7 @@
  * | 群と種類の対応 | `timeline/kinds.js` の `KIND_MARK` ＋ `MARK_GROUPS` |
  * | 種類の日本語 | `timeline/kinds.js` の `KIND_LABELS` |
  * | 版 | `/api/update` の `current`（上のバーの `#ver` と同じ出どころ） |
+ * | メーターの色が変わる割合 | `runs.js` の `RATE_WARN` / `RATE_HOT` |
  *
  * **形の名前（菱形・輪…）は1文字も書かない。** 実物の点をそのまま置けば、
  * 形は見れば分かるし、`list.css` を直した日にここが嘘になることもない。
@@ -35,14 +36,16 @@ import { dom } from './dom.js';
 import { closeOnBackdrop } from './modal.js';
 import { store, SUMMARY_ORDER, STATE_TONE, toneOf, colorOf } from './store.js';
 import { KIND_LABELS, KIND_MARK, MARK_GROUPS } from './timeline/kinds.js';
+import { RATE_HOT, RATE_WARN } from './runs.js';
 
 /**
- * 節の左ナビに差す絵。**この5つはここでしか使わない**ので、
+ * 節の左ナビに差す絵。**この6つはここでしか使わない**ので、
  * `main.js` ではなくこちらで差す（`settings.js` と同じ流儀）。
  */
 const SEC_ICON = {
   what: 'deck',
   screen: 'sidebar',
+  can: 'plus',
   marks: 'info',
   words: 'chart',
   about: 'gear',
@@ -170,6 +173,35 @@ function fillTags() {
 }
 
 /**
+ * 上のバーのメーターの凡例。**何 % で色が変わるかは `runs.js` の定数から作る**
+ * （しきい値を2箇所に書くと、片方だけ直した日に凡例が嘘になる）。
+ * 見本の棒は上のバーと同じ部品（`.rate-meter` と `data-tone`）で描く。
+ */
+function fillMeters() {
+  const pct = (v) => `${Math.round(v * 100)}%`;
+  const rows = [
+    { tone: '', ratio: RATE_WARN / 2, name: `${pct(RATE_WARN)} 未満`, note: 'ふだんの色' },
+    { tone: 'warn', ratio: (RATE_WARN + RATE_HOT) / 2, name: `${pct(RATE_WARN)} から`, note: 'そろそろ枠が尽きます。走らせている作業を畳む頃合い' },
+    { tone: 'hot', ratio: (RATE_HOT + 1) / 2, name: `${pct(RATE_HOT)} から`, note: 'もうすぐ止まります' },
+  ];
+  dom.aboutMeters.replaceChildren();
+  for (const r of rows) {
+    const meter = el('span', 'rate-meter');
+    if (r.tone) meter.dataset.tone = r.tone;
+    const bar = el('span', 'rate-bar');
+    const fill = el('i');
+    fill.style.width = pct(r.ratio);
+    bar.append(fill);
+    meter.append(bar);
+    const text = el('span');
+    text.append(el('span', 'lg-name', r.name), el('span', 'lg-kinds', r.note));
+    const li = el('li');
+    li.append(meter, text);
+    dom.aboutMeters.append(li);
+  }
+}
+
+/**
  * 版の1行。
  *
  * **出どころは `/api/update` の `current`。** 上のバーの `#ver` と同じところから取る
@@ -208,6 +240,7 @@ function open() {
   fillStates();
   fillKinds();
   fillTags();
+  fillMeters();
   fillVersion();
   dom.about.showModal();
 }
@@ -217,6 +250,11 @@ export function initAbout() {
   for (const btn of dom.aboutNav.children) {
     const name = SEC_ICON[btn.dataset.sec];
     if (name) btn.prepend(icon(name));
+  }
+  // 本文の絵（「できること」の見出しと、行の凡例の ☆）。差す場所は data-icon の印
+  // （設定モーダル・起こすフォームと同じ作法）。器は動かないので1回だけ差す
+  for (const node of dom.about.querySelectorAll('.settings-body [data-icon]')) {
+    node.prepend(icon(node.dataset.icon));
   }
 
   dom.aboutOpen.addEventListener('click', open);
