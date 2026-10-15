@@ -269,22 +269,22 @@ function pickFromHero(row) {
 }
 
 /**
- * 畳む・広げるのボタンを組む。押すと組み直しで自分が消えるので、
- * 入れ替わった相方のボタンへ焦点を渡す（キーボードで連続して押せるように）。
- * @param {string} label ボタンの字
- * @param {boolean} on 押したら畳むなら true
- * @returns {HTMLElement}
+ * 畳む・広げるのボタン。**1つだけ作り、帯の外（器 `.hero-wrap`）の右上に固定する。**
+ *
+ * 前は帯の中に置いて、畳む・広げるたびに作り直していた。帯の高さ（広げると 260px、
+ * 畳むと 42px）の真ん中に来るので、押すたびにボタンが上下へ動き、
+ * 続けて押すのにカーソルを追いかけることになった（実測の指摘）。
+ * 位置は動かさず、字（畳む／広げる）だけを入れ替える。節点が消えないので焦点もそのまま残る。
+ * 作るのは initHero の1回だけ。
  */
-function foldButton(label, on) {
-  const btn = el('button', 'btn hero-fold-btn', label);
-  btn.type = 'button';
-  // いま広がっているか。「畳む」を出しているときは広がっている
-  btn.setAttribute('aria-expanded', String(on));
-  btn.addEventListener('click', () => {
-    setHeroFolded(on);
-    dom.heroBand.querySelector('.hero-fold-btn')?.focus({ preventScroll: true });
-  });
-  return btn;
+let foldBtn = null;
+
+/** ボタンの字と aria-expanded を、いまの畳み具合に合わせる */
+function syncFoldButton() {
+  if (!foldBtn) return;
+  foldBtn.textContent = heroFolded ? '広げる' : '畳む';
+  // いま広がっているか
+  foldBtn.setAttribute('aria-expanded', String(!heroFolded));
 }
 
 /**
@@ -444,13 +444,12 @@ export function renderHero() {
     const label = el('span', 'hero-fold-label', `あなたの番 ${rows.length}`);
     dom.heroBand.append(label);
     for (const row of rows) dom.heroBand.append(buildHeroChip(row, heroPrimed && !heroSeen.has(row.sessionId)));
-    dom.heroBand.append(foldButton('広げる', false));
   } else {
     delete dom.heroWrap.dataset.fold;
     for (const row of rows) dom.heroBand.append(buildHeroCard(row));
-    // 自分で畳む口。開かずに畳みたいとき（帯が詳細を押し下げているのが邪魔なとき）
-    dom.heroBand.append(foldButton('畳む', true));
   }
+  // 自分で畳む・広げる口。開かずに畳みたいとき（帯が詳細を押し下げているのが邪魔なとき）にも使う
+  syncFoldButton();
   // 見せた札を覚える。広げているあいだに見たものも「見た」に数える
   heroSeen = new Set(rows.map((r) => r.sessionId));
   heroPrimed = true;
@@ -475,6 +474,12 @@ function syncHeroEdge() {
 
 /** 帯の膜を配線する。`main.js` から1回だけ呼ぶ。 */
 export function initHero() {
+  foldBtn = el('button', 'btn hero-fold-btn');
+  foldBtn.type = 'button';
+  foldBtn.addEventListener('click', () => setHeroFolded(!heroFolded));
+  dom.heroWrap.append(foldBtn);
+  syncFoldButton();
+
   dom.heroBand.addEventListener('scroll', syncHeroEdge, { passive: true });
   // 窓の幅が変わると、そもそも溢れているかどうかが変わる
   window.addEventListener('resize', syncHeroEdge);

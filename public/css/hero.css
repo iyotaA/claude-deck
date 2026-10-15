@@ -20,6 +20,11 @@
    膜も一緒に流れて、いつも同じ場所に居てくれない */
 .hero-wrap {
   position: relative;
+  /* **最小幅を 0 にする。** .app（grid）の子は既定で中身の幅より縮まない。
+     畳んだ札（flex: none・折り返さない）が多いと、器が札の幅まで伸びて
+     ページごと横にはみ出していた（実測で 1440px の窓に 1856px）。
+     0 にすれば、溢れたぶんは帯（.hero-band）の中で横へ送る */
+  min-width: 0;
   background:
     radial-gradient(130% 150% at 0% 0%, var(--accent-soft), transparent 60%),
     var(--bg-sunk);
@@ -68,19 +73,25 @@
   scroll-snap-type: x proximity;
 }
 
-/* 「畳む」「広げる」。**右端に貼り付ける**（sticky）。札が横へ溢れても、
-   送らずに押せる場所に居てほしい。膜（::after の z-index: 2）より上に置く */
+/* 「畳む」「広げる」。**器の右上に固定する。帯の中には置かない。**
+   帯の中だと、帯の高さ（広げると 260px、畳むと 42px）の真ん中へ来るので、
+   押すたびにボタンが上下へ動いた（実測の指摘）。top は畳んだ帯（42px）の中央に
+   揃う値で、広げたときも同じ位置に居る。字が変わっても右端が揃うよう、幅の下限を置く。
+   膜（::after の z-index: 2）より上に置く */
 .hero-fold-btn {
-  position: sticky;
-  right: 0;
+  position: absolute;
+  top: .4rem;
+  right: 1rem;
   z-index: 3;
-  flex: none;
-  align-self: center;
-  margin-left: auto;
-  /* 札が溢れると最後の1枚の上に重なる（スクロールする帯の上に浮く）。
-     浮いていると読めるように影を1段上げる（--sh-2 は「浮いた札」の段） */
+  min-width: 4.5rem;
+  justify-content: center;
+  /* 札が溢れて横へ送ると、札がこの下をくぐる。浮いていると読めるように影を1段上げる
+     （--sh-2 は「浮いた札」の段） */
   box-shadow: var(--sh-2), var(--hi);
 }
+
+/* ボタンのぶん、帯の右に余白を取る。送り切ったとき最後の1枚がボタンの下に潜らない */
+.hero-band { padding-right: 6.5rem; }
 
 /* ------------------------------------------------------- 畳んだ帯（1行） */
 
@@ -90,7 +101,8 @@
 .hero-wrap[data-fold] .hero-band {
   align-items: center;
   gap: .5rem;
-  padding: .35rem 1rem;
+  /* 右はボタンのぶん空ける（.hero-band と同じ 6.5rem） */
+  padding: .35rem 6.5rem .35rem 1rem;
   scroll-snap-type: none;
 }
 
