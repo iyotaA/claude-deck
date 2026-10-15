@@ -111,6 +111,7 @@ export const dom = {
   aboutStates: document.getElementById('about-states'),
   aboutKinds: document.getElementById('about-kinds'),
   aboutTags: document.getElementById('about-tags'),
+  aboutMeters: document.getElementById('about-meters'),
   aboutVersion: document.getElementById('about-version'),
   // 通知の設定モーダル。settings.js だけが使う
   settings: document.getElementById('settings'),

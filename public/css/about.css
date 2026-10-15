@@ -28,6 +28,7 @@
    節を1つ足しても配線が増えない（settings.css / usage-mode.css と同じ作法） */
 .about[data-sec="what"]   .settings-pane[data-sec="what"],
 .about[data-sec="screen"] .settings-pane[data-sec="screen"],
+.about[data-sec="can"]    .settings-pane[data-sec="can"],
 .about[data-sec="marks"]  .settings-pane[data-sec="marks"],
 .about[data-sec="words"]  .settings-pane[data-sec="words"],
 .about[data-sec="about"]  .settings-pane[data-sec="about"] { display: block; }
@@ -145,6 +146,40 @@
 }
 
 .about-legend.is-tag .lg-kinds { margin-top: 0; }
+
+/* 一覧の行に足されるもの。**見本は実物と同じ色・同じ字の段にする**
+   （hero.css の `.row .memo .k` と `.row .now`、`.group-head .icon` の塗った星）。
+   画面で探すときの手がかりにならないと凡例の意味が無い */
+.about-legend .lg-star,
+.about-legend .lg-memo,
+.about-legend .lg-now {
+  display: flex;
+  justify-content: center;
+  padding-top: .2rem;
+}
+
+.about-legend .lg-star { color: var(--accent); }
+.about-legend .lg-star path { fill: currentColor; }
+
+.about-legend .lg-memo {
+  font-size: var(--fs-0);
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.about-legend .lg-now {
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+}
+
+/* メーターの見本。棒は上のバーと同じ部品（base.css の `.rate-meter`）。
+   1列目は棒の長さぶん広げる（ほかの凡例の 1.6rem では棒が入らない） */
+.about-legend.is-meter li {
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+}
+
+.about-legend.is-meter .rate-meter { padding-top: .45rem; }
 
 /* -------------------------------------------------------------- キー操作 */
 
