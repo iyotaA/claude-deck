@@ -121,13 +121,13 @@
 }
 
 /* 全部隠している。**`.tl-chip[aria-pressed="false"]` と同じ形にする**
-   ―― 枠を透明にして取り消し線。破線は但し書きと区切り専用なので使わない */
+   ―― 枠を透明にして字を沈める。破線は但し書きと区切り専用なので使わない。
+   取り消し線は外した（理由は下の .tl-chip[aria-pressed="false"]） */
 .tl-gchip[data-sel="none"] {
   border-color: transparent;
   background: none;
   box-shadow: none;
   color: var(--fg-faint);
-  text-decoration: line-through;
 }
 
 /* 外れているものの hover を**別に書く。** 上の `.tl-gchip:hover`（0,2,0）と
@@ -229,7 +229,11 @@
   color: var(--fg-faint);
 }
 
-/* 隠している種類。線で消すのは「押せば戻る」ことを見せるため。消さずに沈める。
+/* 隠している種類。**消さずに沈める。**
+
+   **取り消し線は付けない。** 前は「枠を消す・字を沈める・取り消し線」の3つを重ねていたが、
+   取り消し線は「消した」「使えない」とも読める（UI レビューの F10）。
+   残る2つ（枠が無い・字が薄い）で「押せるが外れている」は伝わり、触れば枠が出る。
 
    **破線にしない。** この画面の破線は但し書きと区切りの意味で6箇所に出ていて
    （.facts-waits / .decision + .decision / .md-pre.is-open / .tl-wait .away /
@@ -239,7 +243,6 @@
 .tl-chip[aria-pressed="false"] {
   border-color: transparent;
   color: var(--fg-faint);
-  text-decoration: line-through;
 }
 
 /* 外れているものの hover を**別に書く。** 上の .tl-chip:hover と

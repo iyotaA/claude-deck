@@ -79,17 +79,38 @@ export function detailActions(row) {
 }
 
 /**
+ * 2つの文が同じものを指しているか。題名は長い指示を切ったものが来ることがあるので、
+ * 末尾の「…」を落とし、空白を潰したうえで、片方がもう片方の頭になっていれば同じと見る。
+ * 短すぎる題名（12字未満）は前方一致で決めない（「修正」のような語で誤って消さない）。
+ *
+ * @param {string} a
+ * @param {string|null} b
+ * @returns {boolean}
+ */
+function sameText(a, b) {
+  if (!a || !b) return false;
+  const norm = (s) => s.replace(/[…\s]+$/u, '').replace(/\s+/gu, ' ').trim();
+  const x = norm(a);
+  const y = norm(b);
+  if (x === y) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.length >= 12 && long.startsWith(short);
+}
+
+/**
  * 「なぜこの作業をしているか」を先頭に畳んで置く。
  *
  * 下のパネルを読めば分かることでも、切り替えのたびに読み下すのは重い。
  * 目的と直近の判断だけを最初に見せて、続きは下で追えるようにする。
  */
-export function summaryBlock(summary) {
+export function summaryBlock(summary, title = null) {
   if (!summary || summary.source === 'error') return null;
 
   // 上のバーの .summary とは別物。名前を分けておかないと両方に同じ CSS が当たる
   const box = el('div', 'purpose');
-  if (summary.headline) {
+  // **題名と同じ文なら見出しを出さない。** 題名が最初の指示から作られることが多く、
+  // 同じ文が見出し（3行）と引用（3行）に2回並んでいた（UI レビューの F3）
+  if (summary.headline && !sameText(summary.headline, title)) {
     box.append(el('div', 'purpose-head', summary.headline));
     // 出どころが Claude の中間報告なら、そう断る。
     // 機械的に抜き出した指示やタイトルと同じ重さに見せてはいけない（自己申告なので）
