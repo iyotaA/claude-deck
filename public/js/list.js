@@ -534,9 +534,21 @@ function buildRow(row) {
   if (row.cwd) proj.title = row.cwd;
   node.append(proj);
 
+  // **動いている行にだけ、いま何をしているかを2行目に添える**（UI レビューの段7。
+  // ボール板を作る代わりに、あちらにしか無かった中身だけをここへ持ち込んだ）。
+  // 中身は数秒ごとに変わるので、**一覧の鍵（listKey）に混ぜない。** 混ぜると組み直しのたびに
+  // スクロールと焦点が飛ぶ。節点だけ置いておき、文字は refreshTimes() が差し替える
+  // （経過時間と同じ扱い）。空のあいだは hidden で、行は1行のまま
+  let nowLine = null;
+  if (row.alive) {
+    nowLine = el('span', 'now');
+    paintNow(nowLine, row);
+  }
+
   const idle = el('span', 'm', agoText(row));
   if (row.lastActivityAt) idle.title = stamp(row.lastActivityAt);
   node.append(idle);
+  if (nowLine) node.append(nowLine);
 
   node.addEventListener('click', () => {
     select(row.sessionId, 'live');
@@ -544,6 +556,41 @@ function buildRow(row) {
   });
   li.append(node);
   return li;
+}
+
+/**
+ * 動いている行の「いま何をしているか」の文字。無ければ空。
+ *
+ * 並べるのは2つ。TODO の進み（`4/7`。サーバーの `todoSummary`）と、いまの手
+ * （進行中の TODO の言い方があればそれ、無ければ走っているツールと中身）。
+ * 止まっている行（承認待ちなど）は帯が受け持つので、ここで出すのは動いているものだけ
+ * ―― 帯と一覧の両方に「待っているもの」を出さない。
+ *
+ * @param {object} row 一覧の行
+ * @returns {string}
+ */
+function nowText(row) {
+  if (row.state !== 'running') return '';
+  const parts = [];
+  if (row.todo) parts.push(`TODO ${row.todo.done}/${row.todo.total}`);
+  const tool = row.waitingFor?.tool;
+  const what = row.todo?.doing
+    ?? (tool ? (row.waitingFor.detail ? `${tool}: ${row.waitingFor.detail}` : tool) : null);
+  if (what) parts.push(what);
+  return parts.join(' · ');
+}
+
+/**
+ * 「いま何をしているか」の節点に文字を入れる。空なら隠す（行を1行に保つ）。
+ * @param {HTMLElement} node `.now`
+ * @param {object} row 一覧の行
+ */
+function paintNow(node, row) {
+  const text = nowText(row);
+  if (node.textContent !== text) node.textContent = text;
+  node.hidden = !text;
+  // 長いと「…」で切るので、全文は title に残す
+  node.title = text;
 }
 
 /**
@@ -789,6 +836,9 @@ export function refreshTimes() {
     if (idle) {
       // 一覧の行（.m）だけ「前」を付ける。書庫のカード（.idle）は今までどおり
       idle.textContent = idle.classList.contains('m') ? agoText(row) : since(idleOf(row));
+      // 動いている行の「いま何をしているか」も、組み直さずに文字だけ差し替える
+      const now = node.querySelector('.now');
+      if (now) paintNow(now, row);
       // 追記が進めば実時刻も動く。textContent だけ直すと title が古いままになる
       if (row.lastActivityAt) idle.title = stamp(row.lastActivityAt);
     }

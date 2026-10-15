@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sortRows } from '../src/view/sessions.mjs';
+import { sortRows, todoSummary } from '../src/view/sessions.mjs';
 
 /** 並べたあとの sessionId の並び。 */
 const ids = (rows) => sortRows(rows).map((r) => r.sessionId);
@@ -81,4 +81,27 @@ test('終了済みは今までどおり新しい順（idleMs の小さい順）'
     { sessionId: 'nolog', state: 'ended', startedAt: 3, idleMs: null },
   ];
   assert.deepEqual(ids(rows), ['new', 'old', 'nolog']);
+});
+
+/* ------------------------------------------------------------ TODO の進み */
+
+
+test('TODO の進みは、取り消しを外して数える', () => {
+  const v = todoSummary({ items: [
+    { status: 'completed' }, { status: 'completed' }, { status: 'pending' },
+    { status: 'in_progress', activeForm: 'テストを流しています', subject: 'テスト' },
+    { status: 'cancelled' },
+  ] });
+  assert.deepEqual(v, { done: 2, total: 4, doing: 'テストを流しています' });
+});
+
+test('進行中の言い方が無ければ件名、進行中が無ければ null', () => {
+  assert.equal(todoSummary({ items: [{ status: 'in_progress', subject: '件名' }] }).doing, '件名');
+  assert.equal(todoSummary({ items: [{ status: 'pending' }] }).doing, null);
+});
+
+test('TODO が無い（全部取り消しも含む）なら null。0 と「使っていない」を同じ顔にしない', () => {
+  assert.equal(todoSummary({ items: [] }), null);
+  assert.equal(todoSummary({ items: [{ status: 'cancelled' }] }), null);
+  assert.equal(todoSummary(null), null);
 });

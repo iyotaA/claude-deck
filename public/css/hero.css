@@ -390,6 +390,23 @@
   color: var(--fg-faint);
 }
 
+/* 動いている行の「いま何をしているか」（TODO の進みと、いまの手）。**2行目に置く。**
+   行は1行に詰める決まり（上の .row の説明）の例外で、動いている行だけ（いつも数本）。
+   空のときは hidden で消え、行は1行のまま。押せないので字だけ（--fg-faint）。
+   文字は list.js の refreshTimes() が差し替える（組み直さない） */
+.row .now {
+  grid-column: 2 / -1;
+  margin-top: -.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+}
+
+.row .now[hidden] { display: none; }
+
 /* 終了済みの「残り N 件を出す」。行と同じ左端に揃えて、押せる字（--accent）で出す。
    枠も面も持たない ―― 行の並びの中に箱が1つだけ浮くと、別の種類のものに見える */
 .row-more {

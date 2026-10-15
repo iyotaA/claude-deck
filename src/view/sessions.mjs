@@ -10,6 +10,7 @@
 import { readRegistry } from '../read/registry.mjs';
 import { indexTranscripts, readTail } from '../read/transcript.mjs';
 import { countSubagents } from '../read/subagents.mjs';
+import { readTasks } from '../read/tasks.mjs';
 import { deriveState, STATE_RANK, STATE_LABELS, STATE_BLOCKING } from '../parse/state.mjs';
 import { extractMeta } from '../parse/meta.mjs';
 import { identity, stateFields } from './shape.mjs';
@@ -18,6 +19,32 @@ import { identity, stateFields } from './shape.mjs';
 export const RECENT_MS = 24 * 60 * 60 * 1000;
 /** 一覧に載せる最大件数。 */
 const MAX_ROWS = 60;
+
+/**
+ * TODO の進みを一覧の行に載せる形へ畳む。**判断だけ。I/O を持たない。**
+ *
+ * 作業台の行に「4/7・テストを流しています」と添えるためのもの（UI レビューの段7。
+ * ボール板の代わりに、作業中の行へ足すことにした）。
+ *
+ * - 取り消しは数から外す（やらないと決めたものを「残り」に数えない）
+ * - 1件も無ければ null（0 と「TODO を使っていない」を同じ顔にしない）
+ * - `doing` は進行中の項目の言い方（activeForm）。無ければ件名。進行中が無ければ null
+ *
+ * @param {{items: Array<object>, counts: object}} tasks readTasks の戻り
+ * @returns {{done: number, total: number, doing: string|null}|null}
+ */
+export function todoSummary(tasks) {
+  const items = Array.isArray(tasks?.items) ? tasks.items : [];
+  const live = items.filter((t) => t.status !== 'cancelled');
+  if (live.length === 0) return null;
+  const done = live.filter((t) => t.status === 'completed').length;
+  const now = live.find((t) => t.status === 'in_progress');
+  return {
+    done,
+    total: live.length,
+    doing: now ? (now.activeForm ?? now.subject ?? null) : null,
+  };
+}
 
 /** 一覧の1行を作る。 */
 async function buildRow({ registry, transcript, now }) {
@@ -34,6 +61,10 @@ async function buildRow({ registry, transcript, now }) {
   const subagentCount = transcript
     ? (transcript.hasSessionDir ? await countSubagents(transcript.file, sessionId) : 0)
     : null;
+
+  // TODO の進み。**動いているセッションだけ読む**（いつも数本。終わったものは作業台の行に出さない）。
+  // tasks/<id>/ の小さな JSON を読むだけなので、末尾 64KB の経路は変わらない
+  const todo = registry && sessionId ? todoSummary(await readTasks(sessionId)) : null;
 
   return {
     // 詳細と共通の項目。ずれると同じセッションが2つの顔を持つので shape.mjs にまとめてある
@@ -52,6 +83,8 @@ async function buildRow({ registry, transcript, now }) {
     agents: meta.agents.slice(-3),
     // 記録ファイルの実数。上の agents とは別物で、こちらが「使ったか否か」の答え
     subagentCount,
+    // TODO の進み（todoSummary）。動いているセッションだけ。無ければ null
+    todo,
     parseErrors: tail.parseErrors ?? 0,
     logFile: transcript?.file ?? null,
     logSize: transcript?.size ?? null,
