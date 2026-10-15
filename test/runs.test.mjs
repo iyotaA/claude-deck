@@ -10,7 +10,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rateView, RATE_STALE_MS, RATE_HOT } from '../public/js/runs.js';
+import { rateView, RATE_STALE_MS, RATE_HOT, RATE_WARN } from '../public/js/runs.js';
 
 /** 2026-08-25 20:36:49 JST 相当。値そのものに意味は無い */
 const NOW = 1787657809199;
@@ -114,4 +114,37 @@ test('空いた5時間枠は目立たせない', () => {
   // 落とした数で赤くすると、消えた数の理由が画面のどこにも無くなる
   const v = rateView(rl({ fiveHour: 0.99, resetsAt: SEC(NOW - 1000) }), NOW);
   assert.equal(v.hot, false);
+});
+
+/* ------------------------------------------------------------ メーター */
+
+test('メーターは読めた枠だけを、5h・7d の順に並べる', () => {
+  const v = rateView(rl(), NOW);
+  assert.deepEqual(v.meters.map((m) => m.label), ['5h', '7d']);
+  assert.equal(v.meters[0].ratio, 0.37);
+  assert.equal(v.meters[0].text, '37%');
+});
+
+test('メーターでも 0 は 0 として出し、読めなかった枠は落とす', () => {
+  const v = rateView(rl({ fiveHour: 0, sevenDay: null }), NOW);
+  assert.deepEqual(v.meters, [{ label: '5h', ratio: 0, text: '0%', tone: '' }]);
+});
+
+test('空いた5時間枠はメーターからも落とす', () => {
+  const v = rateView(rl({ resetsAt: SEC(NOW - 60_000) }), NOW);
+  assert.deepEqual(v.meters.map((m) => m.label), ['7d']);
+});
+
+test('色の段は RATE_WARN で黄、RATE_HOT で赤（境目ちょうどは上の段）', () => {
+  const tone = (x) => rateView(rl({ fiveHour: x, sevenDay: null }), NOW).meters[0].tone;
+  assert.equal(tone(RATE_WARN - 0.01), '');
+  assert.equal(tone(RATE_WARN), 'warn');
+  assert.equal(tone(RATE_HOT - 0.01), 'warn');
+  assert.equal(tone(RATE_HOT), 'hot');
+});
+
+test('棒の長さは 0〜1 に丸める（文字は届いた値のまま）', () => {
+  const m = rateView(rl({ fiveHour: 1.2, sevenDay: null }), NOW).meters[0];
+  assert.equal(m.ratio, 1);
+  assert.equal(m.text, '120%');
 });

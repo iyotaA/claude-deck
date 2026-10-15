@@ -183,36 +183,9 @@
    送った先に当のセッションが居ない。溢れたぶんは横スクロールで見る作りで、
    端まで送れることは膜（`data-edge`）が示している。 */
 
-/* 0 件のとき。**空の帯を置かない**が、場所そのものは残す。
-   帯ごと消すと、静かな日に画面の一等地が何も言わずに消える */
-.hero-none {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  min-height: 36px;
-  padding: 0 1rem;
-  font-size: var(--fs-1);
-  color: var(--fg-muted);
-  white-space: nowrap;
-}
-
-/* **空のときは帯の余白を落として1行に畳む。** 前は帯の余白（.9rem×2）と
-   この1行の余白が重なって、何も無いのに 70px を取っていた（実測）。
-   待ちが無い時間のほうが長いので、ほとんどの時間はただの余白になる。
-   印は JS（list.js の renderHero）が data-empty で付け外しする */
-.hero-wrap[data-empty] .hero-band { padding: 0; }
-
-/* 止まっているものが無い、の印。状態の点と同じ大きさで、色は「通っている」 */
-.hero-none-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--done);
-  flex: none;
-}
-
-.hero-none-reply { color: var(--warn); font-weight: 700; }
-.hero-none-note { color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; }
+/* 0 件のときは帯ごと消える（list.js の renderHero が hidden を付ける）。
+   「止まっているものはありません」は上のバーの下段（base.css の .tally.is-calm）が言う。
+   前は帯の中に1行置いていたが、下段とあわせて2段を取っていた */
 
 /* -------------------------------------------------------- 圧縮した行 */
 
@@ -220,11 +193,13 @@
    読む面（--fs-4 / --lh-read）の尺で組むと1行が 28px から 47px へ伸び、
    12本並べたときに 377px が 568px になる（＝全体が一度に見えなくなる）。
 
-   出すのは点・題・経過の3つだけ。置き場所もスキルも、
-   選んだときに詳細ペインで読める */
+   出すのは点・題・置き場所・経過の4つだけ。スキルやブランチは、
+   選んだときに詳細ペインで読める。置き場所だけは足した ―― 同じ題が並ぶと
+   見分けられなかった（UI レビューの F4）。2行目には置かず、題の右に薄く出す */
 .row {
   display: grid;
-  grid-template-columns: .55rem minmax(0, 1fr) auto;
+  /* 点・題・置き場所・経過。置き場所の列は auto だが、.p の max-width で頭打ちにする */
+  grid-template-columns: .55rem minmax(0, 1fr) auto auto;
   align-items: center;
   gap: .5rem;
   width: 100%;
@@ -279,6 +254,34 @@
 }
 
 .row .t.is-empty { color: var(--fg-faint); }
+
+/* 置き場所。**題より一段うしろ。** 同じ題が並んだときに見分けるための添え物で、
+   読ませたいのは題のほう。長いフォルダ名で題を押し潰さないよう、幅に上限を置く */
+.row .p {
+  max-width: 8.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+}
+
+/* 終了済みの「残り N 件を出す」。行と同じ左端に揃えて、押せる字（--accent）で出す。
+   枠も面も持たない ―― 行の並びの中に箱が1つだけ浮くと、別の種類のものに見える */
+.row-more {
+  width: 100%;
+  padding: .32rem .5rem .32rem calc(.55rem + 1rem);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-1);
+  text-align: left;
+  cursor: pointer;
+}
+
+.row-more:hover { background: var(--bg-hi); }
 
 .row .m {
   font-family: var(--font-mono);

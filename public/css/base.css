@@ -86,7 +86,10 @@ body {
 /* 上のバー ／ ボールの所在の帯 ／ 作業台 の3行。
    **子を足したら必ずここも直す。** 宣言した行より子が多いと、
    はみ出したぶんが暗黙の行になって高さの配分が崩れる。
-   帯は 0 件のとき `hidden` で消えるので、そのときは 2行として振る舞う */
+   帯は 0 件のとき `hidden` で消える（待ちが無い時間のほうが長い）。
+   **作業台は3行目に明示して置く**（`.deck` の grid-row）。置かないと帯が消えたとき
+   作業台が2行目（auto）へ繰り上がり、1fr の3行目が空のまま残る。実測では auto の行が
+   余りを分けてもらって伸びるので崩れていなかったが、それはたまたまで、頼らない */
 .app {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -131,6 +134,8 @@ body {
    どちらも (0,2,0) で、読む順で後のほうが勝ってしまう。
    両方立っているときは (0,3,0) の側が要る（.is-archive.is-insp-open と同じ形） */
 .deck {
+  /* .app の3行目（上の説明）。帯が消えても繰り上がらない */
+  grid-row: 3;
   display: grid;
   grid-template-columns: auto 0 minmax(0, 1fr) auto;
   gap: 0;
@@ -330,6 +335,19 @@ body {
 .tally.is-hot { color: var(--hot); }
 .tally.is-hot strong { color: var(--hot); font-size: var(--fs-4); }
 
+/* 止まっているものが無い、の1行。上の帯が空のとき丸ごと消えるので、
+   「見ていない」と「無い」を分ける役目をここが持つ（list.js の renderSummary）。
+   **数ではないので字は落とさない**（--fg-muted のまま）。点は「通っている」の色 */
+.tally.is-calm { align-items: center; }
+
+.calm-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--done);
+  flex: none;
+}
+
 /* 枠の使用率。アカウント共通の値なので画面に1つだけ出す。
    状態ではないので下段の右端へ寄せる。
    display を宣言したので [hidden] を必ず添える（flex は hidden 属性に勝つ） */
@@ -354,7 +372,39 @@ body {
 
 .rate-val strong { color: var(--fg-muted); font-weight: 400; }
 .rate-val.is-hot { color: var(--hot); }
-.rate-val.is-hot strong { color: var(--hot); }
+
+/* 枠ごとのメーター。名前・棒・数の3つで1組。
+   **色は状態色の使い回し**（ふだんは --calm、80% で --warn、90% で --hot）。
+   どの段かは JS（runs.js の rateView）が data-tone に1語で書き、ここは当てるだけ */
+.rate-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+}
+
+.rate-label { color: var(--fg-faint); }
+
+/* 溝は --bg-hi。沈んだ帯（--bg-sunk）の上でも「ここが全体」が見える */
+.rate-bar {
+  display: inline-block;
+  width: 3.5rem;
+  height: 5px;
+  border-radius: var(--r-pill);
+  background: var(--bg-hi);
+  overflow: hidden;
+}
+
+.rate-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--calm);
+}
+
+.rate-meter[data-tone="warn"] .rate-bar i { background: var(--warn); }
+.rate-meter[data-tone="warn"] strong { color: var(--warn); font-weight: 700; }
+.rate-meter[data-tone="hot"] .rate-bar i { background: var(--hot); }
+.rate-meter[data-tone="hot"] strong { color: var(--hot); font-weight: 700; }
 
 /* 「いつ測ったか」。数そのものではないので、さらに落とす */
 .rate-age {

@@ -99,7 +99,7 @@ export const QUIET_MODES = new Set(['auto', 'default', 'normal', 'acceptEdits'])
  *
  * `keepEmpty`（0 件でも見出しを残す）という道具は残してある。あれが守っていたのは
  * 「見ていない」と「無い」を同じ顔にしないことで、その役目は帯と、
- * 帯が空のときに出る1行（`.hero-none`）が引き継いだ。
+ * 帯が空のときに上のバーの下段が言う1行（`.tally.is-calm`）が引き継いだ。
  * 空の見出しを4本とも残すと、静かな日に一覧の場所を食う。
  */
 export const STATE_GROUPS = [
