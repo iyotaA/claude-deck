@@ -780,6 +780,13 @@
 <dialog class="zoom" id="zoom" aria-label="セッションの詳細（拡大）">
   <div class="settings-head">
     <h2>いま見ているセッション</h2>
+    <!-- 止まっているセッション（上の帯と同じ顔ぶれ）を順に片づける口。zoom.js が出し入れする。
+         **詳細を組み直さずに選び直すだけ**（ペインの節点はこのモーダルの中に居たまま） -->
+    <div class="zoom-waits" id="zoom-waits" hidden>
+      <span class="zoom-waits-label" id="zoom-waits-label"></span>
+      <button class="btn" id="zoom-prev" type="button">← 前</button>
+      <button class="btn" id="zoom-next" type="button">次の待ち →</button>
+    </div>
     <!-- 書庫から開いたときだけ出す。**移るかどうかは押した人が決める。**
          勝手に作業台へ飛ばすと、探していた結果がその場で消える -->
     <button class="btn zoom-work" id="zoom-work" type="button" hidden>作業台で開く</button>

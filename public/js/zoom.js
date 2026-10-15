@@ -20,7 +20,7 @@
  * その時点では open がまだ true。あそこを基準にすると、閉じる途中に組み直した札が
  * 「縮小」のまま残る）。2箇所に持てば必ず片方が古くなる。
  */
-import { store } from './store.js';
+import { store, HERO_STATES } from './store.js';
 import { dom } from './dom.js';
 import { closeOnBackdrop } from './modal.js';
 
@@ -43,6 +43,55 @@ let changed = () => {};
  * initMode({ onArchive }) と同じ差し方にしてある。
  */
 let toWork = () => {};
+
+/**
+ * 「次の待ち」で選び直す口。main.js が差す（中身は session.js の select）。
+ *
+ * ここから session.js を import しない（層2 -> 層5 は逆流）。toWork と同じ差し方。
+ */
+let pick = () => {};
+
+/**
+ * 止まっているセッションの並び（上の帯と同じ顔ぶれ・同じ順）。
+ *
+ * 帯（list.js）は visibleRows から拾うが、止まっているものは必ず動いているので
+ * 「稼働中だけ」の絞りで落ちない。store.rows から直に拾えば同じ並びになり、
+ * rows.js を import して層2 の中に向きを1本増やさずに済む。
+ * 並べ替えない（サーバの並び＝手をつける順。比較器を2箇所に持たない）
+ *
+ * @returns {string[]} sessionId の並び
+ */
+function waitIds() {
+  return store.rows.filter((r) => HERO_STATES.has(r.state)).map((r) => r.sessionId);
+}
+
+/**
+ * 「← 前／次の待ち →」を今の様子に合わせる。**開いているときだけ動く。**
+ *
+ * 押した先は待ちの並びの中を一周する（末尾の次は先頭）。いま見ているものが
+ * 待ちでなければ、次は先頭・前は末尾。待ちが1件で、それを見ているなら押す先が無いので
+ * 押せなくする（消さない ―― 「あと何件か」はその1行が答えている）。
+ * 待ちが0件なら丸ごと隠す。
+ *
+ * stream.js が push のたびに呼ぶ。待ちは答えたそばから減るので、
+ * 開いたときに1回組むだけだと、もう居ないセッションへ飛ぶボタンが残る。
+ */
+export function syncZoomWaits() {
+  if (!isZoomed()) return;
+  const ids = waitIds();
+  const n = ids.length;
+  dom.zoomWaits.hidden = n === 0;
+  if (n === 0) return;
+  const i = ids.indexOf(store.selected);
+  dom.zoomWaitsLabel.textContent = i >= 0 ? `あなたの番 ${i + 1} / ${n}` : `あなたの番 ${n} 件`;
+  const next = i < 0 ? ids[0] : ids[(i + 1) % n];
+  const prev = i < 0 ? ids[n - 1] : ids[(i - 1 + n) % n];
+  const stuck = n === 1 && i === 0;
+  dom.zoomNext.dataset.target = next;
+  dom.zoomPrev.dataset.target = prev;
+  dom.zoomNext.disabled = stuck;
+  dom.zoomPrev.disabled = stuck;
+}
 
 /** 拡大しているか。旗を持たず、節点がどこに居るかで決める */
 export function isZoomed() {
@@ -82,6 +131,7 @@ export function openZoom() {
   dom.zoom.showModal();
   changed();
   restoreScroll(top);
+  syncZoomWaits();
   // 組み直しで帯のボタンごと消えるため、showModal() が当てた焦点は残らない。
   // 流れる箱（tabindex="-1"）へ移せば、そのまま矢印キーで読み進められる
   dom.detail.focus({ preventScroll: true });
@@ -123,11 +173,30 @@ export function toggleZoom() {
 /**
  * 拡大モーダルを配線する。main.js から1回だけ呼ぶ。
  *
- * @param {{onChange?: () => void}} hooks 開閉したあとに詳細を組み直す口
+ * @param {{onChange?: () => void, onOpenInWork?: () => void, onPick?: (id: string) => void}} hooks
+ *   onChange は開閉したあとに詳細を組み直す口、onPick は「次の待ち」で選び直す口
  */
-export function initZoom({ onChange, onOpenInWork } = {}) {
+export function initZoom({ onChange, onOpenInWork, onPick } = {}) {
   if (onChange) changed = onChange;
   if (onOpenInWork) toWork = onOpenInWork;
+  if (onPick) pick = onPick;
+
+  // 待ちを順に片づける。選び直すだけで、モーダルは閉じない
+  // （ペインの節点はこの中に居たまま、詳細が組み直される）
+  for (const btn of [dom.zoomPrev, dom.zoomNext]) {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.target;
+      // 押した先は push（2秒ごと）で合わせているだけなので、その間に答えられて
+      // 居なくなっていることがある。居ないものを選ぶと次の push が選択を外し、
+      // 拡大したまま一覧の先頭へ飛ぶ。押した瞬間に並びを引き直して確かめる
+      if (!id || !waitIds().includes(id)) {
+        syncZoomWaits();
+        return;
+      }
+      pick(id);
+      syncZoomWaits();
+    });
+  }
 
   // 閉じてから移る。**順番を逆にしない。** 先にモードを替えると、
   // 詳細ペインが dialog の中に居るまま作業台の骨格へ切り替わり、中央が空で出る

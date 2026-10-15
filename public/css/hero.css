@@ -20,6 +20,11 @@
    膜も一緒に流れて、いつも同じ場所に居てくれない */
 .hero-wrap {
   position: relative;
+  /* **最小幅を 0 にする。** .app（grid）の子は既定で中身の幅より縮まない。
+     畳んだ札（flex: none・折り返さない）が多いと、器が札の幅まで伸びて
+     ページごと横にはみ出していた（実測で 1440px の窓に 1856px）。
+     0 にすれば、溢れたぶんは帯（.hero-band）の中で横へ送る */
+  min-width: 0;
   background:
     radial-gradient(130% 150% at 0% 0%, var(--accent-soft), transparent 60%),
     var(--bg-sunk);
@@ -66,6 +71,125 @@
   overflow-x: auto;
   /* 送った先で札の左端が揃う。半端な位置で止まると読み始めが探しにくい */
   scroll-snap-type: x proximity;
+}
+
+/* 畳む・広げる。**器の右上に固定する。帯の中には置かない。**
+   帯の中だと、帯の高さ（広げると 260px、畳むと 42px）の真ん中へ来るので、
+   押すたびにボタンが上下へ動いた（実測の指摘）。
+
+   **位置は2つの線に揃える。**
+   - 横：右のレール（detail.css の .rail）のアイコンと同じ縦の線。レールは左右に
+     .2rem の余白で 1.9rem のボタンを置くので、こちらも right: .2rem にする。
+     前は right: 1rem で、中心が 12.8px ずれていた（実測の指摘）
+   - 縦：畳んだ帯（高さ --hero-fold-h）の上下の真ん中。広げたときも同じ高さに居る。
+     前は帯の高さが中身なりで、上 5.6px・下 3px と偏っていた
+
+   **絵だけ（.ibtn）。** 字があると帯の札と同じ重さで目に入る（実測の指摘）。
+   .ibtn は面を持たないが、ここは横へ送った札の上に浮くので、面と影を足して
+   下の札と混ざらないようにする（--sh-2 は「浮いた札」の段）。
+   膜（::after の z-index: 2）より上に置く */
+.hero-fold-btn {
+  position: absolute;
+  top: calc((var(--hero-fold-h) - 1.9rem) / 2);
+  right: .2rem;
+  z-index: 3;
+  border-color: var(--border);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-2), var(--hi);
+}
+
+/* 向き。chevron は右向きなので、広がっているときは上（畳む）、畳んでいるときは下（広げる）。
+   判断は JS の aria-expanded だけ。CSS は当てるだけ */
+.hero-fold-btn .icon { transition: transform .15s ease; }
+.hero-fold-btn[aria-expanded="true"] .icon { transform: rotate(-90deg); }
+.hero-fold-btn[aria-expanded="false"] .icon { transform: rotate(90deg); }
+
+/* ボタンのぶん、帯の右に余白を取る。送り切ったとき最後の1枚がボタンの下に潜らない */
+.hero-band { padding-right: 3.5rem; }
+
+/* 畳んだ帯の高さ。ボタンの縦位置もここから決める（1つの値から2つを出す）。
+   **ボタン（1.9rem）の上下に、右と同じ .2rem を足した高さ。** 上・下・右の余白が
+   どれも .2rem で揃う（右のレールがアイコンのまわりに置いている余白と同じ値） */
+.hero-wrap {
+  --hero-fold-h: calc(1.9rem + .4rem);
+}
+
+/* ------------------------------------------------------- 畳んだ帯（1行） */
+
+/* 「開く」で詳細へ移ったら帯を1行に畳む（list.js の heroFolded）。
+   札は 180px ほどあり、残したままだと詳細が画面の下の残りでしか読めなかった。
+   **高さは 40px 前後。** 待ちは札の形で見え続け、押せば切り替わる */
+.hero-wrap[data-fold] .hero-band {
+  align-items: center;
+  gap: .5rem;
+  /* 高さを決めて、札・ラベル・ボタンを上下の真ん中に揃える。
+     右はボタンのぶん空ける（.hero-band と同じ 3.5rem） */
+  height: var(--hero-fold-h);
+  padding: 0 3.5rem 0 1rem;
+  scroll-snap-type: none;
+}
+
+.hero-fold-label {
+  flex: none;
+  font-size: var(--fs-1);
+  font-weight: 700;
+  color: var(--hot);
+  white-space: nowrap;
+}
+
+/* 畳んだ札。**押せるものなのでピル型**（public/CLAUDE.md の約束）。
+   色は状態から（--state-color）。新しい色は作らない */
+.hero-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  max-width: 22rem;
+  padding: .2rem .7rem .2rem .55rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-pill);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-1);
+  cursor: pointer;
+}
+
+.hero-chip:hover { background: var(--bg-hi); }
+
+.hero-chip[aria-current="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: var(--sh-1), 0 0 0 3px var(--accent-soft);
+  font-weight: 700;
+}
+
+/* 縮むのは題だけ。時間と点は折り返さない（折り返すと札の背が伸びて、畳んだ意味が薄れる。実測） */
+.hero-chip-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero-chip-idle {
+  flex: none;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--state-color, var(--fg));
+}
+
+/* 畳んでいるあいだに来た新しい待ち。**一度だけ**光の輪を広げて知らせる。
+   帯を勝手に広げない代わり（読んでいる途中で詳細がずれるのを防ぐ）。
+   止める指定は base.css の prefers-reduced-motion が全体に効いている */
+.hero-chip.is-new { animation: hero-chip-new 1.6s cubic-bezier(.2, .7, .3, 1) 2; }
+
+@keyframes hero-chip-new {
+  0% { box-shadow: var(--sh-1), 0 0 0 0 color-mix(in srgb, var(--state-color, var(--hot)) 55%, transparent); }
+  100% { box-shadow: var(--sh-1), 0 0 0 10px transparent; }
 }
 
 /* ------------------------------------------------------------ 帯（札） */

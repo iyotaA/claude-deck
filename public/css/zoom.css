@@ -119,3 +119,25 @@
 }
 
 .zoom-work[hidden] { display: none; }
+
+/* 「あなたの番 i / N」と「← 前／次の待ち →」。題の右に寄せて置く。
+   **閉じる × の位置は動かさない**（右端は閉じる口の指定席。.zoom-work と同じ理由）。
+   字の色は帯の「あなたの番」と同じ --hot。止まっているものの数なので */
+.zoom-waits {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: var(--fs-1);
+}
+
+.zoom-waits[hidden] { display: none; }
+
+.zoom-waits-label {
+  margin-right: .2rem;
+  font-weight: 700;
+  color: var(--hot);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.zoom-waits .btn { font-size: var(--fs-1); white-space: nowrap; }

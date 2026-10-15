@@ -273,7 +273,8 @@ export function select(sessionId, from = 'live') {
   // **稼働中は圧縮した行（`.row`）**、書庫はカードのままなので両方を拾う
   for (const node of [
     ...dom.list.querySelectorAll('.card, .row'),
-    ...dom.heroBand.querySelectorAll('.hero-card'),
+    // 帯は広げた札（.hero-card）と、畳んだ1行の札（.hero-chip）のどちらか
+    ...dom.heroBand.querySelectorAll('.hero-card, .hero-chip'),
     ...dom.archive.querySelectorAll('.card'),
   ]) {
     node.setAttribute('aria-current', String(node.dataset.sessionId === store.selected));
