@@ -73,25 +73,33 @@
   scroll-snap-type: x proximity;
 }
 
-/* 「畳む」「広げる」。**器の右上に固定する。帯の中には置かない。**
+/* 畳む・広げる。**器の右上に固定する。帯の中には置かない。**
    帯の中だと、帯の高さ（広げると 260px、畳むと 42px）の真ん中へ来るので、
    押すたびにボタンが上下へ動いた（実測の指摘）。top は畳んだ帯（42px）の中央に
-   揃う値で、広げたときも同じ位置に居る。字が変わっても右端が揃うよう、幅の下限を置く。
+   揃う値で、広げたときも同じ位置に居る。
+
+   **絵だけ（.ibtn）。** 字があると帯の札と同じ重さで目に入る（実測の指摘）。
+   .ibtn は面を持たないが、ここは横へ送った札の上に浮くので、面と影を足して
+   下の札と混ざらないようにする（--sh-2 は「浮いた札」の段）。
    膜（::after の z-index: 2）より上に置く */
 .hero-fold-btn {
   position: absolute;
-  top: .4rem;
+  top: .35rem;
   right: 1rem;
   z-index: 3;
-  min-width: 4.5rem;
-  justify-content: center;
-  /* 札が溢れて横へ送ると、札がこの下をくぐる。浮いていると読めるように影を1段上げる
-     （--sh-2 は「浮いた札」の段） */
+  border-color: var(--border);
+  background: var(--bg-elev);
   box-shadow: var(--sh-2), var(--hi);
 }
 
+/* 向き。chevron は右向きなので、広がっているときは上（畳む）、畳んでいるときは下（広げる）。
+   判断は JS の aria-expanded だけ。CSS は当てるだけ */
+.hero-fold-btn .icon { transition: transform .15s ease; }
+.hero-fold-btn[aria-expanded="true"] .icon { transform: rotate(-90deg); }
+.hero-fold-btn[aria-expanded="false"] .icon { transform: rotate(90deg); }
+
 /* ボタンのぶん、帯の右に余白を取る。送り切ったとき最後の1枚がボタンの下に潜らない */
-.hero-band { padding-right: 6.5rem; }
+.hero-band { padding-right: 3.5rem; }
 
 /* ------------------------------------------------------- 畳んだ帯（1行） */
 
@@ -101,8 +109,8 @@
 .hero-wrap[data-fold] .hero-band {
   align-items: center;
   gap: .5rem;
-  /* 右はボタンのぶん空ける（.hero-band と同じ 6.5rem） */
-  padding: .35rem 6.5rem .35rem 1rem;
+  /* 右はボタンのぶん空ける（.hero-band と同じ 3.5rem） */
+  padding: .35rem 3.5rem .35rem 1rem;
   scroll-snap-type: none;
 }
 

@@ -14,6 +14,7 @@ import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaBranch, metaPath } from './card.js';
 import { postJson } from './api.js';
+import { icon } from './icons.js';
 
 /**
  * 一覧の1枚。
@@ -274,7 +275,12 @@ function pickFromHero(row) {
  * 前は帯の中に置いて、畳む・広げるたびに作り直していた。帯の高さ（広げると 260px、
  * 畳むと 42px）の真ん中に来るので、押すたびにボタンが上下へ動き、
  * 続けて押すのにカーソルを追いかけることになった（実測の指摘）。
- * 位置は動かさず、字（畳む／広げる）だけを入れ替える。節点が消えないので焦点もそのまま残る。
+ * 位置は動かさず、向きだけを入れ替える。節点が消えないので焦点もそのまま残る。
+ *
+ * **字を出さずに絵（chevron）だけにする。** 開け閉めの口に字があると、
+ * 帯の中の札と同じ重さで目に入って画面の情報が増える（実測の指摘）。
+ * 名前は title と aria-label が持つ（アイコンだけのボタンの約束）。
+ * 向きは CSS が aria-expanded から決める（上＝畳む、下＝広げる）。
  * 作るのは initHero の1回だけ。
  */
 let foldBtn = null;
@@ -282,7 +288,9 @@ let foldBtn = null;
 /** ボタンの字と aria-expanded を、いまの畳み具合に合わせる */
 function syncFoldButton() {
   if (!foldBtn) return;
-  foldBtn.textContent = heroFolded ? '広げる' : '畳む';
+  const name = heroFolded ? '広げる' : '畳む';
+  foldBtn.title = name;
+  foldBtn.setAttribute('aria-label', `あなたの番の帯を${name}`);
   // いま広がっているか
   foldBtn.setAttribute('aria-expanded', String(!heroFolded));
 }
@@ -474,8 +482,10 @@ function syncHeroEdge() {
 
 /** 帯の膜を配線する。`main.js` から1回だけ呼ぶ。 */
 export function initHero() {
-  foldBtn = el('button', 'btn hero-fold-btn');
+  foldBtn = el('button', 'ibtn hero-fold-btn');
   foldBtn.type = 'button';
+  // 形は新しく作らない。右向きの chevron を CSS で上下へ回す
+  foldBtn.append(icon('chevron', 16));
   foldBtn.addEventListener('click', () => setHeroFolded(!heroFolded));
   dom.heroWrap.append(foldBtn);
   syncFoldButton();
