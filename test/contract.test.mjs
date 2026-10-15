@@ -293,6 +293,21 @@ test('update.json の requested と prevPort を両側が使う', () => {
   assert.ok(has(code('src/update/state.mjs'), 'raw.requested'), 'Node が requested を読まなくなっている');
 });
 
+test('C# は数の型を確かめてから TryGetInt* を呼ぶ', () => {
+  // TryGetInt32 / TryGetInt64 は値が数でないと false ではなく例外を投げる。
+  // 紙には "progress": null が載るので、確かめずに呼ぶと ReadState() が毎回 null に倒れ、
+  // --restarted が requested を読めずに done を書かない（1.2.0 への更新で実測）。
+  // 画面は「入れ替えています」のまま止まるが、どこにもエラーは出ない
+  const lines = code('launcher/JsonRead.cs').split('\n').filter((line) => /TryGetInt(32|64)\(/.test(line));
+  assert.ok(lines.length > 0, 'JsonRead.cs から数を読む行が見つからない');
+  for (const line of lines) {
+    assert.ok(line.includes('IsNumber('), `ValueKind を確かめずに数を読んでいる: ${line.trim()}`);
+  }
+  for (const file of fs.readdirSync(path.join(ROOT, 'launcher')).filter((f) => f.endsWith('.cs') && f !== 'JsonRead.cs')) {
+    assert.ok(!/TryGetInt(32|64)\(/.test(code(`launcher/${file}`)), `${file} が JsonRead を通さずに数を読んでいる`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // 配布物の許可リスト
 // ---------------------------------------------------------------------------
