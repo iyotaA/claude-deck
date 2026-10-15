@@ -49,6 +49,8 @@ export function rowOf(sessionId) {
 export const LIVE_FIELDS = [
   'state', 'stateLabel', 'ball', 'blocking', 'idleMs', 'lastActivityAt',
   'waitingFor', 'stateReason', 'stateConfident', 'statusRaw', 'alive', 'pid', 'run',
+  // ピンとメモ。会話ログには無く、サーバーが一覧の行にだけ載せる（src/marks）
+  'pinned', 'memo',
 ];
 
 /**

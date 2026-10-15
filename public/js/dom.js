@@ -37,6 +37,14 @@ export const dom = {
   // 詳細ペインそのもの。zoom.js が節点ごとモーダルへ運ぶので、器の側にも取っ手が要る。
   // **中身は組み直さない**（理由は zoom.js の冒頭）
   detailPane: document.getElementById('detail-pane'),
+  // メモを書く窓。marks.js だけが使う
+  memo: document.getElementById('memo'),
+  memoFor: document.getElementById('memo-for'),
+  memoInput: document.getElementById('memo-input'),
+  memoMsg: document.getElementById('memo-msg'),
+  memoSave: document.getElementById('memo-save'),
+  memoClear: document.getElementById('memo-clear'),
+  memoClose: document.getElementById('memo-close'),
   // 詳細の頭（題名・状態・場所・ボタン）。入力欄より前。detail.js が組む
   detailHead: document.getElementById('detail-head'),
   // 中央下の入力欄の器。詳細ペインの外に置いてあるので replaceChildren() で消えない

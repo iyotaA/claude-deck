@@ -33,6 +33,7 @@ import { select } from './session.js';
 import { openRunForm } from './run-form.js';
 import { setMode } from './mode.js';
 import { closeOnBackdrop } from './modal.js';
+import { setPin, openMemo } from './marks.js';
 
 // モードの札。**二値に畳まない。** 三項で「監視盤か作業台か」と書くと、
 // モードが1つ増えた日に文言と行き先の2箇所を直すことになる
@@ -102,6 +103,28 @@ function buildAll() {
     hay: hay('起こす 起動 新しい セッション run new'),
     run: openRunForm,
   });
+
+  // ピン留めとメモ（段8）。選んでいるセッションに対して。
+  // どちらも子プロセスに触らないので出してよい側（止める・替える・続けるとは違う）
+  if (cur?.sessionId) {
+    const on = cur.pinned === true;
+    out.push({
+      group: '動かす',
+      verb: on ? 'ピンを外す' : 'ピン留めする',
+      name: cur.title || cur.name || '選んでいるセッション',
+      desc: on ? '作業台のいちばん上から外す' : '終わっても作業台のいちばん上に残す',
+      hay: hay('ピン 留める 外す pin 星 お気に入り', cur.title, cur.name),
+      run: () => setPin(cur.sessionId, !on),
+    });
+    out.push({
+      group: '動かす',
+      verb: cur.memo ? 'メモを直す' : 'メモを書く',
+      name: cur.title || cur.name || '選んでいるセッション',
+      desc: cur.memo ?? '自分だけのひとこと（200 字まで）',
+      hay: hay('メモ memo 書く 直す', cur.title, cur.name),
+      run: () => openMemo({ sessionId: cur.sessionId, memo: cur.memo, title: cur.title || cur.name }),
+    });
+  }
 
   // ターミナルの窓があるのは、生きていて pid を持っているものだけ。
   // 結果を読ませたいので、これだけは押しても閉じない

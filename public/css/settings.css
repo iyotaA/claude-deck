@@ -496,3 +496,33 @@
   font-size: var(--fs-1);
   color: var(--fg-muted);
 }
+
+/* ------------------------------------------------------------ メモの窓 */
+
+/* ピン留めとメモの「メモ」を書く小さな窓（marks.js）。中身は上のクラスを借りるので、
+   ここに書くのは器の4つだけ（起こすフォームの .runform と同じ借り方）。
+   <dialog> の既定（canvas 色）を意味トークンで塗り替えないと、暗い配色でも白く残る。
+   **名前を `.memo` にしない。** 一覧の行のメモ（hero.css の `.row .memo`）にも当たり、
+   行の2行目が窓の幅と枠と影を持ってはみ出す（実測） */
+.memo-win {
+  padding: 0;
+  width: min(32rem, calc(100vw - 2rem));
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--sh-3);
+}
+
+.memo-win::backdrop { background: var(--scrim); }
+
+/* 借りた .settings-text は URL 向けの等幅。メモは日本語の文なので本文の書体へ戻す */
+.memo-win .settings-text { font-family: inherit; }
+
+/* 誰のメモかを見出しにする。長い題は1行で切る */
+.memo-for {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

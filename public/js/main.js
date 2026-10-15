@@ -58,6 +58,7 @@ import { icon } from './icons.js';
 import { visibleRows } from './rows.js';
 import { initListDrawer, setListOpen, initialListOpen } from './drawer.js';
 import { initZoom, openZoom, closeZoom } from './zoom.js';
+import { initMarks } from './marks.js';
 import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
 import { renderDetail, renderDetailIfNeeded, initInspector } from './detail.js';
@@ -176,6 +177,8 @@ setListOpen(initialListOpen(), null, false);
 // 「次の待ち →」の選び直しもここで差す（zoom.js は層2 なので session.js を import しない）
 initZoom({ onChange: renderDetail, onOpenInWork: () => setMode('work'), onPick: (id) => select(id, 'live') });
 initHero();
+// ピン留めとメモ（段8）。メモの窓の配線
+initMarks();
 initInspector();
 initResize();
 // 書庫の探す帯を配線してから initMode に渡す。あちらの setMode は
