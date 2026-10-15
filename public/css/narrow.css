@@ -142,4 +142,8 @@
   }
 
   .is-list-open .scrim { opacity: 1; pointer-events: auto; }
+
+  /* 引き出しは 24rem しか無いので、行の置き場所を詰める。
+     広い窓の 8.5rem のままだと、題のほうが半分ほどに押し潰される（実測） */
+  .row .p { max-width: 5.5rem; }
 }

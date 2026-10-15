@@ -353,6 +353,37 @@ export const RATE_STALE_MS = 5 * 60_000;
 export const RATE_HOT = 0.9;
 
 /**
+ * この割合を超えたら、メーターを黄色（`--warn`）にする。
+ *
+ * RATE_HOT の手前に1段置く。赤になってからでは、走らせている作業を畳む余裕が無い。
+ * 色は状態色の使い回しで、新しい色は作らない。
+ */
+export const RATE_WARN = 0.8;
+
+/**
+ * メーターの色の段。**判断はここに置き、CSS は語を当てるだけ。**
+ * @param {number} v 0〜1 の割合
+ * @returns {'hot'|'warn'|''}
+ */
+function toneOfRate(v) {
+  if (v >= RATE_HOT) return 'hot';
+  if (v >= RATE_WARN) return 'warn';
+  return '';
+}
+
+/**
+ * 1本ぶんのメーター。読めなければ null（**0 は 0 として出す**）。
+ * @param {string} label 枠の名前（5h / 7d）
+ * @param {unknown} v 0〜1 の割合
+ */
+function meterOf(label, v) {
+  if (typeof v !== 'number') return null;
+  // 棒の長さは 0〜1 に丸める。届いた値が 1 を超えても器からはみ出させない
+  const ratio = Math.min(1, Math.max(0, v));
+  return { label, ratio, text: pct(v), tone: toneOfRate(v) };
+}
+
+/**
  * 枠の使用率を、出す形まで決める。**DOM を触らない純関数。**
  *
  * 判断がここに要るのは3つ。
@@ -364,8 +395,13 @@ export const RATE_HOT = 0.9;
  *
  * @param {object|null|undefined} rl `newestRateLimit()` の戻り
  * @param {number} now いまの時刻（ms）
+ * `meters` はメーターの形（枠ごとに長さ・文字・色の段）。読めた枠だけが入る。
+ * 空いた5時間枠も落ちる（上と同じ理由）。
+ *
  * @returns {{fiveHour: ?string, sevenDay: ?string, age: ?string, hot: boolean,
- *            gone: boolean, at: number, resetsAt: ?number}|null} 出すものが無ければ null
+ *            gone: boolean, at: number, resetsAt: ?number,
+ *            meters: Array<{label: string, ratio: number, text: string, tone: string}>}|null}
+ *          出すものが無ければ null
  */
 export function rateView(rl, now) {
   // resetsAt は**秒**の unix 時刻（実測）。ミリ秒として比べると必ず過去になる
@@ -383,6 +419,7 @@ export function rateView(rl, now) {
     sevenDay,
     age: elapsed >= RATE_STALE_MS ? ageText(elapsed) : null,
     hot: [five, seven].some((v) => typeof v === 'number' && v >= RATE_HOT),
+    meters: [meterOf('5h', five), meterOf('7d', seven)].filter(Boolean),
     gone,
     at: rl.at,
     resetsAt,

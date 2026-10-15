@@ -112,9 +112,10 @@ export function buildCard(row, onPick = null) {
  *
  * @param {object} group STATE_GROUPS の1つ（`label` と `states` を使う）
  * @param {object[]} rows そこに入る行
+ * @param {number} [limit] 最初に出す件数。超えたぶんは「残り N 件を出す」で開く
  * @returns {HTMLElement} `<li>` に入れたかたまり
  */
-function buildGroup(group, rows) {
+function buildGroup(group, rows, limit = Infinity) {
   const li = el('li', 'group');
   // 色は状態から引く。見出しのために新しい色を作らない
   li.style.setProperty('--state-color', colorOf(group.states[0]));
@@ -130,7 +131,26 @@ function buildGroup(group, rows) {
   const body = el('ul', 'group-body');
   // **カードではなく圧縮した行。** 答えないと進まないものは上の帯が持っていったので、
   // ここの役目は「全体が一度に見えること」に変わった
-  for (const row of rows) body.append(buildRow(row));
+  for (const row of rows.slice(0, limit)) body.append(buildRow(row));
+  // **切ったことを黙らない。** 見出しの数は全件のまま出しているので、
+  // 押せば出ることを数つきで言う（見出しの数と行の数が食い違って見えないように）
+  const rest = rows.length - limit;
+  if (rest > 0) {
+    const more = el('li');
+    const btn = el('button', 'row-more', `残り ${rest} 件を出す`);
+    btn.type = 'button';
+    const firstHidden = rows[limit]?.sessionId ?? '';
+    btn.addEventListener('click', () => {
+      endedOpen = true;
+      renderList();
+      // 押したボタンは組み直しで消えるので、焦点を新しく出た最初の行へ移す
+      // （キーボードで押した人の焦点が body へ落ちないように）
+      const next = [...dom.list.querySelectorAll('.row')].find((n) => n.dataset.sessionId === firstHidden);
+      next?.focus({ preventScroll: true });
+    });
+    more.append(btn);
+    body.append(more);
+  }
   li.append(body);
   return li;
 }
@@ -279,62 +299,34 @@ function buildHeroCard(row) {
  * **件数に上限を置かない。折り返さずに横へ流す。**
  * 折り返して縦に伸ばすと、下の圧縮行（全体を見せる役目）が押し出される。
  *
- * 0 件なら帯ごと消す（`hidden`）が、**場所は残す** ――
- * 帯が空のときは「待っているものはありません」の1行を出す。
- * 帯ごと黙って消えると、静かな日に画面の一等地が何も言わずに空く。
+ * 0 件なら帯ごと消す（`hidden`）。**黙っては消さない** ――
+ * 「承認や質問で止まっているセッションはありません」を上のバーの下段が言う
+ * （`renderSummary`）。帯ごと黙って消えると、静かな日に「見ていない」と
+ * 「無い」が同じ顔になる。前は帯の中に1行置いていたが、下段とあわせて
+ * 2段を取っていたので、言う場所を下段の1つへ寄せた。
  */
 export function renderHero() {
   const rows = heroRows();
-  const replies = rows.length === 0 ? visibleRows().filter((r) => r.state === 'awaiting-reply') : [];
-  // 空のときは返信待ちの数も鍵に混ぜる。混ぜないと、数が変わっても1行が古いまま残る
-  const key = rows.length > 0 ? heroKey(rows) : `none:${replies.length}`;
+  const key = heroKey(rows);
   // 顔ぶれも押せることも変わっていなければ、節点に触らない。
   // 触ると横へ送った位置が戻る（この関数がある理由そのもの）
   if (key === heroStamp) return;
   heroStamp = key;
 
-  dom.heroWrap.hidden = false;
   dom.heroBand.replaceChildren();
 
+  // **空のときは帯ごと消す。** 「止まっているものはありません」は
+  // 上のバーの下段（renderSummary）が言う。前は帯の中に1行置いていたが、
+  // 下段のすぐ下にもう1段ぶん場所を取っていた（待ちが無い時間のほうが長い）
   if (rows.length === 0) {
-    // 帯としては組まない（横スクロールも膜も要らない）。器に1行だけ置く。
-    // data-empty で帯の余白を落とし、1行ぶんの高さに畳む（hero.css）
-    dom.heroBand.append(heroQuiet(replies));
-    dom.heroWrap.dataset.empty = '';
+    dom.heroWrap.hidden = true;
     dom.heroWrap.dataset.edge = 'none';
     return;
   }
 
-  delete dom.heroWrap.dataset.empty;
+  dom.heroWrap.hidden = false;
   for (const row of rows) dom.heroBand.append(buildHeroCard(row));
   syncHeroEdge();
-}
-
-/**
- * 帯が空のときの1行。
- *
- * **帯が見ているものだけを「ありません」と言う。** 帯に出すのは承認・質問・プランの
- * 3つ（`HERO_STATES`）で、返信待ちはわざと外してある（答えなくても誰も止まっていない）。
- * 前の文言は「あなたの返事を待っているセッションはありません」で、
- * 上のバーの「返信待ち 1」と同じ画面で食い違って見えた。
- * 返信待ちがあるときは、その数をこの1行に添えて、帯の外にあることを示す。
- *
- * 返信待ちの呼び名は行の `stateLabel`（サーバ由来）を使う。画面側に状態の日本語を持たない。
- *
- * @param {object[]} replies 返信待ちの行
- * @returns {HTMLElement}
- */
-function heroQuiet(replies) {
-  const line = el('div', 'hero-none');
-  line.append(el('span', 'hero-none-dot'), el('span', null, '承認や質問で止まっているセッションはありません'));
-  if (replies.length > 0) {
-    const label = replies[0].stateLabel ?? replies[0].state;
-    line.append(
-      el('span', 'hero-none-reply', `― ${label} ${replies.length}`),
-      el('span', 'hero-none-note', '（返事をすると続きが始まるもの。一覧にあります）'),
-    );
-  }
-  return line;
 }
 
 /**
@@ -369,7 +361,7 @@ export function initHero() {
  * 置き場所もスキルも待ちの中身も出さない ―― どれも選んだときに詳細ペインで読める。
  *
  * **カード（`buildCard`）を借りない。** あちらは書庫と数値も使う定型で、
- * 出す項目が5つある。ここは3つに絞ることそのものが役目なので、借りると
+ * 出す項目が5つある。ここは4つ（点・題・置き場所・経過）に絞ることそのものが役目なので、借りると
  * 「何を出さないか」を毎回打ち消すことになる。
  *
  * @param {object} row 一覧の行
@@ -391,7 +383,15 @@ function buildRow(row) {
   if (row.title) title.title = row.title;
   node.append(title);
 
-  const idle = el('span', 'm', since(idleOf(row)));
+  // **置き場所を題の右に薄く出す。** 書庫とコマンド入力には出ているのに、
+  // ここだけ無かった。同じ題（「セキュリティレビュー」など）が並ぶと見分けられない。
+  // 2行目には置かない ―― 1行が 28px から伸びて、全体が一度に見えなくなる（hero.css の .row）。
+  // 取れない行も空の節点を置く（列の数を行ごとに変えない）
+  const proj = el('span', 'p', row.project ?? '');
+  if (row.cwd) proj.title = row.cwd;
+  node.append(proj);
+
+  const idle = el('span', 'm', agoText(row));
   if (row.lastActivityAt) idle.title = stamp(row.lastActivityAt);
   node.append(idle);
 
@@ -404,6 +404,38 @@ function buildRow(row) {
 }
 
 /**
+ * 一覧の行の経過時間。**「前」を付ける。**
+ *
+ * 数だけだと「19時間00分」が、かかった時間なのか、どれだけ前なのかが読めない。
+ * 測っているのは最後に動いてからの時間（`idleOf`）なので「前」が正しい。
+ * 取れないとき（`since` が「—」を返す）は付けない。
+ *
+ * 帯の札（`.hero-idle`）には付けない。あちらは「待たせている長さ」で、
+ * 字の後ろに「経過」が添えてある。
+ *
+ * @param {object} row 一覧の行
+ * @returns {string}
+ */
+function agoText(row) {
+  const t = since(idleOf(row));
+  return t === '—' ? t : `${t}前`;
+}
+
+/**
+ * 終了済みを最初に何件出すか。残りは「残り N 件を出す」で開く。
+ *
+ * 前は全部（実測 26 件）を並べていて、動いている2件が上の小さな島になっていた。
+ * 全部を見たいときは押せば出るし、もっと古いものは書庫にある。
+ */
+const ENDED_FIRST = 5;
+
+/**
+ * 終了済みを全部出しているか。**localStorage に残さない。**
+ * 開き直したら畳んだ形から始める（覚えると、いちど開いただけで既定が崩れる）。
+ */
+let endedOpen = false;
+
+/**
  * 一覧を組み直すかどうかの鍵。**帯の `heroKey()` と同じ考え方。**
  *
  * 見るのは「どの行が、どの状態で、どんな題で並んでいるか」だけ。
@@ -414,8 +446,10 @@ function buildRow(row) {
  * @returns {string}
  */
 function listKey(rows) {
-  const parts = rows.map((r) => `${r.sessionId}:${r.state}:${r.title ?? r.name ?? ''}`);
+  const parts = rows.map((r) => `${r.sessionId}:${r.state}:${r.title ?? r.name ?? ''}:${r.project ?? ''}`);
   parts.push(store.onlyLive ? 'live' : 'all');
+  // 畳んでいるかで出す行が変わる。混ぜないと「残りを出す」を押しても組み直されない
+  parts.push(endedOpen ? 'ended-open' : 'ended-first');
   return parts.join('|');
 }
 
@@ -476,7 +510,8 @@ export function renderList() {
       const list = bins.get(g.id);
       // 空の見出しは畳む。ただし「あなたの番」だけは 0 でも残す
       if (list.length === 0 && !g.keepEmpty) continue;
-      dom.list.append(buildGroup(g, list));
+      const group = buildGroup(g, list, g.id === 'done' && !endedOpen ? ENDED_FIRST : Infinity);
+      dom.list.append(group);
     }
     if (rest.length) {
       dom.list.append(buildGroup({ label: 'そのほか', states: ['unknown'] }, rest));
@@ -493,6 +528,22 @@ export function renderSummary() {
   // 前は key.startsWith('needs') で見ていたが、あれは名前の付け方への当て推量で、
   // 接頭辞の違う状態を1つ足した日にここだけ古くなる（行の blocking と同じ出どころに揃える）
   const blocking = store.meta?.stateBlocking ?? {};
+
+  // **止まっているものが無ければ、まずそう言う。** 上の帯は空のとき丸ごと消えるので
+  // （renderHero）、「見ていない」と「無い」を分ける役目をここが持つ。
+  // 言うのは帯が見ているもの（止まっているもの）だけ。返信待ちは後ろの数に出るので、
+  // 「返事を待っているものはありません」と言って数と食い違わせない
+  // **meta を受け取る前は言わない。** counts が空のうちは「無い」ではなく「まだ知らない」。
+  // セッションが1本も無いときも言わない（下の「動いているセッションなし」と2文が並ぶ）
+  // 数えるのは下で数を出す状態（SUMMARY_ORDER）だけ。知らない状態まで数えると、
+  // それしか居ないときに「動いているセッションなし」と2文が並ぶ
+  const any = SUMMARY_ORDER.some((k) => (counts[k] ?? 0) > 0);
+  if (any && !SUMMARY_ORDER.some((k) => blocking[k] && (counts[k] ?? 0) > 0)) {
+    const calm = el('span', 'tally is-calm');
+    calm.append(el('span', 'calm-dot'), document.createTextNode('承認や質問で止まっているセッションはありません'));
+    dom.summary.append(calm);
+  }
+
   for (const key of SUMMARY_ORDER) {
     const n = counts[key] ?? 0;
     if (n === 0) continue;
@@ -507,7 +558,8 @@ export function renderSummary() {
     if (blocking[key]) item.classList.add('is-hot');
     dom.summary.append(item);
   }
-  if (dom.summary.childElementCount === 0) {
+  // 数が1つも出なかったときだけ。止まっていない、の1行は数ではないので数えない
+  if (!dom.summary.querySelector('.tally:not(.is-calm)')) {
     dom.summary.append(el('span', 'tally', '動いているセッションなし'));
   }
 }
@@ -539,17 +591,28 @@ export function renderRate() {
     return;
   }
 
-  const key = [v.fiveHour, v.sevenDay, v.age, v.hot].join('|');
+  // 色の段も鍵に混ぜる。字は丸めた百分率なので、79.6% → 80.0% のように
+  // 字が同じ「80%」のまま黄色の段を跨ぐと、混ぜないと色が古いまま残る
+  const key = [v.fiveHour, v.sevenDay, v.age, v.hot, ...v.meters.map((m) => m.tone)].join('|');
   if (rateKey === key) return;
   rateKey = key;
 
   const box = el('span', 'rate-val');
   if (v.hot) box.classList.add('is-hot');
   box.append(document.createTextNode('枠'));
-  // 「5h:42%」と繋ぐ。空白だと 5h と 42% がどちらも器の gap と同じ幅で離れて、
-  // どの数がどの枠のものか目で組み直すことになる。コロンで結んで1語に見せる
-  if (v.fiveHour !== null) box.append(el('strong', null, `5h:${v.fiveHour}`));
-  if (v.sevenDay !== null) box.append(el('strong', null, `7d:${v.sevenDay}`));
+  // **数だけでなく長さで見せる。** 前は「5h:42%」の 11px の字だけで、
+  // 上限が近づいても目に入らなかった。色の段（黄・赤）は rateView が決める。
+  // 棒の長さは style.width で直に入れる（CSS 変数にすると screen.test の FROM_JS に足す口が増える）
+  for (const m of v.meters) {
+    const meter = el('span', 'rate-meter');
+    if (m.tone) meter.dataset.tone = m.tone;
+    const fill = el('i');
+    fill.style.width = `${Math.round(m.ratio * 100)}%`;
+    const bar = el('span', 'rate-bar');
+    bar.append(fill);
+    meter.append(el('span', 'rate-label', m.label), bar, el('strong', null, m.text));
+    box.append(meter);
+  }
   if (v.age) box.append(el('span', 'rate-age', v.age));
 
   const note = [`測ったのは ${stamp(v.at)}`];
@@ -581,7 +644,8 @@ export function refreshTimes() {
     if (!row) continue;
     const idle = node.querySelector('.idle, .m');
     if (idle) {
-      idle.textContent = since(idleOf(row));
+      // 一覧の行（.m）だけ「前」を付ける。書庫のカード（.idle）は今までどおり
+      idle.textContent = idle.classList.contains('m') ? agoText(row) : since(idleOf(row));
       // 追記が進めば実時刻も動く。textContent だけ直すと title が古いままになる
       if (row.lastActivityAt) idle.title = stamp(row.lastActivityAt);
     }
