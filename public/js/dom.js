@@ -162,6 +162,11 @@ export const dom = {
   zoom: document.getElementById('zoom'),
   zoomBody: document.getElementById('zoom-body'),
   zoomClose: document.getElementById('zoom-close'),
+  // 拡大モーダルの「← 前／次の待ち →」と「あなたの番 i / N」
+  zoomWaits: document.getElementById('zoom-waits'),
+  zoomWaitsLabel: document.getElementById('zoom-waits-label'),
+  zoomPrev: document.getElementById('zoom-prev'),
+  zoomNext: document.getElementById('zoom-next'),
   // 画面の中のコマンド入力（Ctrl+K）。palette.js だけが使う。
   // 開いているかどうかも URL には持たせない（開いた状態を人に渡す意味が無い）
   palette: document.getElementById('palette'),

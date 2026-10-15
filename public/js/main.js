@@ -173,7 +173,8 @@ setListOpen(initialListOpen(), null, false);
 // 差すのは renderDetail のほう。renderDetailIfNeeded は中身が同じなら何もしないので、
 // 札だけを付け替えたいこの用には効かない
 // 「作業台で開く」の行き先もここで差す（zoom.js は層2 なので mode.js を import しない）
-initZoom({ onChange: renderDetail, onOpenInWork: () => setMode('work') });
+// 「次の待ち →」の選び直しもここで差す（zoom.js は層2 なので session.js を import しない）
+initZoom({ onChange: renderDetail, onOpenInWork: () => setMode('work'), onPick: (id) => select(id, 'live') });
 initHero();
 initInspector();
 initResize();

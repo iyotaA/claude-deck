@@ -33,6 +33,8 @@ export const LS = Object.freeze({
   newestFirst: 'claude-deck.newestFirst',
   onlyDecisions: 'claude-deck.onlyDecisions',
   theme: 'claude-deck.theme',
+  // 上の帯を1行の札に畳んでいるか（list.js）。待ちが0件になったら解く
+  heroFolded: 'claude-deck.heroFolded',
 });
 
 /**

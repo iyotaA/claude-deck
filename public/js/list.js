@@ -5,7 +5,7 @@
  */
 import { el, since, stamp, tokens, agentTag } from './util.js';
 import {
-  store, colorOf, toneOf, QUIET_MODES, SUMMARY_ORDER, STATE_GROUPS, HERO_STATES,
+  store, colorOf, toneOf, QUIET_MODES, SUMMARY_ORDER, STATE_GROUPS, HERO_STATES, LS,
 } from './store.js';
 import { dom } from './dom.js';
 import { idleOf, headOf, visibleRows } from './rows.js';
@@ -197,11 +197,95 @@ function heroRows() {
 function heroKey(rows) {
   return rows
     .map((r) => `${r.sessionId}:${r.state}:${runFor(r.sessionId)?.asks?.[0]?.id ?? ''}`)
+    .concat(heroFolded ? 'folded' : 'open')
     .join('|');
 }
 
 /** 前に組んだときの鍵。null は「まだ一度も組んでいない」 */
 let heroStamp = null;
+
+/**
+ * 帯を1行の札に畳んでいるか。**localStorage に覚える**（開き直しても畳んだまま）。
+ *
+ * 帯の札は1枚 180px ほどあり、「開く」で詳細へ移っても帯は残るので、
+ * 詳細が画面の下の残りでしか読めなかった（実測の指摘）。
+ * 開いたら畳み、待ちは1行の札として見え続ける。広げるのは「広げる」だけ。
+ *
+ * **新しい待ちが来ても勝手に広げない。** 読んでいる途中で詳細が 150px 下へずれる。
+ * 代わりにその札だけを一度光らせる（`heroSeen`）。
+ *
+ * **待ちが0件になったら解く。** 次に来た待ちは広げた形で出す ―― 静かなところへ
+ * 来た1件目は、いちばん目に入ってほしいもの。
+ */
+let heroFolded = readFolded();
+
+/** 畳んだ帯で、もう見せた札。ここに無いものが来たら一度だけ光らせる */
+let heroSeen = new Set();
+
+/**
+ * 待ちのある帯を一度でも組んだか。**読み込み直した直後の1回は光らせない。**
+ * 畳んだまま開き直すと heroSeen は空なので、全部の札が「新しい」に見えてしまう
+ */
+let heroPrimed = false;
+
+/** localStorage は人が書き換えられる場所なので、'1' のときだけ畳んだと読む */
+function readFolded() {
+  try {
+    return localStorage.getItem(LS.heroFolded) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 畳む・広げるを切り替えて、帯を組み直す。
+ * @param {boolean} on 畳むなら true
+ */
+function setHeroFolded(on) {
+  if (heroFolded === on) return;
+  heroFolded = on;
+  try {
+    if (on) localStorage.setItem(LS.heroFolded, '1');
+    else localStorage.removeItem(LS.heroFolded);
+  } catch {
+    // 保存できなくても、この窓のあいだは効く
+  }
+  heroStamp = null;
+  renderHero();
+}
+
+/**
+ * 帯から1本を選んで詳細へ送る。**選ぶと帯を畳む。**
+ * 広げた札の「開く」「答える」と札そのもの、畳んだ札のどれから来ても同じ。
+ * @param {object} row 一覧の行
+ */
+function pickFromHero(row) {
+  setHeroFolded(true);
+  select(row.sessionId, 'live');
+  closeListAfterPick();
+  // 押したボタンは畳んだ組み直しで消えるので、焦点が body へ落ちる。
+  // 開いた先（詳細の流れる箱。tabindex="-1"）へ移せば、そのまま読み進められる
+  if (document.activeElement === document.body) dom.detail.focus({ preventScroll: true });
+}
+
+/**
+ * 畳む・広げるのボタンを組む。押すと組み直しで自分が消えるので、
+ * 入れ替わった相方のボタンへ焦点を渡す（キーボードで連続して押せるように）。
+ * @param {string} label ボタンの字
+ * @param {boolean} on 押したら畳むなら true
+ * @returns {HTMLElement}
+ */
+function foldButton(label, on) {
+  const btn = el('button', 'btn hero-fold-btn', label);
+  btn.type = 'button';
+  // いま広がっているか。「畳む」を出しているときは広がっている
+  btn.setAttribute('aria-expanded', String(on));
+  btn.addEventListener('click', () => {
+    setHeroFolded(on);
+    dom.heroBand.querySelector('.hero-fold-btn')?.focus({ preventScroll: true });
+  });
+  return btn;
+}
 
 /**
  * 帯の1枚。
@@ -258,8 +342,7 @@ function buildHeroCard(row) {
   go.type = 'button';
   go.addEventListener('click', (ev) => {
     ev.stopPropagation();
-    select(row.sessionId, 'live');
-    closeListAfterPick();
+    pickFromHero(row);
   });
   act.append(go);
 
@@ -287,10 +370,38 @@ function buildHeroCard(row) {
   // 選択が消えるうえ画面まで切り替わる
   card.addEventListener('click', () => {
     if (!window.getSelection()?.isCollapsed) return;
-    select(row.sessionId, 'live');
-    closeListAfterPick();
+    pickFromHero(row);
   });
   return card;
+}
+
+/**
+ * 畳んだ帯の1枚。点・題・経過だけの押せる札（ピル型は押せるものの形）。
+ *
+ * 中身は広げた札と同じ行から作る。「答える」「ターミナルを前面に」は持たない ――
+ * 押せば詳細が開き、そこに要求カード（`run-ask.js`）が居る。
+ *
+ * @param {object} row 一覧の行
+ * @param {boolean} fresh 初めて見せる札なら true（一度だけ光らせる）
+ * @returns {HTMLElement}
+ */
+function buildHeroChip(row, fresh) {
+  const chip = el('button', 'hero-chip');
+  chip.type = 'button';
+  chip.dataset.sessionId = row.sessionId ?? '';
+  chip.style.setProperty('--state-color', colorOf(row.state));
+  chip.setAttribute('aria-current', String(row.sessionId === store.selected));
+  if (fresh) chip.classList.add('is-new');
+  // 何で止まっているかは字でも残す（題だけだと、承認か質問かが読めない）
+  chip.title = [row.stateLabel, row.title ?? row.name].filter(Boolean).join(' ― ');
+
+  const state = el('span', 'state');
+  state.dataset.s = toneOf(row.state);
+  const idle = el('span', 'hero-chip-idle', since(idleOf(row)));
+  idle.dataset.heroIdle = row.sessionId ?? '';
+  chip.append(state, el('span', 'hero-chip-title', row.title ?? row.name ?? row.sessionId), idle);
+  chip.addEventListener('click', () => pickFromHero(row));
+  return chip;
 }
 
 /**
@@ -321,11 +432,28 @@ export function renderHero() {
   if (rows.length === 0) {
     dom.heroWrap.hidden = true;
     dom.heroWrap.dataset.edge = 'none';
+    // 待ちが無くなったら畳みを解く。次の1件目は広げた形で出す
+    heroSeen = new Set();
+    if (heroFolded) setHeroFolded(false);
     return;
   }
 
   dom.heroWrap.hidden = false;
-  for (const row of rows) dom.heroBand.append(buildHeroCard(row));
+  if (heroFolded) {
+    dom.heroWrap.dataset.fold = '';
+    const label = el('span', 'hero-fold-label', `あなたの番 ${rows.length}`);
+    dom.heroBand.append(label);
+    for (const row of rows) dom.heroBand.append(buildHeroChip(row, heroPrimed && !heroSeen.has(row.sessionId)));
+    dom.heroBand.append(foldButton('広げる', false));
+  } else {
+    delete dom.heroWrap.dataset.fold;
+    for (const row of rows) dom.heroBand.append(buildHeroCard(row));
+    // 自分で畳む口。開かずに畳みたいとき（帯が詳細を押し下げているのが邪魔なとき）
+    dom.heroBand.append(foldButton('畳む', true));
+  }
+  // 見せた札を覚える。広げているあいだに見たものも「見た」に数える
+  heroSeen = new Set(rows.map((r) => r.sessionId));
+  heroPrimed = true;
   syncHeroEdge();
 }
 

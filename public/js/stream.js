@@ -9,7 +9,7 @@ import { visibleRows } from './rows.js';
 import { renderList, renderSummary, refreshTimes } from './list.js';
 import { loadDetail } from './session.js';
 import { renderDetailIfNeeded } from './detail.js';
-import { isZoomed } from './zoom.js';
+import { isZoomed, syncZoomWaits } from './zoom.js';
 import { getJson } from './api.js';
 
 const initialSession = query.get('session');
@@ -46,6 +46,9 @@ function apply(payload) {
   syncQuery();
   // まとめは書庫を出しているあいだも動かす。「誰かが待っている」の唯一の合図なので
   renderSummary();
+  // 拡大モーダルの「次の待ち」も動かす（開いていなければ何もしない）。
+  // 待ちは答えたそばから減るので、もう居ないセッションへ飛ぶボタンを残さない
+  syncZoomWaits();
   // 作業台でないあいだは**何も描かない。** 中央も左も消えているうえ、
   // 書庫（/api/archive）も数値（/api/usage）もファイルを開く窓口なので、
   // 見えないもののために毎2秒撃たない。左の一覧に触ると、見えていない

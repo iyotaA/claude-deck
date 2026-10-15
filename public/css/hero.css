@@ -68,6 +68,95 @@
   scroll-snap-type: x proximity;
 }
 
+/* 「畳む」「広げる」。**右端に貼り付ける**（sticky）。札が横へ溢れても、
+   送らずに押せる場所に居てほしい。膜（::after の z-index: 2）より上に置く */
+.hero-fold-btn {
+  position: sticky;
+  right: 0;
+  z-index: 3;
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  /* 札が溢れると最後の1枚の上に重なる（スクロールする帯の上に浮く）。
+     浮いていると読めるように影を1段上げる（--sh-2 は「浮いた札」の段） */
+  box-shadow: var(--sh-2), var(--hi);
+}
+
+/* ------------------------------------------------------- 畳んだ帯（1行） */
+
+/* 「開く」で詳細へ移ったら帯を1行に畳む（list.js の heroFolded）。
+   札は 180px ほどあり、残したままだと詳細が画面の下の残りでしか読めなかった。
+   **高さは 40px 前後。** 待ちは札の形で見え続け、押せば切り替わる */
+.hero-wrap[data-fold] .hero-band {
+  align-items: center;
+  gap: .5rem;
+  padding: .35rem 1rem;
+  scroll-snap-type: none;
+}
+
+.hero-fold-label {
+  flex: none;
+  font-size: var(--fs-1);
+  font-weight: 700;
+  color: var(--hot);
+  white-space: nowrap;
+}
+
+/* 畳んだ札。**押せるものなのでピル型**（public/CLAUDE.md の約束）。
+   色は状態から（--state-color）。新しい色は作らない */
+.hero-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  max-width: 22rem;
+  padding: .2rem .7rem .2rem .55rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-pill);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-1), var(--hi);
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-1);
+  cursor: pointer;
+}
+
+.hero-chip:hover { background: var(--bg-hi); }
+
+.hero-chip[aria-current="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: var(--sh-1), 0 0 0 3px var(--accent-soft);
+  font-weight: 700;
+}
+
+/* 縮むのは題だけ。時間と点は折り返さない（折り返すと札の背が伸びて、畳んだ意味が薄れる。実測） */
+.hero-chip-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero-chip-idle {
+  flex: none;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--state-color, var(--fg));
+}
+
+/* 畳んでいるあいだに来た新しい待ち。**一度だけ**光の輪を広げて知らせる。
+   帯を勝手に広げない代わり（読んでいる途中で詳細がずれるのを防ぐ）。
+   止める指定は base.css の prefers-reduced-motion が全体に効いている */
+.hero-chip.is-new { animation: hero-chip-new 1.6s cubic-bezier(.2, .7, .3, 1) 2; }
+
+@keyframes hero-chip-new {
+  0% { box-shadow: var(--sh-1), 0 0 0 0 color-mix(in srgb, var(--state-color, var(--hot)) 55%, transparent); }
+  100% { box-shadow: var(--sh-1), 0 0 0 10px transparent; }
+}
+
 /* ------------------------------------------------------------ 帯（札） */
 
 /* **幅を固定して、次の1枚が必ず見切れるようにする。**
