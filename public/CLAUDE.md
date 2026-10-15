@@ -35,6 +35,7 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 | 0 | `modal.js` | `<dialog>` の背面クリック（`closeOnBackdrop`） |
 | 0 | `update-banner.js` | 更新の帯に何を出すか（`bannerOf`）と、道中の段の様子（`STEPS` / `stepsOf`）。**import ゼロの純関数**なので Node からテストできる（`test/update-banner.test.mjs`） |
 | 0 | `usage-trend.js` | 数値の概要の札に添える新旧の差と推移（`halfTrend`）。読んだ窓を時刻で半分に割って比べる（前の窓は読まない）。**import ゼロの純関数**なので Node からテストできる（`test/usage-trend.test.mjs`） |
+| 0 | `today-md.js` | 今日のまとめを Markdown にする（`todayMarkdown`）と、画面とコピーで共有する言い方（`isQuiet` / `shortPath` / `spanText`）。**import ゼロの純関数**なので Node からテストできる（`test/today-md.test.mjs`） |
 | 1 | `dom.js` | 画面の節点の索引。**起動時に決まって二度と変わらない** |
 | 1 | `store.js` | 画面側の状態・URL クエリの同期・`localStorage` の鍵（`LS`）・状態の見た目（`STATE_TONE` から `colorOf` / `toneOf`） |
 | 1 | `panel.js` | 詳細ペインの共通部品（器・見出し・折りたたみ） |
@@ -60,6 +61,7 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 | 5 | `session.js` | 詳細の取得・保持・選択 |
 | 6 | `list.js` | 稼働中の一覧と、上のバーのまとめ |
 | 7 | `archive.js` | 書庫モード（過去を探す）。カードは `list.js` から借りる |
+| 7 | `today.js` | 今日のまとめの窓（`#today`）。入口は書庫の頭のボタンと Ctrl+K。**新しいモードは作らない**。開いたときに `/api/today` を1回だけ引く |
 | 7 | `usage-tab.js` | 数値の横断（3つ目のモード）。誰からも import されない |
 | 7 | `mode.js` | モードの出し入れ（作業台・書庫・数値）。**もとは `board.js`（監視盤）** |
 | 7 | `stream.js` | SSE でつなぎ、届いた一覧を画面へ流す |
@@ -85,7 +87,7 @@ ESM なので**読み込み順を人が守る必要はない。** import が解�
 `WAIT_GUIDE` を知らなくてよい）。`run-view.js` とは向きを作らず、`RUN_OVER` をあえて重複させている
 （`run-resume.js` と同じ線）。
 
-層7 の中の向きは2本。`palette.js` → `run-form.js` ／ `palette.js` → `mode.js`。
+層7 の中の向きは3本。`palette.js` → `run-form.js` ／ `palette.js` → `mode.js` ／ `palette.js` → `today.js`。
 どちらも片方向で、逆を足すと循環になる。
 （ここには長く「`stream.js` → `mode.js`」も並べてあったが、その import は存在しない。
 `mode.js` を見ているのは `palette.js` と `main.js` の2つだけ）
@@ -229,7 +231,7 @@ CSS は `public/css/` に平置き。`index.html` の `<link>` の並びが、�
 | `ask.css` | 許可要求のカード。**`markdown.css` より前**に読む（カード内のプラン本文の見出しを上書きしないため） |
 | `markdown.css` | Markdown の見た目（`.md` の下だけ）。見出し・フェンス・表・箇条書き・引用・リンク・打ち消し |
 | `palette.css` | 画面の中のコマンド入力（Ctrl+K）の器・行・キー案内 |
-| `archive.css` | 書庫モード（骨格の組み替え・探す帯・結果のグリッド） |
+| `archive.css` | 書庫モード（骨格の組み替え・探す帯・結果のグリッド）と、その頭から開く今日のまとめの窓（`.today-win`） |
 | `usage-mode.css` | 数値モードの**骨格**（`.is-usage`。`archive.css` の `.is-archive` と同じ形）。`archive.css` の隣に置く — 骨格を組み替える2枚だから |
 | `zoom.css` | 詳細ペインの拡大（器 ＋ 高さの上限を外す2行 ＋ 帯の拡大ボタン） |
 | `narrow.css` | 狭い窓向け（`@media (max-width: 860px)`） |

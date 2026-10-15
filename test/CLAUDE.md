@@ -27,6 +27,8 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `meta.test.mjs` | ログから拾う情報（`ai-title` などの実測した形） |
 | `summary.test.mjs` | 見出しの出どころ。古い自己申告を見出しに使わないこと |
 | `archive.test.mjs` | 書庫のクエリの丸め方 |
+| `today.test.mjs` | 今日のまとめの判断（`src/view/today.mjs`）。**その日の行だけを拾うこと**（前の日に書いたファイルと決めたことを並べない）・動いていない日を空の行にしないこと・「(Recommended)」を外すこと・切ったぶんを数で返すこと・日の窓を地方時で切ること・クエリの丸め方 |
+| `today-md.test.mjs` | 今日のまとめの Markdown（`public/js/today-md.js`）。画面と同じ順で出すこと・切ったことを黙らないこと・動いただけの行を最後に名前だけ並べること・パスを作業フォルダから見た形にすること・選べる日数がサーバーと揃っていること |
 | `sessions-sort.test.mjs` | 一覧の並び順（`sortRows`）。同じ状態の中では始めた順に固定し、状態が変わったときだけ動くこと。終了済みは新しい順。**行に載せる TODO の進み（`todoSummary`）** も見る（取り消しを数えない・無ければ null） |
 | `skills.test.mjs` | スキルの索引のうち**判断だけ**（壊れた索引を読んでも落ちない・印が同じなら読み直さない） |
 | `entry.test.mjs` | 原文を出すときに伏せる・切る判断 |
@@ -112,8 +114,9 @@ import で確かめられるのは Node 側の半分だけになり、それで�
 読み取り層（`read/`）と画面側にはテストが無い。
 そこは実物で確かめる。
 
-例外は4枚。`public/js/md.js`（Markdown のパーサ）、`public/js/runs.js` の `rateView()`、
-`public/js/update-banner.js`（更新の帯の組み立て）、`public/js/usage-trend.js`（数値の新旧の差）。
+例外は5枚。`public/js/md.js`（Markdown のパーサ）、`public/js/runs.js` の `rateView()`、
+`public/js/update-banner.js`（更新の帯の組み立て）、`public/js/usage-trend.js`（数値の新旧の差）、
+`public/js/today-md.js`（今日のまとめの Markdown）。
 どれも DOM を1つも触らない純関数なので、`.js` のまま Node から import できる
 （`package.json` が `type:module`）。`runs.js` は `EventSource` を関数の中でしか呼ばないので、
 読み込むだけなら何も起きない。`update-banner.js` は import そのものがゼロ。

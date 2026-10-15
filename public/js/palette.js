@@ -34,6 +34,7 @@ import { openRunForm } from './run-form.js';
 import { setMode } from './mode.js';
 import { closeOnBackdrop } from './modal.js';
 import { setPin, openMemo } from './marks.js';
+import { openToday } from './today.js';
 
 // モードの札。**二値に畳まない。** 三項で「監視盤か作業台か」と書くと、
 // モードが1つ増えた日に文言と行き先の2箇所を直すことになる
@@ -139,6 +140,16 @@ function buildAll() {
       run: () => focusTerminal(cur.pid),
     });
   }
+
+  // 今日のまとめ。窓が開くだけで、子プロセスに触らない
+  out.push({
+    group: '出す・畳む',
+    verb: 'まとめ',
+    name: '今日のまとめを開く',
+    desc: '決めたことと書き換えたファイルを1枚に（Markdown でコピーできる）',
+    hay: hay('まとめ 今日 きょう 日報 引き継ぎ today summary'),
+    run: openToday,
+  });
 
   // モードの切り替えは出してよい。替わるのは画面だけで、
   // 止める・替える・続けるのように子プロセスを畳んだり起こしたりしない。

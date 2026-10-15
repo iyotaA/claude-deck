@@ -260,3 +260,206 @@
   color: var(--fg);
   font-weight: 700;
 }
+
+/* ------------------------------------------------------------ 今日のまとめ */
+
+/* 入口は書庫の頭のいちばん前（today.js）。押せるもの（.btn）なので、隣の絞り込みの札
+   （.archive-field。押しても状態が変わるだけ）とは形が違うままでよい */
+.today-open { flex: 0 0 auto; }
+
+/* 絵の付いたボタン。素の .btn は inline なので、絵と字がくっつく
+   （detail.css の .detail-actions .btn と同じ手当て） */
+.today-open,
+.today-win .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+
+/* 窓の器。中身の頭と足は設定モーダルのクラスを借りる（メモの窓・起こすフォームと同じ借り方）。
+   <dialog> の既定（canvas 色）を意味トークンで塗り替えないと、暗い配色でも白く残る。
+   **高さは固定する**（`max-height` にしない）。日を替えるたびに中身の量が変わるので、
+   中身なりにすると <dialog> の中央配置で上下に跳ねる（設定モーダルと同じ理由） */
+.today-win {
+  display: none;
+  padding: 0;
+  width: min(54rem, calc(100vw - 2rem));
+  height: min(40rem, calc(100vh - 2rem));
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--sh-3);
+}
+
+.today-win[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.today-win::backdrop { background: var(--scrim); }
+
+.today-body {
+  overflow: auto;
+  padding: .2rem 1.1rem 1rem;
+}
+
+.today-empty,
+.today-note {
+  margin: .8rem 0 0;
+  font-size: var(--fs-1);
+  color: var(--fg-muted);
+}
+
+/* 数の帯。押せないので面も枠も持たない（上のバーの .tally と同じ形） */
+.today-sum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem 1.6rem;
+  padding: .8rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-1);
+  color: var(--fg-muted);
+}
+
+.today-stat b {
+  display: block;
+  font: 700 var(--fs-5)/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.today-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 1本ぶん。左に置き場所と時刻、右に中身。区切りは横罫だけ（箱で囲まない） */
+.today-ent {
+  display: grid;
+  grid-template-columns: 9.5rem minmax(0, 1fr);
+  gap: 1rem;
+  padding: .9rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.today-tm {
+  display: grid;
+  align-content: start;
+  gap: .1rem;
+  font: var(--fs-0) var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+.today-tm b {
+  overflow-wrap: anywhere;
+  font-family: var(--font-sans);
+  font-size: var(--fs-1);
+  color: var(--fg-muted);
+}
+
+.today-alive { color: var(--accent); }
+
+.today-main {
+  display: grid;
+  gap: .25rem;
+  min-width: 0;
+}
+
+/* 題。押すと窓を閉じて拡大で開く。押せる字なので --accent に寄せず、触れたときだけ下線 */
+.today-title,
+.today-q-title {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.today-title {
+  font-size: var(--fs-3);
+  font-weight: 700;
+}
+
+.today-title:hover,
+.today-q-title:hover { text-decoration: underline; }
+
+.today-k {
+  margin-top: .35rem;
+  font-size: var(--fs-0);
+  font-weight: 700;
+  color: var(--fg-faint);
+}
+
+.today-dec {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--fs-2);
+  color: var(--fg-muted);
+}
+
+.today-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+}
+
+.today-files code {
+  padding: .05rem .35rem;
+  border-radius: var(--r-xs);
+  background: var(--code-bg);
+  font-size: var(--fs-0);
+}
+
+.today-win .is-more {
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+}
+
+/* 決めたことも書き換えも無かったもの。動いた事実は消さないが、下に畳む */
+.today-quiet {
+  margin-top: .8rem;
+  font-size: var(--fs-1);
+  color: var(--fg-muted);
+}
+
+.today-quiet summary { cursor: pointer; }
+
+.today-quiet ul {
+  display: grid;
+  gap: .2rem;
+  margin: .5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.today-quiet li {
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  gap: .75rem;
+}
+
+.today-q-tm {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--fs-0) var(--font-mono);
+  color: var(--fg-faint);
+}
+
+.today-q-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-1);
+}
+
+/* 狭い窓では左の列を上へ畳む */
+@media (max-width: 40rem) {
+  .today-ent { grid-template-columns: minmax(0, 1fr); gap: .4rem; }
+  .today-quiet li { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}
