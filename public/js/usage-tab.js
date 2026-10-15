@@ -20,10 +20,11 @@ import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaPath } from './card.js';
 import {
   block, readNote, hitRateNote, statTile, barList, shareBar, trendList, tableDetails,
-  foldBlock, deltaText,
+  foldBlock, deltaText, sparkline,
   tokensStrict, pctStrict, numStrict,
   toolsBlock as toolsBlockOf,
 } from './usage-chart.js';
+import { halfTrend } from './usage-trend.js';
 
 /**
  * カードを押されたあとに作業台へ移す口。`initUsageTab` で外から差す。
@@ -178,14 +179,32 @@ function scanNote(d) {
 function tiles(d) {
   const out = new DocumentFragment();
   const box = el('div', 'stats');
+  // 新旧の差と推移。同じ窓を時刻で半分に割る（理由は usage-trend.js の冒頭）
+  const trend = halfTrend(d.rows);
+  // 札には短く「古い N 本より ±x%」。何と何を比べたかの説明は下の注記に1回だけ置く
+  // （札ごとに繰り返すと、狭い窓で折り返して数より長くなる）
+  const delta = (pair) => {
+    const t = trend ? deltaText(pair.now, pair.base) : null;
+    return t ? `古い ${trend.half} 本より ${t}` : null;
+  };
+
   // 実消費の但し書きだけは札に残す。あれは「その数がどこから出たか」の内訳で、
   // 数を読むときに一緒に読む値だから（他の3本は読み方の断り書き）
-  box.append(statTile('実消費', tokensStrict(d.totals.ite), `${numStrict(d.requests)} 回の要求`));
+  const ite = statTile('実消費', tokensStrict(d.totals.ite), `${numStrict(d.requests)} 回の要求`,
+    trend ? delta(trend.ite) : null);
+  addSpark(ite, trend?.series.ite, '実消費の推移（古い順・1本ずつ）');
+  box.append(ite);
   // 本数で割ると「長く話したセッションが多い月」というだけで動く。
   // 要求あたりなら、セッションの長さの違いを気にせず並べられる
-  box.append(statTile('1要求あたり', tokensStrict(d.requests > 0 ? d.totals.ite / d.requests : null)));
+  const per = statTile('1要求あたり', tokensStrict(d.requests > 0 ? d.totals.ite / d.requests : null),
+    null, trend ? delta(trend.perReq) : null);
+  addSpark(per, trend?.series.perReq, '1要求あたりの推移（古い順・1本ずつ）');
+  box.append(per);
   box.append(statTile('セッション', `${numStrict(d.sessions)} 本`));
-  box.append(statTile('キャッシュ命中率', pctStrict(d.cache.hitRate)));
+  // 命中率は差を出さない（行から正しく組み直せない。usage-trend.js）。線だけ
+  const hit = statTile('キャッシュ命中率', pctStrict(d.cache.hitRate));
+  if (d.cache.hitRate !== null) addSpark(hit, trend?.series.hitRate, 'キャッシュ命中率の推移（古い順・1本ずつ）');
+  box.append(hit);
   out.append(box);
 
   // **1本も減らしていない。** 札から外したぶんは、そのまま下の塊へ移すだけ。
@@ -193,11 +212,32 @@ function tiles(d) {
   // 面も枠も持たない4枚がどこで区切れているのか読めなかった
   const read = readNote([
     '1要求あたりは長さの違いを均した値です。作業の中身でも動きます。',
+    trend
+      ? `差は、読んだ本数を時刻で半分に割り、新しい ${trend.half} 本の値を古い ${trend.half} 本と比べたものです。`
+        + '線は古い順に1本ずつ並べています。'
+      : null,
     scanNote(d),
     crossHitRateNote(d),
   ]);
   if (read) out.append(read);
   return out;
+}
+
+/**
+ * 札の下に推移の線を足す。線が引けない（2点に足りない・読めない値がある）なら何もしない。
+ *
+ * **線は形しか語らない。** 両端の数は札の値と差が持っているので、ここでは添えない。
+ *
+ * @param {HTMLElement} tile statTile の戻り
+ * @param {number[]|null|undefined} values 古い順の値
+ * @param {string} label 読み上げに渡す名前
+ */
+function addSpark(tile, values, label) {
+  const svg = values ? sparkline(values, label) : null;
+  if (!svg) return;
+  const frame = el('div', 'stat-spark');
+  frame.append(svg);
+  tile.append(frame);
 }
 
 /**
@@ -219,6 +259,11 @@ function overviewBlock(d, go) {
   const out = new DocumentFragment();
   out.append(tiles(d));
 
+  // **内訳と重いものを2列に並べる。** 前は縦に積んでいて、全幅の器では右半分が
+  // 空いていた（UI レビューの F9）。狭い窓では1列に戻る（usage-mode.css）
+  const two = el('div', 'usage-two');
+  out.append(two);
+
   const un = d.skillsUnattributed;
   if (un) {
     const box = block('この期間の内訳');
@@ -230,7 +275,7 @@ function overviewBlock(d, go) {
       '残りはどのスキルにも紐づいていません。スキルを使わずに進めたぶんが入ります。',
     ]);
     if (read) box.append(read);
-    out.append(box);
+    two.append(box);
   }
 
   const box = block('いちばん重いもの');
@@ -283,7 +328,7 @@ function overviewBlock(d, go) {
 
   if (!list.children.length) return out;
   box.append(list);
-  out.append(box);
+  two.append(box);
   return out;
 }
 

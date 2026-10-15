@@ -54,6 +54,7 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `update-state.test.mjs` | 更新の紙の読み方。stale の判定と、無い紙を異常にしないこと |
 | `startup-state.test.mjs` | 自動起動の紙の読み方。紙が無いことを「動いていない」と読まないこと |
 | `update-banner.test.mjs` | 更新の帯の組み立て（`bannerOf`）。枝の順・鍵（`key`）の粒度・押したときに走らせる仕事の配線。**押せる知らせと押せない知らせで鍵を分けること**が本丸 |
+| `usage-trend.test.mjs` | 数値の概要の新旧の差（`halfTrend`）。**時刻で並べ替えてから割ること**（応答の rows は重い順で来る）・奇数のとき真ん中を外して本数を揃えること・1要求あたりを半分ごとの合計で割ること・0 と不明を混ぜないこと |
 | `screen.test.mjs` | 画面側の、**ブラウザで開くまで気づけないのに字面で分かること**。import した名前が相手側で export されているか・CSS が参照するトークンが定義されているか・使う先の無い意味トークンが残っていないか・ボールの所在の帯の約束（一覧と状態が重ならない／鍵に時刻を混ぜない／`refreshTimes` が帯も見る／`.card` だけ掴んで `.row` を取りこぼしていない）。**このリポジトリに linter は無い**ので、ここが代わりになる |
 | `tokens.test.mjs` | 色のトークンの二重定義。明暗の実体が1対1で揃っていること・意味トークンが3箇所すべてで差し替わること・色を直に書いていないこと。**片方だけ直しても何のエラーも出ない**種類の約束（`contract.test.mjs` と同じ性質） |
 | `md.test.mjs` | Markdown のパーサ。記法を読めることと、途中で切れた入力で壊れないこと。頭出しが中途半端な単位で終わらないこと（印を落とさないこと）。チェックリストの印を、印でないもの（`- [2] …`）と分けること。**リンクに http / https 以外を通さないこと**（`javascript:` と相対パスは表示名だけ）と、`blocksText` がリンクの URL を数えないこと |
@@ -109,8 +110,8 @@ import で確かめられるのは Node 側の半分だけになり、それで�
 読み取り層（`read/`）と画面側にはテストが無い。
 そこは実物で確かめる。
 
-例外は3枚。`public/js/md.js`（Markdown のパーサ）、`public/js/runs.js` の `rateView()`、
-`public/js/update-banner.js`（更新の帯の組み立て）。
+例外は4枚。`public/js/md.js`（Markdown のパーサ）、`public/js/runs.js` の `rateView()`、
+`public/js/update-banner.js`（更新の帯の組み立て）、`public/js/usage-trend.js`（数値の新旧の差）。
 どれも DOM を1つも触らない純関数なので、`.js` のまま Node から import できる
 （`package.json` が `type:module`）。`runs.js` は `EventSource` を関数の中でしか呼ばないので、
 読み込むだけなら何も起きない。`update-banner.js` は import そのものがゼロ。
