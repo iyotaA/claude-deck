@@ -99,7 +99,6 @@ test('CSS が参照しているトークンが、どこかで定義されてい�
 });
 
 test('使う先の無い意味トークンを残さない', () => {
-  // 色の実体（--l-* / --d-*）は意味トークンから指されるので、ここでは見ない
   const defined = new Set();
   const used = new Set();
   for (const f of fs.readdirSync(CSS)) {
@@ -107,7 +106,7 @@ test('使う先の無い意味トークンを残さない', () => {
     for (const m of src.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)) defined.add(m[1]);
     for (const m of src.matchAll(/var\((--[a-z0-9-]+)/g)) used.add(m[1]);
   }
-  const dead = [...defined].filter((n) => !used.has(n) && !/^--[ld]-/.test(n));
+  const dead = [...defined].filter((n) => !used.has(n));
   assert.deepEqual(
     dead, [],
     `使われていない意味トークンがある（要る場面が来たときに、使う側と一緒に足す）:\n  ${dead.join('\n  ')}`,

@@ -247,7 +247,7 @@
 }
 
 /* いちばん知りたい数を、いちばん大きく出す。
-   一覧の `.idle` は --fs-0（11px）で、前はここも同じだった ―― 題名より小さい */
+   一覧の `.idle` は --fs-0（12px）で、前はここも同じだった ―― 題名より小さい */
 .hero-idle {
   margin-left: auto;
   font-family: var(--font-mono);
