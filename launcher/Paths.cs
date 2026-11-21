@@ -76,8 +76,8 @@ static class Paths
     /// <summary>
     /// Edge に持たせるプロファイル。
     ///
-    /// 普段のプロファイルと分ける。画面側が localStorage に配色・onlyLive・
-    /// 時系列の向きを覚えているので、同居させると閲覧データを消したときに
+    /// 普段のプロファイルと分ける。画面側が localStorage に onlyLive・
+    /// 時系列の向きなどを覚えているので、同居させると閲覧データを消したときに
     /// 画面の状態まで一緒に消える。普段の Edge を全部閉じたときの巻き添えも避けられる。
     /// </summary>
     public static string EdgeProfile => Path.Combine(DataDir, "edge-profile");

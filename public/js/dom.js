@@ -61,7 +61,6 @@ export const dom = {
   // 題名。脇の印（SVG）を main.js が1回だけ差す
   brand: document.getElementById('brand'),
   reload: document.getElementById('reload'),
-  themeToggle: document.getElementById('theme-toggle'),
   onlyLive: document.getElementById('only-live'),
   // モードの札（mode.js）。骨格の組み替えは .app のクラスが受け持つ
   modeWork: document.getElementById('mode-work'),

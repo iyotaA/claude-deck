@@ -32,7 +32,7 @@ export function buildCard(row, onPick = null) {
 
   const top = el('div', 'card-top');
   const state = el('span', 'state', row.stateLabel);
-  // 点の形も状態で変える。**色だけに頼らない**（強調のテラコッタと --hot が近いため）。
+  // 点の形も状態で変える。**色だけに頼らない**（実行中の --calm と終了の --off がどちらも灰色寄りのため）。
   // 形の割り当ては色と同じ表（STATE_TONE）から引くので、2箇所に書かずに済む
   state.dataset.s = toneOf(row.state);
   // 判定に自信が無いものは印を付ける。断定して外すより、迷っていると伝えたほうが役に立つ
