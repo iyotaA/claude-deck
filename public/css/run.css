@@ -5,8 +5,8 @@
 
    色は新しく作らない。使うのは --accent（強調1本）と
    --fg-muted / --fg-faint / --border / --border-strong / --hot / --warn だけ。
-   多色を足すと tokens.css の二重定義（prefers-color-scheme 側と
-   [data-theme="dark"] 側）を両方直す義務が生まれる。 */
+   色は tokens.css の1箇所にだけ置き、字として使う色はそこで全部の面との比を
+   測ってある（test/tokens.test.mjs）。多色を足すと、測っていない色がその外に生まれる。 */
 
 /* ------------------------------------------------------- 状態の札 */
 

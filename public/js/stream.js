@@ -91,7 +91,7 @@ export function setLive(state, label) {
     label = '更新のためにサーバーを入れ替えています';
   }
   dom.live.dataset.live = state;
-  // **出すのは短い語だけ。** ここは道具（起こす・設定・配色）の並ぶ場所なので、
+  // **出すのは短い語だけ。** ここは道具（起こす・説明・設定）の並ぶ場所なので、
   // 押せない文が伸びると、押せるものを画面の端へ押しのける
   dom.live.textContent = LIVE_SHORT[state] ?? label;
   dom.live.title = label;

@@ -84,8 +84,9 @@
 /* 作業中（取り寄せ・入れ替え）。
  *
  * 一覧の「実行中」と同じ色を使う。この画面で「いま動いている」を表す色を1つに保つ。
- * 新しい色は作らない。足すと tokens.css の二重定義（prefers-color-scheme 側と
- * [data-theme="dark"] 側）を両方直す義務が生まれる */
+ * 新しい色は作らない。色は tokens.css の1箇所にだけ置き、字として使う色は
+ * そこで全部の面との比を測ってある（test/tokens.test.mjs）。ここで作ると、
+ * 測っていない色がその外に生まれる */
 .update[data-tone='work'] { border-left-color: var(--calm); }
 
 .update-text { font-weight: 600; }
@@ -187,7 +188,10 @@
 }
 
 /* 段の印。まだ＝細い輪、いま＝回る輪、済み＝✓、転んだ＝！。
-   **形でも分ける。** 色だけだと、済み（--done）と転んだ（--warn）が隣り合ったとき弱い */
+   **形でも分ける。** 色だけだと、済み（--done）と転んだ（--warn）が隣り合ったとき弱い。
+
+   中の字は 12px。前は輪に合わせて 9px にしていたが、12px を割る字は置かない
+   （tokens.css の字の段）。輪の大きさに縛られる字なので、段（--fs-*）ではなく数で持つ */
 .upd-dot {
   flex: none;
   display: inline-flex;
@@ -197,7 +201,7 @@
   height: .8rem;
   border-radius: 50%;
   border: 1.5px solid var(--border-strong);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1;
   color: var(--bg);

@@ -1,9 +1,10 @@
 <!doctype html>
-<html lang="ja" data-theme="">
+<html lang="ja">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<!-- 配色は暗い1種類だけ。スクロールバーやフォームの既定の色も暗いほうで描かせる -->
+<meta name="color-scheme" content="dark">
 <title>ClaudeDeck</title>
 <!-- ico の中に 16 / 32 / 48 が入っている。作り直すなら scripts\build-icons.ps1 -->
 <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
@@ -36,7 +37,7 @@
 <link rel="stylesheet" href="css/narrow.css">
 </head>
 <body>
-<!-- キーボードで来た人が、上のバーの道具8つを通り抜けて本文へ跳ぶ口。
+<!-- キーボードで来た人が、上のバーの道具を通り抜けて本文へ跳ぶ口。
      **焦点が当たるまで見えない**（.skip:not(:focus) が画面の外へ逃がす）ので、
      触っている人の視界には出ない。行き先は詳細ペインの流れる箱で、
      あそこは既に tabindex="-1" を持っている（焦点を受けられる） -->
@@ -70,16 +71,15 @@
       <span class="live" id="live" role="status" data-live="wait">接続中</span>
       <!-- ここだけ文字を残す。他の3つと違って、押すと新しいものが生まれる -->
       <button class="btn is-lead" id="runform-open" type="button" aria-label="新しいセッションを起こす">起こす</button>
-      <!-- 補助の4つはアイコンだけにする。名前は title と aria-label に残るので、
+      <!-- 補助の3つはアイコンだけにする。名前は title と aria-label に残るので、
            触れば出るし読み上げにも乗る。中身（SVG）は main.js が差す。
 
            **説明を先頭に置く。** 渡された人がいちばん先に押すもので、
-           残り3つ（再読み込み・設定・配色）は使い慣れてから触るものなので、
+           残り2つ（再読み込み・設定）は使い慣れてから触るものなので、
            読む順（左から右）と押す順を合わせてある -->
       <button class="ibtn" id="about-open" type="button" title="このアプリについて" aria-label="このアプリについて"></button>
       <button class="ibtn" id="reload" type="button" title="再読み込み" aria-label="再読み込み"></button>
       <button class="ibtn" id="settings-open" type="button" title="設定を開く" aria-label="設定を開く"></button>
-      <button class="ibtn" id="theme-toggle" type="button" title="配色を切り替える" aria-label="配色を切り替える"></button>
     </div>
 
     <!-- 更新のお知らせ。.app 直下ではなく topbar の中に置く。
@@ -103,7 +103,7 @@
 
     <!-- 下段。ボールの所在だけを置く帯。
          上段と同じ行に混ぜない。混ぜると「どれから手をつけるか」が
-         道具（起こす・設定・配色）と横幅を取り合い、状態の名前を出せなくなる。
+         道具（起こす・説明・設定）と横幅を取り合い、状態の名前を出せなくなる。
          枠の使用率は .summary とは別の器にする。あちらは renderSummary() が
          replaceChildren() で毎回まるごと入れ替えるので、混ぜると出どころの違う2つが
          同じ器を取り合う -->

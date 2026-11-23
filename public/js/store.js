@@ -27,12 +27,15 @@ import { initialHiddenKinds, hideQueryValue } from './timeline/kinds.js';
  * - `update.js` の `SEEN_KEY`（見た更新）
  *
  * 幅（`resize.js`）は `SIDES` の表が鍵ごと持っている。
+ *
+ * 前の版は配色の選択もここ（鍵の末尾 `.theme`）に覚えていた。配色を暗い1種類に
+ * そろえたので、もう読まない。**消しにも行かない** … 残っていても何も起きないので、
+ * 消す処理を足すと「誰も読まない鍵のための道具」が1つ増えるだけになる。
  */
 export const LS = Object.freeze({
   onlyLive: 'claude-deck.onlyLive',
   newestFirst: 'claude-deck.newestFirst',
   onlyDecisions: 'claude-deck.onlyDecisions',
-  theme: 'claude-deck.theme',
   // 上の帯を1行の札に畳んでいるか（list.js）。待ちが0件になったら解く
   heroFolded: 'claude-deck.heroFolded',
 });
@@ -40,8 +43,8 @@ export const LS = Object.freeze({
 /**
  * 状態 → 見た目の調子。**色と形はここ1つから引く。**
  *
- * 強調（`--accent`）をテラコッタにしたので、`--hot` と色相が近い。
- * `tokens.css` が長く避けていた組み合わせで、離してはあるが**色だけでは足りない**。
+ * 状態は**色だけでは足りない**。実行中（`--calm`）は無彩色で、終了・不明（`--off`）も
+ * 灰色寄りなので、その2つは色の差だけでは見分けにくい。
  * だから状態の点は形でも分ける（`list.css` の `.state[data-s]`）。
  * 色覚の差にも効く。
  *
@@ -72,7 +75,7 @@ export function toneOf(state) {
 /**
  * その状態の色を引く。**必ず CSS 変数経由**で返す。
  *
- * 生の色を返す形にすると、明暗の差し替え（`tokens.css` の3ブロック）に乗らない。
+ * 生の色を返す形にすると、色の実体（`tokens.css` の1か所）を直したときに乗らない。
  *
  * @param {string} state 行の `state`
  * @returns {string} `var(--hot)` など
@@ -140,7 +143,9 @@ export const SUMMARY_ORDER = [
  *
  *  ?session=<id> … そのセッションを開く（見に戻るときのブックマーク用）。
  *                  一覧に無いもの（24時間より古いもの）も開ける
- *  ?theme=dark|light … 配色を固定する
+ *  ?theme=dark|light … 前の版で配色を固定していた指定。いまは読まない。
+ *                      配色は暗い1種類だけなので、前の版のブックマークに残っていても
+ *                      受けて無視する（画面は暗いまま。URL から消しにも行かない）
  *  ?only=1 … 時系列を「判断だけ」で開く
  *  ?tq=<語> … 時系列の検索語
  *  ?hide=<種類,種類> … 時系列で隠す種類。空で付けると「何も隠さない」になる
@@ -525,7 +530,8 @@ export const store = {
  * 見えないものの指定を引きずったアドレスを人に渡さないよう、その場に無いキーは落とす。
  *
  * ほかに mode と、tab を消しに行くだけの行が1つある（書庫が左のペインのタブだった名残）。
- * theme と nolive は「開くときの指定」なので、こちらから書き換えない
+ * nolive は「開くときの指定」なので、こちらから書き換えない。
+ * 前の版の theme も触らずに残す（読まないだけで、消しに行く理由が無い）
  */
 export function syncQuery() {
   const params = new URLSearchParams(location.search);
