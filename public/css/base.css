@@ -671,6 +671,16 @@ button {
   color: var(--fg);
 }
 
+/* 押せないとき（今日のまとめの窓の端の矢印）。**押せないことを止まった絵で見せる** … 薄くし、
+   触れても面を出さない（`.btn[disabled]` の .5 と同じ薄さ。`.ibtn:hover`（0,2,0）の面は `.ibtn[disabled]:hover`（0,3,0）で打ち消す）。
+   隠さないのは、端に来るたびに隣のボタンの位置がずれるから（`today.js` の `renderHead`） */
+.ibtn[disabled] { opacity: .5; cursor: default; }
+
+.ibtn[disabled]:hover {
+  background: none;
+  color: var(--fg-muted);
+}
+
 /* ------------------------------------------------------------ 選ぶ口 */
 
 /* **ネイティブの矢印を消す。**

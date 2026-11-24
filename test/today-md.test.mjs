@@ -3,11 +3,13 @@
  *
  * 画面側のファイルだが import ゼロの純関数なので、Node から読める。
  * 見たいのは「画面と同じ並びで、切ったことを黙らない」こと。
+ * どの日を見るかの判断（範囲の丸め・日の言い方・前後の矢印の行き先と端）もここで関数を呼んで見る。
+ * 窓の配線（矢印と日の選択が同じ道を通ること・端で押せないこと・足のボタン）は `today-win.test.mjs` が字面で見る。
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  TODAY_AGO_MAX_UI, isQuiet, shortPath, spanText, todayMarkdown,
+  TODAY_AGO_MAX_UI, agoDate, agoLabel, agoSteps, clampAgo, isQuiet, shortPath, spanText, todayMarkdown,
 } from '../public/js/today-md.js';
 import { TODAY_AGO_MAX } from '../src/view/today.mjs';
 
@@ -79,4 +81,45 @@ test('時刻の言い方。同じ分なら1つだけ', () => {
 
 test('選べる日数がサーバーの上限と揃っている', () => {
   assert.equal(TODAY_AGO_MAX_UI, TODAY_AGO_MAX);
+});
+
+/* ── どの日を見るか（窓の頭の矢印と日の選択。画面刷新⑤の D23）──────────── */
+
+test('何日前かを選べる範囲の整数へ丸める。数でないものは「きょう」', () => {
+  assert.equal(clampAgo(3), 3);
+  assert.equal(clampAgo('2'), 2);
+  assert.equal(clampAgo(2.9), 2);
+  assert.equal(clampAgo(-1), 0);
+  assert.equal(clampAgo(TODAY_AGO_MAX_UI + 5), TODAY_AGO_MAX_UI);
+  for (const v of [undefined, null, '', 'abc', NaN]) assert.equal(clampAgo(v), 0, `${String(v)} を「きょう」に倒していない`);
+});
+
+test('前後の矢印の行き先。前の日は1日古く、次の日は1日新しい。端は null（押せない）', () => {
+  assert.deepEqual(agoSteps(0), { prev: 1, next: null }, 'きょうより先へは行けない');
+  assert.deepEqual(agoSteps(3), { prev: 4, next: 2 });
+  assert.deepEqual(agoSteps(TODAY_AGO_MAX_UI), { prev: null, next: TODAY_AGO_MAX_UI - 1 }, '選べるいちばん古い日より前へは行けない');
+  // 範囲の外から来ても丸めてから決める（どの口から来ても同じ道）
+  assert.deepEqual(agoSteps(99), agoSteps(TODAY_AGO_MAX_UI));
+  assert.deepEqual(agoSteps('x'), agoSteps(0));
+  // 矢印だけで、選べる日を端から端まで1日ずつ全部たどれる（飛ばす日も、行き止まりの手前で止まる日も無い）
+  const seen = [0];
+  for (let a = 0; agoSteps(a).prev !== null; a = agoSteps(a).prev) seen.push(agoSteps(a).prev);
+  assert.deepEqual(seen, Array.from({ length: TODAY_AGO_MAX_UI + 1 }, (_, i) => i));
+});
+
+test('日の言い方。題と選択肢が同じ「M/D（曜）」で、選択肢は「きょう」「きのう」のあと日付だけ（地方時）', () => {
+  const now = new Date(2026, 10, 24, 9, 30).getTime(); // 2026-11-24（火）
+  assert.equal(agoDate(0, now), '11/24（火）');
+  assert.equal(agoDate(1, now), '11/23（月）');
+  assert.equal(agoLabel(0, now), 'きょう 11/24（火）');
+  assert.equal(agoLabel(1, now), 'きのう 11/23（月）');
+  assert.equal(agoLabel(2, now), '11/22（日）');
+  assert.equal(agoLabel(2, now), agoDate(2, now), '3日目からは選択肢と題が同じ言い方');
+  // 月をまたぐ・範囲の外は丸める
+  const first = new Date(2026, 11, 2, 0, 5).getTime(); // 2026-12-02（水）の 00:05
+  assert.equal(agoDate(3, first), '11/29（日）');
+  assert.equal(agoDate(99, first), agoDate(TODAY_AGO_MAX_UI, first));
+  // 日付が変わる前後で「きょう」が動く（基準の時刻を外から渡すので、開きっぱなしでも古い日に固まらない）
+  assert.equal(agoLabel(0, new Date(2026, 10, 24, 23, 59).getTime()), 'きょう 11/24（火）');
+  assert.equal(agoLabel(0, new Date(2026, 10, 25, 0, 0).getTime()), 'きょう 11/25（水）');
 });

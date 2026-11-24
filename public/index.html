@@ -676,7 +676,8 @@
         <section class="settings-sec">
           <h3 class="settings-h3 has-icon" data-icon="today">今日のまとめ</h3>
           <p class="settings-hint">左のレールの <strong>今日のまとめ</strong>、書庫の頭のボタン、Ctrl+K のどれからでも開けます。
-            その日に決めたことと書き換えたファイルを1枚に並べ、Markdown でコピーできます。</p>
+            その日に決めたことと書き換えたファイルを1枚に並べ、Markdown でコピーできます。
+            窓の頭の矢印（<strong>前の日・次の日</strong>）で1日ずつ、日付の欄で数日前まで一度に戻れます。</p>
         </section>
       </div>
 
@@ -948,19 +949,31 @@
 </dialog>
 
 <!-- 今日のまとめ（today.js）。入口は左のレール・書庫の頭のボタン・Ctrl+K の3つ。
-     中身は開いたときに /api/today から1回だけ引いて組む。頭と足は設定モーダルのクラスを借りる -->
+     中身は開いたときに /api/today から1回だけ引いて組み、日を替えたら引き直す。頭と足は設定モーダルのクラスを借りる。
+     頭は 題（日付つき）……（空き）……前の日 ・ 日の選択 ・ 次の日 → ×。足は 一言 → 閉じる → Markdown でコピー（塗る）。
+     **塗るのは足の「Markdown でコピー」の1つだけ**（窓の中の1画面に1つ。メモの窓の「保存」・起こすフォームの「起こす」と同じ位置）。
+     矢印は手本のモックでは題の両脇だが、**右端の × の隣で日の選択の両脇に置く**。題は日付の字数で幅が変わるので、
+     題の脇だと矢印が押すたびにずれる（選択の幅も archive.css で決めてある）。
+     矢印の絵は today.js が差す（icons.js の chevron。前の日は CSS で裏返す） -->
 <dialog class="today-win" id="today" aria-labelledby="today-title">
   <div class="settings-head today-head">
-    <h2 id="today-title">まとめ</h2>
-    <span class="archive-field selectbox">
-      <select id="today-ago" aria-label="どの日を見るか"></select>
-    </span>
-    <button class="btn" id="today-copy" type="button" disabled>Markdown でコピー</button>
+    <h2 id="today-title">まとめ <span class="today-day" id="today-day"></span></h2>
+    <div class="today-days" role="group" aria-label="見る日">
+      <button class="ibtn today-step is-prev" id="today-prev" type="button"
+              title="前の日" aria-label="前の日"></button>
+      <span class="archive-field selectbox">
+        <select id="today-ago" aria-label="どの日を見るか"></select>
+      </span>
+      <button class="ibtn today-step" id="today-next" type="button"
+              title="次の日" aria-label="次の日"></button>
+    </div>
     <button class="settings-x" id="today-close" type="button" aria-label="閉じる">&#215;</button>
   </div>
   <div class="today-body" id="today-body"></div>
   <div class="settings-foot">
-    <p class="settings-msg" id="today-msg" role="status"></p>
+    <p class="settings-msg" id="today-msg" role="status" data-tone=""></p>
+    <button class="btn" id="today-close-foot" type="button">閉じる</button>
+    <button class="btn is-lead" id="today-copy" type="button" disabled>Markdown でコピー</button>
   </div>
 </dialog>
 

@@ -6,7 +6,10 @@
  * Ctrl+K の3つで、開くのは窓。見終わったら閉じて元の画面へ戻る。
  *
  * 中身は `/api/today` から**開いたときに1回だけ**引く（全文を読む重い窓口なので、毎秒は撃たない）。
- * Markdown の組み立てと、画面とコピーで共有する言い方は `today-md.js`（層0）に置く。
+ * 日を替えたら引き直す。**日を替える口は3つ（日の選択・前の日・次の日）あるが、通る道は `setAgo` の1本**
+ * （丸め・選択の値・題・矢印の押せる押せない・一言の消去・引き直しを1か所でやる）。
+ * Markdown の組み立てと、画面とコピーで共有する言い方、どの日を見るかの判断（範囲・日の言い方・
+ * 矢印の行き先）は `today-md.js`（層0）に置く。
  *
  * セッションの題を押すと、窓を閉じて拡大モーダルで開く（書庫のカードと同じ開き方）。
  */
@@ -17,7 +20,10 @@ import { getJson } from './api.js';
 import { closeOnBackdrop } from './modal.js';
 import { select } from './session.js';
 import { openZoom } from './zoom.js';
-import { TODAY_AGO_MAX_UI, decisionText, isQuiet, shortPath, spanText, todayMarkdown } from './today-md.js';
+import {
+  TODAY_AGO_MAX_UI, agoDate, agoLabel, agoSteps, clampAgo,
+  decisionText, isQuiet, shortPath, spanText, todayMarkdown,
+} from './today-md.js';
 
 /** いま見ている日（何日前か） */
 let ago = 0;
@@ -27,14 +33,77 @@ let data = null;
 let seq = 0;
 
 /**
+ * 足の1行に一言出す（設定モーダル・起こすフォームの `say` と同じ作法）。
+ * 色は `.settings-msg[data-tone]` が持つ（済んだ = good・できなかった = bad）。空で消える。
+ *
+ * @param {string} text
+ * @param {''|'good'|'bad'} [tone]
+ */
+function say(text, tone = '') {
+  dom.todayMsg.textContent = text;
+  dom.todayMsg.dataset.tone = text ? tone : '';
+}
+
+/**
  * 窓を開く。開くたびに引き直す（閉じているあいだに動いたぶんを拾う）。
  * 見る日は覚えたまま（きのうを見ていたら、次もきのうから）。
+ *
+ * **日の選択肢も開くたびに組み直す。** 常駐していると、起動した日に組んだ「きょう 11/24」が
+ * 次の日も残り、題（開くたびにその日の日付で組む）と選択肢の日付が食い違う。
  */
 export function openToday() {
   if (dom.today.open) return;
-  dom.todayMsg.textContent = '';
+  fillAgo();
   dom.today.showModal();
+  setAgo(ago);
+}
+
+/**
+ * 見る日を替える。**日を替える口（日の選択・前の日・次の日・開いたとき）はすべてここを通る。**
+ * 口ごとに別の道を持つと、矢印だけ選択の値を書き忘れる・題が古いまま、のような食い違いが起きる。
+ *
+ * @param {unknown} next 何日前か（範囲の外と数でないものは `clampAgo` が丸める）
+ */
+function setAgo(next) {
+  ago = clampAgo(next);
+  dom.todayAgo.value = String(ago);
+  renderHead();
+  say('');
   load();
+}
+
+/**
+ * 頭の題と矢印を、いま見ている日に合わせる。
+ *
+ * **端の矢印は隠さずに押せなくする（disabled）。** 隠すと日の選択と × の位置が端に来るたびに横へずれ、
+ * 続けて押していた手元の下へ別のボタンが来る。拡大の窓の「← 前／次の待ち →」も、
+ * 押す先が無いときは消さずに押せなくしている（`zoom.js` の `syncZoomWaits`）。
+ * 押せないことは形で見せる（薄くし、触れても面を出さない。`base.css` の `.ibtn[disabled]`）。
+ * 「押せない顔のボタンを出さない」の約束は、押しても何も起きないのに押せる顔をしているもの
+ * （詳細の頭の次の一手）の話で、押せないと見えているボタンはそれに当たらない
+ */
+function renderHead() {
+  dom.todayDay.textContent = agoDate(ago, Date.now());
+  const steps = agoSteps(ago);
+  dom.todayPrev.disabled = steps.prev === null;
+  dom.todayNext.disabled = steps.next === null;
+}
+
+/**
+ * 前後の矢印を押した。行き先は `agoSteps` が決める（端なら null で何もしない）。
+ *
+ * **端に着いて押せなくなったら、焦点を反対の矢印へ渡す。** 押した矢印が disabled になると焦点が外れ、
+ * キーボードで続けて押していた人の焦点が窓の外（body）へ落ちる。
+ *
+ * @param {'prev'|'next'} dir
+ */
+function step(dir) {
+  const target = agoSteps(ago)[dir];
+  if (target === null) return;
+  const btn = dir === 'prev' ? dom.todayPrev : dom.todayNext;
+  const held = document.activeElement === btn;
+  setAgo(target);
+  if (held && btn.disabled) (dir === 'prev' ? dom.todayNext : dom.todayPrev).focus();
 }
 
 /** 引いて描く。失敗は窓の中に理由を出す（黙って空にしない） */
@@ -161,31 +230,35 @@ function render() {
   dom.todayCopy.disabled = !data.rows.length;
 }
 
-/** Markdown でコピー。手元のクリップボードに入れるだけで、外へは送らない */
+/**
+ * Markdown でコピー。手元のクリップボードに入れるだけで、外へは送らない。
+ * 結果は足の一言（押したボタンのすぐ左）に出す。日を替えるか開き直すまで残す
+ * （窓の足の一言は、設定モーダル・起こすフォームと同じく次の操作まで残す作法）
+ */
 async function copy() {
   if (!data) return;
   try {
     await navigator.clipboard.writeText(todayMarkdown(data));
-    dom.todayMsg.textContent = 'コピーしました';
+    say('コピーしました', 'good');
   } catch (err) {
-    dom.todayMsg.textContent = `コピーできませんでした: ${err.message}`;
+    say(`コピーできませんでした: ${err.message}`, 'bad');
   }
 }
 
 /**
  * 見る日の選択肢。「きょう」「きのう」のあとは日付で出す（「3日前」だと曜日が分からない）。
+ * 言い方は窓の題と同じ `agoLabel` / `agoDate`（`today-md.js`）から。開くたびに組み直す（`openToday`）
  */
 function fillAgo() {
-  const days = ['日', '月', '火', '水', '木', '金', '土'];
+  const now = Date.now();
+  const opts = [];
   for (let i = 0; i <= TODAY_AGO_MAX_UI; i += 1) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const date = `${d.getMonth() + 1}/${d.getDate()}（${days[d.getDay()]}）`;
-    const label = i === 0 ? `きょう ${date}` : i === 1 ? `きのう ${date}` : date;
-    const o = el('option', null, label);
+    const o = el('option', null, agoLabel(i, now));
     o.value = String(i);
-    dom.todayAgo.append(o);
+    opts.push(o);
   }
+  dom.todayAgo.replaceChildren(...opts);
+  dom.todayAgo.value = String(ago);
 }
 
 /** 配線。main.js から1回だけ呼ぶ */
@@ -196,14 +269,18 @@ export function initToday() {
   dom.archiveToday.prepend(icon('today', 14));
   dom.todayCopy.prepend(icon('copy', 14));
   dom.todayAgo.closest('.archive-field').prepend(icon('clock', 14));
+  // 前後の矢印。**絵を新しく作らない** … 右向きの chevron（起こすフォームの畳み・終了の開け閉めと同じ形）を
+  // そのまま「次の日」に、CSS で裏返して「前の日」に使う（`.today-step.is-prev .icon`）
+  dom.todayPrev.append(icon('chevron'));
+  dom.todayNext.append(icon('chevron'));
   // 入口は2つ（左のレール・書庫の頭）。どちらも同じ窓を開く
   for (const btn of [dom.todayOpen, dom.archiveToday]) btn.addEventListener('click', openToday);
-  dom.todayClose.addEventListener('click', () => dom.today.close());
+  // 閉じる口は頭の × と足の「閉じる」（手本のモックと同じ。足の並びで「閉じる」と「コピー」を選べる）
+  for (const btn of [dom.todayClose, dom.todayCloseFoot]) btn.addEventListener('click', () => dom.today.close());
   dom.todayCopy.addEventListener('click', copy);
-  dom.todayAgo.addEventListener('change', () => {
-    ago = Number(dom.todayAgo.value) || 0;
-    dom.todayMsg.textContent = '';
-    load();
-  });
+  // 日を替える口は3つ。どれも setAgo の1本を通る
+  dom.todayAgo.addEventListener('change', () => setAgo(dom.todayAgo.value));
+  dom.todayPrev.addEventListener('click', () => step('prev'));
+  dom.todayNext.addEventListener('click', () => step('next'));
   closeOnBackdrop(dom.today);
 }
