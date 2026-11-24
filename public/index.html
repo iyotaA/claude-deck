@@ -147,7 +147,9 @@
            左のレールにも同じ入口（#today-open）がある。こちらは字を出せる場所なので名前ごと残す -->
       <button class="btn today-open" id="archive-today" type="button">今日のまとめ</button>
       <!-- 検索欄。絵（虫めがね）は archive.js が差す。
-           打つ前に「ここが検索欄」と分かる合図が、いままで placeholder しか無かった -->
+           打つ前に「ここが検索欄」と分かる合図が、いままで placeholder しか無かった。
+           **文言に「題」を入れない**（手本のモックは「ID・題・置き場所で探す」）。浅い検索は題を読んでいない行が大半で、
+           題では当たらない（src/view/archive.mjs の matches）。文言が嘘になる -->
       <span class="archive-field is-q">
         <input class="archive-q" id="archive-q" type="search"
                placeholder="ID・置き場所で探す" aria-label="書庫を検索">
@@ -184,7 +186,9 @@
           <option value="size">大きい順</option>
         </select>
       </span>
-      <!-- 既定はファイルを開かない検索。タイトルまで探すのは押されたときだけ -->
+      <!-- 既定はファイルを開かない検索。本文まで探すのは入れたときだけ。
+           **チェックのまま置く**（手本のモックも同じ）。「どれを見るか」の切り替え（.live-filter）ではなく、
+           いまの検索に本文を足すかどうかの1つの選択なので。見た目は archive.css -->
       <label><input type="checkbox" id="archive-deep"> 中身も探す</label>
       <!-- 絞り込みを1つでも掛けているときだけ出す。押すと全部外す。
            **絵だけにする。** 隣の絞り込みと同じ形だと「もう1つの絞り込み」に見える。

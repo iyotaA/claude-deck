@@ -100,48 +100,9 @@
   color: var(--fg-muted);
 }
 
-/* 書庫のヘッダは項目が多い。折り返して2段になっても崩れないようにする */
-.archive-head { flex-wrap: wrap; }
-
-.archive-q {
-  flex: 1 1 9rem;
-  min-width: 0;
-  padding: .3rem .45rem;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-elev);
-  box-shadow: var(--hi);
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--fs-2);
-}
-
-/* 焦点は線の色だけで示さない。**外へ光の輪を回す。**
-   1px の枠を塗り替えるだけだと、どこに焦点があるか探すことになる。
-   base.css の :focus-visible（2px の outline）は入力欄でも出るので、
-   ここはその内側を面ごと持ち上げるぶんだけを足す */
-.archive-q:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.archive-head select {
-  padding: .25rem .3rem;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-elev);
-  box-shadow: var(--hi);
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--fs-1);
-}
-
-.archive-head #archive-count {
-  flex: 1 0 100%;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--fg-faint);
-}
+/* 書庫の探す帯（.archive-head）の指定は archive.css に1か所。ここには置かない
+   （書庫が左の列のタブだった頃の「単体で置く」指定が残っていて、器の中に丸い線を出していた）。
+   ここに残すのは書庫のカードのぶんだけ */
 
 /* 書庫のカードには状態色の帯を出さない。全部終わっているので、
    色を付けると稼働中の一覧と同じ重さに見えて手をつける順番が読めなくなる */
@@ -172,13 +133,6 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--fg-faint);
-}
-
-.list-head label {
-  display: inline-flex;
-  align-items: center;
-  gap: .3rem;
-  cursor: pointer;
 }
 
 /* 引き出しを閉じるボタン。広い画面には引き出しが無いので出さない */
@@ -579,16 +533,22 @@
   transform: translateY(-1px);
 }
 
-/* 選んでいるもの。**枠の色だけで示さない。**
+/* 選んでいるもの。**枠の色だけで示さない。面ごと持ち上げる。**
    1px の線を塗り替えるだけだと、隣のカードとの差が 1px ぶんしか無かった。
-   影を1段上げ、外側に光の輪（--accent-soft）を回して面ごと持ち上げる。
 
-   枠は --accent そのものではなく border と混ぜる。純色の輪郭に光の輪が重なると、
-   同じ色が2本並んで太い枠に見える */
+   **一覧の選んでいる行（.row[aria-current]）と同じ考え方** … 面 --bg-hi ＋ 枠 --border-strong、
+   **光の輪は付けない**（ラベンダーを減らす決め。選んだ印は押すもの・あなたの番の色と分ける）。
+   影は素の .card のまま（--sh-1 ＋ --hi）で、押せるカードの形は落とさない。
+
+   前は面を --bg に沈め、--accent を混ぜた枠と光の輪で示していた。画面刷新⑤で書庫の床も --bg にした
+   （数値モードの床はもともと --bg）ので、**選んだカードだけ面が床と同じ色に抜けて見えた**。
+   --bg-hi は面の段でいちばん明るく、字の比の表（tokens.css）も全部の字をこの面で 4.5:1 以上に保っている。
+
+   使っているのは書庫のカードだけ（稼働中の一覧は .row。数値モードのカードは aria-current を付けない。
+   usage-tab.js の usageCard）。素の .card に置くので、付けるカードが増えても同じ見え方になる */
 .card[aria-current="true"] {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: var(--bg);
-  box-shadow: var(--sh-2), 0 0 0 3px var(--accent-soft), var(--hi);
+  border-color: var(--border-strong);
+  background: var(--bg-hi);
 }
 
 .card-top {

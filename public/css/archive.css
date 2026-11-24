@@ -21,21 +21,63 @@
 .is-archive .detail-pane,
 .is-archive .insp { display: none; }
 
-/* 探す帯。狭い列に居たころは件数を次の行へ送っていた（list.css の `flex: 1 0 100%`）。
-   広い場所では同じ行の右端に置ける。**打ち切りの断りもここに出る**ので、
-   検索語のとなりから離しておく（読む順が「探した → 何件 → どこまで」になる） */
-.is-archive .archive-head { padding: .55rem .75rem; }
+/* 探す帯。**数値モードの頭（`.usage-head`）と同じ帯にそろえる**（画面刷新⑤）。
+   器は一覧の頭と同じ `.list-head`（余白・下線・字の段）を借り、**ここで余白を上書きしない** ――
+   前は書庫だけ余白を `.55rem` に広げていて、書庫と数値を行き来すると帯の背が跳ねた（実測 52.6px / 51px）。
+   並びは 今日のまとめ → 検索欄 → 置き場所 → スキル → 期間 → 並び → 中身も探す → 外す口 → 件数（手本のモックの書庫の頭）。
+   項目が多いので、収まらない窓でだけ折り返す。
 
-.is-archive .archive-head #archive-count {
-  flex: 0 0 auto;
+   **探す帯の指定はこのファイルの1か所に置く。** 前は `list.css` にも、書庫が左の列のタブだった頃の
+   「単体で置く」指定（`.archive-q` / `.archive-head select` / 件数の `flex: 1 0 100%`）が残っていて、
+   ここで打ち消し損ねたぶんが中に丸い線として出ていた（下の `.archive-field select` のコメント）。画面刷新⑤で消した */
+.archive-head { flex-wrap: wrap; }
+
+/* 件数。**打ち切りの断りもここに出る**ので、検索語のとなりから離して同じ行の右端に置く
+   （読む順が「探した → 何件 → どこまで」になる）。数値の `#usage-count`・一覧の `#list-count` と同じ作法 */
+.archive-head #archive-count {
   margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
 }
 
 /* 検索語だけが伸びる。絞り込みは中身の幅で置く */
-.is-archive .archive-field.is-q { flex: 1 1 20rem; }
+.archive-head .archive-field.is-q { flex: 1 1 20rem; }
+
+/* 帯の中の押せるもの（今日のまとめ・検索欄・絞り込みの札）の背を1つにそろえる（34px）。
+   中身なりに任せると、select の札が 34px、検索欄と今日のまとめが 31px になり、
+   1行の帯の中で上下がずれていた（実測）。34px は select の札がもともと出していた背で、
+   数値の頭の節ナビ（`usage-mode.css` の `.usage-head .usage-nav button`）もこれに合わせてある。
+   `.archive-field` は数値の頭も借りるが、あちらの札は select だけなので背は変わらない。
+   絞り込みを外す口（`.archive-clear`）は入れない。ピル型の小さな丸で、札と形を変えてあるのが役目 */
+.archive-field,
+.archive-head .today-open { min-height: 2.125rem; }
+
+/* 「中身も探す」。**チェックのまま置く**（手本のモックも同じ）。これは「どれを見るか」の切り替え
+   （一覧の頭の「すべて｜稼働中」= `.live-filter`）ではなく、いまの検索に本文を足すかどうかの1つの選択だから。
+   箱は字の横で小さく見えない大きさにし（既定は 13px）、入れた印は --accent
+   （選んでいるものの色。許可要求のカードの `.ask-pick` と同じ当て方）。押せる範囲は字ごと（label） */
+.archive-head label {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.archive-head input[type="checkbox"] {
+  width: .95rem;
+  height: .95rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 
 /* 絵と欄を1つの枠に収める。枠は外側が持ち、中の入力と選択は枠を持たない。
-   **絵は絞り込みの札にだけ置く。** 横に4つ並ぶものは形で見分けられると速い */
+   **絵は絞り込みの札にだけ置く。** 横に並ぶ札は形で見分けられると速い。
+   カードの中には置かない（画面刷新⑤の D20。理由は `archive.js` の `initArchive`）。
+   **面は押せる段（--bg-elev ＋ 影）のまま。** 手本のモックの select は沈めた面（--bg-sunk）だが、
+   押せるものは浮かせる約束（public/CLAUDE.md の「段の当て方」）を採る */
 .archive-field {
   display: inline-flex;
   align-items: center;
@@ -55,6 +97,7 @@
 }
 
 /* 中身は枠を外して、外側の枠に任せる。二重の枠にすると押せる範囲が読めなくなる。
+   入力欄と select がブラウザの既定で持つ枠・余白・字（システムの字）も、ここで全部外して器に合わせる。
 
    **`background: none` にしない。** 面まで透明にすると、`<select>` を開いたときの
    ドロップダウン（ブラウザが描くネイティブの一覧）の地も透明になり、
@@ -67,20 +110,27 @@
   padding: 0;
   border: 0;
   /* **丸みと影も外す。枠と一緒に外側へ預ける。**
-     `list.css` の `.archive-q` と `.archive-head select` は、この器がまだ無かった頃の
-     「単体で置く」ための指定で、`border-radius` と `box-shadow: var(--hi)` を持っている。
+     前は `list.css` に、この器がまだ無かった頃の「単体で置く」ための指定
+     （`.archive-q` と `.archive-head select`。`border-radius` と `box-shadow: var(--hi)` を持つ）が残っていて、
      ここで打ち消していたのは `border` と `padding` だけだったので、
      **中に丸い線がもう1本残っていた** ―― `--hi` は内側 1px のハイライトで、
      丸みで切り取られるため輪郭のように見える。
 
      `<select>` では長いあいだ隠れていた。ネイティブの見た目が上から描いていたためで、
      `appearance: none`（`base.css`）で素の箱にした途端に出てきた。
-     検索欄（`<input>`）のほうは元から素の箱なので、ずっと出ていたことになる */
+     検索欄（`<input>`）のほうは元から素の箱なので、ずっと出ていたことになる。
+     その単体の指定は画面刷新⑤で消した。**戻さない**（探す帯の指定はこのファイルの1か所） */
   border-radius: 0;
   box-shadow: none;
   background: var(--bg-elev);
   color: var(--fg);
+  /* 入力欄はブラウザの既定でシステムの字（13.33px）になる。帯の字の段を継がせる */
+  font: inherit;
 }
+
+/* 検索欄の字だけ1段大きく（--fs-2）。打った語を読み返すのはここなので、
+   隣の札の名前（帯の --fs-1）より立てる（手本のモックも探す欄だけ 14px） */
+.archive-field .archive-q { font-size: var(--fs-2); }
 
 /* ドロップダウンの1行ずつにも直に置く。上の `background` だけでは足りない環境がある
    （選択肢の地は `<select>` から必ずしも継がない） */
@@ -135,7 +185,9 @@
 .archive-clear[hidden] { display: none; }
 
 /* 結果。窓を広げた分だけ列が増える。19rem はタイトルが2行で収まる下限で、
-   これより狭めると3行になってカードの高さが揃わなくなる */
+   これより狭めると3行になってカードの高さが揃わなくなる。
+   **題の行数に上限は付けない**（下の `.archive-grid .card`。画面刷新⑤の D19）ので、
+   手本のモックの 250px（題を2行で切る前提の幅）までは下げない */
 .archive-grid {
   display: grid;
   /* **`min()` で包む。** 素の `minmax(19rem, 1fr)` は 19rem（304px）を下限として
@@ -143,15 +195,22 @@
      `min(19rem, 100%)` なら、窓が狭いときだけ下限のほうが折れる
      （数値モードの `.usage-grid` が先に同じ書き方をしている） */
   grid-template-columns: repeat(auto-fill, minmax(min(19rem, 100%), 1fr));
-  gap: .5rem;
+  /* カードの間は .75rem。床（--bg）の上でカードが面と影で浮くので、
+     前の .5rem では影どうしが寄って1枚の板に見えた（手本のモックは 14px） */
+  gap: .75rem;
   margin: 0;
-  padding: .6rem;
+  /* 左右は帯（.list-head）と同じ .75rem。カードの左の縁が、帯の「今日のまとめ」の左の縁とそろう
+     （前は .6rem で 2.4px ずれていた）。上と下は数値モードの床（.usage-pane）と同じ */
+  padding: .7rem .75rem 1.2rem;
   overflow-y: auto;
   min-height: 0;
   list-style: none;
   /* 件数が少ない日にカードが縦へ伸びないようにする */
   align-content: start;
-  background: var(--bg-sunk);
+  /* **床は --bg**（画面刷新⑤の D22。数値モードの床 `.usage-pane` と同じ）。
+     前は --bg-sunk で、カードの面（--bg-elev）との明るさの差がほとんど無く、カードが床に貼り付いて見えた。
+     帯（.list-head）は面を持たないので body の --bg-sunk のまま ―― 数値モードの頭と床と同じ関係 */
+  background: var(--bg);
 }
 
 /* `display: grid` は `[hidden]` の既定（0,1,0）に勝つので、消す指定を自分で書く */
@@ -161,16 +220,25 @@
    グリッドの1マスに入ると画面の左上へ小さく出て、見つけられない */
 .archive-grid > li.is-wide { grid-column: 1 / -1; }
 
-/* カードの中身は広い場所でも同じ形。**タイトルの行数に上限を付けない。**
-   探しに来た人が読むのはそこなので、省くと画面を広げた意味が消える */
+/* カードの中身は広い場所でも同じ形。**タイトルの行数に上限を付けない**（画面刷新⑤の D19）。
+   探しに来た人が読むのはそこなので、省くと画面を広げた意味が消える。
+   手本のモックは題を2行で切って背をそろえていたが採らない ―― 背は下の `height: 100%` で行ごとにそろう */
 .archive-grid .card {
   height: 100%;
   /* 高さを揃えるために 100% を敷くが、**中身まで引き伸ばさない。**
      .card は grid なので、既定のままだと余った縦を各行へ分けてしまい、
      札や数の**字の下だけに隙間が空く**（実測で最大 14px）。
-     上へ詰めて、余りは下にまとめて残す */
-  align-content: start;
+
+     書庫のカードは**縦の flex に替えて、余りを数値の格子の上に1つにまとめる**（下の `margin-top: auto`）。
+     数値の格子がカードの底にそろうので、同じ行のカードどうしで「命中」が同じ高さに並ぶ
+     （画面刷新⑤の D21。格子にした理由そのもの）。題の行数に上限が無い（D19）ので、
+     上へ詰めるだけだと格子の高さが題の長さでカードごとにずれる（手本のモックは題を2行で切ってそろえていた）。
+     間（gap）は .card の .3rem をそのまま使う。**ここだけの指定**で、数値モードのカード（.card.is-usage）は grid のまま */
+  display: flex;
+  flex-direction: column;
 }
+
+.archive-grid .card > .card-stats { margin-top: auto; }
 
 /* スキルの索引を作っている最中。**選べないことを形で伝える。**
    薄くするだけでなく、押せないもの（disabled）にしてある ―― 空の候補を
@@ -185,42 +253,71 @@
   cursor: default;
 }
 
-/* カードの数値。作業台の右の枠に出している4つを、1行へ畳んだもの。
+/* カードの数値。作業台の右の枠に出している4つ（実消費・文脈・命中・圧縮）を、
+   **4つの格子**に並べる（画面刷新⑤の D21。手本のモックの書庫のカード）。1マスはラベルの下に値。
+   前は「k v」を1行に流していて、値の長さでマスの位置がカードごとにずれ、隣のカードと目で比べにくかった。
+   格子なら「命中」はどのカードでも同じ位置に来る。節点は `archive.js` の `fillStats` が組む（前と同じ）。
 
    **札（.tag）と同じ形にしない。** あちらは「何であるか」を言うもので、
    こちらは数。並べて置くと、どちらも同じ重さの飾りに見える。
-   枠を持たず、上に細い区切り線を1本引いて「別の段」だと示す */
+   枠を持たず、上に細い区切り線を1本引いて「別の段」だと示す（マスの間にも線は引かない）。
+
+   **1マスの背はここで1回だけ決める**（`--stat-*`）。ラベルと値の行の高さ・その間・線の下の余白を変数に持ち、
+   届く前の点線の器（`.is-waiting`）が同じ式で背を取る。前は1行ぶんの `1.1rem` を手で書いていて、
+   届くと器が 8px 伸びていた（実測 17.6px → 25.6px）。字の段は px なので、行の高さも段から出せる */
 .card-stats {
-  display: flex;
-  flex-wrap: wrap;
-  /* 器が伸ばされたときに数だけ上へ寄るのを止める（.card-meta と同じ理由） */
-  align-items: center;
-  gap: .1rem .7rem;
-  margin-top: .1rem;
-  padding-top: .35rem;
+  --stat-k: calc(var(--fs-0) * 1.5);
+  --stat-v: calc(var(--fs-1) * 1.4);
+  --stat-gap: .1rem;
+  --stat-pad: .45rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0 .5rem;
+  /* マスを上に詰める。器が伸ばされても、値の下だけに隙間が空かない（.card-meta の center と同じ話） */
+  align-items: start;
+  padding-top: var(--stat-pad);
   border-top: 1px solid var(--border);
-  font-size: var(--fs-0);
 }
 
-/* まだ届いていないあいだ。**0 を書かない。**
-   高さだけ先に取っておくと、届いたときにカードの背が動かない */
+/* 選んだカード（面 --bg-hi。list.css の `.card[aria-current]`）では、区切り線を1段濃くする。
+   素の --border（#2C2A3B）は --bg-hi（#2A2839）とほぼ同じ明るさで、選んだカードだけ線が消えて
+   数値の格子が「別の段」に見えなくなる（実測）。濃くするのは選んだカードの枠と同じ --border-strong */
+.card[aria-current="true"] .card-stats { border-top-color: var(--border-strong); }
+
+/* まだ届いていないあいだ。**0 を書かない。** 器だけを点線で置き、背は格子と同じ式で先に取る
+   （box-sizing は border-box なので、上の線 1px と余白も足す）。届いたときにカードの背が動かない */
 .card-stats.is-waiting {
-  min-height: 1.1rem;
+  min-height: calc(1px + var(--stat-pad) + var(--stat-k) + var(--stat-gap) + var(--stat-v));
   border-top-style: dashed;
 }
 
 .card-stat {
-  display: inline-flex;
-  align-items: baseline;
-  gap: .25rem;
+  display: grid;
+  gap: var(--stat-gap);
+  min-width: 0;
 }
 
-.card-stat .k { color: var(--fg-faint); }
-
+/* ラベルも値も1行に保つ。折り返すとそのカードだけ背が伸び、届く前の器とも背が食い違う。
+   いまの値（18.8M・688k・98.8%・2回）は狭い列の 1マスにも収まるので、切れるのは想定の外だけ */
+.card-stat .k,
 .card-stat .v {
-  color: var(--fg-muted);
-  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-stat .k {
+  font-size: var(--fs-0);
+  line-height: var(--stat-k);
+  color: var(--fg-faint);
+}
+
+/* 値は字の色（--fg）で少し太く。格子の主役はこちら（手本のモックの `.a-nums b`）。
+   題（--fs-3）より小さいので、カードの主役（題）は動かない */
+.card-stat .v {
+  font: 600 var(--fs-1) / var(--stat-v) var(--font-mono);
   font-variant-numeric: tabular-nums;
+  color: var(--fg);
 }
 
 /* 本文に当たった場所の抜き書き。**深い検索のときだけ出る。**
