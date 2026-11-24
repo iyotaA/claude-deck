@@ -18,6 +18,7 @@
  * - 概要の札の下は2列（D17。左: 線グラフ・いちばん重いもの／右: 内訳・読み方）。内訳は横棒のまま（D16）、
  *   いちばん重いものは1位＋「次は」の札で、何で並べているかを消さない（D18）。概要の見出しは帯にしない（K13）
  * - 横断（`usage-tab.js`）の誤読を防ぐ注記が字のまま残っている（右の紙のぶんは `detail-pane.test.mjs`）
+ * - 数値のカードを押しても作業台へ移さず、書庫と同じく拡大の窓で開く（D27）
  *
  * 主役の札の上の字の比（4.5:1）は `tokens.test.mjs` が見ている（比の計算はあちらにある）。
  * 字面はコメントを落としてから読む。このリポジトリは説明が厚く、経緯がコメントに残るため。
@@ -416,6 +417,79 @@ test('数値モード（横断）の誤読を防ぐ注記は字のまま残っ�
   // **注記を吹き出しへ移さない。** 数値モードは全幅で場所があるので、読み方も本文に置いている。
   // 吹き出し（tip）を使い始めるなら、移すものが誤読を防ぐ注記でないことを確かめてからここを直す
   assert.doesNotMatch(code, /\btip:/, '数値モードが見出しの吹き出し（tip）を使っている');
+});
+
+/* ── 数値のカードを拡大の窓で開く（D27）────────────────────── */
+
+test('数値のカードを押しても作業台へ移さず、書庫と同じく拡大の窓で開く（モードは数値のまま）', () => {
+  const main = jsCode(read(path.join(JS_DIR, 'main.js')));
+  assert.match(main, /initUsageTab\(\{ onPick: \(\) => openZoom\(\) \}\)/, '数値のカードを押したあとに拡大の窓を開いていない');
+  assert.doesNotMatch(main, /initUsageTab\(\{ onPick: \(\) => setMode\('work'\) \}\)/, '数値のカードを押すと作業台へ移る形が残っている');
+  // 書庫と同じ形（並べて読めるように）
+  assert.match(main, /initArchive\(\{ onPick: \(\) => openZoom\(\) \}\)/, '書庫のカードの開き方が変わっている');
+
+  const card = fnBody(tabCode(), 'usageCard');
+  // 選んでから開く（書庫の buildArchiveCard と同じ順）。逆にすると、前に選んでいたセッションが拡大の窓に一瞬出る
+  const sel = card.indexOf("select(row.sessionId, 'usage')");
+  const pick = card.indexOf('onPick?.()');
+  assert.ok(sel >= 0, "カードが select(row.sessionId, 'usage') で選んでいない");
+  assert.ok(pick > sel, '選ぶ前に拡大の窓を開いている（前に選んでいたものが一瞬出る）');
+  // 一覧の引き出しを畳む口は要らない（数値モードに一覧は無い。焦点は拡大の窓が流れる箱へ移す）
+  assert.doesNotMatch(card, /closeListAfterPick/, '作業台の一覧を畳む口が残っている');
+});
+
+test('一覧に居ないセッションでも、数値の行から詳細の頭を組める（詳細が届く前に窓が畳まれない）', () => {
+  // renderDetailInner は headOf(store.selected) が空だと拡大を畳む。詳細はまだ届いていないので、
+  // 一覧（store.rows）にも書庫の行にも居ないセッション（数値のカードの大半）は、開いた直後に閉じていた（実測）
+  const body = fnBody(jsCode(read(path.join(JS_DIR, 'rows.js'))), 'rowOf');
+  assert.match(body, /store\.archive\.rows\.find\(/, '書庫の行へ落とす口が消えている');
+  assert.match(body, /store\.usageTab\.data\?\.rows\?\.find\(/, '数値の行へ落とす口が無い（数値から開いた窓が詳細の届く前に畳まれる）');
+  // 一覧の行がいちばん先（状態などの新しい項目を持つのはあちらだけ）
+  assert.ok(body.indexOf('store.rows.find(') < body.indexOf('store.usageTab'), '一覧の行より先に数値の行を見ている');
+});
+
+test('拡大の窓の「作業台で開く」は、作業台の外（書庫・数値）から開いたときに出す', () => {
+  const zoom = jsCode(read(path.join(JS_DIR, 'zoom.js')));
+  assert.match(fnBody(zoom, 'openZoom'), /dom\.zoomWork\.hidden = store\.mode === 'work'/,
+    '「作業台で開く」を出す条件が「作業台の外から開いたとき」になっていない');
+  assert.doesNotMatch(zoom, /store\.mode !== 'archive'/, '「作業台で開く」を書庫のときだけに絞っている（数値から開くと移る口が無い）');
+});
+
+test('数値モードで拡大を開いているあいだも、apply() は詳細を描き直す（作業台でないあいだの早期 return を抜ける）', () => {
+  // 動いている最中のセッションも数値のカードに並ぶ。開いて見ているものが古いまま止まらないように
+  const apply = fnBody(jsCode(read(path.join(JS_DIR, 'stream.js'))), 'apply');
+  assert.match(apply, /if \(store\.mode !== 'work'\) \{\s*if \(isZoomed\(\)\) \{\s*renderDetailIfNeeded\(\);\s*loadDetail\(store\.selected/,
+    '作業台でないあいだ、拡大を開いていても詳細を描き直していない');
+  assert.doesNotMatch(apply, /store\.mode === 'archive'/, '早期 return を抜ける判定が書庫だけに絞られている');
+});
+
+test('拡大の窓は .app の外にある（数値モードで詳細ペインを消す .is-usage .detail-pane が、運んだ先に当たらない）', () => {
+  const html = htmlCode(read(path.join(REPO, 'public', 'index.html')));
+  const appAt = html.indexOf('<div class="app" id="app">');
+  const zoomAt = html.indexOf('<dialog class="zoom" id="zoom"');
+  assert.ok(appAt >= 0 && zoomAt >= 0, '.app か拡大の窓が index.html に無い');
+  // .app の閉じタグを div の入れ子を数えて探す
+  const re = /<div\b|<\/div>/g;
+  re.lastIndex = appAt;
+  let depth = 0;
+  let closedAt = -1;
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    depth += m[0] === '</div>' ? -1 : 1;
+    if (depth === 0) {
+      closedAt = m.index;
+      break;
+    }
+  }
+  assert.ok(closedAt > appAt && closedAt < zoomAt, '拡大の窓が .app の中にある（数値・書庫から開いた窓が空で出る）');
+  // 寄りかかっている先の指定（子孫セレクタで詳細ペインを消している）
+  assert.ok(declsOf('.is-usage .detail-pane').some((d) => d.prop === 'display' && d.value === 'none'),
+    '数値モードで詳細ペインを消す指定が見当たらない（この約束の前提が変わった）');
+});
+
+test('セッションの節の一言は「押すと拡大の窓で開く」と言う（右に出る・作業台へ移るとは言わない）', () => {
+  const rows = fnBody(tabCode(), 'rowsBlock');
+  assert.doesNotMatch(rows, /押すと右に中身が出ます/, '前の言い方（右に中身が出る）が残っている');
+  assert.match(rows, /拡大/, '押すと拡大の窓で開くことを言っていない');
 });
 
 test('節ナビを組み直しても、押していた札へ焦点を名前で拾い直す', () => {

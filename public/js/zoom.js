@@ -128,9 +128,11 @@ function restoreScroll(top) {
  */
 export function openZoom() {
   if (isZoomed()) return;
-  // 書庫から開いたときだけ「作業台で開く」を出す。作業台で拡大しているあいだは
-  // もうそこに居るので、押す先が無い
-  dom.zoomWork.hidden = store.mode !== 'archive';
+  // 作業台の外（書庫・数値）から開いたときだけ「作業台で開く」を出す。作業台で拡大しているあいだは
+  // もうそこに居るので、押す先が無い。
+  // **書庫だけに絞らない。** 前は `!== 'archive'` で、数値のカードを拡大の窓で開くようにしたとき
+  // （画面刷新⑤の D27）移る口が出なくなった。モードを1つ足しても直さずに済むよう「作業台かどうか」で見る
+  dom.zoomWork.hidden = store.mode === 'work';
   const top = dom.detail.scrollTop;
   dom.zoomBody.append(dom.detailPane);
   dom.app.classList.add('is-zoom');

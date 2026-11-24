@@ -126,8 +126,10 @@ initArchive({ onPick: () => openZoom() });
 initToday();
 // 数値モードの絞り込みを配線してから initMode に渡す。あちらの setMode は
 // ?mode=usage で開いたときに onUsage（= showUsage）をその場で呼ぶので、
-// 先に配線しておかないと <select> の初期値が当たる前に引き始める
-initUsageTab({ onPick: () => setMode('work') });
+// 先に配線しておかないと <select> の初期値が当たる前に引き始める。
+// **数値にいたまま詳細を出す**（書庫と同じ形。画面刷新⑤の D27）。前は作業台へ移していたが、
+// 読み比べていたセッションの並びがその場で消える。移るかどうかは窓の頭の「作業台で開く」で押した人が決める
+initUsageTab({ onPick: () => openZoom() });
 // パレットより前に置く。あちらは mode.js の setMode を呼ぶので、
 // 押される前にモードが当たっていないと最初の1回が空振りする。
 // 数値モードの中身は usage-tab.js にあるので、出す口だけを差す

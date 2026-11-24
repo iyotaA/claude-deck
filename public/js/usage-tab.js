@@ -15,7 +15,6 @@ import { el, shortModel, num } from './util.js';
 import { icon } from './icons.js';
 import { store, syncQuery, USAGE_DEFAULTS } from './store.js';
 import { dom } from './dom.js';
-import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaPath } from './card.js';
 import {
@@ -28,12 +27,15 @@ import { halfTrend } from './usage-trend.js';
 import { dayChartView, dayLabel, partialNote, chartNote, clipNote } from './usage-days.js';
 
 /**
- * カードを押されたあとに作業台へ移す口。`initUsageTab` で外から差す。
+ * カードを押されたあとに詳細を見せる口。`initUsageTab` で外から差す（いまは拡大の窓 `openZoom`）。
  *
- * 数値モードは全幅で、中央の詳細ペインが消えている（`usage.css`）。押した1本を
- * 見せるには作業台へ戻すしかないが、その判断（`setMode`）を持っているのは
- * `mode.js` の側で、**こちらから import すると向きが両方に付く。**
- * `runs.js` の `subscribeRuns(fn)` と同じ切り方で、配線だけ外に出す。
+ * 数値モードは全幅で、中央の詳細ペインが消えている（`usage-mode.css`）。押した1本は
+ * **数値にいたまま拡大の窓で見せる**（書庫と同じ形。画面刷新⑤の D27）。前は作業台へ移していたが、
+ * 読み比べていたセッションの並びがその場で消えた。作業台へ移るのは窓の頭の「作業台で開く」から。
+ *
+ * 開く口（`zoom.js` の `openZoom`）も移す口（`mode.js` の `setMode`）も、ここから import しない。
+ * どちらにするかの判断は `main.js` が持ち、`runs.js` の `subscribeRuns(fn)` と同じ切り方で配線だけ外に出す
+ * （`mode.js` を import すると同じ層7 に向きが両方付く。`archive.js` の `pick` と同じ形）。
  *
  * @type {(() => void)|null}
  */
@@ -608,7 +610,7 @@ function skillsBlock(d) {
 }
 
 /**
- * セッション1本のカード。押すと右に詳細が出る。
+ * セッション1本のカード。押すと拡大の窓で詳細が出る（モードは数値のまま）。
  *
  * **`aria-current` は付けない。** `select()` は `dom.list` と `dom.archive` の
  * `.card` にしか印を付け直さないので、ここに付けると古い印が残り続ける。
@@ -617,8 +619,8 @@ function skillsBlock(d) {
  * @returns {HTMLElement}
  */
 function usageCard(row) {
-  // aria-current は付けない。押すとモードごと移るので、
-  // 「いま見ているもの」の意味が一覧・書庫と違う
+  // aria-current は付けない。上の理由に加えて、カードは押すと窓の向こうで開くだけで、
+  // 並びの中に「いま選んでいるもの」の居場所が無い（書庫のカードは同じ一覧へ選び直しに戻ってくる）
   const { li, card } = cardShell(row, { variant: 'is-usage', current: false });
 
   const top = el('div', 'card-top');
@@ -638,20 +640,20 @@ function usageCard(row) {
   if (row.mixed) meta.append(el('span', 'tag', 'モデル混在'));
   closeCardMeta(card, meta);
 
-  // 行き先の印。**押すと右に詳細が出る**ことを、動かさなくても分かる形で出す
+  // 行き先の印。**押すと詳細が開く**ことを、動かさなくても分かる形で出す
   // （すぐ上に並ぶ .stat は押せないので印を持たない）。
   // 絶対配置で右端の中央に置くので、DOM 上の位置は末尾でよい
   card.append(icon('chevron'));
 
   card.addEventListener('click', () => {
-    // **作業台へ移すのを先にやる。** 詳細ペインは数値モードのあいだ display で消えていて、
-    // このあとの setListOpen が焦点をそこへ移す。出す前に呼ぶと焦点が行き場を失う
-    onPick?.();
     // 'live' にしない。60本には24時間より古いものが混ざるので、`apply()` の
     // 「一覧から消えたら選択を外す」（`selectedFrom === 'live'` のときだけ働く）に
     // 引っかかって、押した直後に先頭へ飛ぶ
     select(row.sessionId, 'usage');
-    closeListAfterPick(dom.detail);
+    // **選んでから開く**（書庫の buildArchiveCard と同じ順）。逆にすると、前に選んでいたセッションが
+    // 拡大の窓に一瞬出てから差し替わる。焦点は拡大の窓が流れる箱へ移す（zoom.js）ので、ここでは触らない。
+    // 前にあった作業台の一覧を畳む口（closeListAfterPick）は外した ―― 数値モードに一覧は無い
+    onPick?.();
   });
   li.append(card);
   return li;
@@ -758,7 +760,7 @@ function rowsBlock(d) {
   if (!d.rows.length) return null;
 
   const box = block('セッション別');
-  box.append(el('p', 'note', '実消費の多い順です。押すと右に中身が出ます。'));
+  box.append(el('p', 'note', '実消費の多い順です。押すと拡大の窓で中身が開きます（この画面のまま。作業台へは窓の頭から移れます）。'));
 
   const list = el('ul', 'usage-rows');
   for (const row of d.rows.slice(0, ROWS_MAX)) list.append(usageCard(row));
@@ -1030,8 +1032,8 @@ export function showUsage() {
  * 数値モードの絞り込みの配線。`main.js` から1回だけ呼ぶ。
  *
  * @param {object} [opts]
- * @param {() => void} [opts.onPick] セッションのカードが押されたときに先に呼ぶもの。
- *   作業台へ戻すために使う（判断を持っているのは呼ぶ側）
+ * @param {() => void} [opts.onPick] セッションのカードが押されたあと（選んだあと）に呼ぶもの。
+ *   拡大の窓で開くために使う（どう見せるかの判断を持っているのは呼ぶ側）
  */
 export function initUsageTab({ onPick: pick = null } = {}) {
   onPick = pick;

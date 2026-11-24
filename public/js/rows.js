@@ -16,19 +16,25 @@ export function idleOf(row) {
 }
 
 /**
- * 一覧から素の行を引く。無ければ書庫の行に落とす。
+ * 一覧から素の行を引く。無ければ書庫の行、次に数値の行（横断の `rows`）に落とす。
  *
- * 書庫の行は LIVE_FIELDS（state / idleMs など）を1つも持たないので、
+ * 書庫の行と数値の行は LIVE_FIELDS（state / idleMs など）を1つも持たないので、
  * headOf の上書きは何も起こさない。逆に logSize は持っているので、
- * 書庫から開いたセッションでも detailStampOf が本物の目印を取れる。
+ * 書庫・数値から開いたセッションでも detailStampOf が本物の目印を取れる。
+ *
+ * **数値の行も見るのは、数値のカードを拡大の窓で開くため**（画面刷新⑤の D27）。
+ * `renderDetailInner` は `headOf` が空だと拡大を畳む。押した直後は詳細がまだ届いていないので、
+ * 一覧（24時間より古いものは居ない）にも書庫の行にも居ないセッションは、開いた直後に閉じていた（実測。
+ * 新しい順に読む数値の 60 本には、一覧に居ない終わったセッションが普通に混ざる）。
  *
  * @param {string|null} sessionId
- * @returns {object|null} どちらにも居なければ null
+ * @returns {object|null} どれにも居なければ null
  */
 export function rowOf(sessionId) {
   if (!sessionId) return null;
   return store.rows.find((r) => r.sessionId === sessionId)
     ?? store.archive.rows.find((r) => r.sessionId === sessionId)
+    ?? store.usageTab.data?.rows?.find((r) => r.sessionId === sessionId)
     ?? null;
 }
 
