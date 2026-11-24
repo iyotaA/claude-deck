@@ -666,6 +666,9 @@ export function buildUsage(entries, { sidechain = false } = {}) {
  * **日の鍵はここでしか組まない。** `groupByDay` の行の鍵と、横断の `meta.scanFrom`
  * （どの日から全部数えてあるか。`view/usage.mjs`）は文字列のまま比べられる必要がある。
  * 組み方を2箇所に書くと、片方だけ直した日に境目と行の鍵が食い違い、黙って1日ずれる。
+ * **例外は画面側の写し**（`public/js/usage-days.js` の `localDay`。線グラフの「今日」を `meta.now` から出す）。
+ * 画面は `src/` を import できないので写すしかなく、`test/usage-days.test.mjs` が両方を呼んで突き合わせている。
+ * ここを直したらあちらも直す。
  *
  * `toLocaleDateString` ではなく自前で組むのは、区切り文字と桁が環境で変わらないようにするため。
  *

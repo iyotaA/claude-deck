@@ -772,6 +772,7 @@ export function aggregateUsage(recs) {
  * **穴を埋めない。** 使わなかった日は行ごと出さない ―― 0 を並べると
  * 「その日は0だった」と「その日は測っていない」が同じ顔になる
  * （上限で切っているので、後者は普通に起きる）。
+ * 埋めるのは画面の線グラフ（`public/js/usage-days.js`）で、全部数えてある日（`meta.scanFrom` 以降）だけ。
  *
  * @param {Array<object>} list 1本ぶんの集計の配列
  * @returns {{list: Array<object>, undated: number}}

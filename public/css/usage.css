@@ -368,6 +368,147 @@
 
 .spark-caption + .facts { margin-top: .5rem; }
 
+/* ---------------------------------------------------- 日ごとの線グラフ */
+
+/* 数値モードの概要の「日ごとの実消費」（usage-chart.js の dayChart。画面刷新⑤）。右の紙では使わない。
+
+   **字は SVG の text にしない。** 線は preserveAspectRatio="none" で器いっぱいに伸ばすので、SVG の中の字は
+   器の幅で伸び縮みして 12px を割る。目盛りの字・山の吹き出し・山の点は HTML で置き、位置だけ % で合わせる。
+   どの字も --fs-0（12px）以上。
+
+   並び（grid の2列×3行）。左の列は縦の目盛りの字、右の列は 上: 山の吹き出しの帯 / 中: 線 / 下: 日付と曜日。
+   吹き出しを線の上の帯に置くので、線にも点にも重ならない。
+   色は数値モードのグラフと同じく var(--chart-hi, var(--accent))（宣言が無ければラベンダー）。新しい色は作らない */
+.day-chart {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto 9rem auto;
+  column-gap: .5rem;
+}
+
+/* 何日ぶんの範囲か。見出しの直下に小さく */
+.day-chart-range {
+  margin: 0 0 .2rem;
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+}
+
+.day-chart-peak {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  height: 1.6rem;
+}
+
+/* 山の吹き出し（日と量だけ。D5）。押せないので面も枠も持たない字だけ。
+   真ん中寄せが既定で、両端の近く（data-side）では器の外へはみ出さないよう片寄せにする */
+.day-chart-tip {
+  position: absolute;
+  bottom: .25rem;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: var(--fs-1);
+  color: var(--fg-muted);
+}
+
+.day-chart-tip[data-side="start"] { transform: translateX(-.5rem); }
+.day-chart-tip[data-side="end"] { transform: translateX(calc(-100% + .5rem)); }
+
+.day-chart-tip b {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+/* 縦の目盛りの字。横線（上端・半分・0）と同じ高さに、字の真ん中を合わせる */
+.day-chart-y {
+  position: relative;
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 2.6rem;
+}
+
+.day-chart-y span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+.day-chart-plot {
+  position: relative;
+  grid-column: 2;
+  grid-row: 2;
+}
+
+/* 上端の横線が半分切れないよう、はみ出しを見せる */
+.day-chart-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.day-chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+/* 山の縦の補助線。吹き出しと点をつなぐだけなので、線より弱く破線で */
+.day-chart-guide {
+  stroke: var(--chart-hi, var(--accent));
+  stroke-opacity: .35;
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+/* 線の下の面。.spark-area と同じ理由で薄く塗る（線の上下の向きが読める） */
+.day-chart-area {
+  fill: var(--chart-hi, var(--accent));
+  opacity: var(--chart-wash, .14);
+}
+
+.day-chart-line {
+  fill: none;
+  stroke: var(--chart-hi, var(--accent));
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* 山の点。SVG の circle にしない（preserveAspectRatio="none" で横に潰れて楕円になる） */
+.day-chart-dot {
+  position: absolute;
+  width: .7rem;
+  height: .7rem;
+  border: 2px solid var(--chart-hi, var(--accent));
+  border-radius: 50%;
+  background: var(--bg);
+  transform: translate(-50%, -50%);
+}
+
+/* 日付と曜日。列の数は点の数と同じ（JS が grid-template-columns を書く）。間引いた日は空の列 */
+.day-chart-x {
+  display: grid;
+  grid-column: 2;
+  grid-row: 3;
+  margin-top: .3rem;
+}
+
+.day-chart-tick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: var(--fs-0);
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--fg-faint);
+}
+
 /* 折れ線を棒の位置（.bar の2列目）に置く器。
    棒の高さ（.5rem）のままだと折れ線が潰れて向きが読めないので、ここだけ高くする。
    高さを持つのは器の側で、中の SVG は viewBox で伸び縮みする（.spark と同じ作り） */

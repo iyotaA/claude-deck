@@ -12,6 +12,9 @@
  * - 単位（M・k・%・本）を小さく出すのは数値モードの札だけ（D13）
  * - 節ナビは一覧の「すべて｜稼働中」（`.live-filter`）を借り、使い手の居なくなった `.tab` は消す（D14）。
  *   頭は1行の帯で、狭い窓では折り返す（横にはみ出さない）
+ * - 概要に日ごとの線グラフを1枚（D6）。期間の切り替えは置かない（D1）。字は HTML で置く。
+ *   「これより前は一部しか読んでいません」を線グラフと節「推移」の両方に添える（D2。消さない）。
+ *   何を描くかの判断そのもの（境目・0 埋め・山）は `usage-days.test.mjs` が関数を呼んで見ている
  *
  * 主役の札の上の字の比（4.5:1）は `tokens.test.mjs` が見ている（比の計算はあちらにある）。
  * 字面はコメントを落としてから読む。このリポジトリは説明が厚く、経緯がコメントに残るため。
@@ -241,6 +244,63 @@ test('数値の頭は1行の帯。節ナビが行をまるごと取らず、狭�
   assert.ok(own.some((d) => d.prop === 'min-width' && d.value === '0'), '.usage-head .usage-nav が器より細くなれない');
   // 件数は同じ行の右端（一覧の #list-count と同じ作法）
   assert.ok(declsOf('.usage-head #usage-count').some((d) => d.prop === 'margin-left' && d.value === 'auto'), '件数が右端へ寄っていない');
+});
+
+/* ── 推移の線グラフ（D1〜D6）──────────────────────────────── */
+
+test('概要に日ごとの線グラフを1枚置く。何を描くかは層0（usage-days.js）が決める', () => {
+  const code = tabCode();
+  assert.match(fnBody(code, 'overviewBlock'), /out\.append\(daysBlock\(d\)\)/, '概要が線グラフの節を置いていない');
+  const days = fnBody(code, 'daysBlock');
+  assert.match(days, /dayChartView\(d\)/, '描いてよい日を層0 の dayChartView で決めていない');
+  assert.match(days, /view\.status === 'ok'[\s\S]*dayChart\(view\)/, '描けるときだけ線を描く形になっていない');
+  // 期間の切り替え（7 / 14 / 30 日）は置かない（D1。3つとも同じ応答になる）
+  assert.doesNotMatch(days, /'button'/, '線グラフの節に押すもの（期間の切り替えなど）がある');
+  // 線グラフは数値モードだけ。右の紙では使わない
+  assert.doesNotMatch(panelCode(), /dayChart/, '右の紙（usage-panel.js）が線グラフを使っている');
+});
+
+test('「これより前は一部しか読んでいません」を線グラフと節「推移」の両方に添える（誤読を防ぐ注記。消さない）', () => {
+  const code = tabCode();
+  assert.match(fnBody(code, 'daysBlock'), /partialNote\(view\)/, '線グラフに一部の日の一言が無い');
+  assert.match(fnBody(code, 'daysBlock'), /chartNote\(view\)/, '描かないときの一言が無い（空の箱になる）');
+  assert.match(fnBody(code, 'daysBlock'), /clipNote\(view\)/, '上限で切ったことを言っていない');
+  const daily = fnBody(code, 'dailyBlock');
+  assert.match(daily, /partialNote\(view\)/, '節「推移」に一部の日の一言が無い');
+  // 前の注記は左端の日まで全部足したように読めた
+  assert.doesNotMatch(daily, /全部足したもの/, '「同じ期間に走ったセッションを全部足したもの」が残っている');
+  // 横棒と表はそのまま
+  assert.match(daily, /barList\(/, '節「推移」の横棒が消えた');
+  assert.match(daily, /tableDetails\(/, '節「推移」の表が消えた');
+});
+
+test('線グラフの字は HTML で置く（SVG の text にしない）。innerHTML を使わず、読み上げの名前を持つ', () => {
+  const chart = chartCode();
+  const body = fnBody(chart, 'dayChart');
+  assert.match(body, /svgEl\('svg'/, '線を svgEl で組んでいない');
+  assert.doesNotMatch(body, /svgEl\('text'/, 'SVG の text で字を描いている（viewBox の伸び縮みで 12px を割る）');
+  assert.doesNotMatch(body, /svgEl\('circle'/, '山の点を SVG の circle で描いている（横に潰れて楕円になる）');
+  assert.match(body, /role: 'img'/, '線が role="img" を持たない');
+  assert.match(body, /'aria-label': label/, '線に読み上げの名前が無い');
+  assert.match(body, /日ぶん/, '読み上げの名前が何日ぶんかを言っていない');
+  assert.match(body, /いちばん多いのは/, '読み上げの名前がいちばん多い日を言っていない');
+  assert.doesNotMatch(chart, /innerHTML/, 'usage-chart.js が innerHTML を使っている');
+});
+
+test('線グラフの色は数値モードのグラフと同じ受け方（var(--chart-hi, var(--accent))）。状態色を使わない', () => {
+  const bad = [];
+  for (const r of cssRules()) {
+    if (!r.selectors.some((s) => /\.day-chart/.test(s))) continue;
+    for (const d of r.decls) {
+      if (/var\(--(hot|warn|done|calm|off)\)/.test(d.value)) bad.push(`${r.file} … ${r.selectors.join(', ')} { ${d.prop}: ${d.value} }`);
+      // ラベンダーを直に書かない。変数で受けて、宣言が無いときだけラベンダーに落ちる
+      if (/var\(--accent\)/.test(d.value) && !d.value.includes('var(--chart-hi, var(--accent))')) {
+        bad.push(`${r.file} … ${r.selectors.join(', ')} { ${d.prop}: ${d.value} }`);
+      }
+    }
+  }
+  assert.deepEqual(bad, [], `線グラフの色の受け方が違う:\n  ${bad.join('\n  ')}`);
+  assert.ok(declsOf('.day-chart-line').some((d) => d.prop === 'stroke' && d.value === 'var(--chart-hi, var(--accent))'));
 });
 
 test('節ナビを組み直しても、押していた札へ焦点を名前で拾い直す', () => {

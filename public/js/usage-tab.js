@@ -20,11 +20,12 @@ import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaPath } from './card.js';
 import {
   block, readNote, hitRateNote, statTile, barList, shareBar, trendList, tableDetails,
-  foldBlock, deltaText, sparkline,
+  foldBlock, deltaText, sparkline, dayChart,
   tokensStrict, pctStrict, numStrict,
   toolsBlock as toolsBlockOf,
 } from './usage-chart.js';
 import { halfTrend } from './usage-trend.js';
+import { dayChartView, dayLabel, partialNote, chartNote, clipNote } from './usage-days.js';
 
 /**
  * カードを押されたあとに作業台へ移す口。`initUsageTab` で外から差す。
@@ -264,6 +265,7 @@ function addSpark(tile, values, label) {
 function overviewBlock(d, go) {
   const out = new DocumentFragment();
   out.append(tiles(d));
+  out.append(daysBlock(d));
 
   // **内訳と重いものを2列に並べる。** 前は縦に積んでいて、全幅の器では右半分が
   // 空いていた（UI レビューの F9）。狭い窓では1列に戻る（usage-mode.css）
@@ -336,6 +338,37 @@ function overviewBlock(d, go) {
   box.append(list);
   two.append(box);
   return out;
+}
+
+/**
+ * 概要の「日ごとの実消費」の線グラフ（画面刷新⑤の D1〜D6）。
+ *
+ * **描くのは全部そろっている日だけ**（`meta.scanFrom` から今日まで。判断は層0 の `usage-days.js`）。
+ * 一部しか数えていない左端の日を描くと、左が低く出て右肩上がりに読める。描いた範囲で使わなかった日は 0。
+ *
+ * **期間の切り替え（7 / 14 / 30 日）は置かない**（D1）。窓口は新しい順に最大 60 本しか読まないので、
+ * 3つとも同じ応答になる（実測）。押しても変わらないボタンを作らない。読む範囲は上の絞り込み（本数・期間）で決まる。
+ *
+ * 描かないとき（境目が決められない・描ける日が無い・1日だけ）は**空の箱を置かず**、何が起きているかを一言で言う。
+ * 「これより前は一部しか読んでいません」（`partialNote`）は誤読を防ぐ注記なので、描いたときは必ず添える。
+ *
+ * @param {object} d `/api/usage` の応答
+ * @returns {HTMLElement}
+ */
+function daysBlock(d) {
+  const view = dayChartView(d);
+  const box = block('日ごとの実消費');
+  if (view.status === 'ok') {
+    box.append(el('p', 'day-chart-range',
+      `${dayLabel(view.from)} 〜 ${dayLabel(view.to)}・${numStrict(view.days.length)} 日ぶん`));
+    box.append(dayChart(view));
+  }
+  const read = readNote(view.status === 'ok'
+    ? [partialNote(view), clipNote(view)]
+    // 描かないときは、なぜ描かないかを先に言う。1日だけのときは左が欠けているかも続けて言う
+    : [chartNote(view), view.status === 'short' ? partialNote(view) : null]);
+  if (read) box.append(read);
+  return box;
 }
 
 /**
@@ -559,6 +592,12 @@ function usageCard(row) {
  *
  * **使わなかった日は行ごと出さない。** 0 を並べると「その日は0だった」と
  * 「その日は測っていない」が同じ顔になる（上限で切っているので後者は普通に起きる）。
+ * 横棒は全部の日（一部しか数えていない左端の日も）を並べるので、ここでは区別が付かない。
+ * 概要の線グラフは全部そろっている日だけを描くので、そちらは使わなかった日を 0 で描く（測って 0）。
+ *
+ * **左端の日は一部しか数えていない。** 前はここに「同じ期間に走ったセッションを全部足したもの」と
+ * 書いていたが、開かなかったログのぶんは入っていない（実測で同じ 11-18 が 30 本で 46.2M、60 本で 82.0M）。
+ * 横棒と表はそのまま残し、線グラフと同じ一言（`partialNote`）で境目の日を名指しする。
  *
  * @param {object} d `/api/usage` の応答
  * @returns {HTMLElement|null}
@@ -566,6 +605,7 @@ function usageCard(row) {
 function dailyBlock(d) {
   const list = d.daily?.list ?? [];
   if (!list.length) return null;
+  const view = dayChartView(d);
 
   const box = block('日ごとの実消費');
 
@@ -579,8 +619,11 @@ function dailyBlock(d) {
   }))));
 
   const notes = [
-    '同じ期間に走ったセッションを全部足したものです。',
-    '使わなかった日は行ごと出しません（0 と「読んでいない」を同じ顔にしないため）。',
+    '読んだセッションを日ごとに足したものです。',
+    // **誤読を防ぐ注記。消さない**（線グラフと同じ一言。境目の日を名指しする）
+    partialNote(view),
+    '使わなかった日は行ごと出しません（0 と「読んでいない」を同じ顔にしないため）。'
+    + '概要の線グラフは全部そろっている日だけを描くので、そちらでは使わなかった日を 0 で描きます。',
   ];
   // 時刻の取れなかった要求。**0 でも黙らない**のではなく、有るときだけ言う
   // （0 件は「測って0」なので、わざわざ書くと読む量が増えるだけ）
