@@ -162,7 +162,8 @@ export function sortRows(rows) {
  * 行から数を数える。
  *
  * `sortRows` と同じ理由でここに置いてある。合流のあとに数え直さないと、
- * 上のバーのまとめ（画面側の `renderSummary`）だけが合流前の数のまま残る。
+ * 数だけが合流前のまま残る。読んでいるのは画面の左のレールのバッジ（`meta.counts` から数える
+ * `renderRailBadge`）と `cli.mjs` の「あなた待ち」（`meta.needsYou`）。
  *
  * @param {Array<object>} rows 数える行
  * @returns {{live:number, needsYou:number, counts:object}}

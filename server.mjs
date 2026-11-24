@@ -254,7 +254,7 @@ function touchSkillIndex() {
 /**
  * 一覧を1回組む。
  *
- * @returns {Promise<{rows:object[], meta:object}>} 行と、上のバーに出す要約
+ * @returns {Promise<{rows:object[], meta:object}>} 行と、一覧の要約（画面の左のレールのバッジと cli.mjs が読む）
  */
 async function computeSessions() {
   // ピンを付けたセッションは古くても入れる（keep）。ピンとメモは行に載せて返す。
@@ -273,7 +273,7 @@ async function computeSessions() {
  * **`computeSessions()` の中でやらない。** あちらは `allowedRunDirs()` も呼んでいて、
  * 合成行の cwd が起こせる場所の候補として跳ね返る形になる。読む口ごとにここを通す。
  *
- * 数え直しも要る。画面の上のバーは `meta.counts` しか見ていない。
+ * 数え直しも要る。画面の左のレールのバッジは `meta.counts` しか見ていない（行からは数え直さない）。
  *
  * @param {{rows:Array<object>, meta:object}} payload `computeSessions()` の結果
  * @returns {{rows:Array<object>, meta:object}} 同じオブジェクト（その場で書き換える）
