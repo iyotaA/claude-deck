@@ -16,7 +16,9 @@
  * 流れる箱の並びは タブ帯 → 答えないと進まない待ち（止まっているときだけ・どのタブでも）→
  * 選んだタブの中身。**タブ帯の上には何も置かない**（長さの変わるものを上に置くと帯が上下する）。
  *
- * 右のインスペクタ（INSP_DEFS）は「作業しながら横目で見るもの」。既定では閉じている。
+ * 右の紙（INSP_DEFS）は「作業しながら横目で見るもの」。広い窓（1281px 以上）では
+ * 覚えた開閉で始まり（既定は開く）、狭い窓では閉じて始まる（insp-open.js）。
+ * 開く口は頭の「数値」の絵、数値と診断の切り替えは紙の頭。
  *
  *   数値 … 何にトークンを使ったか
  *   診断 … 困ったときに見る値
@@ -36,7 +38,8 @@
 import { el, num } from './util.js';
 import { mark } from './perf.js';
 import { icon } from './icons.js';
-import { store, syncQuery, colorOf, toneOf } from './store.js';
+import { store, syncQuery, colorOf, toneOf, LS } from './store.js';
+import { INSP_DEFAULT_TAB } from './insp-open.js';
 import { dom } from './dom.js';
 import { headOf, detailErrorNow } from './rows.js';
 import { panel } from './panel.js';
@@ -174,13 +177,13 @@ export function pickedTab() {
 }
 
 /**
- * 右のインスペクタの定義。並びがそのままレールの並び。id は store.inspector の値。
+ * 右の紙の定義。並びがそのまま紙の頭の切り替え（数値｜診断）の並び。id は store.inspector の値。
  *
  * 形は TAB_DEFS と同じにしてある。中央と右で組み方を変えると、
  * どちらかに足したときにもう片方の作法を思い出せなくなる。
  *
- * title はインスペクタの見出し。レールのボタンは幅 2.3rem しか無いので短い語を出し、
- * 開いた先で何を見ているのかを言い直す
+ * label は切り替えの札（短い語）、title は紙の見出し（開いた先で何を見ているのかを言い直す）。
+ * icon は頭の「数値」の絵が使う（開く口は頭の絵1つ。前は右のレールに1つずつ絵があった）
  */
 export const INSP_DEFS = [
   { id: 'usage', label: '数値', icon: 'chart', title: '何にトークンを使ったか' },
@@ -518,19 +521,16 @@ function applyInspOpen(open) {
 }
 
 /**
- * レールのボタンの状態を合わせる。
+ * 紙の頭の切り替え（数値｜診断）の押している印を合わせる。
  *
  * ボタン自体は initInspector() で1回だけ組む。**毎回作り直さない。**
  * 詳細ペインは他の理由でもよく組み直されるので、そのたびに節点を捨てると
- * キーボードで辿っている途中の focus が飛ぶ
- *
- * @param {object|null} row 選んでいるセッション（無ければ null）
+ * キーボードで辿っている途中の focus が飛ぶ（紙は詳細ペインの外なので作り直しに巻き込まれない）。
+ * **旗を2つ持たない** … 正は store.inspector の1つで、ここはその写し
  */
-function syncRail(row) {
-  for (const b of dom.rail.querySelectorAll('.rail-btn')) {
+function syncInspTabs() {
+  for (const b of dom.inspTabs.querySelectorAll('button')) {
     b.setAttribute('aria-pressed', store.inspector === b.dataset.insp ? 'true' : 'false');
-    // 出す中身がまだ無いので押させない。**隠さない**（列の幅が変わって中央が跳ねる）
-    b.disabled = !row;
   }
 }
 
@@ -556,42 +556,69 @@ function renderInspector(ctx) {
   dom.inspBody.append(stack);
 }
 
+/** 最後に開いていた紙。頭の「数値」の絵で開き直すときに同じものを出す（覚えるのはこの窓のあいだだけ） */
+let lastInsp = store.inspector ?? INSP_DEFAULT_TAB;
+
 /**
- * 右のインスペクタを開く／閉じる。
+ * 右の紙の状態を変える。**人が開け閉めした経路は全部ここを通る**（頭の絵・紙の頭の × と切り替え・
+ * パレット）。開閉を `localStorage` に覚えるのもここ1か所（一覧の開閉の `setListOpen` と同じ扱い）。
+ * 始めの値（URL・覚えた値・窓の広さ）は通らない ―― あれは復元で、人の操作ではない。
  *
- * 同じものを押したら閉じる。レールは開く口と閉じる口を兼ねている
- *
- * @param {string|null} id INSP_DEFS の id。null で閉じる
+ * @param {string|null} next INSP_DEFS の id。null で閉じる
  */
-export function setInspector(id) {
-  store.inspector = store.inspector === id ? null : id;
+function applyInspector(next) {
+  store.inspector = next;
+  if (next) lastInsp = next;
+  localStorage.setItem(LS.inspOpen, next ? '1' : '0');
   syncQuery();
   renderDetail();
 }
 
 /**
- * レールを組んで、閉じるボタンを配線する。起動時に1回だけ呼ぶ。
+ * 右の紙を指定して開く／閉じる。**同じものを指したら閉じる**（パレットの「右の枠に出す／畳む」）。
  *
- * レールは詳細の中身ではなく画面の枠なので、セッションを選んでいなくても出したままにする。
- * 選ぶまでは押せない（syncRail が disabled を当てる）
+ * @param {string|null} id INSP_DEFS の id。null で閉じる
+ */
+export function setInspector(id) {
+  applyInspector(store.inspector === id ? null : id);
+}
+
+/**
+ * 右の紙を開け閉めする（頭の「数値」の絵）。開くときは最後に見ていた紙を出す。
+ *
+ * 開く口と閉じる口を兼ねる。狭い窓（860px 以下）の下から出る紙でも同じで、
+ * 頭は紙の上に見えたままなので、押した場所でそのまま閉じられる
+ */
+export function toggleInspector() {
+  applyInspector(store.inspector ? null : lastInsp);
+}
+
+/**
+ * 紙の頭の切り替え（数値｜診断）と × を配線する。起動時に1回だけ呼ぶ。
+ *
+ * 切り替えの見た目は一覧の頭の「すべて｜稼働中」（`.live-filter`）を借りる。
+ * 押せる切り替えなので面と影で浮かせる段（①②で決めたもの）で、**新しい見た目を作らない**。
+ * 札の名前は INSP_DEFS から組む（index.html に書き写さない）。
+ * 押している側をもう一度押しても何もしない（切り替えで紙を閉じない。閉じる口は × と頭の絵）
  */
 export function initInspector() {
   for (const t of INSP_DEFS) {
-    const b = el('button', 'rail-btn');
+    const b = el('button', null, t.label);
     b.type = 'button';
     b.dataset.insp = t.id;
-    b.disabled = true;
+    b.title = t.title;
     b.setAttribute('aria-pressed', 'false');
-    // **絵だけにする。** 縦のレールに字を積むと1文字ずつ折り返すか、
-    // レールそのものを広げることになる。名前は title と aria-label に残るので、
-    // 触れば出るし読み上げにも乗る（上のバーの再読み込みと同じ流儀）
-    b.append(icon(t.icon, 17));
-    b.title = `${t.label} — ${t.title}`;
-    b.setAttribute('aria-label', b.title);
-    b.addEventListener('click', () => setInspector(t.id));
-    dom.rail.append(b);
+    b.addEventListener('click', () => {
+      if (store.inspector !== t.id) applyInspector(t.id);
+    });
+    dom.inspTabs.append(b);
   }
-  dom.inspClose.addEventListener('click', () => setInspector(null));
+  // × で閉じたら焦点を頭の「数値」の絵（開く口）へ戻す。× は紙ごと hidden になるので、
+  // 何もしないと焦点が body へ落ち、キーボードで開き直すのに頭まで辿り直すことになる
+  dom.inspClose.addEventListener('click', () => {
+    applyInspector(null);
+    document.querySelector('[data-refocus="insp"]')?.focus();
+  });
 }
 
 /**
@@ -733,25 +760,28 @@ function renderHead(row, composer) {
 }
 
 /**
- * 頭の「数値」の絵。右の紙の数値を出す・畳む（右のレールの数値と同じ `setInspector('usage')`）。
+ * 頭の「数値」の絵。**右の紙を開く口と閉じる口を兼ねる**（`toggleInspector`）。
  *
- * 段階の途中なので、開け閉めの作りは右のレールと同じものを呼ぶだけにしてある。
- * 押している印（aria-pressed）も同じ `store.inspector` から引く（旗を2つ持たない）。
+ * 前は右端のレールに数値と診断の絵が縦に並んでいて、そちらが開く口だった。
+ * レールをやめて、開く口はここ1つ、数値と診断の切り替えは紙の頭に置いた（画面刷新④）。
+ * 狭い窓（860px 以下）の下から出る紙でも、頭は紙の上に見えたままなので同じ口で足りる。
+ *
+ * 押している印（aria-pressed）は「紙が開いているか」。`store.inspector` から引く（旗を2つ持たない）。
  * 頭は作り直されるので `data-refocus` を付ける。
  *
  * @returns {HTMLElement}
  */
 function inspButton() {
-  const def = INSP_DEFS.find((t) => t.id === 'usage');
-  const on = store.inspector === def.id;
+  const on = Boolean(store.inspector);
+  const usage = INSP_DEFS.find((t) => t.id === INSP_DEFAULT_TAB);
   const btn = el('button', 'ibtn detail-insp');
   btn.type = 'button';
   btn.dataset.refocus = 'insp';
   btn.setAttribute('aria-pressed', String(on));
-  btn.title = on ? `${def.label}を畳む` : `${def.label} — ${def.title}（右に出す）`;
+  btn.title = on ? '数値と診断を畳む' : '数値と診断を右に出す';
   btn.setAttribute('aria-label', btn.title);
-  btn.append(icon(def.icon, 16));
-  btn.addEventListener('click', () => setInspector(def.id));
+  btn.append(icon(usage.icon, 16));
+  btn.addEventListener('click', () => toggleInspector());
   return btn;
 }
 
@@ -834,7 +864,7 @@ function renderDetailInner() {
   // 右も同じ材料で組み直す。中央だけ差し替えると、選び直したあとも
   // 右に前のセッションの数字が残ったままになる
   dom.inspBody.replaceChildren();
-  syncRail(row);
+  syncInspTabs();
   // 選ぶ前は出すものが無いので閉じる。store.inspector は残しておいて、
   // 選んだら開いた状態で戻る（URL に ?insp= で渡した指定も保たれる）
   applyInspOpen(Boolean(store.inspector) && Boolean(row));

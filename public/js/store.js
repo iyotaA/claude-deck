@@ -14,6 +14,7 @@
  */
 import { initialHiddenKinds, hideQueryValue } from './timeline/kinds.js';
 import { MODE_LIST } from './nav.js';
+import { initialInspector, INSP_WIDE_QUERY } from './insp-open.js';
 
 /**
  * `localStorage` の鍵。
@@ -41,6 +42,9 @@ export const LS = Object.freeze({
   onlyLive: 'claude-deck.onlyLive',
   newestFirst: 'claude-deck.newestFirst',
   onlyDecisions: 'claude-deck.onlyDecisions',
+  // 右の紙を開いていたか（'1' / '0'）。一覧の開閉（drawer.js の claude-deck.listOpen）と同じ扱いで、
+  // 人が開け閉めしたときだけ書く。読むのは始めの1回だけ（insp-open.js の initialInspector）
+  inspOpen: 'claude-deck.inspOpen',
 });
 
 /**
@@ -130,7 +134,8 @@ export const SUMMARY_ORDER = [
  *  ?askill=<スキル名> … 書庫の絞り込み（サーバ側の索引から引く）
  *  ?adays=7|30|90|365 … 書庫の絞り込み（何日ぶんを見るか）
  *  ?dtab=log|agents … 詳細ペインの中央のどのタブを開くか
- *  ?insp=usage|basics … 右のインスペクタをどのタブで開くか（付けなければ閉じた状態）
+ *  ?insp=usage|basics … 右の紙をどれで開くか。**覚えた開閉より強い**
+ *                       （付けなければ、広い窓は覚えた開閉・狭い窓は閉じた状態。insp-open.js）
  *                       `?insp=out` だけは中央タブの「成果」へ読み替える
  *                       （成果が右のインスペクタだった版の URL が実在するため。initialDetailTab）
  */
@@ -252,17 +257,6 @@ function initialUsage() {
  * 判定と syncQuery の2箇所を直すことになる
  */
 export const DETAIL_TABS = new Set(['now', 'log', 'out', 'agents']);
-
-/**
- * 右のインスペクタに出せるもの。知らない値は null（閉じた状態）に落とす。
- *
- * 中央と分けてあるのは、これが「作業しながら横目で見るもの」だから。
- * 中央のタブに混ぜると、数字を見るために作業の手元（いま・経過）を隠すことになる。
- *
- * **「成果」（out）は中央のタブへ戻した。** あれは芯の「どうなったのか」に答えるもので、
- * 横目で見るものではない。レールを1押ししないと見えない場所に置くのをやめた
- */
-export const INSPECTOR_TABS = new Set(['usage', 'basics']);
 
 /**
  * 開く中央タブを決める。
@@ -387,14 +381,20 @@ export const store = {
    */
   dtabPinned: DETAIL_TABS.has(query.get('dtab')),
   /**
-   * 右のインスペクタ。INSPECTOR_TABS のどれか、または null で閉じている。
+   * 右の紙。INSPECTOR_TABS（insp-open.js）のどれか、または null で閉じている。
    *
    * **開閉と「どれを見ているか」を1つの値で持つ。** 2つに分けると
-   * 「開いているのにどのタブも選んでいない」という組み合わせが作れてしまい、
+   * 「開いているのにどの紙も選んでいない」という組み合わせが作れてしまい、
    * そこへ落ちたときに空の枠だけが右に残る。
-   * レールは同じボタンをもう一度押すと閉じるので、その形が素直に書ける
+   *
+   * 始めの値は insp-open.js の initialInspector が決める（URL → 広い窓なら覚えた開閉 → 閉じる）。
+   * 窓の広さを見るのはここの1回だけ（途中で広げ縮めしても開閉は動かさない。理由は insp-open.js）
    */
-  inspector: INSPECTOR_TABS.has(query.get('insp')) ? query.get('insp') : null,
+  inspector: initialInspector({
+    insp: query.get('insp'),
+    stored: localStorage.getItem(LS.inspOpen),
+    wide: matchMedia(INSP_WIDE_QUERY).matches,
+  }),
   /** 書庫の状態。rows はサーバの応答そのまま（logSize と mtimeMs を持つ） */
   archive: {
     rows: [],

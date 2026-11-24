@@ -1,7 +1,7 @@
 /* ClaudeDeck ── 詳細ペイン（中央）と右のインスペクタ
  *
  * 中央のタブ・パネルの器・待ちの中身・判断の記録・facts・本文の見た目、
- * それと右のインスペクタと、それを開閉するレール。
+ * それと右の紙（インスペクタ）。開く口は詳細の頭の「数値」の絵で、右端のレールはやめた。
  */
 
 /* ------------------------------------------------------------ 詳細（中央） */
@@ -106,6 +106,16 @@
 .dh-main {
   flex: 999 1 20rem;
   min-width: 0;
+}
+
+/* 頭の「数値」の絵は右の紙の開け閉めの切り替え。開いているあいだは面で浮かせる
+   （紙の頭の切り替え .live-filter の押している側と同じ段。止まった絵で開閉が分かるように）。
+   **ラベンダーにしない** … 頭には塗った次の一手があり、同じ色の強い場所を増やさない。
+   前は右のレールの絵が押している印（枠・面・--accent の字）を持っていた */
+.detail-insp[aria-pressed="true"] {
+  background: var(--bg-hi);
+  color: var(--fg);
+  box-shadow: var(--sh-1);
 }
 
 /* ピンが付いているときは星を塗る。色は強調（--accent）。状態色は使わない */
@@ -616,10 +626,13 @@ details.rejected ul { margin: .35rem 0 0; padding-left: 1.1rem; color: var(--fg-
 details.rejected li { margin-bottom: .2rem; }
 details.rejected .label { color: var(--fg); }
 
-/* ------------------------------------------------- 右のインスペクタ */
+/* ------------------------------------------------- 右の紙（インスペクタ） */
 
-/* 数値・成果・状態はここへ寄せた。中央のタブに混ぜると、
+/* 数値と診断はここへ寄せた。中央のタブに混ぜると、
    数字を見るために作業の手元（いま・経過）を隠すことになる。
+
+   **開く口は詳細の頭の「数値」の絵**（右端のレールはやめた）。広い窓では覚えた開閉で始まり
+   （既定は開く）、狭い窓では閉じて始まる（insp-open.js）。
 
    閉じているあいだは JS が hidden を立てて grid の列ごと消す。
    **[hidden] は UA 側の指定なので、こちらの display: flex に負ける。**
@@ -634,19 +647,28 @@ details.rejected .label { color: var(--fg); }
 
 .insp[hidden] { display: none; }
 
+/* 紙の頭。数値｜診断の切り替え → 見出し → ×。
+   切り替えは一覧の頭の「すべて｜稼働中」（list.css の .live-filter）を借りる。押せる切り替えなので
+   面と影で浮かせる段（押している側は面 --bg-hi・影 --sh-1）で、**新しい見た目を作らない**。
+   見出しは開いた紙が何かを言い直す1行。狭い紙では折り返さずに「…」で切る */
 .insp-head {
   display: flex;
   align-items: center;
-  gap: .5rem;
+  gap: .6rem;
   padding: .55rem .75rem;
   border-bottom: 1px solid var(--border);
 }
 
 .insp-head h2 {
-  margin: 0 auto 0 0;
-  font-size: var(--fs-2);
-  font-weight: 700;
-  color: var(--fg-muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-1);
+  font-weight: 400;
+  color: var(--fg-faint);
 }
 
 /* 閉じるボタン。見た目は引き出しの .drawer-close と揃えてある
@@ -676,50 +698,3 @@ details.rejected .label { color: var(--fg); }
   overflow-y: auto;
   padding: .9rem .75rem 2rem;
 }
-
-/* ------------------------------------------------------- 右端のレール */
-
-/* 閉じていても幅は取ったままにする。消すと押すたびに中央の幅が跳ねる。
-   縦線1本で中央と切り分けるだけにして、面は塗らない */
-.rail {
-  display: flex;
-  flex-direction: column;
-  gap: .15rem;
-  padding: .5rem .2rem;
-  background: var(--bg);
-  border-left: 1px solid var(--border);
-}
-
-/* レールのボタン。**絵だけ。** 縦のレールに字を積むと1文字ずつ折り返すか、
-   レールそのものを広げることになる。名前は title と aria-label が持つ。
-   大きさは上のバーの絵だけボタン（.ibtn）に合わせてある */
-.rail-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.9rem;
-  height: 1.9rem;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  background: none;
-  color: var(--fg-muted);
-}
-
-.rail-btn:hover:not(:disabled) { color: var(--fg); }
-
-/* 開いているものだけ枠と色を付ける。開閉の正は aria-pressed 1つにする。
-   専用のクラスを足すと、JS が2つの真偽を同期する義理を負う */
-.rail-btn[aria-pressed="true"] {
-  border-color: var(--border);
-  background: var(--bg-elev);
-  color: var(--accent);
-}
-
-/* まだ出す中身が無いとき。薄くするだけで隠さない（隠すと列の幅が変わる） */
-.rail-btn:disabled {
-  cursor: default;
-  color: var(--fg-faint);
-  opacity: .55;
-}
-

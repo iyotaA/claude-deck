@@ -325,3 +325,69 @@ test('置き場所の札は押せないので枠も面も持たない。作業�
   const panels = jsCode(read(path.join(JS_DIR, 'detail-panels.js')));
   assert.match(fnBody(panels, 'basicsPanel'), /fact\(setup, '作業フォルダ', row\.cwd\)/, '診断に作業フォルダが無い');
 });
+
+/* ── 右の紙：レールをやめて頭の絵から開く（段4） ─────────────────── */
+
+const indexHtml = () => read(path.join(REPO, 'public', 'index.html')).replace(/<!--[\s\S]*?-->/g, '');
+
+test('右のレール（#rail）が index.html・public/js・public/css に戻っていない', () => {
+  const bad = [];
+  const html = indexHtml();
+  if (/id="rail"/.test(html)) bad.push('index.html … id="rail"');
+  if (/class="rail"/.test(html)) bad.push('index.html … class="rail"');
+  for (const file of jsFiles()) {
+    const code = jsCode(read(file));
+    const rel = path.relative(JS_DIR, file).replace(/\\/g, '/');
+    for (const [re, label] of [
+      [/dom\.rail\b/, 'dom.rail'],
+      [/getElementById\('rail'\)/, "getElementById('rail')"],
+      [/rail-btn/, '.rail-btn'],
+      [/syncRail\b/, 'syncRail'],
+    ]) {
+      if (re.test(code)) bad.push(`${rel} … ${label}`);
+    }
+  }
+  for (const r of cssRules()) {
+    for (const s of r.selectors) {
+      if (/(^|[\s,>+~])\.rail(-btn)?\b/.test(s)) bad.push(`${r.file} … ${s}`);
+    }
+  }
+  assert.deepEqual(bad, [], `消した右のレールが残っている:\n  ${bad.join('\n  ')}`);
+});
+
+test('右の紙を開く口は頭の「数値」の絵（トグル）。紙の頭に数値｜診断の切り替えと × がある', () => {
+  const body = fnBody(detailCode(), 'inspButton');
+  assert.match(body, /toggleInspector\(\)/, '頭の数値の絵が toggleInspector を呼んでいない');
+  assert.match(body, /aria-pressed/, '頭の数値の絵が開閉を aria-pressed で示していない');
+  const html = indexHtml();
+  const head = html.match(/<div class="insp-head">([\s\S]*?)<\/div>\s*<div class="insp-body"/);
+  assert.ok(head, 'index.html に .insp-head が無い');
+  assert.match(head[1], /id="insp-tabs"/, '紙の頭に数値｜診断の切り替え（#insp-tabs）が無い');
+  assert.match(head[1], /role="group"/, '切り替えに role="group" が無い');
+  assert.match(head[1], /id="insp-close"/, '紙の頭に × が無い');
+});
+
+test('右の紙の開閉は localStorage に覚える。鍵は store.js の LS に置く', () => {
+  const store = jsCode(read(path.join(JS_DIR, 'store.js')));
+  const ls = store.match(/export const LS = Object\.freeze\(\{([\s\S]*?)\}\)/);
+  assert.ok(ls, 'store.js に LS が無い');
+  assert.match(ls[1], /inspOpen: 'claude-deck\.inspOpen'/, 'LS に右の紙の開閉の鍵（inspOpen）が無い');
+  // 初めの判断は純関数（insp-open.js）を通す。URL・覚えた値・窓の広さの3つを渡す
+  assert.match(store, /initialInspector\(\{/, 'store.js が initialInspector を通していない');
+  assert.match(detailCode(), /localStorage\.setItem\(LS\.inspOpen/, 'detail.js が開閉を覚えていない');
+});
+
+test('.deck の列は一覧 × 右の紙の4通りで、子の数と釣り合う（閉じて2列・紙を開いて3列）', () => {
+  const cols = (sel) => declsOf(sel)
+    .filter((d) => d.prop === 'grid-template-columns' && d.file === 'base.css')
+    .map((d) => d.value);
+  const tracks = (v) => v.replace(/\([^)]*\)/g, '()').trim().split(/\s+/).length;
+  const cases = [['.deck', 2], ['.is-list-open .deck', 2], ['.is-insp-open .deck', 3], ['.is-list-open.is-insp-open .deck', 3]];
+  for (const [sel, n] of cases) {
+    const [v] = cols(sel);
+    assert.ok(v, `${sel} の列が base.css に無い`);
+    assert.equal(tracks(v), n, `${sel} の列が ${n} 本でない（${v}）`);
+    // 右のレールの列（末尾の auto）が戻っていない
+    assert.doesNotMatch(v, /\bauto$/, `${sel} の末尾に右のレールの列（auto）が残っている`);
+  }
+});

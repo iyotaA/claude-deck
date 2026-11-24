@@ -286,11 +286,14 @@
       </div>
     </section>
 
-    <!-- 右のインスペクタ。作業しながら横目で見るもの（数値・成果・状態）をここへ寄せる。
+    <!-- 右の紙。作業しながら横目で見るもの（数値・診断）をここへ寄せる。
          閉じているあいだは hidden で丸ごと外し、grid の列も消える。
-         器は作り直さず、中身（#insp-body）だけを差し替える -->
+         器は作り直さず、中身（#insp-body）だけを差し替える。
+         開く口は詳細の頭の「数値」の絵（右のレールはやめた）。数値と診断の切り替えはこの頭に置く。
+         切り替えの見た目は一覧の頭の「すべて｜稼働中」（.live-filter）を借りる。札は detail.js が組む -->
     <aside class="insp" id="insp" aria-label="このセッションの詳しいところ" hidden>
       <div class="insp-head">
+        <div class="live-filter insp-tabs" id="insp-tabs" role="group" aria-label="右に出すもの"></div>
         <h2 id="insp-title"></h2>
         <button class="iclose" id="insp-close" type="button" aria-label="閉じる">&times;</button>
       </div>
@@ -300,10 +303,6 @@
       <button class="splitter" id="split-insp" type="button"
               aria-label="詳しいところの幅を変える。矢印キーでも動かせる（Home で既定に戻る）"></button>
     </aside>
-
-    <!-- 右端のレール。中身は detail.js が組む（並びと語彙を1箇所に持つため）。
-         閉じていても幅は取ったままにする。消すと押すたびに中央の幅が跳ねる -->
-    <nav class="rail" id="rail" aria-label="詳しいところを開く"></nav>
   </main>
 
   <!-- 引き出しの背後を覆う膜。押すと閉じる -->
@@ -612,7 +611,8 @@
             頭の左に題・状態・置き場所、右上に ☆・メモ・数値・再開コマンドのコピーと、次の一手（ターミナルで返事をする など）。
             答えないと進まないものはタブのすぐ下に、どのタブを見ていても出ます。
             このセッションの目的は「いま」の先頭にあります。「拡大」で大きく開けます。</p>
-          <p class="settings-hint"><strong>右のレール</strong> — そのセッションの数値と診断。</p>
+          <p class="settings-hint"><strong>右の紙</strong> — そのセッションの数値と診断。頭の右上の数値の絵で出し入れし、紙の頭で数値と診断を切り替えます。
+            広い窓では最初から開いていて、開け閉めは覚えます。狭い窓では閉じて始まり、下から出ます。</p>
         </section>
 
         <section class="settings-sec">
