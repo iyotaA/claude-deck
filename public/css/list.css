@@ -59,13 +59,18 @@
 
    **押せる切り替えの顔はこれ1つ。** 右の紙の頭の「数値｜診断」（#insp-tabs）と数値モードの節ナビ
    （#usage-nav）も器にこのクラスを付けて借りる（前は数値の節ナビだけ下線式の .tab だったが、消した）。
-   セレクタを #live-head に絞らないのはそのため */
+   セレクタを #live-head に絞らないのはそのため。
+
+   器の内側の余白と枠の太さは変数で持つ（`--seg-pad` / `--seg-line`）。数値の頭の節ナビ（usage-mode.css）が
+   帯の背（`--band-ctl-h`）からこの2つを引いて札の背を出すので、ここの数を変えても帯の背がずれない */
 .live-filter {
+  --seg-pad: 2px;
+  --seg-line: 1px;
   display: inline-flex;
   flex: none;
   gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
+  padding: var(--seg-pad);
+  border: var(--seg-line) solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-sunk);
 }

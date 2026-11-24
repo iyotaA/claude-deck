@@ -111,7 +111,9 @@ function buildArchiveCard(row) {
   card.append(stats);
 
   card.addEventListener('click', () => {
-    select(row.sessionId, 'archive');
+    // 押した行を渡して控えさせる（store.pickedRow）。検索の引き直しの最中に押すと、届いた結果に
+    // そのセッションが居ないことがある。控えが無いと、詳細の届く前に拡大の窓が畳まれる（rows.js の rowOf）
+    select(row.sessionId, 'archive', row);
     // 押されたあと何をするかは外から差す。いまは拡大の窓で開く（モードは書庫のまま。main.js）
     pick?.();
   });

@@ -189,13 +189,33 @@ export function splitUnit(text) {
 }
 
 /**
+ * 値を「数 ＋ 小さい単位」で器に入れる（`splitUnit` で割り、単位だけ `.stat-unit` で包む）。
+ * 単位の無い値と `—`（不明）は1本の字のまま入れる。
+ *
+ * **単位の span を組むのはここだけ**（クラス名 `stat-unit` もここ1か所）。使うのは数値モードの札
+ * （`statTile` の `smallUnit`）と、概要の「いちばん重いもの」の1位の量（`usage-tab.js` の `heavyBlock`）。
+ * 前は2か所が同じ組み方を書き写していて、片方だけ直すと単位の見た目が食い違った。
+ * 字をそのまま並べ直すだけなので、選んでコピーしたときは「150.6M」と1続きに取れる。
+ *
+ * @param {HTMLElement} node 入れる器（中身は差し替える）
+ * @param {string} value 整形済みの値（`tokensStrict` / `pctStrict` などを通したもの）
+ * @returns {HTMLElement} 受け取った器
+ */
+export function unitValue(node, value) {
+  const { num: n, unit } = splitUnit(value);
+  if (unit) node.replaceChildren(n, el('span', 'stat-unit', unit));
+  else node.replaceChildren(n);
+  return node;
+}
+
+/**
  * 数値を1つ大きく出す札。
  *
  * 単一の現在値なので棒グラフにしない（棒は比べるためのもので、
  * 比べる相手がいない値を棒にすると、長さに意味があるように見えてしまう）。
  *
  * **右の紙と数値モードで共有する。** `smallUnit` は数値モードの札だけが渡す（D13）。
- * 既定は割らないので、右の紙の札は1本の字のまま。単位の見た目（`.stat-unit`）も
+ * 既定は割らないので、右の紙の札は1本の字のまま。割るときは `unitValue` を通す。単位の見た目（`.stat-unit`）も
  * `usage-mode.css` に `.usage-pane` で絞って置いてある。
  *
  * @param {string} label 何の数か
@@ -208,11 +228,8 @@ export function splitUnit(text) {
 export function statTile(label, value, note, delta, { smallUnit = false } = {}) {
   const box = el('div', 'stat');
   box.append(el('div', 'stat-label', label));
-  const v = el('div', 'stat-value', value);
-  const split = smallUnit ? splitUnit(value) : null;
-  // 字をそのまま並べ直すだけなので、選んでコピーしたときは「150.6M」と1続きに取れる
-  if (split?.unit) v.replaceChildren(split.num, el('span', 'stat-unit', split.unit));
-  box.append(v);
+  // 単位を小さく出すのは渡されたときだけ（数値モードの札）。組み方は unitValue の1か所
+  box.append(smallUnit ? unitValue(el('div', 'stat-value'), value) : el('div', 'stat-value', value));
   // 差は値のすぐ下。但し書きより先に置く（値と一続きに読ませたい）
   if (delta) box.append(el('div', 'stat-delta', delta));
   if (note) box.append(el('div', 'stat-note', note));

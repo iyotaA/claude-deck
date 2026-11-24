@@ -1,7 +1,7 @@
 /**
  * 数値モードの「日ごとの実消費」の線グラフに、どの日をどう描くか（`public/js/usage-days.js`）。
  *
- * 画面刷新⑤の D2〜D5。import ゼロの純関数なので、画面のファイルのまま Node から呼ぶ。
+ * 画面刷新⑤の D2〜D5。純関数で、import は層0 の `day-text.js`（日付の言い方）だけなので、画面のファイルのまま Node から呼ぶ。
  *
  * - 描くのは `meta.scanFrom`（全部数えてある最初の日）から今日まで。境目より前は描かない（D2）
  * - 境目が決められない（null）・古いサーバー（キーが無い）は描かない側に倒す（0 と不明を分ける）
@@ -242,4 +242,34 @@ test('決められないとき・描ける日が無いときも、何が起き�
   assert.doesNotMatch(chartNote(dayChartView(resp([], { scanFrom: '2026-11-25' }, { limit: 60 }))), /本数を増やす/, '上限なら言わない');
   assert.match(chartNote(dayChartView(resp([['2026-11-24', 1e6]], { scanFrom: '2026-11-24' }))), /11\/24（火）の1日だけ/);
   assert.equal(chartNote(dayChartView(resp([['2026-11-20', 1e6]]))), null, '描けるときは言わない');
+});
+
+test('描けないときは、上の絞り込みで何を変えればそろう日が増えるかまで言う（本数・期間）', () => {
+  // 1日だけ（short）も、本数を増やせるなら言う（既定より少ない本数で、今日と昨日しか読めなかったとき）
+  const short = (meta, extra) => chartNote(dayChartView(resp([['2026-11-24', 1e6]], { scanFrom: '2026-11-24', ...meta }, extra)));
+  assert.match(short({}, { limit: 10 }), /1日だけ.*本数を増やす/);
+  assert.doesNotMatch(short({}, { limit: 60 }), /本数を増やす|期間を広げる/, '上限まで選んでいれば勧める手が無い');
+
+  // 期間で絞り、期間の中は全部読めた（上限に当たっていない）。期間で外したログが境目を決めているので、広げれば増える
+  const byDays = { indexed: 553, scanned: 12, scanLimited: false };
+  const v = dayChartView(resp([['2026-11-24', 1e6]], { scanFrom: '2026-11-24', ...byDays }, { days: 1 }));
+  assert.equal(v.canLengthen, true);
+  assert.equal(v.canWiden, false, '上限に当たっていないので本数では変わらない');
+  assert.match(chartNote(v), /期間を広げる/);
+  assert.doesNotMatch(chartNote(v), /本数を増やす/);
+  // 期間で外したものが無い（索引の全部を読めた）なら、広げても変わらない
+  assert.doesNotMatch(short({ indexed: 12, scanned: 12, scanLimited: false }, { days: 7 }), /期間を広げる/);
+  // 期間を絞っていなければ言わない
+  assert.doesNotMatch(short(byDays, { days: null }), /期間を広げる/);
+  // 上限に当たっているあいだは、期間を広げても境目は動かない（いちばん新しい外れものは上限の外のまま）
+  const limited = dayChartView(resp([['2026-11-24', 1e6]], { scanFrom: '2026-11-24' }, { days: 7, limit: 60 }));
+  assert.equal(limited.canLengthen, false);
+
+  // そろう日が0日（none）では期間を勧めない。期間で外したログの最終更新は「いま − 期間」より前なので、
+  // 境目を今日より後へは押し出さない（0日の原因は上限で外したログか、読めなかったログ）
+  const none = dayChartView(resp([], { scanFrom: '2026-11-25', ...byDays }, { days: 1 }));
+  assert.equal(none.status, 'none');
+  assert.doesNotMatch(chartNote(none), /期間を広げる/);
+  // 古いサーバー（scanLimited が無い）では期間を勧めない（期間の中を全部読めたか分からない）
+  assert.equal(dayChartView(resp([], { scanFrom: '2026-11-24', scanLimited: undefined, indexed: 9, scanned: 3 }, { days: 1 })).canLengthen, false);
 });

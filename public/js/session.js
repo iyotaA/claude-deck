@@ -263,11 +263,21 @@ export async function loadUsageBaseline(sessionId) {
  * @param {string|null} sessionId
  * @param {'live'|'query'|'archive'|'usage'} [from] 選んだ経路。store.selectedFrom の説明を参照。
  *   'live' 以外は、一覧から消えても選択を外さない（stream.js が見ている）
+ * @param {object|null} [row] 押した行（書庫と数値のカードが渡す）。`store.pickedRow` に控え、
+ *   一覧の外のセッションを開いた拡大の窓が、詳細の届く前に畳まれないようにする（理由は store.js）
  */
-export function select(sessionId, from = 'live') {
-  if (store.selected === sessionId) return;
+export function select(sessionId, from = 'live', row = null) {
+  // 押した行がそのセッションのものなら控える。**早い return より前に置く。** 選び直しでも
+  // （同じセッションを別の場所から押したときも）押した行を控えに残す
+  const picked = row && row.sessionId === sessionId ? row : null;
+  if (store.selected === sessionId) {
+    if (picked) store.pickedRow = picked;
+    return;
+  }
   store.selected = sessionId || null;
   store.selectedFrom = store.selected ? from : null;
+  // 別のセッションへ移ったら前の控えは捨てる（rowOf は id で突き合わせるが、持ち続ける理由が無い）
+  store.pickedRow = picked;
   // 印は両方の一覧に付け直す。書庫で選んだあと稼働中に戻ったとき、
   // 同じセッションが両方に居ることがある。
   // **稼働中は圧縮した行（`.row`。枠「あなたの番」の中の行も含む）**、

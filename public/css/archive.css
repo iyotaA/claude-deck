@@ -47,11 +47,12 @@
 /* 帯の中の押せるもの（今日のまとめ・検索欄・絞り込みの札）の背を1つにそろえる（34px）。
    中身なりに任せると、select の札が 34px、検索欄と今日のまとめが 31px になり、
    1行の帯の中で上下がずれていた（実測）。34px は select の札がもともと出していた背で、
-   数値の頭の節ナビ（`usage-mode.css` の `.usage-head .usage-nav button`）もこれに合わせてある。
+   数値の頭の節ナビ（`usage-mode.css` の `.usage-head .usage-nav button`）も同じ変数から背を出す。
+   **数は書かない。** 値は `base.css` の `--band-ctl-h` の1つ（2か所に書くと片方だけ直した日に黙ってずれる）。
    `.archive-field` は数値の頭も借りるが、あちらの札は select だけなので背は変わらない。
    絞り込みを外す口（`.archive-clear`）は入れない。ピル型の小さな丸で、札と形を変えてあるのが役目 */
 .archive-field,
-.archive-head .today-open { min-height: 2.125rem; }
+.archive-head .today-open { min-height: var(--band-ctl-h); }
 
 /* 「中身も探す」。**チェックのまま置く**（手本のモックも同じ）。これは「どれを見るか」の切り替え
    （一覧の頭の「すべて｜稼働中」= `.live-filter`）ではなく、いまの検索に本文を足すかどうかの1つの選択だから。

@@ -151,6 +151,28 @@ test('帯の中の押せるもの（今日のまとめ・検索欄・絞り込�
   assert.ok(!rule.selectors.some((s) => /archive-clear/.test(s)), '外す口まで札と同じ背にしている（形を変える約束）');
 });
 
+test('帯の背（34px）の数は base.css の --band-ctl-h の1か所。書庫の札も数値の頭の節ナビもそこから引く', () => {
+  // 前は書庫の札が 2.125rem、節ナビが 1.75rem（借りた器の余白と枠を足して 34px になる前提）と、
+  // 別々の単位の数で書いてあった。片方だけ直すと、1行の帯の中で黙って上下がずれる
+  const defs = cssRules().flatMap((r) => r.decls
+    .filter((d) => d.prop === '--band-ctl-h')
+    .map((d) => `${r.file} … ${r.selectors.join(', ')} { ${d.value} }`));
+  assert.deepEqual(defs, ['base.css … :root { 2.125rem }'], `帯の背の定義が1か所でない（または値が変わった）:\n  ${defs.join('\n  ')}`);
+  assert.equal(valueOf('.archive-field', 'min-height'), 'var(--band-ctl-h)', '書庫の札の背が帯の変数から出ていない');
+  // 節ナビは、帯の背から借りた器（.live-filter）の内側の余白と枠を上下ぶん引いた式
+  assert.equal(valueOf('.usage-head .usage-nav button', 'height'),
+    'calc(var(--band-ctl-h) - 2 * (var(--seg-pad) + var(--seg-line)))', '節ナビの札の背が、帯の背から器の余白と枠を引いた式になっていない');
+  // 器の余白と枠は、引く側と同じ変数で持つ（数を書き写すと、器だけ直した日に節ナビがずれる）
+  assert.equal(valueOf('.live-filter', 'padding'), 'var(--seg-pad)', '.live-filter の余白が変数から出ていない');
+  assert.match(valueOf('.live-filter', 'border'), /^var\(--seg-line\) solid /, '.live-filter の枠の太さが変数から出ていない');
+  // どこにも背の数を直に戻さない
+  const literal = cssRules().flatMap((r) => r.decls
+    .filter((d) => /^(min-)?height$/.test(d.prop) && /^(2\.125rem|1\.75rem|34px|28px)$/.test(d.value)
+      && r.selectors.some((s) => /archive-field|today-open|usage-nav/.test(s)))
+    .map((d) => `${r.file} … ${r.selectors.join(', ')} { ${d.prop}: ${d.value} }`));
+  assert.deepEqual(literal, [], `帯の背を数で直に書いている:\n  ${literal.join('\n  ')}`);
+});
+
 test('探す帯の指定は archive.css の1か所。list.css に「単体で置く」指定を戻さない', () => {
   const loose = [];
   for (const r of cssRules()) {

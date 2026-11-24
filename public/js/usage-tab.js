@@ -19,7 +19,7 @@ import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaPath } from './card.js';
 import {
   block, readNote, hitRateNote, statTile, barList, shareBar, trendList, tableDetails,
-  foldBlock, deltaText, sparkline, dayChart, splitUnit,
+  foldBlock, deltaText, sparkline, dayChart, unitValue,
   tokensStrict, pctStrict, numStrict,
   toolsBlock as toolsBlockOf,
 } from './usage-chart.js';
@@ -368,12 +368,8 @@ function heavyBlock(d, go) {
     // 1行で「…」で切るので、全文は title で読めるようにする
     nm.title = name;
     li.append(nm);
-    // 単位は数値モードの札と同じく小さく出す（D13。見た目は .usage-pane .stat-unit）
-    const v = el('span', 'heavy-v');
-    const { num: n, unit } = splitUnit(value);
-    v.append(n);
-    if (unit) v.append(el('span', 'stat-unit', unit));
-    li.append(v);
+    // 単位は数値モードの札と同じく小さく出す（D13。組み方は usage-chart.js の unitValue の1か所）
+    li.append(unitValue(el('span', 'heavy-v'), value));
     li.append(el('span', 'heavy-basis', basis));
     if (next) li.append(el('span', 'heavy-next', `次は ${next}`));
     // **押せるものは行き先の印を持つ。** 札（押せない）と止まった絵で見分けが付くようにする
@@ -648,8 +644,11 @@ function usageCard(row) {
   card.addEventListener('click', () => {
     // 'live' にしない。60本には24時間より古いものが混ざるので、`apply()` の
     // 「一覧から消えたら選択を外す」（`selectedFrom === 'live'` のときだけ働く）に
-    // 引っかかって、押した直後に先頭へ飛ぶ
-    select(row.sessionId, 'usage');
+    // 引っかかって、押した直後に先頭へ飛ぶ。
+    // **押した行を渡して控えさせる**（store.pickedRow）。本数や期間を替えた引き直しの最中は前の並びが
+    // 薄く出たまま押せるので、届いた並びにこのセッションが居ないことがある。数値の並びを引きに行くと、
+    // 詳細の届く前の組み直しで拡大の窓が畳まれる（rows.js の rowOf）
+    select(row.sessionId, 'usage', row);
     // **選んでから開く**（書庫の buildArchiveCard と同じ順）。逆にすると、前に選んでいたセッションが
     // 拡大の窓に一瞬出てから差し替わる。焦点は拡大の窓が流れる箱へ移す（zoom.js）ので、ここでは触らない。
     // 前にあった作業台の一覧を畳む口（closeListAfterPick）は外した ―― 数値モードに一覧は無い

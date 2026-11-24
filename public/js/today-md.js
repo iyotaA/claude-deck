@@ -1,6 +1,6 @@
 /**
- * 今日のまとめを Markdown の文字列にする。層0。**import ゼロの純関数**なので Node からテストできる
- * （`test/today-md.test.mjs`）。
+ * 今日のまとめを Markdown の文字列にする。層0。**純関数**で、import は層0 の `day-text.js`（日付の言い方）
+ * だけなので Node からテストできる（`test/today-md.test.mjs`）。
  *
  * 画面の「Markdown でコピー」が使う。手元のクリップボードに入れるだけで、外へは送らない。
  * 日報や引き継ぎに貼る下書きなので、**画面と同じ並び・同じ言い方**にする
@@ -11,7 +11,9 @@
  *
  * どの日を見るかの判断（選べる範囲 `TODAY_AGO_MAX_UI`・丸め方 `clampAgo`・日の言い方 `agoDate` / `agoLabel`・
  * 前後の矢印の行き先 `agoSteps`）もここに置く。窓の題・日の選択肢・矢印が同じ範囲と言い方を使うため。
+ * 「M/D（曜）」の組み方そのものは `day-text.js` の `dayText`（数値モードの線グラフの日付と同じ言い方にする）。
  */
+import { dayText } from './day-text.js';
 
 /**
  * 何日前まで選べるか。サーバー（`src/view/today.mjs` の `TODAY_AGO_MAX`）と同じ値。
@@ -19,9 +21,6 @@
  * 揃っていることは `test/today-md.test.mjs` が見ている
  */
 export const TODAY_AGO_MAX_UI = 6;
-
-/** 曜日。「3日前」と書くより、日付と曜日のほうが日報の日と結び付く */
-const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
 /**
  * 何日前かを、選べる範囲（0〜`TODAY_AGO_MAX_UI`）の整数へ丸める。
@@ -38,7 +37,8 @@ export function clampAgo(v) {
 
 /**
  * その日の「M/D（曜）」。地方時（サーバーの `/api/today` も地方時の日で切る）。
- * 窓の題と日の選択肢が同じ言い方になるよう、ここ1つで組む。
+ * 窓の題と日の選択肢が同じ言い方になるよう、どちらもここを通す。組み方は `day-text.js` の `dayText`
+ * （数値モードの線グラフの日付 `usage-days.js` の `dayLabel` と同じ言い方）。
  *
  * @param {number} ago 何日前か（0 = きょう）
  * @param {number} now 基準の時刻（ms）。**外から渡す**（日付が変わったあとも開きっぱなしの画面で、
@@ -48,7 +48,7 @@ export function clampAgo(v) {
 export function agoDate(ago, now) {
   const d = new Date(now);
   d.setDate(d.getDate() - clampAgo(ago));
-  return `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
+  return dayText(d);
 }
 
 /**

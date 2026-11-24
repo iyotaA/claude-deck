@@ -126,7 +126,7 @@
   border-bottom: 1px solid var(--border);
 }
 
-/* **概要だけは帯にしない**（画面刷新⑤の K13）。概要の札の下は2列（.usage-over）で、見出しは列の中に入る。
+/* **概要だけは帯にしない**。概要の札の下は2列（.usage-over）で、見出しは列の中に入る。
    帯のまま残すと、左右の負の margin（器の padding を相殺して器の端まで伸ばす分）が列の外へはみ出して
    隣の列や隙間に重なり、sticky も列ごとにばらばらに貼り付く（紙の中に帯ができる）。
    概要は1画面にほぼ収まる短い節なので、スクロール中に見出しを残す要もない。
@@ -183,8 +183,11 @@
 }
 
 /* 同じ行に並ぶ絞り込みの札（`.archive-field`。34px）と背を揃える。
-   借りた札の既定（1.5rem）だと器ごと 30px で、1行の帯の中で節ナビだけ 4px 低く見えた（実測） */
-.usage-head .usage-nav button { height: 1.75rem; }
+   借りた札の既定（1.5rem）だと器ごと 30px で、1行の帯の中で節ナビだけ 4px 低く見えた（実測）。
+   **背は帯の変数（`base.css` の `--band-ctl-h`）から、借りた器（`.live-filter`）の内側の余白と枠を
+   上下ぶん引いて出す**（34px − 2 ×（2px ＋ 1px）＝ 28px）。どちらの数も手で書き写さない ――
+   器の余白と枠は `list.css` の `.live-filter` が `--seg-pad` / `--seg-line` で持っている */
+.usage-head .usage-nav button { height: calc(var(--band-ctl-h) - 2 * (var(--seg-pad) + var(--seg-line))); }
 
 /* 件数。`.detail-tab .n` と同じ扱いで、押せない添え物として沈める。
    手本のモックの `.seg .cnt` はピル型の札だが、ピル型は押せるものだけの形にしてある。

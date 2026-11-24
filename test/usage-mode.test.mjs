@@ -16,7 +16,7 @@
  *   「これより前は一部しか読んでいません」を線グラフと節「推移」の両方に添える（D2。消さない）。
  *   何を描くかの判断そのもの（境目・0 埋め・山）は `usage-days.test.mjs` が関数を呼んで見ている
  * - 概要の札の下は2列（D17。左: 線グラフ・いちばん重いもの／右: 内訳・読み方）。内訳は横棒のまま（D16）、
- *   いちばん重いものは1位＋「次は」の札で、何で並べているかを消さない（D18）。概要の見出しは帯にしない（K13）
+ *   いちばん重いものは1位＋「次は」の札で、何で並べているかを消さない（D18）。概要の見出しは帯にしない（2列の中で帯が列の外へはみ出すため）
  * - 横断（`usage-tab.js`）の誤読を防ぐ注記が字のまま残っている（右の紙のぶんは `detail-pane.test.mjs`）
  * - 数値のカードを押しても作業台へ移さず、書庫と同じく拡大の窓で開く（D27）
  *
@@ -193,7 +193,7 @@ test('単位を小さく出すのは数値モードの札だけ。右の紙の�
   assert.doesNotMatch(panelCode(), /smallUnit/, '右の紙（usage-panel.js）の札まで単位を小さくしている');
   // 既定は割らない。指定しなかった札（右の紙）の値は1本の字のまま
   assert.match(chartCode(), /function statTile\([^)]*\{ smallUnit = false \} = \{\}\)/, 'statTile の既定が「割らない」でない');
-  assert.match(fnBody(chartCode(), 'statTile'), /smallUnit \? splitUnit\(value\) : null/, 'statTile が smallUnit のときだけ割る形になっていない');
+  assert.match(fnBody(chartCode(), 'statTile'), /smallUnit \? unitValue\(/, 'statTile が smallUnit のときだけ割る形になっていない');
   const loose = [];
   for (const r of cssRules()) {
     for (const s of r.selectors) {
@@ -201,6 +201,25 @@ test('単位を小さく出すのは数値モードの札だけ。右の紙の�
     }
   }
   assert.deepEqual(loose, [], `単位の見た目が数値モードの外にもある:\n  ${loose.join('\n  ')}`);
+});
+
+test('「数 ＋ 単位の span」を組むのは usage-chart.js の unitValue の1か所（札もいちばん重いものもそこを通す）', () => {
+  // 前は statTile と heavyBlock が同じ組み方（splitUnit → span.stat-unit）を書き写していた
+  const unit = fnBody(chartCode(), 'unitValue');
+  assert.match(unit, /splitUnit\(value\)/, 'unitValue が splitUnit で割っていない');
+  assert.match(unit, /el\('span', 'stat-unit', unit\)/, 'unitValue が単位を .stat-unit で包んでいない');
+  // 単位のクラス名を JS に書くのは unitValue の中だけ
+  const named = jsFiles().flatMap((f) => {
+    const code = jsCode(read(f));
+    const n = (code.match(/'stat-unit'/g) ?? []).length;
+    return n ? [`${path.basename(f)} × ${n}`] : [];
+  });
+  assert.deepEqual(named, ['usage-chart.js × 1'], `単位の span を組む場所が1か所でない:\n  ${named.join('\n  ')}`);
+  assert.equal((unit.match(/'stat-unit'/g) ?? []).length, 1, '単位のクラス名が unitValue の外にある');
+  // いちばん重いものの1位の量も同じ組み方を通す
+  const heavy = fnBody(tabCode(), 'heavyBlock');
+  assert.match(heavy, /unitValue\(el\('span', 'heavy-v'\), value\)/, 'いちばん重いものの量が unitValue を通っていない');
+  assert.doesNotMatch(heavy, /splitUnit/, 'いちばん重いものが自分で単位を割っている（組み方の写し）');
 });
 
 /* ── 節ナビと帯（D14）────────────────────────────────────── */
@@ -430,22 +449,39 @@ test('数値のカードを押しても作業台へ移さず、書庫と同じ�
 
   const card = fnBody(tabCode(), 'usageCard');
   // 選んでから開く（書庫の buildArchiveCard と同じ順）。逆にすると、前に選んでいたセッションが拡大の窓に一瞬出る
-  const sel = card.indexOf("select(row.sessionId, 'usage')");
+  const sel = card.indexOf("select(row.sessionId, 'usage', row)");
   const pick = card.indexOf('onPick?.()');
-  assert.ok(sel >= 0, "カードが select(row.sessionId, 'usage') で選んでいない");
+  assert.ok(sel >= 0, "カードが select(row.sessionId, 'usage', row) で選んでいない（押した行を控えさせていない）");
   assert.ok(pick > sel, '選ぶ前に拡大の窓を開いている（前に選んでいたものが一瞬出る）');
   // 一覧の引き出しを畳む口は要らない（数値モードに一覧は無い。焦点は拡大の窓が流れる箱へ移す）
   assert.doesNotMatch(card, /closeListAfterPick/, '作業台の一覧を畳む口が残っている');
 });
 
-test('一覧に居ないセッションでも、数値の行から詳細の頭を組める（詳細が届く前に窓が畳まれない）', () => {
+test('一覧に居ないセッションでも、押した行の控えから詳細の頭を組める（詳細が届く前に窓が畳まれない）', () => {
   // renderDetailInner は headOf(store.selected) が空だと拡大を畳む。詳細はまだ届いていないので、
   // 一覧（store.rows）にも書庫の行にも居ないセッション（数値のカードの大半）は、開いた直後に閉じていた（実測）
   const body = fnBody(jsCode(read(path.join(JS_DIR, 'rows.js'))), 'rowOf');
   assert.match(body, /store\.archive\.rows\.find\(/, '書庫の行へ落とす口が消えている');
-  assert.match(body, /store\.usageTab\.data\?\.rows\?\.find\(/, '数値の行へ落とす口が無い（数値から開いた窓が詳細の届く前に畳まれる）');
-  // 一覧の行がいちばん先（状態などの新しい項目を持つのはあちらだけ）
-  assert.ok(body.indexOf('store.rows.find(') < body.indexOf('store.usageTab'), '一覧の行より先に数値の行を見ている');
+  assert.match(body, /store\.pickedRow\?\.sessionId === sessionId \? store\.pickedRow : null/,
+    '押した行の控えへ落とす口が無い（または id で突き合わせていない）');
+  // **数値の並びは引きに行かない。** 引き直しの最中（前の並びが薄く出て押せる）に押すと、届いた並びに
+  // そのセッションが居ないことがあり、詳細の届く前の組み直しで窓が突然閉じた
+  assert.doesNotMatch(body, /store\.usageTab/, 'rowOf が数値の並び（引き直しで差し替わる）を見ている');
+  // 一覧の行がいちばん先（状態などの新しい項目を持つのはあちらだけ）、控えは最後
+  assert.ok(body.indexOf('store.rows.find(') < body.indexOf('store.archive.rows'), '一覧の行より先に書庫の行を見ている');
+  assert.ok(body.indexOf('store.archive.rows') < body.indexOf('store.pickedRow'), '書庫の行より先に控えを見ている');
+
+  // 控えるのは select の第3引数。**早い return より前で控える**（同じセッションを押し直しても控えが残る）
+  const sel = fnBody(jsCode(read(path.join(JS_DIR, 'session.js'))), 'select');
+  const keep = sel.indexOf('store.pickedRow = picked');
+  const early = sel.indexOf('return;');
+  assert.ok(keep >= 0 && early >= 0 && keep < early, '同じセッションを押し直したとき、早い return で控えを書き損ねる');
+  assert.match(sel, /row && row\.sessionId === sessionId \? row : null/, '控える行がそのセッションのものか確かめていない');
+  assert.match(jsCode(read(path.join(JS_DIR, 'session.js'))), /export function select\(sessionId, from = 'live', row = null\)/,
+    'select が押した行（第3引数）を受け取らない');
+  // 書庫のカードも同じく押した行を渡す（検索の引き直しの最中に押したときも同じことが起きる）
+  assert.match(fnBody(jsCode(read(path.join(JS_DIR, 'archive.js'))), 'buildArchiveCard'), /select\(row\.sessionId, 'archive', row\)/,
+    '書庫のカードが押した行を控えさせていない');
 });
 
 test('拡大の窓の「作業台で開く」は、作業台の外（書庫・数値）から開いたときに出す', () => {

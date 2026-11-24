@@ -1,7 +1,8 @@
 /* 層0。数値モードの「日ごとの実消費」の線グラフに、どの日をどう描くか（画面刷新⑤の D2〜D5）。
  *
- * **import ゼロの純関数**（DOM を触らない）なので、`.js` のまま Node から import してテストできる
- * （`test/usage-days.test.mjs`）。描くのは層1 の `usage-chart.js` の `dayChart`、置くのは層7 の `usage-tab.js`。
+ * **純関数**（DOM を触らない）で、import は層0 の `day-text.js`（日付の言い方）だけなので、`.js` のまま
+ * Node から import してテストできる（`test/usage-days.test.mjs`）。描くのは層1 の `usage-chart.js` の `dayChart`、
+ * 置くのは層7 の `usage-tab.js`。
  *
  * ## 描いてよい日
  *
@@ -21,6 +22,7 @@
  *     画面とサーバーは同じ機械の時計と時間帯を見ている。`meta.now` が無ければ行のいちばん新しい日まで
  *     （知らない日を 0 で足さない）
  */
+import { dayText, weekdayOf } from './day-text.js';
 
 /**
  * 描く日数の上限。
@@ -37,7 +39,7 @@
 export const DAY_CHART_MAX = 30;
 
 /** 線を引くのに要る日数。1日では点にしかならず、形が読めない */
-export const DAY_LINE_MIN = 2;
+const DAY_LINE_MIN = 2;
 
 /**
  * 目盛り（日付の字）を毎日に付けるのは何日まで。それより多いと間引く。
@@ -46,8 +48,6 @@ export const DAY_LINE_MIN = 2;
  * ―― いちばん新しい日にはいつも日付が付く。
  */
 export const DAY_TICKS_ALL = 14;
-
-const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
 const DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -108,6 +108,7 @@ function daysBetween(a, b) {
 
 /**
  * 日の名前（`11/18（水）`）。吹き出しと注記と読み上げで使う。
+ * 組み方は `day-text.js` の `dayText`（今日のまとめの窓の題 `today-md.js` の `agoDate` と同じ言い方）。
  *
  * @param {string} day 日の鍵
  * @returns {string} 読めなければ受け取った字のまま
@@ -115,7 +116,7 @@ function daysBetween(a, b) {
 export function dayLabel(day) {
   const d = dateOf(day);
   if (!d) return String(day ?? '');
-  return `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
+  return dayText(d);
 }
 
 /**
@@ -147,7 +148,7 @@ export function niceMax(n) {
  *   - `unknown` … 境目が決められない（null・日として読めない）
  *   - `old` … 境目のキーが無い（古いサーバー）。決められないのと同じ側に倒す
  *
- * @param {object} d `/api/usage` の応答（読むのは `daily.list`・`meta`・`limit` だけ）
+ * @param {object} d `/api/usage` の応答（読むのは `daily.list`・`meta`・`limit`・`days` だけ）
  * @returns {{
  *   status: 'ok'|'short'|'none'|'unknown'|'old',
  *   scanFrom: string|null,
@@ -155,21 +156,30 @@ export function niceMax(n) {
  *   days: Array<{day: string, ite: number, requests: number, x: number, y: number,
  *                tick: string|null, weekday: string|null}>,
  *   peak: {day: string, ite: number, index: number, label: string}|null,
- *   max: number, cut: boolean, clipped: number, canWiden: boolean,
+ *   max: number, cut: boolean, clipped: number, canWiden: boolean, canLengthen: boolean,
  * }}
  *   x / y は 0〜1（x は日の列の真ん中、y は上端からの割合）。cut は「境目より前に一部しか数えていない日がある」。
- *   clipped は上限で描かなかった（全部数えてある）日の数。canWiden は本数を増やせば読む範囲が広がるか
+ *   clipped は上限で描かなかった（全部数えてある）日の数。canWiden は本数を増やせば読む範囲が広がるか、
+ *   canLengthen は期間を広げれば読む範囲が広がるか（描かないときの一言 `chartNote` が何を変えればよいかを言うのに使う）
  */
 export function dayChartView(d) {
   const meta = d?.meta ?? {};
   const list = Array.isArray(d?.daily?.list) ? d.daily.list : [];
   const scanFrom = meta.scanFrom ?? null;
-  // 本数を増やせば読む範囲が広がるか。上限に当たっていて、まだ上限まで選んでいないとき
+  // 境目を左へ動かせる絞り込みはどれか。境目は「数えなかったログのうち、いちばん新しい最終更新の次の日」
+  // （src/view/CLAUDE.md）なので、そのログを外した絞り込みを緩めれば動く。
+  //   - 本数 … 上限に当たっていて、まだ上限（scanMax）まで選んでいないとき。上限で外したログは期間の内側なので、
+  //     上限に当たっているあいだは期間を広げても境目は動かない（いちばん新しい外れものは上限の外のまま）
+  //   - 期間 … 上限に当たっておらず（期間の中は全部読めた）、期間で外したログがあるとき
+  //     （索引の本数 indexed が、読みに行った本数 scanned より多い）
   const canWiden = Boolean(meta.scanLimited)
     && typeof d?.limit === 'number' && typeof meta.scanMax === 'number' && d.limit < meta.scanMax;
+  const canLengthen = meta.scanLimited === false
+    && typeof d?.days === 'number' && d.days > 0
+    && typeof meta.indexed === 'number' && typeof meta.scanned === 'number' && meta.indexed > meta.scanned;
   const base = {
     status: 'unknown', scanFrom, from: null, to: null, days: [], peak: null, max: 0,
-    cut: true, clipped: 0, canWiden,
+    cut: true, clipped: 0, canWiden, canLengthen,
   };
 
   if (!('scanFrom' in meta)) return { ...base, status: 'old' };
@@ -229,7 +239,7 @@ export function dayChartView(d) {
       x: (i + 0.5) / n,
       y: max > 0 ? 1 - x.ite / max : 1,
       tick,
-      weekday: ticked ? WEEKDAYS[date.getDay()] : null,
+      weekday: ticked ? weekdayOf(date) : null,
     };
   });
 
@@ -271,7 +281,27 @@ export function partialNote(view) {
 }
 
 /**
+ * 線を描けないとき（そろう日が0日・1日だけ）に、上の絞り込みで何を変えればそろう日が増えうるかの一言。
+ * **何をすれば描けるかを言う。** 変えても境目が動かない手は勧めない（押しても変わらないことを言わない）。
+ *
+ * 期間の一言は1日だけ（`short`）のときしか出さない。期間で外したログは最終更新が「いま − 期間」より前
+ * （少なくとも1日前）なので、境目を今日より後へは押し出さない。そろう日が0日（`none`）なら、
+ * 境目を決めているのは上限で外したログか読めなかったログで、期間を広げても動かない。
+ *
+ * @param {ReturnType<typeof dayChartView>} view
+ * @returns {string} 勧める手が無ければ空文字
+ */
+function widenHint(view) {
+  if (view.canWiden) return '上で本数を増やすと、そろう日が増えることがあります。';
+  if (view.canLengthen && view.status === 'short') {
+    return '上で期間を広げる（または「期間を絞らない」にする）と、そろう日が増えることがあります。';
+  }
+  return '';
+}
+
+/**
  * 線を描かないときに、概要の線グラフの場所へ置く一言。**空の箱を置かない。**
+ * 描けない理由のあとに、上の絞り込みで何を変えればよいか（`widenHint`）を続ける。
  *
  * @param {ReturnType<typeof dayChartView>} view
  * @returns {string|null} 描けるときは null
@@ -283,9 +313,9 @@ export function chartNote(view) {
       return 'どの日から全部そろっているかが分からないので、日ごとの線は描いていません。';
     case 'none':
       return '全部そろっている日がまだないので、日ごとの線は描いていません（今日のぶんも一部しか読んでいません）。'
-        + (view.canWiden ? '上で本数を増やすと、そろう日が出ることがあります。' : '');
+        + widenHint(view);
     case 'short':
-      return `全部そろっているのは ${dayLabel(view.from)}の1日だけなので、線は描いていません。`;
+      return `全部そろっているのは ${dayLabel(view.from)}の1日だけなので、線は描いていません。` + widenHint(view);
     default:
       return null;
   }
