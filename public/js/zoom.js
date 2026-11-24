@@ -1,6 +1,6 @@
 /* 詳細ペインの拡大表示。
  *
- * 層2。store.js だけを見る。
+ * 層2。store.js と、止まっている状態の集合を持つ groups.js（層0）だけを見る。
  *
  * ここが層2 に居るのは drawer.js の setListOpen と同じ理由。
  * タブの帯へ拡大ボタンを出すのは detail.js（層4）なので、
@@ -20,7 +20,8 @@
  * その時点では open がまだ true。あそこを基準にすると、閉じる途中に組み直した札が
  * 「縮小」のまま残る）。2箇所に持てば必ず片方が古くなる。
  */
-import { store, HERO_STATES } from './store.js';
+import { store } from './store.js';
+import { STOP_STATES } from './groups.js';
 import { dom } from './dom.js';
 import { closeOnBackdrop } from './modal.js';
 
@@ -52,9 +53,12 @@ let toWork = () => {};
 let pick = () => {};
 
 /**
- * 止まっているセッションの並び（上の帯と同じ顔ぶれ・同じ順）。
+ * 止まっているセッションの並び（一覧の枠「あなたの番」の「許可・質問で止まっている」と同じ顔ぶれ・同じ順）。
  *
- * 帯（list.js）は visibleRows から拾うが、止まっているものは必ず動いているので
+ * **返信待ちは回らない。** 枠には返信待ちも入るが、ここで片づけたいのは
+ * 答えないと1行も進まないものだけ（左のレールのバッジと同じ顔ぶれ）。
+ *
+ * 一覧（list.js）は visibleRows から拾うが、止まっているものは必ず動いているので
  * 「稼働中だけ」の絞りで落ちない。store.rows から直に拾えば同じ並びになり、
  * rows.js を import して層2 の中に向きを1本増やさずに済む。
  * 並べ替えない（サーバの並び＝手をつける順。比較器を2箇所に持たない）
@@ -62,7 +66,7 @@ let pick = () => {};
  * @returns {string[]} sessionId の並び
  */
 function waitIds() {
-  return store.rows.filter((r) => HERO_STATES.has(r.state)).map((r) => r.sessionId);
+  return store.rows.filter((r) => STOP_STATES.has(r.state)).map((r) => r.sessionId);
 }
 
 /**
@@ -83,7 +87,9 @@ export function syncZoomWaits() {
   dom.zoomWaits.hidden = n === 0;
   if (n === 0) return;
   const i = ids.indexOf(store.selected);
-  dom.zoomWaitsLabel.textContent = i >= 0 ? `あなたの番 ${i + 1} / ${n}` : `あなたの番 ${n} 件`;
+  // 「あなたの番」とは言わない。一覧の枠「あなたの番」は返信待ちも数えるので、
+  // 同じ名前で違う数を出すと食い違って見える。左のレールの札（「止まっているもの N 件」）に揃える
+  dom.zoomWaitsLabel.textContent = i >= 0 ? `止まっている ${i + 1} / ${n}` : `止まっている ${n} 件`;
   const next = i < 0 ? ids[0] : ids[(i + 1) % n];
   const prev = i < 0 ? ids[n - 1] : ids[(i - 1 + n) % n];
   const stuck = n === 1 && i === 0;

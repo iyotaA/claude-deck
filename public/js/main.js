@@ -8,7 +8,7 @@
  * 同じ名前をトップレベルに2つ置くと SyntaxError で丸ごと落ちていた。
  *
  * 依存は上から下へ一方向にだけ流す。逆向きに import したくなったら置き場所が間違っている。
- *   層0  util.js / perf.js / timeline/kinds.js / nav.js   誰にも依存しない
+ *   層0  util.js / perf.js / timeline/kinds.js / nav.js / groups.js   誰にも依存しない
  *   層1  store.js（kinds.js を直に見る）/ panel.js / detail-head.js / usage-chart.js
  *   層2  rows.js / drawer.js / zoom.js / resize.js / runs.js /
  *        timeline/（外からは index.js の1枚として見る）
@@ -62,7 +62,7 @@ import { initMarks } from './marks.js';
 import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
 import { renderDetail, renderDetailIfNeeded, initInspector } from './detail.js';
-import { renderList, renderRate, initHero } from './list.js';
+import { renderList, renderRate } from './list.js';
 import { initArchive, showArchive } from './archive.js';
 import { initToday } from './today.js';
 import { showUsage, initUsageTab } from './usage-tab.js';
@@ -112,7 +112,6 @@ setListOpen(initialListOpen(), null, false);
 // 「作業台で開く」の行き先もここで差す（zoom.js は層2 なので mode.js を import しない）
 // 「次の待ち →」の選び直しもここで差す（zoom.js は層2 なので session.js を import しない）
 initZoom({ onChange: renderDetail, onOpenInWork: () => setMode('work'), onPick: (id) => select(id, 'live') });
-initHero();
 // ピン留めとメモ（段8）。メモの窓の配線
 initMarks();
 initInspector();

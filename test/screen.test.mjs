@@ -113,52 +113,64 @@ test('使う先の無い意味トークンを残さない', () => {
   );
 });
 
-/* ── ボールの所在の帯 ────────────────────────────────────── */
+/* ── 一覧 ─────────────────────────────────────────────── */
 
-const STORE = read(path.join(JS, 'store.js'));
+// どの行をどの束へ置くか（枠「あなたの番」・ピン留め・状態の見出し・そのほか）は
+// `groups.js` の純関数で、`groups.test.mjs` が import して見ている。
+// ここに残すのは、描く側（`list.js`）の字面でしか確かめられないことだけ
+
 const LIST = read(path.join(JS, 'list.js'));
 
-/** `store.js` の表から状態の語だけを取り出す。 */
-function statesIn(re) {
-  const m = STORE.match(re);
-  assert.ok(m, `${re} が読めない`);
-  return [...m[1].matchAll(/'([\w-]+)'/g)].map((x) => x[1]);
-}
+/**
+ * JS のコメントを落とした本文。落とし方は `navrail.test.mjs` / `tokens.test.mjs` の `jsCode` と同じ
+ * （行頭の `//` と `*`、行末の `//`）。list.js は説明が厚く、消した語がコメントに残るため
+ */
+const LIST_CODE = LIST
+  .split('\n')
+  .map((line) => (/^\s*(\/\/|\/?\*)/.test(line) ? '' : line.replace(/\s\/\/.*$/, '')))
+  .join('\n');
 
-test('帯へ出す状態と、一覧の見出しの状態が重ならない', () => {
-  const hero = new Set(statesIn(/export const HERO_STATES = new Set\(\[([^\]]+)\]\)/));
-  // 見出しの `states` に並ぶ語だけを見る（id とラベルは拾わない）
-  const groups = STORE.match(/export const STATE_GROUPS = \[([\s\S]*?)\];/)[1];
-  const listed = [...groups.matchAll(/states: \[([^\]]+)\]/g)]
-    .flatMap((m) => [...m[1].matchAll(/'([\w-]+)'/g)].map((x) => x[1]));
-
-  const dup = listed.filter((s) => hero.has(s));
-  assert.deepEqual(dup, [], `帯と一覧の両方に出る状態がある（選ぶと aria-current が二重になる）: ${dup.join(' ')}`);
-});
-
-test('どの見出しにも入らない状態は「そのほか」へ落ちる。消えはしない', () => {
+test('どの束にも入らない状態は「そのほか」へ落ちる。消えはしない', () => {
   // 落ちる先があること自体を見る。**状態を1つ足した日に一覧から行が消えるのが困る**ので、
-  // ここは「そのほか」を組む行が在ることの確認
-  assert.match(LIST, /そのほか/, 'どの見出しにも入らない行の受け皿が無い');
+  // ここは受け皿の束（groups.js の REST_GROUP）を描く行が在ることの確認（振り分けは groupRows の rest）
+  assert.match(LIST_CODE, /buildGroup\(REST_GROUP,\s*rest\)/, 'どの束にも入らない行の受け皿を描いていない');
 });
 
-test('帯の鍵に時刻を混ぜない', () => {
-  // 混ぜると毎秒鍵が動いて組み直しになり、**横へ送った位置が先頭へ戻る**。
-  // 「ほか N 件」を見に行った瞬間に引き戻される
-  const key = LIST.match(/function heroKey\([\s\S]*?\n\}/);
-  assert.ok(key, 'heroKey が見つからない');
+test('list.js は状態の名前も束の id も列挙しない（groups.js の定義を読むだけ）', () => {
+  // 列挙すると、状態や束を1つ足した日に groups.js と list.js の片方だけが直る。
+  // 止まっているかは groupRows が振り分けた束（と束の wants）で、開け閉めは束の foldable で決める。
+  // 例外は「動いている行か」の 'running' だけ（ピン留めに入った動いている行も「いま何をしているか」を出すので、
+  // 束からは決められない。材料は一覧の鍵に入っている state）
+  const BAD = [
+    [/STOP_STATES/, 'STOP_STATES（止まっている状態の表。振り分けは groupRows が済ませている）'],
+    [/'needs-|'awaiting-reply'|'ended'|'unknown'/, '状態の名前'],
+    [/===\s*'(stop|reply|run|done|pinned|rest)'/, '束の id の文字列で分岐している'],
+    [/states:\s*\[/, '束の定義をその場で作っている（groups.js に置く）'],
+  ];
+  const bad = BAD.filter(([re]) => re.test(LIST_CODE)).map(([, label]) => label);
+  assert.deepEqual(bad, [], `list.js が束の判断を持っている:\n  ${bad.join('\n  ')}`);
+});
+
+test('一覧の鍵に時刻を混ぜない。開け閉めは混ぜる', () => {
+  // 時刻を混ぜると毎秒鍵が動いて組み直しになり、スクロール位置が先頭へ飛ぶうえ、
+  // 焦点を持っていた行が消えて上下キーが効かなくなる
+  const key = LIST.match(/function listKey\([\s\S]*?\n\}/);
+  assert.ok(key, 'listKey が見つからない');
   assert.doesNotMatch(
     key[0], /idleOf|since\(|lastActivityAt/,
-    '帯の鍵に時刻が混ざっている。毎秒組み直して横スクロールが戻る',
+    '一覧の鍵に時刻が混ざっている。毎秒組み直してスクロールと焦点が飛ぶ',
   );
+  // 開け閉めで出す行が変わる。混ぜないと、押しても組み直されない
+  assert.match(key[0], /openFolds/, '一覧の鍵に開け閉め（openFolds）が入っていない。押しても行が出ない');
 });
 
-test('refreshTimes が帯の経過も差し替える', () => {
-  // 帯は鍵が変わるまで組み直さないので、時刻を動かす場所がここしかない。
+test('refreshTimes が一覧の行の経過と「いま何をしているか」を差し替える', () => {
+  // 一覧は鍵が変わるまで組み直さないので、時刻を動かす場所がここしかない。
   // 忘れると経過が固まったままになる
   const fn = LIST.match(/export function refreshTimes\([\s\S]*?\n\}/);
   assert.ok(fn, 'refreshTimes が見つからない');
-  assert.match(fn[0], /heroBand/, 'refreshTimes が帯を見ていない。経過が固まる');
+  assert.match(fn[0], /\.m\b/, 'refreshTimes が行の経過（.m）を見ていない。経過が固まる');
+  assert.match(fn[0], /paintNow/, 'refreshTimes が「いま何をしているか」を差し替えていない');
 });
 
 test('稼働中の一覧を掴む所が、圧縮した行（.row）も拾う', () => {

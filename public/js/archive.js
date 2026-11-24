@@ -288,7 +288,7 @@ const STAT_DEFS = [
  *
  * **まだ届いていないときは点線の器だけを置く。** 「0」と書かない ―― 使っていないのと
  * まだ読めていないのが同じ顔になる（`tokensStrict` を使うのも同じ理由で、
- * `util.js` の `tokens()` は 0 と不明を同じに見せる）。
+ * `if (!n)` で弾く整形は 0 と不明を同じに見せる）。
  *
  * @param {HTMLElement} box `.card-stats`
  * @param {object|null|undefined} u 1本ぶんの数値。undefined はまだ届いていない

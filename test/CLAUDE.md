@@ -58,11 +58,12 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `startup-state.test.mjs` | 自動起動の紙の読み方。紙が無いことを「動いていない」と読まないこと |
 | `update-banner.test.mjs` | 更新の帯の組み立て（`bannerOf`）。枝の順・鍵（`key`）の粒度・押したときに走らせる仕事の配線。**押せる知らせと押せない知らせで鍵を分けること**が本丸 |
 | `usage-trend.test.mjs` | 数値の概要の新旧の差（`halfTrend`）。**時刻で並べ替えてから割ること**（応答の rows は重い順で来る）・奇数のとき真ん中を外して本数を揃えること・1要求あたりを半分ごとの合計で割ること・0 と不明を混ぜないこと |
-| `screen.test.mjs` | 画面側の、**ブラウザで開くまで気づけないのに字面で分かること**。import した名前が相手側で export されているか・CSS が参照するトークンが定義されているか・使う先の無い意味トークンが残っていないか・ボールの所在の帯の約束（一覧と状態が重ならない／鍵に時刻を混ぜない／`refreshTimes` が帯も見る／`.card` だけ掴んで `.row` を取りこぼしていない）。**このリポジトリに linter は無い**ので、ここが代わりになる |
+| `screen.test.mjs` | 画面側の、**ブラウザで開くまで気づけないのに字面で分かること**。import した名前が相手側で export されているか・CSS が参照するトークンが定義されているか・使う先の無い意味トークンが残っていないか・一覧の描く側（`list.js`）の約束（どの束にも入らない行の受け皿 `REST_GROUP` を描く／**状態の名前も束の id も列挙しない**（`STOP_STATES` を引き直さない・`=== 'done'` で分岐しない・束をその場で作らない。例外は「動いている行か」の `'running'` だけ）／一覧の鍵に時刻を混ぜず、開け閉め（`openFolds`）は混ぜる／`refreshTimes` が行の経過と「いま何をしているか」を差し替える／`.card` だけ掴んで `.row` を取りこぼしていない）。**このリポジトリに linter は無い**ので、ここが代わりになる |
 | `tokens.test.mjs` | 色と字の段（`public/css/tokens.css` ほか）。明るいテーマの名残（`--l-` / `--d-` / `prefers-color-scheme` / `data-theme`）が無いこと・意味トークンが `:root` に全部在って `#RRGGBB` で書いてあること（`--accent-soft` だけ `rgb()`）・**字の色が全部の面で 4.5:1 以上**なことと `--accent-fg` が `--accent` の上で 4.5:1 以上なこと（落ちたら「どの字がどの面で何:1」まで出す）・`color-scheme: dark`・字の段が 12px 以上で小さい順なこと・`public/css/` に 12px 未満の直書きが無いこと・`index.html` と `public/js/` に配色の切り替え（`theme-toggle` / `?theme=` を読む口 / `claude-deck.theme`）が戻っていないこと。CSS は解析せず字面で読む。**崩れても画面を開くまで何のエラーも出ない**種類の約束（`contract.test.mjs` と同じ性質） |
 | `md.test.mjs` | Markdown のパーサ。記法を読めることと、途中で切れた入力で壊れないこと。頭出しが中途半端な単位で終わらないこと（印を落とさないこと）。チェックリストの印を、印でないもの（`- [2] …`）と分けること。**リンクに http / https 以外を通さないこと**（`javascript:` と相対パスは表示名だけ）と、`blocksText` がリンクの URL を数えないこと |
 | `runs.test.mjs` | 左のレールに出す枠の使用率の判断（`rateView` → `ringView`）。0 と不明の分け方・枠を表示の字ではなく鍵（`five` / `seven`）で持ち、丸める前の値（`value`）も持つこと・`resetsAt` を過ぎた枠を落とすこと・`resetsAt` を**秒**として読むこと・**測ってから7日より古い観測の7日の枠を落とすこと**（ちょうど7日は残す・5時間枠も無ければ null・7日以内なら古い印つきで出す）・色の段（`RATE_WARN` で黄、`RATE_HOT` で赤。境目ちょうどは上の段）と弧の長さを 0〜1 に丸めること。**輪**は、片方しか読めないときにもう片方を null にする（外＝5時間・内＝7日の位置を動かさない）・真ん中の数を `%` 無しで高いほうにする（比べるのは丸める前の値）・古い観測で `stale` を立てる・名前に両方の % と測った時刻を入れ、読めない枠を 0% と書かないこと |
 | `navrail.test.mjs` | 左のレールと上のバー。`public/js/nav.js` の判断（モードの名前とキーの出どころ `MODE_LIST`・数字キーを効かせない条件（Ctrl/Meta/Alt・IME の変換中・入力欄・`<dialog>`）・止まっている数を `meta.stateBlocking` の真のキーだけで数え、meta が無ければ null・作業台の札の名前で「無い」と「まだ知らない」を分けること・件数を名前に持つ札が `counts` の1つだけで、ほかの札の名前と吹き出し（`modeName` / `modeTip`）は件数で変わらないこと）と、`index.html` / `public/js/` の字面（レールと上のバーに置く節点・レールに `title` を付けないこと・「起こす」を塗らないこと・**消した部品（下段の帯・版・左の細い帯・`.modes`）と口（`renderSummary` など）が戻っていないこと**）。字面はコメントを落としてから読む |
+| `groups.test.mjs` | 一覧の束（`public/js/groups.js`）。止まっている状態は枠「あなたの番」の `stop`、返信待ちは `reply` に入ること・**ピンが付いていても枠が先**（ピン留めには枠に入らないピンの行だけ）・実行中と終了はそれぞれの見出し、知らない状態は `rest`（黙って落とさない）・**並べ替えない**（入ってきた順のまま）・入ってきた配列を書き換えない・0本なら全部空・同じ状態が2つの表に出ないこと・`STOP_STATES` が枠の `stop` と同じ顔ぶれなこと・**`STOP_STATES` が `src/parse/state.mjs` の `STATE_BLOCKING` が真の状態と同じ顔ぶれなこと**（状態を1つ足した日に、レールのバッジと一覧の枠と拡大モーダルの「次の待ち」が食い違わない）・ピン留めとそのほかの束（`PINNED_GROUP` / `REST_GROUP`）も `groups.js` が持ち、状態を名指ししないこと・開け閉め（`foldable`）は終了だけ、2行目の「何を求めているか」（`wants`）は止まっているものだけなこと。字面では、**消した上の帯（`hero-wrap` / `hero-band` / `hero.css` / `renderHero` / `heroFolded` / `HERO_STATES`）と「残り N 件を出す」（`ENDED_FIRST` / `.row-more`）が戻っていないこと**と、見出しの表（`STATE_GROUPS`）を持つのが `groups.js` だけなこと。字面はコメントを落としてから読む |
 | `run-dirs.test.mjs` | 起こしてよいフォルダの登録。ドライブ直下・相対パス・`-` 始まりを断ること、大小違いの重複、登録済みの配下、上限、紙の知らないキーを残すこと |
 | `run-rate.test.mjs` | 枠の使用率の紙。壊れた紙・前の版が書いた紙で落ちないことと、`at`（測った時刻）の無いものを通さないこと |
 | `run-defaults.test.mjs` | 起こすときの既定値。壊れた紙・知らない語で落ちないこと、**`bypassPermissions` が紙からは入らないこと**（環境変数の関門を紙で迂回させない）、予算を範囲へ丸めること（「指定なし」に倒すと上限を掛けたい意図が消える）、知らないキーを残すこと |
@@ -115,13 +116,14 @@ import で確かめられるのは Node 側の半分だけになり、それで�
 読み取り層（`read/`）と画面側にはテストが無い。
 そこは実物で確かめる。
 
-例外は6枚。`public/js/md.js`（Markdown のパーサ）、`public/js/runs.js` の `rateView()` / `ringView()`、
+例外は7枚。`public/js/md.js`（Markdown のパーサ）、`public/js/runs.js` の `rateView()` / `ringView()`、
 `public/js/update-banner.js`（更新の帯の組み立て）、`public/js/usage-trend.js`（数値の新旧の差）、
-`public/js/today-md.js`（今日のまとめの Markdown）、`public/js/nav.js`（左のレールの判断）。
+`public/js/today-md.js`（今日のまとめの Markdown）、`public/js/nav.js`（左のレールの判断）、
+`public/js/groups.js`（一覧のどの行をどの束へ置くか）。
 どれも DOM を1つも触らない純関数なので、`.js` のまま Node から import できる
 （`package.json` が `type:module`）。`runs.js` は `EventSource` を関数の中でしか呼ばないので、
 読み込むだけなら何も起きない（import しているのは `util.js` だけで、あちらも `document` を関数の中でしか触らない）。
-`update-banner.js` と `nav.js` は import そのものがゼロ。
+`update-banner.js` と `nav.js` と `groups.js` は import そのものがゼロ。
 **画面側のファイルでも、判断だけを切り出せばテストに乗る**という前例にしてある。
 
 更新の帯は**ここに並べた中でいちばんテストの値打ちが大きい。**

@@ -28,11 +28,8 @@
 export const dom = {
   app: document.getElementById('app'),
   list: document.getElementById('list'),
+  // 一覧の頭の1行。終了済みを上限で切ったときだけ「書庫へ」を出す（list.js の renderList）
   listCount: document.getElementById('list-count'),
-  // ボールの所在の帯。器（膜と出し入れ）と、流れる側（札が並ぶ）を分けて持つ。
-  // list.js の renderHero() だけが書く
-  heroWrap: document.getElementById('hero-wrap'),
-  heroBand: document.getElementById('hero-band'),
   // 左のレール（#navrail）の頭の印（飾り）。絵は main.js が1回だけ差す。
   // レールそのものは JS から触らない（札は下の modeWork などで1つずつ引く）
   navrailLogo: document.getElementById('navrail-logo'),
@@ -191,7 +188,7 @@ export const dom = {
   zoom: document.getElementById('zoom'),
   zoomBody: document.getElementById('zoom-body'),
   zoomClose: document.getElementById('zoom-close'),
-  // 拡大モーダルの「← 前／次の待ち →」と「あなたの番 i / N」
+  // 拡大モーダルの「← 前／次の待ち →」と「止まっている i / N」
   zoomWaits: document.getElementById('zoom-waits'),
   zoomWaitsLabel: document.getElementById('zoom-waits-label'),
   zoomPrev: document.getElementById('zoom-prev'),
