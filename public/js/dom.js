@@ -68,12 +68,15 @@ export const dom = {
   // 上のバーの探す欄。押すとパレットが開く（配線は main.js）
   paletteOpen: document.getElementById('palette-open'),
   reload: document.getElementById('reload'),
-  onlyLive: document.getElementById('only-live'),
+  // 一覧の頭の右端の「すべて｜稼働中」。状態は store.onlyLive の1つで、配線は main.js
+  showAll: document.getElementById('show-all'),
+  showLive: document.getElementById('show-live'),
   // モードの札（左のレール。mode.js）。骨格の組み替えは .app のクラスが受け持つ
   modeWork: document.getElementById('mode-work'),
   modeArchive: document.getElementById('mode-archive'),
   modeUsage: document.getElementById('mode-usage'),
   listPane: document.getElementById('list-pane'),
+  // 一覧の開閉。作業台（.deck）の左上に固定してあり、#list-pane の外に居る（drawer.js）
   listToggle: document.getElementById('list-toggle'),
   listClose: document.getElementById('list-close'),
   scrim: document.getElementById('scrim'),

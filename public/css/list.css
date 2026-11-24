@@ -57,14 +57,57 @@
   border-bottom-color: var(--accent);
 }
 
-/* 閉じる口は一覧の帯の右端。**広い窓では出さない。**
-   広い窓の一覧は列なので、上のバーの開閉ボタンが隠れずに見えている。
+/* 閉じる口は一覧の頭の右端（「すべて｜稼働中」のさらに右）。**広い窓では出さない。**
+   広い窓の一覧は列なので、作業台の左上の開閉ボタンが隠れずに見えている。
    ここにも置くと同じことをする口が2つ並ぶ。
-   狭い窓（引き出し）だけは残す ―― 手前に重なった紙が上のバーの開閉ボタンを覆うので、
-   紙の中に閉じる口が要る（narrow.css が出す） */
-#live-head .drawer-close {
-  display: none;
-  margin-left: auto;
+   狭い窓（引き出し）だけは残す ―― 手前に重なった紙が開閉ボタンを覆うので、
+   紙の中に閉じる口が要る（narrow.css が出す）。
+   右へ寄せるのは書庫への一言（#list-count）の margin-left: auto に任せる。
+   ここにも auto を持たせると空きが2つに割れ、切り替えが行の真ん中に浮く */
+#live-head .drawer-close { display: none; }
+
+/* 一覧の頭の行。**左は開閉ボタン（.deck の左上に固定。base.css）のぶん空ける。**
+   高さはボタン＋上下の距離から出し、ボタンが行の上下の真ん中に来るようにする
+   （数は base.css の :root の --list-toggle-* の2つ。手で足し算して書き写さない） */
+#live-head {
+  min-height: calc(var(--list-toggle-size) + 2 * var(--list-toggle-inset));
+  padding-left: calc(var(--list-toggle-inset) + var(--list-toggle-size) + .5rem);
+}
+
+/* 「すべて｜稼働中」。何を出すかの切り替え（状態は store.onlyLive の1つ。main.js）。
+   前はチェックボックス（「稼働中だけ」）だった。開閉ボタンを頭の左へ入れると行が詰まるので、右端へ移した。
+
+   **押せるものなので面と影で浮かせる。** 押している側は面 --bg-hi・字 --fg・影 --sh-1、
+   もう片方は字 --fg-muted だけ。器は沈んだ面（--bg-sunk）に細い枠で、2つが1組だと形で分かる。
+   焦点は base.css の :focus-visible（光の輪）のまま */
+.live-filter {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+}
+
+.live-filter button {
+  height: 1.5rem;
+  padding: 0 .6rem;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--fs-1);
+  cursor: pointer;
+}
+
+.live-filter button:hover { color: var(--fg); }
+
+.live-filter button[aria-pressed="true"] {
+  background: var(--bg-hi);
+  color: var(--fg);
+  box-shadow: var(--sh-1);
 }
 
 .list-head {

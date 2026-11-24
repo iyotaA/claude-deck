@@ -131,6 +131,11 @@ body {
      .navrail に置くとモーダルの中から見えない。数を3箇所に書くと、片方だけ直した日に
      札と輪の大きさが食い違う */
   --navrail-cell: 2.75rem;
+  /* 一覧の開閉ボタン（.list-toggle）の大きさと、作業台の左上の角からの距離。
+     ボタンの位置だけでなく、ボタンのぶん空ける量（一覧の頭の行・閉じたときの詳細の頭）も
+     この2つから出す。数を3箇所に書くと、片方だけ直した日に字とボタンが重なる */
+  --list-toggle-size: 2rem;
+  --list-toggle-inset: .5rem;
 }
 
 /* 一覧 ＋ 読む面 ＋ 右端のレール。
@@ -154,6 +159,10 @@ body {
   /* .app の2列目・2行目（上の説明） */
   grid-column: 2;
   grid-row: 2;
+  /* 一覧の開閉ボタン（.list-toggle）を左上に絶対配置する基準。
+     絶対配置の子は grid のセルを取らないので、「子の数と列の数が釣り合う」前提は崩れない。
+     狭い窓の引き出し（.list-pane の position: fixed）は窓が基準のままで、ここの影響を受けない */
+  position: relative;
   display: grid;
   grid-template-columns: 0 minmax(0, 1fr) auto;
   gap: 0;
@@ -427,7 +436,8 @@ body {
 /* ------------------------------------------------------------- 上のバー */
 
 /* **「探す・起こす」だけに絞る。** 行き先（モード・設定・説明）は左のレールにある。
-   並びは 一覧の開閉 → 題 → 接続の札 → 探す欄 →（空き）→ 再読み込み → 起こす。
+   並びは 題 → 接続の札 → 探す欄 →（空き）→ 再読み込み → 起こす。
+   一覧の開閉はここに置かない（作業台の左上。下の「一覧の開閉」の節の .list-toggle）。
 
    行の間（row-gap）を padding の上下と同じ .7rem にする。
    1rem のままだと、更新の帯が自分の行へ折り返したときに
@@ -458,26 +468,43 @@ body {
    縮まないようにするのだけがここの仕事（形は icons.js が持つ） */
 .icon { flex: none; }
 
+/* ----------------------------------------------------------- 一覧の開閉 */
+
 /* 一覧を畳む・出す口。**広い窓でも狭い窓でも同じボタン1つ。**
    広い窓では列を畳み、狭い窓では引き出しを出す（姿の違いは CSS が持ち、drawer.js は開閉だけを持つ）。
+
+   **作業台（.deck）の左上に固定する。開いても閉じても画面の上の位置を変えない。**
+   開いているときは一覧の頭の行（#live-head）の左に収まり、閉じているときは詳細の頭の左に乗る
+   （どちらも、ボタンのぶんを向こうが空ける。下の「閉じたとき」と list.css の #live-head）。
+   前は上のバーの左端に居て、作業台のときだけそこに出るのが浮いていた（ユーザーの声）。
+   **#list-pane の中に置かない** … 閉じると一覧は幅 0 と inert になるので、中だと押せなくなる。
+
+   **面も枠も持たない補助のボタン**（.ibtn と同じ段）。触れたときだけ面で応える。
+   頭の行の字と同じ高さに並ぶので、面と影で浮かせると行の中の「次に押すもの」に見える。
+   z-index は一覧（.list-pane は position: relative。DOM で後ろに居るぶん上に描かれる）より上へ出すため。
+   狭い窓の引き出し（40）と膜（30）より下なので、引き出しを開けるとその下に隠れる（中の × が閉じる口）。
 
    **3本線（ハンバーガー）から替えた。** あれは「メニューを開く」の記号で、
    左の列を畳む・出すことを示していない（押した先が読めない、という指摘を受けた）。
    いまは画面の枠と左の帯で描いたサイドバーの記号で、帯の塗りが開閉を示す */
 .list-toggle {
+  position: absolute;
+  top: var(--list-toggle-inset);
+  left: var(--list-toggle-inset);
+  z-index: 4;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.15rem;
-  height: 2.15rem;
+  width: var(--list-toggle-size);
+  height: var(--list-toggle-size);
   padding: 0;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--r-sm);
-  background: var(--bg-elev);
-  box-shadow: var(--sh-1), var(--hi);
+  background: none;
+  color: var(--fg-muted);
 }
 
-.list-toggle:hover { border-color: var(--border-strong); box-shadow: var(--sh-2), var(--hi); }
+.list-toggle:hover { background: var(--bg-hi); color: var(--fg); }
 /* 開いているあいだは左の帯を塗る。**アイコンで状態を示す。**
    絵が「いま一覧が出ているか」を持つので、押した先に何が起きるかが読める。
    出し分けは aria-expanded に乗せてある（drawer.js が付け替えるので JS は増えない） */
@@ -487,6 +514,20 @@ body {
    残すと、押しても見えない一覧が開閉するだけのボタンになる */
 .is-archive .list-toggle,
 .is-usage .list-toggle { display: none; }
+
+/* 閉じたとき。**帯は残さない。** ボタンは詳細ペインの左上に乗るので、
+   **その下に来る最上段だけ**をボタンのぶん右へ寄せる（字とボタンが重ならない）。
+   最上段は詳細の頭。頭が無いとき（選んでいない・まだ読めていない）は入力欄が最上段になるので、そちらを寄せる。
+   タブや本文（流れる箱）は寄せない ―― ボタンの下へは来ないので、寄せると左端が段ごとに食い違うだけになる。
+
+   **.deck の中だけに絞る。** 拡大すると詳細ペインの節点は .app の外の <dialog> へ運ばれ、
+   そこにはボタンが無い（寄せる理由が無い）。
+   詳細度は (0,4,0) 以上あり、detail.css / run.css の padding に読む順ではなく詳細度で勝つ。
+   狭い窓では引き出しを開けていても寄せたままにする（narrow.css）。ボタンは引き出しの下で同じ場所に居るため */
+.app:not(.is-list-open) .deck .detail-head,
+.app:not(.is-list-open) .deck .detail-head[hidden] + .composer {
+  padding-left: calc(var(--list-toggle-inset) + var(--list-toggle-size) + .75rem);
+}
 
 /* 探す欄。**押すとパレット（Ctrl+K）が開くボタン。** 打つ場所はパレットの中にある。
    入力欄の顔（沈んだ面 --bg-sunk ＋ 細い枠）にして「ここで探せる」を形で示し、
