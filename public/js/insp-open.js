@@ -3,6 +3,7 @@
  * 層0。**import ゼロの純関数**なので Node からテストできる（`test/insp-open.test.mjs`）。
  * `groups.js` / `next-step.js` と同じ形。読み込むときに `store.js` が1回だけ呼ぶ。
  * 材料（URL・覚えた開閉・窓の広さ）を集めて渡すのは `store.js` で、ここは決めるだけ。
+ * URL へ書き戻すときに何を書くか（`inspQueryValue`）もここ（読む側と書く側の決めを1か所に置く）。
  *
  * ## 決まり（画面刷新④の D10・D12）
  *
@@ -52,4 +53,22 @@ export function initialInspector({ insp = null, stored = null, wide = false } = 
   if (wide !== true) return null;
   // 人が書き換えられる場所なので、'0' 以外は「閉じた」と読まない（既定の開くへ落とす）
   return stored === '0' ? null : INSP_DEFAULT_TAB;
+}
+
+/**
+ * いまの右の紙を URL（`?insp=`）に書くときの値。書かないなら null。
+ *
+ * **書くのは既定でない紙（診断）を見ているときだけ。** 広い窓では紙が最初から開くので、
+ * 開いている紙をそのまま書くと `?insp=usage` が常に付く。その URL を控えると、
+ * URL は覚えた開閉より強いので、閉じたことを覚えていても開いて始まる。
+ * 既定の紙（数値）は URL が無くても覚えた開閉で同じ形に戻る。閉じているときも書かない。
+ *
+ * **読む側（`initialInspector`）は今どおり `usage` も受ける**（配ったブックマークを切らない）。
+ *
+ * @param {string|null} [inspector] `store.inspector`（開いている紙の id。閉じていれば null）
+ * @returns {string|null}
+ */
+export function inspQueryValue(inspector = null) {
+  if (!INSPECTOR_TABS.has(inspector)) return null;
+  return inspector === INSP_DEFAULT_TAB ? null : inspector;
 }

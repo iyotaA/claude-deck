@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  initialInspector, INSPECTOR_TABS, INSP_DEFAULT_TAB, INSP_WIDE_QUERY,
+  initialInspector, inspQueryValue, INSPECTOR_TABS, INSP_DEFAULT_TAB, INSP_WIDE_QUERY,
 } from '../public/js/insp-open.js';
 
 test('URL で開く紙を指定したら、覚えた開閉と窓の広さより URL を守る', () => {
@@ -62,6 +62,27 @@ test('広い窓の境目は 1281px。狭い窓のボトムシート（860px 以�
   const m = narrow.match(/@media \(max-width: (\d+)px\)/);
   assert.ok(m, 'narrow.css の境目が読めない');
   assert.ok(Number(m[1]) < 1281, `ボトムシートの境目（${m[1]}px）が広い窓の境目以上になっている`);
+});
+
+test('URL に書くのは既定でない紙（診断）だけ。既定の紙（数値）と閉じているときは書かない', () => {
+  // 広い窓では紙が最初から開くので、開いている紙をそのまま書くと ?insp=usage が常に付き、
+  // その URL を控えると「閉じた」を覚えていても開いて始まる（URL は覚えた開閉より強い）
+  assert.equal(inspQueryValue('usage'), null);
+  assert.equal(inspQueryValue(INSP_DEFAULT_TAB), null);
+  assert.equal(inspQueryValue('basics'), 'basics');
+  assert.equal(inspQueryValue(null), null);
+  assert.equal(inspQueryValue('nope'), null);
+  assert.equal(inspQueryValue(), null);
+  // 書いた値は読む側で同じ紙に戻る（狭い窓でも・閉じたのを覚えていても）
+  assert.equal(initialInspector({ insp: inspQueryValue('basics'), stored: '0', wide: false }), 'basics');
+  // 読む側は今どおり usage / basics を受ける（配ったブックマークを切らない）
+  assert.equal(initialInspector({ insp: 'usage', stored: '0', wide: false }), 'usage');
+});
+
+test('store.js の syncQuery は右の紙を inspQueryValue を通して書く', () => {
+  const store = fs.readFileSync(fileURLToPath(new URL('../public/js/store.js', import.meta.url)), 'utf8');
+  assert.match(store, /set\('insp', work \? inspQueryValue\(store\.inspector\) : null\)/,
+    'syncQuery が開いている紙をそのまま ?insp= に書いている');
 });
 
 test('入ってきた値を書き換えない・引数が無くても落ちない', () => {

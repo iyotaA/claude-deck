@@ -191,6 +191,23 @@ export function statTile(label, value, note, delta) {
 }
 
 /**
+ * 横棒・折れ線の行の名前。**全文を title に入れる。**
+ *
+ * 右の紙（詳細ペイン）は狭いので、名前を1行で「…」で切る（`usage.css` の `.insp .bar-label`）。
+ * 切ったぶんは触れれば読める。数値モード（横断）は折り返しのままで、title は添えるだけ。
+ * 3つの組み方（`shareBar` / `barList` / `trendList`）がここを通る（片方だけ title を忘れない）。
+ *
+ * @param {string} text 名前
+ * @returns {HTMLElement}
+ */
+function barLabel(text) {
+  const label = el('span', 'bar-label', text);
+  // 空の名前に空の吹き出しを付けない
+  if (text) label.title = String(text);
+  return label;
+}
+
+/**
  * 部分と全体を1本で示す横棒。
  *
  * **溝がそのまま「残り」になる。** `.bar-track`（--bg-sunk）が全体、
@@ -212,7 +229,7 @@ export function statTile(label, value, note, delta) {
 export function shareBar(label, ratio, restLabel) {
   const list = el('ul', 'bars');
   const li = el('li', 'bar is-share is-top');
-  li.append(el('span', 'bar-label', label));
+  li.append(barLabel(label));
 
   const track = el('span', 'bar-track');
   const fill = el('span', 'bar-fill');
@@ -244,7 +261,7 @@ export function barList(rows) {
   rows.forEach((row, i) => {
     const li = el('li', 'bar');
     if (i === 0) li.classList.add('is-top');
-    li.append(el('span', 'bar-label', row.label));
+    li.append(barLabel(row.label));
 
     const track = el('span', 'bar-track');
     const fill = el('span', 'bar-fill');
@@ -414,7 +431,7 @@ export function trendList(rows) {
     if (!chart) continue;
 
     const li = el('li', 'bar is-trend');
-    li.append(el('span', 'bar-label', row.label));
+    li.append(barLabel(row.label));
 
     // SVG は器の高さいっぱいに伸びるので、高さを持つ器で包む
     const frame = el('span', 'trend-spark');

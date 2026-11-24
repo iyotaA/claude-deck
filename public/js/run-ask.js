@@ -12,8 +12,8 @@
  * 要求カードは正反対。追記されない。答えたら消える。守るべき状態は
  * 「送信中の askId」1つだけ。混ぜると `applyEnabled()` の `ops.busy || ops.over` に
  * 性質の違う4つ目が入り、`setBusy(true)` が要求カードのボタンまで殺すかどうかの
- * 判断が毎回要ることになる。`run-resume.js` が `run-view.js` を import せず
- * `RUN_OVER` をあえて重複させているのと同じ線。
+ * 判断が毎回要ることになる。`run-resume.js` が `run-view.js` を import しないのと同じ線
+ * （共通で要る終わりの語 `RUN_OVER` は、どちらも層0 の `run-over.js` から借りる）。
  *
  * ## 要求は「行」から読む。速報からは読まない
  *
@@ -42,14 +42,9 @@ import { bodyText } from './timeline/index.js';
 import { panel, SEC } from './panel.js';
 import { runFor } from './runs.js';
 import { postJson } from './api.js';
-
-/**
- * 子がもういない状態。
- *
- * **`run-view.js` から import しない。** あちらとこちらは層が同じで、
- * 向きを作ると層3の中に依存が1本増える。`run-resume.js` が同じ判断をしている。
- */
-const RUN_OVER = new Set(['stopped', 'failed', 'done']);
+// 子がもういない状態。**`run-view.js` から借りない**（同じ層3どうしで向きを作ると依存が1本増える）。
+// 層0 の1か所に置いてあるので、下向きの import で済む
+import { RUN_OVER } from './run-over.js';
 
 /**
  * 聞かれ方ごとの見出し（何を決めるのか）。
@@ -67,8 +62,8 @@ const ASK_GUIDE = {
 /**
  * 権限モードの言い方。ボタンの括弧に出す。
  *
- * `spec.mjs` の `PERMISSION_MODE_LABELS` とわざと重複させている（`RUN_OVER` と同じ切り方。
- * ここへ配るために `run-view.js` の選択肢を借りると向きができる）。
+ * `spec.mjs` の `PERMISSION_MODE_LABELS` とわざと重複させている（サーバーの語は画面から
+ * import できない。ここへ配るために `run-view.js` の選択肢を借りると層3の中に向きができる）。
  * **括弧の中まで同じ言い方に揃える。** 片方だけ直すと、同じ語に別の説明が付く。
  */
 const THEN_LABELS = {

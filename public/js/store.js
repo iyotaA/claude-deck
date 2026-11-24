@@ -14,7 +14,7 @@
  */
 import { initialHiddenKinds, hideQueryValue } from './timeline/kinds.js';
 import { MODE_LIST } from './nav.js';
-import { initialInspector, INSP_WIDE_QUERY } from './insp-open.js';
+import { initialInspector, inspQueryValue, INSP_WIDE_QUERY } from './insp-open.js';
 
 /**
  * `localStorage` の鍵。
@@ -136,6 +136,8 @@ export const SUMMARY_ORDER = [
  *  ?dtab=log|agents … 詳細ペインの中央のどのタブを開くか
  *  ?insp=usage|basics … 右の紙をどれで開くか。**覚えた開閉より強い**
  *                       （付けなければ、広い窓は覚えた開閉・狭い窓は閉じた状態。insp-open.js）
+ *                       書き戻すのは basics（既定でない紙）を見ているときだけ（inspQueryValue）。
+ *                       usage は読むだけ（配ったブックマークのため）
  *                       `?insp=out` だけは中央タブの「成果」へ読み替える
  *                       （成果が右のインスペクタだった版の URL が実在するため。initialDetailTab）
  */
@@ -559,8 +561,10 @@ export function syncQuery() {
   // 既定（経過）のときだけキーを落とす。既定が「いま」から替わったので、
   // これからは ?dtab=now が URL に載る。**これも作業台のときだけ**（上を見よ）
   set('dtab', work && store.detailTab !== 'log' ? store.detailTab : null);
-  // 閉じているときはキーを付けない。null は set() が消してくれる
-  set('insp', work ? store.inspector : null);
+  // 書くのは既定でない紙（診断）を見ているときだけ。既定の紙（数値）と閉じているときは付けない
+  // （広い窓では紙が最初から開くので、そのまま書くと ?insp=usage が常に付き、控えた URL が
+  // 覚えた開閉より強く効いて「閉じた」を覚えていても開いて始まる。判断は insp-open.js）
+  set('insp', work ? inspQueryValue(store.inspector) : null);
 
   const qs = params.toString();
   const next = qs ? `${location.pathname}?${qs}` : location.pathname;

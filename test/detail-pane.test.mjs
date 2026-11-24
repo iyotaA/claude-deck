@@ -304,6 +304,17 @@ test('押した結果の一言は節点ではなくモジュールに控える�
   assert.match(head, /lastHint\.sessionId === sessionId/, '組み直すときに控えを書き戻していない');
 });
 
+test('押した結果の一言は数秒で消える。別のセッションへ移ったら持ち越さない', () => {
+  // 期限が無いと「コピーしました」が同じセッションの作り直しのたびに残り続ける
+  const head = jsCode(read(path.join(JS_DIR, 'detail-head.js')));
+  assert.match(head, /const HINT_MS = \d+;/, '一言の期限（HINT_MS）が無い');
+  assert.match(fnBody(head, 'sayHint'), /setTimeout\(clearHint, HINT_MS\)/, '一言を期限で消していない');
+  const body = fnBody(head, 'detailActions');
+  assert.match(body, /lastHint\.sessionId !== sessionId\) clearHint\(\)/, '別のセッションへ移ったときに控えを消していない');
+  // 返事が着いたときに別のセッションへ移っていたら控えない（戻ってきたときに他人の結果を出さない）
+  assert.match(fnBody(head, 'sayHint'), /if \(hintSession !== sessionId\) return;/, '移ったあとに着いた返事を控えている');
+});
+
 test('メモは1行で切り、全文は title に入れる', () => {
   const decls = declsOf('.detail-memo');
   const has = (prop, value) => decls.some((d) => d.prop === prop && d.value === value);
@@ -367,6 +378,15 @@ test('右の紙を開く口は頭の「数値」の絵（トグル）。紙の�
   assert.match(head[1], /id="insp-close"/, '紙の頭に × が無い');
 });
 
+test('右の紙の定義（INSP_DEFS）は使う所の無い絵を持たない。頭の絵は inspButton が持つ', () => {
+  // 絵を使うのは開く口（頭の絵1つ）だけ。紙ごとに絵を持つと、使わない値が定義に残る
+  const code = detailCode();
+  const defs = code.match(/export const INSP_DEFS = \[([\s\S]*?)\];/);
+  assert.ok(defs, 'detail.js に INSP_DEFS が無い');
+  assert.doesNotMatch(defs[1], /\bicon:/, 'INSP_DEFS に使う所の無い icon が残っている');
+  assert.match(fnBody(code, 'inspButton'), /icon\('chart', 16\)/, '頭の数値の絵が inspButton に無い');
+});
+
 test('右の紙の開閉は localStorage に覚える。鍵は store.js の LS に置く', () => {
   const store = jsCode(read(path.join(JS_DIR, 'store.js')));
   const ls = store.match(/export const LS = Object\.freeze\(\{([\s\S]*?)\}\)/);
@@ -400,22 +420,58 @@ const chartCode = () => jsCode(read(path.join(JS_DIR, 'usage-chart.js')));
 /** 色の付いたトークン。右の紙のグラフに戻ってきてはいけない */
 const HUE_RE = /var\(--(accent|hot|warn|done|calm|off)\)/;
 
-test('右の紙のグラフ（横棒の1位・スパークライン）は無彩色。.insp に絞って上書きする', () => {
+/** グラフの強調の色を受ける変数。部品は既定（ラベンダー）付きで受け、右の紙だけが宣言する */
+const CHART_HI = 'var(--chart-hi, var(--accent))';
+
+test('右の紙のグラフ（横棒の1位・スパークライン）は無彩色。.insp は変数を宣言するだけ', () => {
+  // 色の出どころを1か所にする。部品の側で .insp を名指しして塗り直さない
+  const hi = declsOf('.insp').filter((d) => d.prop === '--chart-hi');
+  assert.equal(hi.length, 1, '.insp が --chart-hi を1つ宣言していない');
+  assert.doesNotMatch(hi[0].value, HUE_RE, `.insp の --chart-hi に色が付いている（${hi[0].value}）`);
   const bad = [];
-  for (const sel of ['.insp .bar.is-top .bar-fill', '.insp .spark-area', '.insp .spark-line']) {
-    const decls = declsOf(sel);
-    assert.ok(decls.length, `${sel} の指定が無い（右の紙のグラフが色のまま）`);
-    for (const d of decls) if (HUE_RE.test(d.value)) bad.push(`${d.file} … ${sel} { ${d.prop}: ${d.value} }`);
+  for (const r of cssRules()) {
+    for (const s of r.selectors) {
+      if (!/^\.insp .*\.(bar-fill|spark-area|spark-line)$/.test(s)) continue;
+      for (const d of r.decls) {
+        if (['background', 'fill', 'stroke'].includes(d.prop)) bad.push(`${r.file} … ${s} { ${d.prop}: ${d.value} }`);
+      }
+    }
   }
-  assert.deepEqual(bad, [], `右の紙のグラフに色が残っている:\n  ${bad.join('\n  ')}`);
+  assert.deepEqual(bad, [], `右の紙のグラフを .insp の詳細度で塗り直している（色の出どころが2か所になる）:\n  ${bad.join('\n  ')}`);
 });
 
-test('数値モード（横断）のグラフの色は触らない（usage.css の素の指定はラベンダーのまま）', () => {
-  // ⑤で「バランスがいい」と言われた画面。右の紙の無彩色は .insp に絞って上書きする
-  const fill = declsOf('.bar.is-top .bar-fill').filter((d) => d.file === 'usage.css').map((d) => d.value);
-  assert.ok(fill.includes('var(--accent)'), '素の .bar.is-top .bar-fill が --accent でなくなっている');
-  const line = declsOf('.spark-line').filter((d) => d.file === 'usage.css' && d.prop === 'stroke').map((d) => d.value);
-  assert.ok(line.includes('var(--accent)'), '素の .spark-line が --accent でなくなっている');
+test('数値モード（横断）のグラフの色は触らない（変数が無ければラベンダー。宣言するのは .insp だけ）', () => {
+  // ⑤で「バランスがいい」と言われた画面。部品は既定付きで受けるので、変数を宣言しない横断はそのまま
+  const fill = declsOf('.bar.is-top .bar-fill').filter((d) => d.file === 'usage.css' && d.prop === 'background');
+  assert.deepEqual(fill.map((d) => d.value), [CHART_HI], '素の .bar.is-top .bar-fill が変数（既定はラベンダー）で受けていない');
+  const area = declsOf('.spark-area').filter((d) => d.file === 'usage.css' && d.prop === 'fill');
+  assert.deepEqual(area.map((d) => d.value), [CHART_HI], '素の .spark-area が変数（既定はラベンダー）で受けていない');
+  const line = declsOf('.spark-line').filter((d) => d.file === 'usage.css' && d.prop === 'stroke');
+  assert.deepEqual(line.map((d) => d.value), [CHART_HI], '素の .spark-line が変数（既定はラベンダー）で受けていない');
+  const declared = cssRules()
+    .filter((r) => r.decls.some((d) => d.prop === '--chart-hi'))
+    .map((r) => `${r.file} … ${r.selectors.join(', ')}`);
+  assert.deepEqual(declared, ['usage.css … .insp'], `--chart-hi を .insp 以外でも宣言している:\n  ${declared.join('\n  ')}`);
+});
+
+test('右の紙の横棒の名前は1行で「…」で切り、全文は title に入れる（1字ずつ折らない）', () => {
+  // 紙は狭く、長いツール名（mcp__…）が1字ずつ縦に伸びていた
+  const d = declsOf('.insp .bar-label');
+  const has = (prop, value) => d.some((x) => x.prop === prop && x.value === value);
+  assert.ok(has('white-space', 'nowrap'), '.insp .bar-label が折り返す');
+  assert.ok(has('overflow', 'hidden'), '.insp .bar-label が溢れを隠していない（「…」が出ない）');
+  assert.ok(has('text-overflow', 'ellipsis'), '.insp .bar-label に「…」が無い');
+  // 数値モード（横断）の素の指定はそのまま（全幅では折り返しで足りる）
+  assert.ok(
+    declsOf('.bar-label').some((x) => x.file === 'usage.css' && x.prop === 'overflow-wrap' && x.value === 'anywhere'),
+    '素の .bar-label の折り返しが変わっている（数値モードの見た目が変わる）',
+  );
+  const code = chartCode();
+  assert.match(fnBody(code, 'barLabel'), /\.title = /, '名前の全文を title に入れていない');
+  for (const fn of ['barList', 'shareBar', 'trendList']) {
+    assert.match(fnBody(code, fn), /barLabel\(/, `${fn} が barLabel を通していない`);
+  }
+  assert.doesNotMatch(code.replace(fnBody(code, 'barLabel'), ''), /el\('span', 'bar-label'/, 'barLabel を通さずに名前を組んでいる所がある');
 });
 
 test('差（増減）に色を付けない', () => {
@@ -467,6 +523,22 @@ test('見出しの吹き出しはキーボードでも読める（押せる印�
   assert.doesNotMatch(body, /\.title = /, 'title も付けている（OS の札と吹き出しが二重に出る）');
   const shown = cssRules().some((r) => r.selectors.some((s) => /\.tip-mark:focus-visible::after/.test(s)));
   assert.ok(shown, '吹き出しが焦点（:focus-visible）で出ない');
+});
+
+test('吹き出しの見た目（枠・面・影・字）は左のレールと見出しの印で1か所に書く', () => {
+  // 位置・出し入れ・折り返し・余白は目的が違う（レールは横へ1行、印は下へ折り返す）ので別のまま
+  const VISUAL = ['border', 'border-radius', 'background', 'box-shadow', 'color', 'font-size', 'font-weight', 'text-align'];
+  const TIP_RE = /(\.navrail-item\[data-tip\]|\.navrail-rate\[data-tip\]|\.tip-mark)::after$/;
+  const rules = cssRules().filter((r) => r.selectors.some((s) => TIP_RE.test(s)));
+  const shared = rules.filter((r) => ['.navrail-item[data-tip]::after', '.navrail-rate[data-tip]::after', '.tip-mark::after']
+    .every((s) => r.selectors.includes(s)));
+  assert.equal(shared.length, 1, '吹き出しの見た目をまとめた規則が1つでない');
+  const missing = VISUAL.filter((p) => !shared[0].decls.some((d) => d.prop === p));
+  assert.deepEqual(missing, [], `まとめた規則に見た目の宣言が足りない: ${missing.join(', ')}`);
+  const dup = rules
+    .filter((r) => r !== shared[0])
+    .flatMap((r) => r.decls.filter((d) => VISUAL.includes(d.prop)).map((d) => `${r.file} … ${r.selectors.join(', ')} { ${d.prop} }`));
+  assert.deepEqual(dup, [], `吹き出しの見た目を2か所に書いている:\n  ${dup.join('\n  ')}`);
 });
 
 test('紙の題と重なるパネルの見出し（数値・診断）を右の紙に出さない', () => {

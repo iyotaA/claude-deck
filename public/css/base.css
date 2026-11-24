@@ -311,6 +311,23 @@ body {
   background: var(--accent);
 }
 
+/* 吹き出しの見た目（枠・面・影・字）。**左のレールと、右の紙の見出しの印（usage.css の .tip-mark）で
+   ここ1か所に書く。** どちらも「名前や読み方を触れたときに出す」同じ部品で、2か所に書くと片方だけ直した日に
+   別の部品に見える。位置・出し入れ・折り返し・余白と行間は目的が違うので、それぞれの規則に残す
+   （レールは札の右へ出して改行を活かす 1 行ずつの pre、見出しの印は下へ出して見出しの幅で折り返す） */
+.navrail-item[data-tip]::after,
+.navrail-rate[data-tip]::after,
+.tip-mark::after {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-2);
+  color: var(--fg);
+  font-size: var(--fs-1);
+  font-weight: 400;
+  text-align: left;
+}
+
 /* 吹き出し。**title の代わり。** title だと OS の札が遅れて出るうえ、
    キーボードで来た人には出ない。:hover と :focus-visible の両方で出す。
    中身は data-tip（改行を活かすので white-space: pre）。
@@ -323,15 +340,7 @@ body {
   top: 50%;
   z-index: 40;
   padding: .375rem .625rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  background: var(--bg-elev);
-  box-shadow: var(--sh-2);
-  color: var(--fg);
-  font-size: var(--fs-1);
-  font-weight: 400;
   line-height: var(--lh-tight);
-  text-align: left;
   white-space: pre;
   opacity: 0;
   transform: translateY(-50%);

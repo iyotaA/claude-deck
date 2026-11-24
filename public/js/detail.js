@@ -183,15 +183,16 @@ export function pickedTab() {
  * どちらかに足したときにもう片方の作法を思い出せなくなる。
  *
  * label は切り替えの札（短い語）、title は紙の見出し（開いた先で何を見ているのかを言い直す）。
- * icon は頭の「数値」の絵が使う（開く口は頭の絵1つ。前は右のレールに1つずつ絵があった）
+ * **絵は持たない。** 開く口は頭の「数値」の絵1つで、絵は `inspButton` が持つ
+ * （前は右のレールに紙ごとの絵があった。レールをやめて、診断の絵は使う所が無くなった）
  */
 export const INSP_DEFS = [
-  { id: 'usage', label: '数値', icon: 'chart', title: '何にトークンを使ったか' },
+  { id: 'usage', label: '数値', title: '何にトークンを使ったか' },
   // **id は basics のまま。** ?insp=basics は v0.6.0 で配っているので、
   // 名前を変えると配ったブックマークが切れる。替えるのは札と見出しだけ。
   // 「状態」から替えたのは、いまの状態そのもの（あなたの番・返信待ち）は
   // 帯とヘッダに出ていて、ここに残るのが困ったときに見る値だから
-  { id: 'basics', label: '診断', icon: 'info', title: '困ったときに見る値' },
+  { id: 'basics', label: '診断', title: '困ったときに見る値' },
 ];
 
 /**
@@ -773,14 +774,14 @@ function renderHead(row, composer) {
  */
 function inspButton() {
   const on = Boolean(store.inspector);
-  const usage = INSP_DEFS.find((t) => t.id === INSP_DEFAULT_TAB);
   const btn = el('button', 'ibtn detail-insp');
   btn.type = 'button';
   btn.dataset.refocus = 'insp';
   btn.setAttribute('aria-pressed', String(on));
   btn.title = on ? '数値と診断を畳む' : '数値と診断を右に出す';
   btn.setAttribute('aria-label', btn.title);
-  btn.append(icon(usage.icon, 16));
+  // 絵は数値の形（chart）。開く口は1つで、診断もここから開く（紙の頭で切り替える）
+  btn.append(icon('chart', 16));
   btn.addEventListener('click', () => toggleInspector());
   return btn;
 }

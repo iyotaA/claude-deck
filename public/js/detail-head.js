@@ -37,21 +37,44 @@ export async function focusTerminal(pid) {
  *
  * 頭は `detailKeyOf()` が動くたびに作り直されるので（動いているセッションでは数秒おき）、
  * 一言を節点にだけ書くと、読む前に消える。セッションごとに1つ控えて、組み直すたびに書き戻す。
- * 別のセッションへ移れば出さない（他人の結果を出さない）。
+ *
+ * **控えるのは `HINT_MS` のあいだだけ。** 期限が無いと「コピーしました」が、同じセッションの
+ * 作り直しのたびに何分経っても出続ける（押したことへの返事で、ずっと言い続ける話ではない）。
+ * **別のセッションへ移ったら消す**（他人の結果を出さない。戻ってきたときにも出さない）。
  */
 let lastHint = { sessionId: null, text: '' };
 /** いま画面に出ている一言の節点と、そのセッション。await のあいだに組み直されても新しいほうへ書く */
 let hintNode = null;
 let hintSession = null;
+/** 一言を消すタイマー。言い直すたびに数え直す */
+let hintTimer = null;
+
+/** 押した結果の一言を出しておく時間。読むには足り、次に押すまで残らない長さ */
+const HINT_MS = 5000;
+
+/** 控えと、いま出ている一言を消す */
+function clearHint() {
+  clearTimeout(hintTimer);
+  hintTimer = null;
+  lastHint = { sessionId: null, text: '' };
+  if (hintNode?.isConnected) hintNode.textContent = '';
+}
 
 /**
- * 一言を控えて、いま出ている節点にも書く。
+ * 一言を控えて、いま出ている節点にも書く。期限が来たら消す。
+ *
+ * **返事が着いたときに別のセッションへ移っていたら控えない**（窓を前に出す返事は待つことがある）。
+ * 控えると、期限内に戻ってきたとき前の結果が出る。
+ *
  * @param {string} sessionId 押したときのセッション
  * @param {string} text
  */
 function sayHint(sessionId, text) {
+  if (hintSession !== sessionId) return;
   lastHint = { sessionId, text };
-  if (hintNode?.isConnected && hintSession === sessionId) hintNode.textContent = text;
+  if (hintNode?.isConnected) hintNode.textContent = text;
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(clearHint, HINT_MS);
 }
 
 /**
@@ -74,6 +97,8 @@ function sayHint(sessionId, text) {
 export function detailActions(row, step) {
   const out = [];
   const sessionId = row.sessionId;
+  // 別のセッションへ移ったら、前の一言は期限の前でも捨てる
+  if (lastHint.sessionId !== null && lastHint.sessionId !== sessionId) clearHint();
 
   // 終了したセッションを開き直すときのコマンド。cwd を間違えると別のログになるので一緒に渡す。
   // **絵だけにする**（どの場面でも出るので、字を持たせると次の一手より目立つ）。

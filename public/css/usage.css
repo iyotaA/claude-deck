@@ -142,6 +142,8 @@
   color: var(--fg);
 }
 
+/* 枠・面・影・字の見た目は左のレールの吹き出しと共通で、base.css に1か所だけ書いてある。
+   ここに残すのは位置・出し入れ・折り返しと、数行になる文のための余白と行間 */
 .tip-mark::after {
   content: attr(data-tip);
   display: none;
@@ -151,15 +153,7 @@
   right: 0;
   z-index: 5;
   padding: .45rem .6rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  background: var(--bg-elev);
-  box-shadow: var(--sh-2);
-  color: var(--fg);
-  font-size: var(--fs-1);
-  font-weight: 400;
   line-height: 1.55;
-  text-align: left;
   white-space: normal;
 }
 
@@ -280,8 +274,9 @@
   background: var(--border-strong);
 }
 
-/* 強調は1位だけ。ここが「次に手を入れる先」になる */
-.bar.is-top .bar-fill { background: var(--accent); }
+/* 強調は1位だけ。ここが「次に手を入れる先」になる。
+   色は --chart-hi で受け、宣言が無ければラベンダー（数値モード）。右の紙は .insp が無彩色を宣言する（下） */
+.bar.is-top .bar-fill { background: var(--chart-hi, var(--accent)); }
 .bar.is-top .bar-label { font-weight: 700; }
 
 /* 部分と全体を1本で示す行。**溝がそのまま「残り」を表す**ので、
@@ -323,28 +318,42 @@
    線の下を塗らないと折れ線の上下がどちらの向きか読みにくい。
    新しい色は作らず、--accent を薄めて使う */
 .spark-area {
-  fill: var(--accent);
-  opacity: .14;
+  fill: var(--chart-hi, var(--accent));
+  opacity: var(--chart-wash, .14);
 }
 
 /* preserveAspectRatio="none" で横に引き伸ばすので、線幅も一緒に潰れる。
    潰さないための vector-effect は SVG 側の属性で付けてある */
 .spark-line {
   fill: none;
-  stroke: var(--accent);
+  stroke: var(--chart-hi, var(--accent));
   stroke-width: 1.5;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 
 /* 右の紙（詳細ペインのインスペクタ）のグラフは無彩色にする（画面刷新④。手本のモックの
-   `.insp { --ring; --bar }` に当たる）。1位の棒は明るい灰（--fg-muted）、ほかは今の --border-strong のまま、
-   明るさの差で1位を立たせる。スパークラインも --fg-muted。**新しい色は作らない**（字の色を塗りに借りる）。
-   **.insp に絞る**（0,3,0 で上の素の指定に詳細度で勝つ）。usage.css は数値モード（横断）と共有で、
-   あちらはグラフが主役の画面なのでラベンダーのまま残す。--off（灰）は「終了・不明」の色なので借りない */
-.insp .bar.is-top .bar-fill { background: var(--fg-muted); }
-.insp .spark-area { fill: var(--fg-muted); opacity: .12; }
-.insp .spark-line { stroke: var(--fg-muted); }
+   `.insp { --ring; --bar }` と同じ考え）。部品（.bar.is-top .bar-fill / .spark-area / .spark-line）は
+   色を --chart-hi で受けて、宣言が無ければラベンダーに落ちる。**ここは変数を宣言するだけ。**
+   部品の側を .insp の詳細度で塗り直す形だと、色の出どころが2か所に割れる。
+
+   1位の棒は明るい灰（--fg-muted）、ほかは今の --border-strong のまま、明るさの差で1位を立たせる。
+   スパークラインも --fg-muted、線の下の面は灰が明るく出るぶん少しだけ薄める（--chart-wash）。
+   **新しい色は作らない**（字の色を塗りに借りる）。usage.css は数値モード（横断）と共有で、
+   あちらはグラフが主役の画面なので宣言せず、ラベンダーのまま残す。--off（灰）は「終了・不明」の色なので借りない */
+.insp {
+  --chart-hi: var(--fg-muted);
+  --chart-wash: .12;
+}
+
+/* 右の紙は狭く（23rem）、名前の列が 6〜7rem しか取れない。長いツール名（mcp__…）が
+   素の overflow-wrap: anywhere で1字ずつ縦に伸びていたので、1行で「…」で切る。全文は title
+   （usage-chart.js の barLabel）。数値モード（横断）は全幅で名前の列に 13rem あり、折り返しのまま */
+.insp .bar-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 
 /* 絵は形しか語らない。両端と山の高さは必ず文字でも出す */
 .spark-caption {
