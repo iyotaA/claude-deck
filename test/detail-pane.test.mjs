@@ -391,3 +391,87 @@ test('.deck の列は一覧 × 右の紙の4通りで、子の数と釣り合う
     assert.doesNotMatch(v, /\bauto$/, `${sel} の末尾に右のレールの列（auto）が残っている`);
   }
 });
+
+/* ── 右の紙の中身：無彩色・差に色なし・説明文の置き場所（段5） ───────── */
+
+const panelCode = () => jsCode(read(path.join(JS_DIR, 'usage-panel.js')));
+const chartCode = () => jsCode(read(path.join(JS_DIR, 'usage-chart.js')));
+
+/** 色の付いたトークン。右の紙のグラフに戻ってきてはいけない */
+const HUE_RE = /var\(--(accent|hot|warn|done|calm|off)\)/;
+
+test('右の紙のグラフ（横棒の1位・スパークライン）は無彩色。.insp に絞って上書きする', () => {
+  const bad = [];
+  for (const sel of ['.insp .bar.is-top .bar-fill', '.insp .spark-area', '.insp .spark-line']) {
+    const decls = declsOf(sel);
+    assert.ok(decls.length, `${sel} の指定が無い（右の紙のグラフが色のまま）`);
+    for (const d of decls) if (HUE_RE.test(d.value)) bad.push(`${d.file} … ${sel} { ${d.prop}: ${d.value} }`);
+  }
+  assert.deepEqual(bad, [], `右の紙のグラフに色が残っている:\n  ${bad.join('\n  ')}`);
+});
+
+test('数値モード（横断）のグラフの色は触らない（usage.css の素の指定はラベンダーのまま）', () => {
+  // ⑤で「バランスがいい」と言われた画面。右の紙の無彩色は .insp に絞って上書きする
+  const fill = declsOf('.bar.is-top .bar-fill').filter((d) => d.file === 'usage.css').map((d) => d.value);
+  assert.ok(fill.includes('var(--accent)'), '素の .bar.is-top .bar-fill が --accent でなくなっている');
+  const line = declsOf('.spark-line').filter((d) => d.file === 'usage.css' && d.prop === 'stroke').map((d) => d.value);
+  assert.ok(line.includes('var(--accent)'), '素の .spark-line が --accent でなくなっている');
+});
+
+test('差（増減）に色を付けない', () => {
+  // 実消費が多いのは、単に長く働いた日かもしれない。良し悪しを決めるのは読む人
+  const bad = [];
+  for (const r of cssRules()) {
+    if (!r.selectors.some((s) => /\.stat-delta\b/.test(s))) continue;
+    for (const d of r.decls) {
+      if (HUE_RE.test(d.value)) bad.push(`${r.file} … ${r.selectors.join(', ')} { ${d.prop}: ${d.value} }`);
+    }
+  }
+  assert.deepEqual(bad, [], `差に色が付いている:\n  ${bad.join('\n  ')}`);
+  assert.doesNotMatch(chartCode(), /stat-delta (is-|up|down|good|bad)/, '差に良し悪しのクラスを付けている');
+});
+
+test('誤読を防ぐ注記は右の紙に字のまま残っている（吹き出しへ移さない）', () => {
+  const p = panelCode();
+  const KEEP = [
+    [/帰属は原因ではありません/, '因果の注記（スキル）'],
+    [/中央値との比較です/, '差が何との比較か（中央値の注記）'],
+    [/足し合わせない値です/, '文脈保有量は足し合わせない'],
+    [/ツール以外（あなたの発言など）/, '帰属できなかったぶん（ツール以外）'],
+    [/測れなかった回/, '帰属できなかったぶん（測れなかった回）'],
+    [/この分は入っていません/, 'サブエージェントは上の実消費に入っていない'],
+    [/サブエージェントの消費に占めるぶんです/, 'サブエージェントの割合の分母'],
+    [/実際の消費はこれより多いです/, '頭だけ読んだ記録（過少）'],
+    [/金額ではありません/, '実消費は金額ではない'],
+  ];
+  const lost = KEEP.filter(([re]) => !re.test(p)).map(([, label]) => label);
+  assert.deepEqual(lost, [], `誤読を防ぐ注記が消えている: ${lost.join(' / ')}`);
+  assert.match(chartCode(), /モデルまたぎでは比べられません/, '命中率のモデルの注記が消えている');
+  // 但し書きの札（.stat-note）は常に出す
+  assert.doesNotMatch(cssCode(read(path.join(CSS_DIR, 'usage.css'))), /\.stat-note[^{]*\{[^}]*display:\s*none/);
+});
+
+test('読み方の説明（ツールの節・内訳の節）は見出しの吹き出しへ移す。注記の段には置かない', () => {
+  const p = panelCode();
+  const tools = p.slice(p.indexOf('toolsBlockOf(usage.tools'));
+  assert.match(tools.slice(0, 400), /tip:/, 'ツールの節の説明が見出しの吹き出し（tip）に渡っていない');
+  assert.doesNotMatch(tools.slice(0, 400), /\bnote:/, 'ツールの節の説明が注記（note）のまま');
+  assert.match(fnBody(p, 'iteBlock'), /block\('実消費の内訳', \{ tip:/, '内訳の説明が見出しの吹き出しに無い');
+});
+
+test('見出しの吹き出しはキーボードでも読める（押せる印・名前・焦点で出る吹き出し。title と二重にしない）', () => {
+  const body = fnBody(chartCode(), 'block');
+  assert.match(body, /el\('button'/, '吹き出しの印が押せる要素（button）でない');
+  assert.match(body, /aria-label/, '吹き出しの印に名前（aria-label）が無い');
+  assert.match(body, /dataset\.tip = /, '吹き出しの中身（data-tip）が無い');
+  assert.doesNotMatch(body, /\.title = /, 'title も付けている（OS の札と吹き出しが二重に出る）');
+  const shown = cssRules().some((r) => r.selectors.some((s) => /\.tip-mark:focus-visible::after/.test(s)));
+  assert.ok(shown, '吹き出しが焦点（:focus-visible）で出ない');
+});
+
+test('紙の題と重なるパネルの見出し（数値・診断）を右の紙に出さない', () => {
+  // 紙の頭に「数値｜診断」の切り替えと題があるので、中に同じ名前の見出しを重ねない
+  assert.doesNotMatch(fnBody(panelCode(), 'usagePanel'), /panel\('数値'/, '数値のパネルの見出しが残っている');
+  const panels = jsCode(read(path.join(JS_DIR, 'detail-panels.js')));
+  assert.doesNotMatch(fnBody(panels, 'basicsPanel'), /panel\('診断'/, '診断のパネルの見出しが残っている');
+});

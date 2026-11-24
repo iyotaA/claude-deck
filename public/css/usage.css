@@ -3,8 +3,12 @@
  * 読む順は update.css の後・narrow.css の前。
  * narrow.css が上を全部上書きするので、あれより後ろには置けない。
  *
- * **新しい色を作らない。** 使うのは --accent（強調1本）と
- * --fg-faint / --border-strong（文脈）だけ。
+ * **新しい色を作らない。** 使うのは --accent（強調1本。数値モードのグラフだけ）と
+ * --fg-muted / --fg-faint / --border-strong（文脈・右の紙のグラフ）だけ。
+ *
+ * **右の紙（詳細ペインのインスペクタ）のグラフは無彩色**（下の「右の紙」の節。`.insp` に絞った上書き）。
+ * ラベンダーは「押すもの・あなたの番・選んでいる場所」の色で、右の紙の横棒の1位も
+ * スパークラインもどれでもない。数値モード（横断）はグラフが主役の画面なので色を残す（画面刷新④）。
  * 色は tokens.css の1箇所にだけ置き、字として使う色はそこで全部の面との比を
  * 測ってある（test/tokens.test.mjs）。ここで足すと測っていない色がその外に生まれるので、
  * 足さずに済ませる。
@@ -95,12 +99,73 @@
   border-top: 1px dashed var(--border);
 }
 
+/* 見出しの右に読み方の吹き出しの印（.tip-mark）が付くことがあるので flex で並べる。
+   position: relative は吹き出しの基準。印そのものではなく見出しの幅に合わせて出すため
+   （右の紙は狭く、印を基準にすると吹き出しが紙の右へはみ出して切れる） */
 .usage-block > h4 {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: .3rem;
   margin: 0 0 .4rem;
   font-size: var(--fs-2);
   font-weight: 700;
   color: var(--fg);
 }
+
+/* 見出しの読み方の吹き出し（usage-chart.js の block(title, { tip })）。**読み方の説明だけ。**
+   誤読を防ぐ注記は触れるまで出ない場所に置けないので、本文の .note / .usage-read / .stat-note に残す。
+
+   印は押せる button（焦点を受ける）。面も枠も持たない補助の印（.ibtn と同じ段で、触れたときだけ面）。
+   **吹き出しは :hover と :focus で出す。** キーボードで来た人にも出る（title は焦点では出ない。
+   左のレールの吹き出しと同じ理由で title は付けていない）。:focus も入れるのは、指で触ったときは
+   焦点が付いても :focus-visible にならないため。
+   **出していないあいだは display: none。** opacity で隠すと、紙のいちばん下の節の吹き出しが
+   見えないまま紙の流れる高さを伸ばす（絶対配置でもはみ出しは流れる箱の高さに入る） */
+.tip-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--fg-faint);
+  cursor: help;
+}
+
+.tip-mark:hover,
+.tip-mark:focus-visible {
+  background: var(--bg-hi);
+  color: var(--fg);
+}
+
+.tip-mark::after {
+  content: attr(data-tip);
+  display: none;
+  position: absolute;
+  top: calc(100% + .3rem);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  padding: .45rem .6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-2);
+  color: var(--fg);
+  font-size: var(--fs-1);
+  font-weight: 400;
+  line-height: 1.55;
+  text-align: left;
+  white-space: normal;
+}
+
+.tip-mark:hover::after,
+.tip-mark:focus::after,
+.tip-mark:focus-visible::after { display: block; }
 
 .usage-block > .note { margin-bottom: .6rem; }
 
@@ -124,8 +189,9 @@
 
 /* 読むだけの塊。散らばっていた但し書きをここへまとめる。
 
-   **1本も減らしていない。** 注記は折りたたまずに常時出す決まりなので、
+   **1本も減らしていない。** 誤読を防ぐ注記は折りたたまずに常時出す決まりなので、
    消すのではなく「読めるが目立たない」段を面で作る。
+   見出しの吹き出し（.tip-mark）へ移してよいのは読み方の説明だけ。
    形は settings.css の .settings-read から借りた
    （押せるものが1つも無いことを、文ではなく面で示す）。
 
@@ -270,6 +336,15 @@
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+
+/* 右の紙（詳細ペインのインスペクタ）のグラフは無彩色にする（画面刷新④。手本のモックの
+   `.insp { --ring; --bar }` に当たる）。1位の棒は明るい灰（--fg-muted）、ほかは今の --border-strong のまま、
+   明るさの差で1位を立たせる。スパークラインも --fg-muted。**新しい色は作らない**（字の色を塗りに借りる）。
+   **.insp に絞る**（0,3,0 で上の素の指定に詳細度で勝つ）。usage.css は数値モード（横断）と共有で、
+   あちらはグラフが主役の画面なのでラベンダーのまま残す。--off（灰）は「終了・不明」の色なので借りない */
+.insp .bar.is-top .bar-fill { background: var(--fg-muted); }
+.insp .spark-area { fill: var(--fg-muted); opacity: .12; }
+.insp .spark-line { stroke: var(--fg-muted); }
 
 /* 絵は形しか語らない。両端と山の高さは必ず文字でも出す */
 .spark-caption {

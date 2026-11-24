@@ -1,6 +1,13 @@
-/* 詳細ペインの「数値」パネル。
+/* 詳細ペインの右の紙の「数値」。
  *
  * 層3。`detail-panels.js` と同格で、返す形も同じ（節点か `null`）。
+ * 器は見出しを持たない節（`.insp-sec`）。紙の頭の「数値｜診断」と題が見出しの役をする。
+ *
+ * グラフ（横棒の1位・スパークライン）は右の紙では無彩色（`usage.css` の `.insp …` の上書き）。
+ * 色を付けるのは数値モード（横断）のほうだけ。
+ *
+ * **読み方の説明だけを見出しの吹き出し（`block(title, { tip })`）へ移した。** 誤読を防ぐ注記
+ * （因果・足し合わせない・入っていない・金額ではない・中央値との比較・分母）は本文に残す。
  *
  * **主役は「何が文脈を食っているか」の1つだけ。**
  * 実消費も命中率も、見て納得して終わりになりやすい。
@@ -12,7 +19,7 @@
  * 「セクションを自分で消す」羽目になり、「節点か null を返す」約束と噛み合わなくなる。
  */
 import { el, fact, shortModel } from './util.js';
-import { panel, SEC } from './panel.js';
+import { SEC } from './panel.js';
 import {
   block, readNote, hitRateNote, statTile, barList, shareBar, sparkline, tableDetails,
   tokensStrict, pctStrict, numStrict, deltaText,
@@ -103,9 +110,12 @@ function tiles(usage, d, b) {
 /**
  * 主役。何が文脈を食っているか。
  *
- * 注記は**折りたたまずに常時出す。** ここに出ているのは
- * 「その要求とその次の要求のあいだに、文脈がどれだけ伸びたか」であって、
+ * ここに出ているのは「その要求とその次の要求のあいだに、文脈がどれだけ伸びたか」であって、
  * ツールが返した文字数そのものではない。
+ *
+ * **説明文（何を測っているか・何に使えるか）は読み方の説明なので、見出しの吹き出しへ移した**
+ * （画面刷新④の D15）。**帰属できなかったぶんの注記は本文に残す** ―― あれは「足しても合計に
+ * 届かない理由」で、読まないと誤読する話だから、折りたたまずに常時出す。
  *
  * @param {object} usage
  * @returns {HTMLElement|null}
@@ -123,7 +133,7 @@ function toolsBlock(usage) {
   }
 
   return toolsBlockOf(usage.tools, {
-    note: 'そのツールの結果が、どれだけ文脈に積まれたかです。「Read 1回で 68k」が分かれば、次から範囲や limit を絞れます。',
+    tip: 'そのツールの結果が、どれだけ文脈に積まれたかです。「Read 1回で 68k」が分かれば、次から範囲や limit を絞れます。',
     bars: BARS_MAX,
     tableLabel: `全 ${usage.tools.length} 件を表で見る`,
     extraNote: notes.length ? el('p', 'note note-sub', notes.join(' / ')) : null,
@@ -303,15 +313,23 @@ function iteBlock(usage) {
   });
   rows.push(['合計（実消費）', '—', '—', numStrict(usage.totals.ite)]);
 
-  const box = block('実消費の内訳');
-  box.append(el('p', 'note',
-    '入力トークンに換算した量です。金額ではありません。単価はモデルによって違いますが、この比率はどのモデルでも同じです。'));
+  // 換算の仕方（入力トークンに直した量・重みの比率はモデルによらない）は読み方の説明なので
+  // 見出しの吹き出しへ。**「金額ではありません」だけは本文に残す** ―― 実消費の数字を
+  // ドルと読む誤読を止める但し書きで、触れるまで出ない場所に置くと止められない
+  const box = block('実消費の内訳', { tip: '入力トークンに換算した量です。単価はモデルによって違いますが、この重みの比率はどのモデルでも同じです。' });
+  box.append(el('p', 'note', '金額ではありません。'));
   box.append(tableDetails('内訳を表で見る', ['項目', 'トークン', '重み', '実消費への寄与'], rows, { total: true }));
   return box;
 }
 
 /**
- * 数値パネル1枚。
+ * 右の紙の「数値」1枚。
+ *
+ * **パネルの見出し（「数値　N 回の要求」）を付けない**（画面刷新④）。紙の頭に「数値｜診断」の
+ * 切り替えと題（何にトークンを使ったか）があるので、中に同じ名前の見出しを重ねると
+ * 題が縦に2つ並ぶ。要求の回数は上の札（実消費）の但し書きが言っている。
+ * 器も枠付きのパネル（`.panel`）にしない ―― 紙の中に箱を置くと「紙の中に紙」になる。
+ * 身元（id）だけは残す（`SEC.usage`）。
  *
  * @param {object|null} usage `/api/sessions/:id/usage` の応答
  * @param {object|null} d 詳細の応答（圧縮の回数だけ借りる。まだ読めていなければ null）
@@ -325,30 +343,32 @@ export function usagePanel(usage, d, error, baseline = null) {
     // まだ届いていない・この版のサーバーには窓口が無い、のどちらも静かに退く。
     // 「読んでいます」を出すと、404 のときに永久に出たままになる
     if (!error) return null;
-    const p = panel('数値', { id: SEC.usage });
-    p.body.append(el('p', 'note', `数値を取れません: ${error}`));
-    return p.section;
+    const sec = el('section', 'insp-sec');
+    sec.id = SEC.usage;
+    sec.append(el('p', 'note', `数値を取れません: ${error}`));
+    return sec;
   }
 
   // 要求が1件も無ければ節ごと出さない。0 が並ぶだけの枠は、読む人の時間を取るだけ
   if (!usage.requests) return null;
 
-  const p = panel('数値', { id: SEC.usage, count: `${usage.requests} 回の要求` });
-  p.body.append(tiles(usage, d, baseline));
+  const sec = el('section', 'insp-sec');
+  sec.id = SEC.usage;
+  sec.append(tiles(usage, d, baseline));
   const bnote = baselineNote(baseline);
-  if (bnote) p.body.append(bnote);
+  if (bnote) sec.append(bnote);
 
   const tools = toolsBlock(usage);
-  if (tools) p.body.append(tools);
+  if (tools) sec.append(tools);
   // 「何が食っているか」の系統なので、ツールの隣に置く
   const skills = skillsBlock(usage);
-  if (skills) p.body.append(skills);
+  if (skills) sec.append(skills);
   // 親の数値に入っていないぶんなので、内訳の話が終わる前に出す
   const sub = subBlock(usage);
-  if (sub) p.body.append(sub);
+  if (sub) sec.append(sub);
   const growth = growthBlock(usage);
-  if (growth) p.body.append(growth);
-  p.body.append(iteBlock(usage));
+  if (growth) sec.append(growth);
+  sec.append(iteBlock(usage));
 
-  return p.section;
+  return sec;
 }

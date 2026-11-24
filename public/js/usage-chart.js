@@ -12,6 +12,7 @@
  */
 
 import { el, num, shortModel, svgEl } from './util.js';
+import { icon } from './icons.js';
 
 /**
  * 節を1つ作る。数値の枠の中の小見出し。
@@ -19,20 +20,42 @@ import { el, num, shortModel, svgEl } from './util.js';
  * 詳細のパネル（層3）と横断のタブ（層7）が同じ形を使う。
  * どちらかに置くともう片方から見えないので、層1に置いてある。
  *
+ * **tip は「読み方の説明」だけの置き場所**（右の紙で使う。画面刷新④）。見出しの右に ⓘ の印を置き、
+ * 触れるか焦点を当てたときに吹き出しで出す。**誤読を防ぐ注記はここへ入れない** ―― 吹き出しは
+ * 触れるまで出ないので、「常に出す」決まりの注記（因果・足し合わせない・入っていない など）は
+ * 本文の段（`.note` / `readNote` / `.stat-note`）に残す。
+ *
+ * 印は押せる要素（button）にする。焦点を受けられるので、キーボードで来た人にも吹き出しが出る
+ * （CSS の `:focus` / `:focus-visible`）。名前は aria-label が説明ごと持つ（読み上げにも乗る）。
+ * **title は付けない** … 吹き出しと OS の札が二重に出る（左のレールの吹き出しと同じ理由）。
+ * 右の紙は作り直されるので、焦点を拾い直す名前（data-refocus）も付ける。
+ *
  * @param {string} title
+ * @param {{tip?: string|null}} [opts]
  * @returns {HTMLElement}
  */
-export function block(title) {
+export function block(title, { tip = null } = {}) {
   const box = el('section', 'usage-block');
-  box.append(el('h4', null, title));
+  const head = el('h4', null, title);
+  if (tip) {
+    const mark = el('button', 'tip-mark');
+    mark.type = 'button';
+    mark.dataset.tip = tip;
+    mark.dataset.refocus = `tip:${title}`;
+    mark.setAttribute('aria-label', `「${title}」の読み方: ${tip}`);
+    mark.append(icon('info', 13));
+    head.append(mark);
+  }
+  box.append(head);
   return box;
 }
 
 /**
  * 読むだけの塊。散らばっていた但し書きを1つの面へまとめる。
  *
- * **1本も減らさない。** 注記は折りたたまずに常時出す決まりなので、
+ * **1本も減らさない。** 誤読を防ぐ注記は折りたたまずに常時出す決まりなので、
  * 消すのではなく「読めるが目立たない」段を面で作る。
+ * 吹き出し（`block` の `tip`）へ移してよいのは読み方の説明だけで、ここに来るものは移さない。
  * 形は `settings.css` の `.settings-read`（押せるものが1つも無いことを
  * 文ではなく面で示す）から借りている。
  *
@@ -494,7 +517,7 @@ export function numStrict(n) {
  *
  * | | 詳細ペイン | 横断 |
  * |---|---|---|
- * | 説明の後半 | 「次から範囲や limit を絞れます」 | 「集めたセッションぶんを足しています」 |
+ * | 説明 | 見出しの吹き出し（`tip`。読み方の説明なので） | 本文の注記（`note`。「集めたセッションぶんを足しています」） |
  * | 棒の本数 | 8 | 6 |
  * | 表の見出し | 「全 N 件を表で見る」 | 「ツール N 件を表で見る」 |
  * | 帰属できなかったぶんの注記 | 出す | 出さない（横断では母数が違って読めない） |
@@ -504,17 +527,18 @@ export function numStrict(n) {
  *
  * @param {object[]} tools ツール別の集計（`tool` / `calls` / `tokens` / `avg` / `max`）
  * @param {object} opts
- * @param {string} opts.note 説明文
+ * @param {string} [opts.note] 説明文（本文の注記として出す。横断）
+ * @param {string} [opts.tip] 説明文（見出しの吹き出しへ出す。右の紙。読み方の説明だけ）
  * @param {number} opts.bars 棒で出す本数
  * @param {string} opts.tableLabel 表を開く札の文字
  * @param {HTMLElement|null} [opts.extraNote] 棒と表のあいだに挟む注記
  * @returns {HTMLElement|null} 1件も無ければ null（節ごと出さない）
  */
-export function toolsBlock(tools, { note, bars, tableLabel, extraNote = null }) {
+export function toolsBlock(tools, { note = null, tip = null, bars, tableLabel, extraNote = null }) {
   if (!tools.length) return null;
 
-  const box = block('何が文脈を食っているか');
-  box.append(el('p', 'note', note));
+  const box = block('何が文脈を食っているか', { tip });
+  if (note) box.append(el('p', 'note', note));
 
   box.append(barList(tools.slice(0, bars).map((t) => ({
     label: t.tool,
