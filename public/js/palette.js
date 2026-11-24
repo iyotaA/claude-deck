@@ -37,6 +37,8 @@ import { closeOnBackdrop } from './modal.js';
 import { setPin, openMemo } from './marks.js';
 import { openToday } from './today.js';
 import { MODE_LIST } from './nav.js';
+import { canFocusTerminal } from './next-step.js';
+import { runFor } from './runs.js';
 
 // パレットだけが持つモードの言い方（何をする項目か・探すときの手がかり）。
 // **モードの名前（label）とキーはここに書かない。** 出どころは nav.js の MODE_LIST で、
@@ -144,9 +146,11 @@ function buildAll() {
     });
   }
 
-  // ターミナルの窓があるのは、生きていて pid を持っているものだけ。
+  // ターミナルの窓があるのは、生きていて pid を持っているものだけ。画面から起こした実行の子は
+  // 窓を持たないので出さない。**判断は詳細の頭の次の一手と同じ `canFocusTerminal`**
+  // （パレットは自分では決めない。ここで別の条件を書くと、頭とパレットで出る出ないが食い違う）。
   // 結果を読ませたいので、これだけは押しても閉じない
-  if (cur?.alive && cur.pid) {
+  if (canFocusTerminal(cur, runFor(cur?.sessionId)?.state ?? null)) {
     out.push({
       group: '動かす',
       verb: 'ターミナルを前面に',

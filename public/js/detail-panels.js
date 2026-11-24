@@ -276,8 +276,11 @@ export function basicsPanel(row, d) {
   if (d) fact(dl, 'やり取りの回数', `${d.digest.stats.turns} 往復 / ツール ${d.digest.stats.toolCalls} 回`);
   basics.body.append(dl);
 
-  // この作業がどう設定されているか。替えたくなったら入力欄の上の札から替える
+  // この作業がどう設定されているか。替えたくなったら入力欄の上の札から替える。
+  // **作業フォルダの全文はここに出す。** 頭は置き場所の札（名前だけ・全文は title）に替えたので、
+  // 字で読める場所をここに1つ残す（実行パネルの facts も頭を当てにして落としてある）
   const setup = el('dl', 'facts facts-waits');
+  fact(setup, '作業フォルダ', row.cwd);
   fact(setup, '権限モード', row.permissionMode);
   fact(setup, 'モデル', shortModel(row.model));
   fact(setup, '思考量', row.effort);

@@ -21,11 +21,16 @@
      **頭を入力欄より前に置く。** 前は頭が流れる箱の中にあり、入力欄の下に来ていた
      （続きを起こす欄が題名より上に出た。UI レビューの F5） */
   grid-template-rows: auto auto minmax(0, 1fr);
+  /* **列を minmax(0, 1fr) に固定する。** 書かないと暗黙の列（auto）になり、
+     中身の折り返せない幅（min-content）まで列が広がる。頭のメモを1行で切った
+     （white-space: nowrap）ら、その全文の長さまでペインが窓の外へ伸びた（実測。820px の窓で 900px）。
+     固定すれば、切る指定（overflow / text-overflow）が本来の幅で効く */
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
 }
 
 /* 詳細の頭。流れないので、**場所を取りすぎないように詰める**
-   （題名は2行まで、状態・場所・ボタンは1行）。
+   （題名は2行まで、札は1行、メモは1行。押すものは右上の群に寄せる。並びは下の .dh）。
    読む幅の上限は中身（.detail）・入力欄（.composer-in）と同じ --read-max で揃える。
    左右の余白も流れる箱（.detail-scroll）と同じ 1.3rem。
    display を宣言したので [hidden] を必ず添える */
@@ -85,16 +90,23 @@
   text-align: center;
 }
 
-/* 題名と、その横のピン（☆）とメモ（✎）。ボタンは題名の1行目の高さに揃える */
-.detail-title {
+/* 頭の2つの群。左に題名と札（.dh-main）、右上に押すもの（.detail-actions）。
+   手本のモックの .dh と同じ組み方で、狭くなったら右の群が題名の下へ折り返す。
+
+   **左の群が先に幅を取る**（flex-grow 999）。右の群は中身なりの幅で、
+   題名が短くても長くても右上の位置が変わらない（押す場所が毎回同じところにある）。
+   20rem は題名が2行に収まって読める下限の目安 */
+.dh {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
-  gap: .25rem;
+  gap: .5rem 1rem;
 }
 
-.detail-title h2 { flex: 1; min-width: 0; }
-
-.detail-title .ibtn { flex: none; margin-top: .15rem; }
+.dh-main {
+  flex: 999 1 20rem;
+  min-width: 0;
+}
 
 /* ピンが付いているときは星を塗る。色は強調（--accent）。状態色は使わない */
 .detail-pin.is-pinned { color: var(--accent); }
@@ -105,7 +117,10 @@
    **面を沈めて、枠は持たせない。** 読むだけで押せないので、`.settings-read` /
    `.usage-read` と同じ「沈めた面」の段に置く（押せないものに枠を持たせない）。
    頭の地は --bg なので、--bg-sunk の塊は1段明るく見える（名前で明暗を決めつけない）。
-   角は --r-sm。1行の高さに --r-md を当てると、押せるものの形（ピル型）に寄る */
+   角は --r-sm。1行の高さに --r-md を当てると、押せるものの形（ピル型）に寄る。
+
+   **1行で切る**（全文は title 属性。detail.js の renderHead）。メモは 200 字まで入るので、
+   切らないと頭が数行に伸び、その下のタブ帯がメモの長さで上下する */
 .detail-memo {
   margin: .45rem 0 0;
   padding: .35rem .6rem;
@@ -113,7 +128,9 @@
   background: var(--bg-sunk);
   font-size: var(--fs-1);
   color: var(--fg-muted);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 札「メモ」。**ラベンダーにしない。** あれは押すもの・あなたの番・選んでいる場所の色で、
@@ -138,8 +155,7 @@
   overflow: hidden;
 }
 
-/* 状態・場所・ボタンの1行。ボタンは右へ寄せ、場所は長ければ「…」で切る
-   （全文は title 属性）。狭い窓では折り返して2行になる */
+/* 題名の下の札の1行（状態・置き場所）。狭い窓では折り返す */
 .detail-sub {
   display: flex;
   flex-wrap: wrap;
@@ -148,6 +164,28 @@
   font-size: var(--fs-1);
   color: var(--fg-muted);
 }
+
+/* 置き場所の札（row.project。全文の作業フォルダは title 属性と右の「診断」）。
+   **押せないので枠も面も持たせない**（押せないものに枠と面を持たせない。手本のモックの
+   札は枠つきだが、あれは押せる札と見分けが付かなくなる）。絵と字だけ。
+   長い名前は「…」で切る */
+.detail-sub .place {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--fg-muted);
+}
+
+.detail-sub .place > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-sub .place .icon { color: var(--fg-faint); }
 
 /* 絵を持つボタンは flex にする。**理由が2つある。**
 
@@ -165,29 +203,32 @@
   gap: .35rem;
 }
 
+/* 右上の群。☆・✎・数値・コピー（絵だけ）→ 次の一手 → 押した結果の一言。
+   群ごと右へ寄せる（折り返して題名の下へ落ちたときも右端に付く） */
 .detail-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: .4rem .6rem;
-  /* 頭の1行の右端へ寄せる */
+  justify-content: flex-end;
+  gap: .4rem .3rem;
   margin-left: auto;
 }
 
+/* 次の一手は絵だけのボタンと少し離す。字のボタンが絵の列に食い込んで見えないように */
+.detail-actions > .btn { margin-left: .3rem; }
+
+/* 押した結果の一言は**ボタンの下の行**に出す（flex-basis 100% で折り返す）。
+   ボタンの横に出すと、一言の長さで右上のボタンが左へ押し出され、押した場所が動く。
+   空のあいだは行ごと消す（textContent を入れた瞬間に :empty が外れて出る） */
 .detail-actions .hint {
+  flex: 1 0 100%;
+  text-align: right;
   font-size: var(--fs-1);
   color: var(--fg-muted);
   overflow-wrap: anywhere;
 }
 
-.detail-sub .path {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-}
+.detail-actions .hint:empty { display: none; }
 
 /* このセッションの目的。枠を付けず、左の罫線だけで本文と区別する。
    名前を .summary にしない（前は上のバーに同じ名前があり、両方に当たって縦積みが崩れた）。

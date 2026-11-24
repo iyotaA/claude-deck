@@ -50,7 +50,8 @@ import {
 import { agentsPanel } from './agents.js';
 import { isZoomed, toggleZoom, closeZoom } from './zoom.js';
 import { usagePanel } from './usage-panel.js';
-import { runStampFor } from './runs.js';
+import { runFor, runStampFor } from './runs.js';
+import { nextStep } from './next-step.js';
 import * as RunView from './run-view.js';
 import * as RunResume from './run-resume.js';
 import * as Timeline from './timeline/index.js';
@@ -605,7 +606,11 @@ export function initInspector() {
  * （「この実行はもう終わっています」の死んだ入力欄）ので、後ろに回さないと
  * 押せる「続きを起こす」が押せない欄に隠れる。
  *
+ * 入力欄が出たかどうかを返す。頭の次の一手が「塗るか」を決めるのに使う
+ * （入力欄には塗った「送る」「続きを起こす」があるので、出ていれば頭は塗らない）。
+ *
  * @param {object|null} row 一覧の行と同じ形のもの
+ * @returns {boolean} 入力欄を出したか
  */
 function syncComposer(row) {
   const node = row
@@ -617,6 +622,7 @@ function syncComposer(row) {
     if (node) dom.composer.append(node);
   }
   dom.composer.hidden = !node;
+  return Boolean(node);
 }
 
 /**
@@ -655,21 +661,36 @@ function titleOf(row) {
  * （作り直しで打ちかけが消える）ので、頭のほうを流れる箱の外へ出した。
  *
  * 頭は流れないので、**場所を取りすぎないように詰める。**
- * 題名は2行で切り（全文は title 属性）、状態・場所・ボタンは1行に並べる。
+ *
+ * 並びは手本のモックどおり2つの群（画面刷新④）。
+ *
+ *   左   … 題名（2行で切る。全文は title 属性）と、その下に状態の札・置き場所の札
+ *   右上 … ☆・✎・数値・再開コマンドのコピー（ここまで絵だけ）と次の一手、押した結果の一言
+ *
+ * メモは群の下に1行で切って出す（全文は title 属性）。200字まで入るので、
+ * 切らないと頭が数行に伸びてタブ帯が下がる。
+ *
+ * 押すものを右上へまとめたのは、題名の長さで位置が動かないようにするため
+ * （前は ☆・✎ が題名の右、ほかのボタンが状態の行の右で、2か所に割れていた）。
+ * 拡大はタブ帯の右端のまま（帯ごと拡大する口なので、帯に置く）。
+ *
+ * **次の一手の判断はここに書かない。** `next-step.js`（層0）の `nextStep` が決める。
+ * 渡す材料は、画面から起こした実行の状態（`runFor`）と、入力欄が出ているか。
  *
  * @param {object|null} row 一覧の行と同じ形のもの
+ * @param {boolean} composer 入力欄が出ているか（出ていれば頭は塗らない）
  */
-function renderHead(row) {
+function renderHead(row, composer) {
   dom.detailHead.replaceChildren();
   dom.detailHead.hidden = !row;
   if (!row) return;
 
   const inner = el('div', 'detail-head-in');
-  const top = el('div', 'detail-title');
+  const top = el('div', 'dh');
+  const main = el('div', 'dh-main');
   const title = el('h2', null, titleOf(row));
   title.title = titleOf(row);
-  top.append(title, pinButton(row), memoButton(row));
-  inner.append(top);
+  main.append(title);
 
   const line = el('div', 'detail-sub');
   // stateLabel が無いときに空の .state を出すと、色の点だけが残って意味を持たない
@@ -683,20 +704,55 @@ function renderHead(row) {
     if (row.run?.state === 'budget') state.dataset.mark = 'budget';
     line.append(state);
   }
-  if (row.cwd) {
-    const path = el('span', 'path', row.cwd);
-    path.title = row.cwd;
-    line.append(path);
+  // 置き場所の札。**作業フォルダの全文は出さない**（title に入れる）。長いパスが1行を食い、
+  // 次の一手と同じ行で取り合っていた。全文は右の紙の「診断」にもある。
+  // 押せないので枠も面も持たせない（押せないものに枠と面を持たせない）
+  const place = row.project ?? row.cwd;
+  if (place) {
+    const tag = el('span', 'place');
+    tag.append(icon('folder', 13), el('span', null, place));
+    tag.title = row.cwd ?? place;
+    line.append(tag);
   }
-  line.append(detailActions(row));
-  inner.append(line);
-  // メモは事実の1行の下に、そのまま見せる（書くのは ✎ の窓）
+  main.append(line);
+
+  const step = nextStep(row, { runState: runFor(row.sessionId)?.state ?? null, composer });
+  const act = el('div', 'detail-actions');
+  act.append(pinButton(row), memoButton(row), inspButton(), ...detailActions(row, step));
+  top.append(main, act);
+  inner.append(top);
+
+  // メモは群の下に1行で出す（書くのは ✎ の窓）。全文は title 属性
   if (row.memo) {
     const memo = el('p', 'detail-memo');
     memo.append(el('span', 'k', 'メモ'), document.createTextNode(row.memo));
+    memo.title = row.memo;
     inner.append(memo);
   }
   dom.detailHead.append(inner);
+}
+
+/**
+ * 頭の「数値」の絵。右の紙の数値を出す・畳む（右のレールの数値と同じ `setInspector('usage')`）。
+ *
+ * 段階の途中なので、開け閉めの作りは右のレールと同じものを呼ぶだけにしてある。
+ * 押している印（aria-pressed）も同じ `store.inspector` から引く（旗を2つ持たない）。
+ * 頭は作り直されるので `data-refocus` を付ける。
+ *
+ * @returns {HTMLElement}
+ */
+function inspButton() {
+  const def = INSP_DEFS.find((t) => t.id === 'usage');
+  const on = store.inspector === def.id;
+  const btn = el('button', 'ibtn detail-insp');
+  btn.type = 'button';
+  btn.dataset.refocus = 'insp';
+  btn.setAttribute('aria-pressed', String(on));
+  btn.title = on ? `${def.label}を畳む` : `${def.label} — ${def.title}（右に出す）`;
+  btn.setAttribute('aria-label', btn.title);
+  btn.append(icon(def.icon, 16));
+  btn.addEventListener('click', () => setInspector(def.id));
+  return btn;
 }
 
 /**
@@ -769,8 +825,12 @@ function renderDetailInner() {
   RunView.detach();
   RunResume.detach();
   dom.detail.replaceChildren();
+  // 入力欄は詳細ペインの外。どのタブでも、取得に失敗していても同じ場所に留める。
+  // **頭より先に合わせる。** 入力欄が出るかどうかで、頭の次の一手を塗るかが決まる
+  // （画面での位置は頭が1行目・入力欄が2行目。呼ぶ順とは関係ない）
+  const composer = syncComposer(row);
   // 頭は入力欄より前（ペインの1行目）。選んでいないあいだは出すものが無いので畳む
-  renderHead(row);
+  renderHead(row, composer);
   // 右も同じ材料で組み直す。中央だけ差し替えると、選び直したあとも
   // 右に前のセッションの数字が残ったままになる
   dom.inspBody.replaceChildren();
@@ -778,8 +838,6 @@ function renderDetailInner() {
   // 選ぶ前は出すものが無いので閉じる。store.inspector は残しておいて、
   // 選んだら開いた状態で戻る（URL に ?insp= で渡した指定も保たれる）
   applyInspOpen(Boolean(store.inspector) && Boolean(row));
-  // 入力欄は詳細ペインの外。どのタブでも、取得に失敗していても同じ場所に留める
-  syncComposer(row);
 
   // 入口を3つに割る。ひとまとめにすると「選んでいない」「取得中」「取得に失敗した」が
   // すべて同じ空表示になり、存在しない id を開いても何も起きていないように見える

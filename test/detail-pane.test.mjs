@@ -252,3 +252,76 @@ test('答えないと進まない待ちの高さの上限（24rem）は残す', 
   const decls = declsOf('.is-block .md');
   assert.ok(decls.some((d) => d.prop === 'max-height' && d.value === '24rem'), '.is-block .md の 24rem が無い');
 });
+
+/* ── 頭：2つの群と次の一手（段3） ──────────────────────────── */
+
+test('消した頭の部品（題名の横の群 .detail-title・作業フォルダの全文 .path）が戻っていない', () => {
+  const bad = [];
+  for (const r of cssRules()) {
+    for (const s of r.selectors) {
+      if (/\.detail-title\b/.test(s)) bad.push(`${r.file} … ${s}`);
+      if (/\.detail-sub \.path\b/.test(s)) bad.push(`${r.file} … ${s}`);
+    }
+  }
+  const code = detailCode();
+  if (/'detail-title'/.test(code)) bad.push("detail.js … el(…, 'detail-title')");
+  if (/el\('span', 'path'/.test(code)) bad.push("detail.js … el('span', 'path', …)（頭に作業フォルダの全文）");
+  assert.deepEqual(bad, [], `消した頭の部品が残っている:\n  ${bad.join('\n  ')}`);
+});
+
+test('次の一手の判断は next-step.js だけが持つ（頭を組む側は渡された結果を描くだけ）', () => {
+  const head = jsCode(read(path.join(JS_DIR, 'detail-head.js')));
+  // 前は detail-head.js が row.alive && row.pid を見て「ターミナルを前面に」を出していた
+  assert.doesNotMatch(head, /row\.alive/, 'detail-head.js が生きているかを自分で見ている');
+  assert.doesNotMatch(head, /'ターミナル/, 'detail-head.js が一手の名前を持っている（NEXT_STEPS の1か所に置く）');
+  const code = detailCode();
+  assert.equal((code.match(/nextStep\(/g) ?? []).length, 1, 'detail.js が nextStep を呼ぶ場所が1つでない');
+  // パレットの「ターミナルを前面に」も同じ判断を通す（パレットは自分で決めない）
+  const pal = jsCode(read(path.join(JS_DIR, 'palette.js')));
+  assert.match(pal, /canFocusTerminal\(/, 'palette.js が canFocusTerminal を通していない');
+  assert.doesNotMatch(pal, /cur\?\.alive && cur\.pid/, 'palette.js に前の判断（alive && pid）が残っている');
+});
+
+test('頭の右上の絵だけのボタン（☆・✎・数値・コピー）は名前（title と aria-label）と data-refocus を持つ', () => {
+  // 頭は作り直されるので、名前で焦点を拾い直す。絵だけのボタンは名前を外さない
+  const code = detailCode();
+  for (const fn of ['pinButton', 'memoButton', 'inspButton']) {
+    const body = fnBody(code, fn);
+    assert.match(body, /dataset\.refocus = '/, `${fn} に data-refocus が無い`);
+    assert.match(body, /\.title = /, `${fn} に title が無い`);
+    assert.match(body, /setAttribute\('aria-label'/, `${fn} に aria-label が無い`);
+  }
+  const head = jsCode(read(path.join(JS_DIR, 'detail-head.js')));
+  for (const name of ['copy', 'next']) {
+    assert.match(head, new RegExp(`dataset\.refocus = '${name}'`), `detail-head.js の ${name} に data-refocus が無い`);
+  }
+  assert.match(head, /setAttribute\('aria-label', '再開コマンドをコピー'\)/, 'コピーに aria-label が無い');
+});
+
+test('押した結果の一言は節点ではなくモジュールに控える（作り直しで消えない）', () => {
+  const head = jsCode(read(path.join(JS_DIR, 'detail-head.js')));
+  assert.match(head, /let lastHint = /, '一言の控え（lastHint）が無い');
+  assert.match(head, /lastHint\.sessionId === sessionId/, '組み直すときに控えを書き戻していない');
+});
+
+test('メモは1行で切り、全文は title に入れる', () => {
+  const decls = declsOf('.detail-memo');
+  const has = (prop, value) => decls.some((d) => d.prop === prop && d.value === value);
+  assert.ok(has('white-space', 'nowrap'), '.detail-memo が折り返す');
+  assert.ok(has('text-overflow', 'ellipsis'), '.detail-memo に「…」が無い');
+  assert.match(fnBody(detailCode(), 'renderHead'), /memo\.title = row\.memo/, 'メモの全文を title に入れていない');
+  // 列が暗黙の auto だと、切らない字の長さまでペインが窓の外へ伸びる（実測。820px の窓で 900px）
+  assert.ok(
+    declsOf('.detail-pane').some((d) => d.prop === 'grid-template-columns' && d.value === 'minmax(0, 1fr)'),
+    '.detail-pane の列が minmax(0, 1fr) に固定されていない（1行で切ったメモでペインが伸びる）',
+  );
+});
+
+test('置き場所の札は押せないので枠も面も持たない。作業フォルダの全文は右の診断にある', () => {
+  const bad = declsOf('.detail-sub .place')
+    .filter((d) => /^(border|background|box-shadow)/.test(d.prop))
+    .map((d) => `${d.prop}: ${d.value}`);
+  assert.deepEqual(bad, [], `.detail-sub .place に枠か面がある: ${bad.join(' / ')}`);
+  const panels = jsCode(read(path.join(JS_DIR, 'detail-panels.js')));
+  assert.match(fnBody(panels, 'basicsPanel'), /fact\(setup, '作業フォルダ', row\.cwd\)/, '診断に作業フォルダが無い');
+});
