@@ -138,8 +138,9 @@ body {
   --list-toggle-inset: .5rem;
 }
 
-/* 一覧 ＋ 読む面 ＋ 右端のレール。
-   レールの幅は auto にしてボタン側で決める（数字を2箇所に焼き込まない）。
+/* 一覧 ＋ 読む面 ＋（開いているときだけ）右の紙。
+   **右端のレールはやめた**（画面刷新④）。右の紙を開く口は詳細の頭の「数値」の絵、
+   数値と診断の切り替えは紙の頭にある。閉じているあいだ右に幅を取るものは何も無い。
 
    **一覧は列のまま。ただし畳める。** 畳むと列が 0 になり、幅が中央へ渡る。
    オーバーレイで手前に出す形も試したが、開いているあいだ中央が触れなくなるのと、
@@ -153,8 +154,8 @@ body {
    両方立っているときは (0,3,0) の側が要る（.is-archive.is-insp-open と同じ形）。
 
    **子と列の数は開閉のどの組み合わせでも釣り合う。** 作業台の in-flow な子は
-   一覧・詳細・（開いているときだけ）インスペクタ・右のレールで、閉じた2つは 3/3、
-   インスペクタを開いた2つは 4/4（書庫と数値の頭と器は作業台では hidden） */
+   一覧・詳細・（開いているときだけ）右の紙で、紙を閉じた2つは 2/2、
+   紙を開いた2つは 3/3（書庫と数値の頭と器は作業台では hidden） */
 .deck {
   /* .app の2列目・2行目（上の説明） */
   grid-column: 2;
@@ -164,23 +165,23 @@ body {
      狭い窓の引き出し（.list-pane の position: fixed）は窓が基準のままで、ここの影響を受けない */
   position: relative;
   display: grid;
-  grid-template-columns: 0 minmax(0, 1fr) auto;
+  grid-template-columns: 0 minmax(0, 1fr);
   gap: 0;
   min-height: 0;
 }
 
 .is-list-open .deck {
-  grid-template-columns: var(--list-col) minmax(0, 1fr) auto;
+  grid-template-columns: var(--list-col) minmax(0, 1fr);
 }
 
-/* インスペクタが開いたら、中央を削って右に場所を作る。
+/* 右の紙が開いたら、中央を削って右に場所を作る。
    目印を .app に付けているのは .is-list-open と同じ流儀 */
 .is-insp-open .deck {
-  grid-template-columns: 0 minmax(0, 1fr) var(--insp-col) auto;
+  grid-template-columns: 0 minmax(0, 1fr) var(--insp-col);
 }
 
 .is-list-open.is-insp-open .deck {
-  grid-template-columns: var(--list-col) minmax(0, 1fr) var(--insp-col) auto;
+  grid-template-columns: var(--list-col) minmax(0, 1fr) var(--insp-col);
 }
 
 /* 幅を変えるつまみ。列の境目にまたがらせる。
@@ -310,6 +311,23 @@ body {
   background: var(--accent);
 }
 
+/* 吹き出しの見た目（枠・面・影・字）。**左のレールと、右の紙の見出しの印（usage.css の .tip-mark）で
+   ここ1か所に書く。** どちらも「名前や読み方を触れたときに出す」同じ部品で、2か所に書くと片方だけ直した日に
+   別の部品に見える。位置・出し入れ・折り返し・余白と行間は目的が違うので、それぞれの規則に残す
+   （レールは札の右へ出して改行を活かす 1 行ずつの pre、見出しの印は下へ出して見出しの幅で折り返す） */
+.navrail-item[data-tip]::after,
+.navrail-rate[data-tip]::after,
+.tip-mark::after {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-2);
+  color: var(--fg);
+  font-size: var(--fs-1);
+  font-weight: 400;
+  text-align: left;
+}
+
 /* 吹き出し。**title の代わり。** title だと OS の札が遅れて出るうえ、
    キーボードで来た人には出ない。:hover と :focus-visible の両方で出す。
    中身は data-tip（改行を活かすので white-space: pre）。
@@ -322,15 +340,7 @@ body {
   top: 50%;
   z-index: 40;
   padding: .375rem .625rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  background: var(--bg-elev);
-  box-shadow: var(--sh-2);
-  color: var(--fg);
-  font-size: var(--fs-1);
-  font-weight: 400;
   line-height: var(--lh-tight);
-  text-align: left;
   white-space: pre;
   opacity: 0;
   transform: translateY(-50%);
@@ -561,7 +571,8 @@ body {
 .topbar-space { flex: 1; }
 
 /* 起こす。**塗らない普通のボタン**（.btn）。塗った面（.btn.is-lead）は1画面に1つで、
-   それは詳細の次の一手に譲る。絵（plus）だけ --accent にして、
+   それは詳細の次の一手に譲る（入力欄の「送る」「続きを起こす」か、入力欄が無いときだけ
+   頭の「ターミナルで返事をする」「ターミナルで答える」。決めるのは next-step.js）。絵（plus）だけ --accent にして、
    押すと新しいものが生まれることを残す（ラベンダー＝押すもの） */
 .topbar-run {
   display: inline-flex;

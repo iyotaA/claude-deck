@@ -29,7 +29,7 @@
 <link rel="stylesheet" href="css/palette.css">
 <link rel="stylesheet" href="css/archive.css">
 <!-- 骨格を組み替える2枚は隣に並べる。usage.css（描画の部品）とは役目が違い、
-     あちらは詳細ペインの右のインスペクタでも使う -->
+     あちらは詳細ペインの右の紙（インスペクタ）でも使う -->
 <link rel="stylesheet" href="css/usage-mode.css">
 <link rel="stylesheet" href="css/zoom.css">
 <link rel="stylesheet" href="css/narrow.css">
@@ -273,9 +273,9 @@
            ここも 2秒ごとに作り直すが、入力欄を持たないので打ちかけが消える心配は無い。
            中身は detail.js が組む -->
       <header class="detail-head" id="detail-head" hidden></header>
-      <!-- 中央の入力欄。**流れる箱より前に置く。**
-           答えないと進まない待ちをタブ帯より上へ出したので、読む場所（上）と
-           書く場所が離れていた。ここへ置くと「あなたの番 → すぐ下に入力欄」で隣り合う。
+      <!-- 中央の入力欄。**流れる箱より前に置く**（ペインの2行目。頭の直下）。
+           流れる箱の中は タブ帯 → 答えないと進まない待ち → 選んだタブの中身 の順なので、
+           書く場所（ここ）と止まっている待ちの間に挟まるのはタブ帯1本だけになる。
 
            ペインの直下にあることは変えない。詳細ペインは 2秒ごとに丸ごと作り直されるので、
            流れる箱の中へ入れると打ちかけの文が消える。
@@ -286,11 +286,14 @@
       </div>
     </section>
 
-    <!-- 右のインスペクタ。作業しながら横目で見るもの（数値・成果・状態）をここへ寄せる。
+    <!-- 右の紙。作業しながら横目で見るもの（数値・診断）をここへ寄せる。
          閉じているあいだは hidden で丸ごと外し、grid の列も消える。
-         器は作り直さず、中身（#insp-body）だけを差し替える -->
+         器は作り直さず、中身（#insp-body）だけを差し替える。
+         開く口は詳細の頭の「数値」の絵（右のレールはやめた）。数値と診断の切り替えはこの頭に置く。
+         切り替えの見た目は一覧の頭の「すべて｜稼働中」（.live-filter）を借りる。札は detail.js が組む -->
     <aside class="insp" id="insp" aria-label="このセッションの詳しいところ" hidden>
       <div class="insp-head">
+        <div class="live-filter insp-tabs" id="insp-tabs" role="group" aria-label="右に出すもの"></div>
         <h2 id="insp-title"></h2>
         <button class="iclose" id="insp-close" type="button" aria-label="閉じる">&times;</button>
       </div>
@@ -300,10 +303,6 @@
       <button class="splitter" id="split-insp" type="button"
               aria-label="詳しいところの幅を変える。矢印キーでも動かせる（Home で既定に戻る）"></button>
     </aside>
-
-    <!-- 右端のレール。中身は detail.js が組む（並びと語彙を1箇所に持つため）。
-         閉じていても幅は取ったままにする。消すと押すたびに中央の幅が跳ねる -->
-    <nav class="rail" id="rail" aria-label="詳しいところを開く"></nav>
   </main>
 
   <!-- 引き出しの背後を覆う膜。押すと閉じる -->
@@ -608,9 +607,12 @@
             （許可・質問で止まっているものと、返信待ち）がまとまります。その下にピン留め、実行中、終了。
             終了はたたんであり、見出しの右の ＞ で開きます。
             一覧は左上のボタンで開け閉めでき（閉じても同じ場所に残ります）、頭の右の「すべて｜稼働中」で終わったものを隠せます。</p>
-          <p class="settings-hint"><strong>中央の詳細</strong> — 題・メモ・☆ の頭、入力欄、タブ（経過・成果・いま・調査）の順。
-            「拡大」で大きく開けます。</p>
-          <p class="settings-hint"><strong>右のレール</strong> — そのセッションの数値と診断。</p>
+          <p class="settings-hint"><strong>中央の詳細</strong> — 頭、入力欄、タブ（経過・成果・いま・調査）の順。
+            頭の左に題・状態・置き場所、右上に ☆・メモ・数値・再開コマンドのコピーと、次の一手（ターミナルで返事をする など）。
+            答えないと進まないものはタブのすぐ下に、どのタブを見ていても出ます。
+            このセッションの目的は「いま」の先頭にあります。「拡大」で大きく開けます。</p>
+          <p class="settings-hint"><strong>右の紙</strong> — そのセッションの数値と診断。頭の右上の数値の絵で出し入れし、紙の頭で数値と診断を切り替えます。
+            広い窓では最初から開いていて、開け閉めは覚えます。狭い窓では閉じて始まり、下から出ます。</p>
         </section>
 
         <section class="settings-sec">

@@ -19,8 +19,7 @@
 
 .is-archive .list-pane,
 .is-archive .detail-pane,
-.is-archive .insp,
-.is-archive .rail { display: none; }
+.is-archive .insp { display: none; }
 
 /* 探す帯。狭い列に居たころは件数を次の行へ送っていた（list.css の `flex: 1 0 100%`）。
    広い場所では同じ行の右端に置ける。**打ち切りの断りもここに出る**ので、

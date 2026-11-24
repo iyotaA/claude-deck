@@ -254,10 +254,11 @@ export function outcomeBlock(d, { onMore } = {}) {
  * @param {object|null} d 詳細（まだ読めていなければ null）
  */
 export function basicsPanel(row, d) {
-  // 見出しは短い名前。長い説明は紙の側（#insp-title）が持つ。
-  // usagePanel が「何にトークンを使ったか」の紙に「数値」のパネルを置いているのと同じ作法。
-  // 前はどちらも「セッションの状態」で、同じ文字が縦に2つ並んでいた
-  const basics = panel('診断', { id: SEC.basics });
+  // **見出しを付けない**（画面刷新④）。紙の頭に「数値｜診断」の切り替えと題（困ったときに見る値）が
+  // あるので、中に「診断」の見出しを重ねると同じ名前が縦に2つ並ぶ（前は「セッションの状態」が2つ並んでいた）。
+  // 器も枠付きのパネルにしない（紙の中に紙を作らない）。usagePanel と同じ形の .insp-sec
+  const body = el('section', 'insp-sec');
+  body.id = SEC.basics;
 
   // **性質で3つに割る。** 前は17行が同じ濃さで1つの dl に並んでいて、
   // 「いまどうなっているか」の3行が「PID」「セッションID」と同じ重さで埋もれていた。
@@ -274,15 +275,18 @@ export function basicsPanel(row, d) {
   fact(dl, '登録簿の status', row.statusRaw);
   fact(dl, '文脈の量', row.contextTokens ? `${num(row.contextTokens)} tokens` : null);
   if (d) fact(dl, 'やり取りの回数', `${d.digest.stats.turns} 往復 / ツール ${d.digest.stats.toolCalls} 回`);
-  basics.body.append(dl);
+  body.append(dl);
 
-  // この作業がどう設定されているか。替えたくなったら入力欄の上の札から替える
+  // この作業がどう設定されているか。替えたくなったら入力欄の上の札から替える。
+  // **作業フォルダの全文はここに出す。** 頭は置き場所の札（名前だけ・全文は title）に替えたので、
+  // 字で読める場所をここに1つ残す（実行パネルの facts も頭を当てにして落としてある）
   const setup = el('dl', 'facts facts-waits');
+  fact(setup, '作業フォルダ', row.cwd);
   fact(setup, '権限モード', row.permissionMode);
   fact(setup, 'モデル', shortModel(row.model));
   fact(setup, '思考量', row.effort);
   fact(setup, 'ブランチ', row.gitBranch);
-  if (setup.childElementCount > 0) basics.body.append(setup);
+  if (setup.childElementCount > 0) body.append(setup);
 
   // 素性。ふだん読む値ではないので最後に置く
   const id = el('dl', 'facts facts-waits');
@@ -294,7 +298,7 @@ export function basicsPanel(row, d) {
     fact(id, 'ログの大きさ', `${kb(d.log.size)} / ${d.log.entries} 行`);
     if (d.log.parseErrors) fact(id, '読めなかった行', `${d.log.parseErrors} 行`);
   }
-  if (id.childElementCount > 0) basics.body.append(id);
+  if (id.childElementCount > 0) body.append(id);
 
   // 待ちの集計。1つも測れていなければ行も注記も出さない
   const waits = d?.digest?.stats?.waits;
@@ -307,11 +311,11 @@ export function basicsPanel(row, d) {
     fact(wdl, L.reply, Timeline.waitFact(waits.reply));
     fact(wdl, L.tool, Timeline.waitFact(waits.tool));
     if (wdl.childElementCount > 0) {
-      basics.body.append(wdl);
+      body.append(wdl);
       // 注記は必ず添える。数字だけを出すと「迷っていた時間」と読まれる
-      basics.body.append(el('p', 'note', Timeline.WAIT_NOTE));
+      body.append(el('p', 'note', Timeline.WAIT_NOTE));
     }
   }
 
-  return basics.section;
+  return body;
 }

@@ -13,7 +13,8 @@
  * **`run-view.js` と同じ層に置き、あちらを import しない。**
  * 層3どうしで呼び合うと横向きの依存になる。`fillSelect` / `gridRow` は
  * 10行に満たないのでこちらにも持つ（共有するなら層0の `util.js` へ出すことになり、
- * そちらのほうが影響が広い）。あちらの `RUN_OVER` も同じ理由でここに持っている。
+ * そちらのほうが影響が広い）。終わりの語（`RUN_OVER`）は層0 の `run-over.js` から借りる
+ * （前はあちらと同じ理由でここにも書き写していた）。
  *
  * 見た目は新しく作らない。設定モーダルの `.settings-*` と、実行パネルの
  * `.run-ops` / `.run-prompt` / `.run-ops-foot` をそのまま借りる。
@@ -23,9 +24,8 @@ import { panel, SEC } from './panel.js';
 import { runFor, EFFORT_LABELS, MODEL_FREE, modelOptions, modelValue } from './runs.js';
 import { getJson, postJson } from './api.js';
 import { fillSelect, gridRow } from './form-kit.js';
-
-/** これに入っていれば、その run はもう終わっている（`run-view.js` と同じ語彙）。 */
-const RUN_OVER = new Set(['stopped', 'failed', 'done']);
+// これに入っていれば、その run はもう終わっている（`run-view.js` と同じ1つの Set）
+import { RUN_OVER } from './run-over.js';
 
 /** 控えた焦点を戻してよい時間。これを過ぎたら別の操作とみなして戻さない。 */
 const FOCUS_MEMO_MS = 400;

@@ -8,12 +8,17 @@
  *
  * 中央（TAB_DEFS）は「その作業をするのに要るもの」。どれか1つが必ず出ている。
  *
- *   いま … あなたの番 / この画面から起こした実行 / 続きを起こす
+ *   いま … 目的 / 返信待ち / この画面から起こした実行 / 続きを起こす
  *   経過 … 文脈の圧縮 / 時系列 / ここまで
  *   成果 … 決めたこと / TODO / 書き換えたファイル
  *   調査 … サブエージェントの記録
  *
- * 右のインスペクタ（INSP_DEFS）は「作業しながら横目で見るもの」。既定では閉じている。
+ * 流れる箱の並びは タブ帯 → 答えないと進まない待ち（止まっているときだけ・どのタブでも）→
+ * 選んだタブの中身。**タブ帯の上には何も置かない**（長さの変わるものを上に置くと帯が上下する）。
+ *
+ * 右の紙（INSP_DEFS）は「作業しながら横目で見るもの」。広い窓（1281px 以上）では
+ * 覚えた開閉で始まり（既定は開く）、狭い窓では閉じて始まる（insp-open.js）。
+ * 開く口は頭の「数値」の絵、数値と診断の切り替えは紙の頭。
  *
  *   数値 … 何にトークンを使ったか
  *   診断 … 困ったときに見る値
@@ -33,7 +38,8 @@
 import { el, num } from './util.js';
 import { mark } from './perf.js';
 import { icon } from './icons.js';
-import { store, syncQuery, colorOf, toneOf } from './store.js';
+import { store, syncQuery, colorOf, toneOf, LS } from './store.js';
+import { INSP_DEFAULT_TAB } from './insp-open.js';
 import { dom } from './dom.js';
 import { headOf, detailErrorNow } from './rows.js';
 import { panel } from './panel.js';
@@ -47,7 +53,8 @@ import {
 import { agentsPanel } from './agents.js';
 import { isZoomed, toggleZoom, closeZoom } from './zoom.js';
 import { usagePanel } from './usage-panel.js';
-import { runStampFor } from './runs.js';
+import { runFor, runStampFor } from './runs.js';
+import { nextStep } from './next-step.js';
 import * as RunView from './run-view.js';
 import * as RunResume from './run-resume.js';
 import * as Timeline from './timeline/index.js';
@@ -55,8 +62,8 @@ import * as Timeline from './timeline/index.js';
 /**
  * 「いま」のタブに色を付ける状態。
  *
- * **答えないと1行も進まないもの（blocking）はここに無い。** あれはタブ帯より上に
- * 出しているので、どのタブを見ていても本体が見えている。タブに色まで足すと、
+ * **答えないと1行も進まないもの（blocking）はここに無い。** あれはタブ帯の直下に
+ * どのタブでも出しているので、どのタブを見ていても本体が見えている。タブに色まで足すと、
  * 同じことを2箇所で言うことになる。
  *
  * 残しているのは返信待ちだけ。あれは「いま」タブの中にあり、放置しても壊れないが、
@@ -137,7 +144,8 @@ function effectiveTab(d, error) {
  * Claude が返し終えた瞬間、読んでいた画面が勝手に「いま」へ飛ぶ。
  * 行（状態）がまだ届いていなければ決めずに待つ（?session= で開いた直後は一覧が空のことがある）。
  *
- * 答えないと進まない待ち（blocking）はタブ帯より上に出ているので、ここでは見ない
+ * 答えないと進まない待ち（blocking）はタブ帯の直下にどのタブでも出ているので、ここでは見ない
+ * （止まっても倒さない。経過を読んでいるあいだに止まっても、帯のすぐ下に出るので見落とさない）
  *
  * @param {object|null} row 選んでいるセッションの行
  */
@@ -169,21 +177,22 @@ export function pickedTab() {
 }
 
 /**
- * 右のインスペクタの定義。並びがそのままレールの並び。id は store.inspector の値。
+ * 右の紙の定義。並びがそのまま紙の頭の切り替え（数値｜診断）の並び。id は store.inspector の値。
  *
  * 形は TAB_DEFS と同じにしてある。中央と右で組み方を変えると、
  * どちらかに足したときにもう片方の作法を思い出せなくなる。
  *
- * title はインスペクタの見出し。レールのボタンは幅 2.3rem しか無いので短い語を出し、
- * 開いた先で何を見ているのかを言い直す
+ * label は切り替えの札（短い語）、title は紙の見出し（開いた先で何を見ているのかを言い直す）。
+ * **絵は持たない。** 開く口は頭の「数値」の絵1つで、絵は `inspButton` が持つ
+ * （前は右のレールに紙ごとの絵があった。レールをやめて、診断の絵は使う所が無くなった）
  */
 export const INSP_DEFS = [
-  { id: 'usage', label: '数値', icon: 'chart', title: '何にトークンを使ったか' },
+  { id: 'usage', label: '数値', title: '何にトークンを使ったか' },
   // **id は basics のまま。** ?insp=basics は v0.6.0 で配っているので、
   // 名前を変えると配ったブックマークが切れる。替えるのは札と見出しだけ。
   // 「状態」から替えたのは、いまの状態そのもの（あなたの番・返信待ち）は
   // 帯とヘッダに出ていて、ここに残るのが困ったときに見る値だから
-  { id: 'basics', label: '診断', icon: 'info', title: '困ったときに見る値' },
+  { id: 'basics', label: '診断', title: '困ったときに見る値' },
 ];
 
 /**
@@ -421,16 +430,29 @@ function fillTab(stack, ctx) {
     }
 
     default: {
-      // 'now'。何を待っているか → この画面から起こした実行 → 続きを起こす。
-      // if (d) の外なのは、起こした直後はまだ会話ログが1行も無いため
-      // （ログが出るまで何も出ないと、押したのに何も起きていないように見える）
+      // 'now'。目的 → 何を待っているか → この画面から起こした実行 → 続きを起こす。
+      //
+      // **目的（.purpose）は先頭。** 前はタブ帯より上（どのタブでも）に置いていたが、
+      // 長さがセッションごと・時刻ごとに違うのでタブ帯が上下していた。
+      // 「なぜこの作業をしているか・いまどこまで来たか」は、いま何をするかを決める材料なので
+      // 「いま」に置く。読めていない（d が無い）ときは出さない。
+      // 題名を渡すのは、同じ文なら見出しを出さないため（題名は頭に出ている）
+      if (d) add(summaryBlock(d.summary, titleOf(row)));
+
+      // 待ち以下は if (d) の外。起こした直後はまだ会話ログが1行も無いため
+      // （ログが出るまで何も出ないと、押したのに何も起きていないように見える）。
+      // **目的を数えてから空を判断する。** 目的は「あなたの手が要るもの」ではない
       const before = stack.childElementCount;
-      // 答えないと1行も進まない待ちは帯より上に出しているので、ここでは出さない。
+      // 答えないと1行も進まない待ちはタブ帯の直下に出しているので、ここでは出さない。
       // 出すと同じパネルが1画面に2枚並ぶ
       if (row.blocking !== true) add(waitingBlock(row, d));
       add(RunView.runPanel(row.sessionId));
       add(RunResume.resumePanel(row));
-      if (stack.childElementCount === before) none('いまあなたの手が要るものはありません');
+      // 止まっているときは「手が要るものはありません」と言わない。帯の直下に
+      // 答えないと進まない待ちが出ていて、その下で打ち消すことになる
+      if (stack.childElementCount === before && row.blocking !== true) {
+        none('いまあなたの手が要るものはありません');
+      }
       break;
     }
   }
@@ -500,19 +522,16 @@ function applyInspOpen(open) {
 }
 
 /**
- * レールのボタンの状態を合わせる。
+ * 紙の頭の切り替え（数値｜診断）の押している印を合わせる。
  *
  * ボタン自体は initInspector() で1回だけ組む。**毎回作り直さない。**
  * 詳細ペインは他の理由でもよく組み直されるので、そのたびに節点を捨てると
- * キーボードで辿っている途中の focus が飛ぶ
- *
- * @param {object|null} row 選んでいるセッション（無ければ null）
+ * キーボードで辿っている途中の focus が飛ぶ（紙は詳細ペインの外なので作り直しに巻き込まれない）。
+ * **旗を2つ持たない** … 正は store.inspector の1つで、ここはその写し
  */
-function syncRail(row) {
-  for (const b of dom.rail.querySelectorAll('.rail-btn')) {
+function syncInspTabs() {
+  for (const b of dom.inspTabs.querySelectorAll('button')) {
     b.setAttribute('aria-pressed', store.inspector === b.dataset.insp ? 'true' : 'false');
-    // 出す中身がまだ無いので押させない。**隠さない**（列の幅が変わって中央が跳ねる）
-    b.disabled = !row;
   }
 }
 
@@ -538,42 +557,69 @@ function renderInspector(ctx) {
   dom.inspBody.append(stack);
 }
 
+/** 最後に開いていた紙。頭の「数値」の絵で開き直すときに同じものを出す（覚えるのはこの窓のあいだだけ） */
+let lastInsp = store.inspector ?? INSP_DEFAULT_TAB;
+
 /**
- * 右のインスペクタを開く／閉じる。
+ * 右の紙の状態を変える。**人が開け閉めした経路は全部ここを通る**（頭の絵・紙の頭の × と切り替え・
+ * パレット）。開閉を `localStorage` に覚えるのもここ1か所（一覧の開閉の `setListOpen` と同じ扱い）。
+ * 始めの値（URL・覚えた値・窓の広さ）は通らない ―― あれは復元で、人の操作ではない。
  *
- * 同じものを押したら閉じる。レールは開く口と閉じる口を兼ねている
- *
- * @param {string|null} id INSP_DEFS の id。null で閉じる
+ * @param {string|null} next INSP_DEFS の id。null で閉じる
  */
-export function setInspector(id) {
-  store.inspector = store.inspector === id ? null : id;
+function applyInspector(next) {
+  store.inspector = next;
+  if (next) lastInsp = next;
+  localStorage.setItem(LS.inspOpen, next ? '1' : '0');
   syncQuery();
   renderDetail();
 }
 
 /**
- * レールを組んで、閉じるボタンを配線する。起動時に1回だけ呼ぶ。
+ * 右の紙を指定して開く／閉じる。**同じものを指したら閉じる**（パレットの「右の枠に出す／畳む」）。
  *
- * レールは詳細の中身ではなく画面の枠なので、セッションを選んでいなくても出したままにする。
- * 選ぶまでは押せない（syncRail が disabled を当てる）
+ * @param {string|null} id INSP_DEFS の id。null で閉じる
+ */
+export function setInspector(id) {
+  applyInspector(store.inspector === id ? null : id);
+}
+
+/**
+ * 右の紙を開け閉めする（頭の「数値」の絵）。開くときは最後に見ていた紙を出す。
+ *
+ * 開く口と閉じる口を兼ねる。狭い窓（860px 以下）の下から出る紙でも同じで、
+ * 頭は紙の上に見えたままなので、押した場所でそのまま閉じられる
+ */
+export function toggleInspector() {
+  applyInspector(store.inspector ? null : lastInsp);
+}
+
+/**
+ * 紙の頭の切り替え（数値｜診断）と × を配線する。起動時に1回だけ呼ぶ。
+ *
+ * 切り替えの見た目は一覧の頭の「すべて｜稼働中」（`.live-filter`）を借りる。
+ * 押せる切り替えなので面と影で浮かせる段（①②で決めたもの）で、**新しい見た目を作らない**。
+ * 札の名前は INSP_DEFS から組む（index.html に書き写さない）。
+ * 押している側をもう一度押しても何もしない（切り替えで紙を閉じない。閉じる口は × と頭の絵）
  */
 export function initInspector() {
   for (const t of INSP_DEFS) {
-    const b = el('button', 'rail-btn');
+    const b = el('button', null, t.label);
     b.type = 'button';
     b.dataset.insp = t.id;
-    b.disabled = true;
+    b.title = t.title;
     b.setAttribute('aria-pressed', 'false');
-    // **絵だけにする。** 縦のレールに字を積むと1文字ずつ折り返すか、
-    // レールそのものを広げることになる。名前は title と aria-label に残るので、
-    // 触れば出るし読み上げにも乗る（上のバーの再読み込みと同じ流儀）
-    b.append(icon(t.icon, 17));
-    b.title = `${t.label} — ${t.title}`;
-    b.setAttribute('aria-label', b.title);
-    b.addEventListener('click', () => setInspector(t.id));
-    dom.rail.append(b);
+    b.addEventListener('click', () => {
+      if (store.inspector !== t.id) applyInspector(t.id);
+    });
+    dom.inspTabs.append(b);
   }
-  dom.inspClose.addEventListener('click', () => setInspector(null));
+  // × で閉じたら焦点を頭の「数値」の絵（開く口）へ戻す。× は紙ごと hidden になるので、
+  // 何もしないと焦点が body へ落ち、キーボードで開き直すのに頭まで辿り直すことになる
+  dom.inspClose.addEventListener('click', () => {
+    applyInspector(null);
+    document.querySelector('[data-refocus="insp"]')?.focus();
+  });
 }
 
 /**
@@ -588,7 +634,11 @@ export function initInspector() {
  * （「この実行はもう終わっています」の死んだ入力欄）ので、後ろに回さないと
  * 押せる「続きを起こす」が押せない欄に隠れる。
  *
+ * 入力欄が出たかどうかを返す。頭の次の一手が「塗るか」を決めるのに使う
+ * （入力欄には塗った「送る」「続きを起こす」があるので、出ていれば頭は塗らない）。
+ *
  * @param {object|null} row 一覧の行と同じ形のもの
+ * @returns {boolean} 入力欄を出したか
  */
 function syncComposer(row) {
   const node = row
@@ -600,6 +650,7 @@ function syncComposer(row) {
     if (node) dom.composer.append(node);
   }
   dom.composer.hidden = !node;
+  return Boolean(node);
 }
 
 /**
@@ -638,21 +689,36 @@ function titleOf(row) {
  * （作り直しで打ちかけが消える）ので、頭のほうを流れる箱の外へ出した。
  *
  * 頭は流れないので、**場所を取りすぎないように詰める。**
- * 題名は2行で切り（全文は title 属性）、状態・場所・ボタンは1行に並べる。
+ *
+ * 並びは手本のモックどおり2つの群（画面刷新④）。
+ *
+ *   左   … 題名（2行で切る。全文は title 属性）と、その下に状態の札・置き場所の札
+ *   右上 … ☆・✎・数値・再開コマンドのコピー（ここまで絵だけ）と次の一手、押した結果の一言
+ *
+ * メモは群の下に1行で切って出す（全文は title 属性）。200字まで入るので、
+ * 切らないと頭が数行に伸びてタブ帯が下がる。
+ *
+ * 押すものを右上へまとめたのは、題名の長さで位置が動かないようにするため
+ * （前は ☆・✎ が題名の右、ほかのボタンが状態の行の右で、2か所に割れていた）。
+ * 拡大はタブ帯の右端のまま（帯ごと拡大する口なので、帯に置く）。
+ *
+ * **次の一手の判断はここに書かない。** `next-step.js`（層0）の `nextStep` が決める。
+ * 渡す材料は、画面から起こした実行の状態（`runFor`）と、入力欄が出ているか。
  *
  * @param {object|null} row 一覧の行と同じ形のもの
+ * @param {boolean} composer 入力欄が出ているか（出ていれば頭は塗らない）
  */
-function renderHead(row) {
+function renderHead(row, composer) {
   dom.detailHead.replaceChildren();
   dom.detailHead.hidden = !row;
   if (!row) return;
 
   const inner = el('div', 'detail-head-in');
-  const top = el('div', 'detail-title');
+  const top = el('div', 'dh');
+  const main = el('div', 'dh-main');
   const title = el('h2', null, titleOf(row));
   title.title = titleOf(row);
-  top.append(title, pinButton(row), memoButton(row));
-  inner.append(top);
+  main.append(title);
 
   const line = el('div', 'detail-sub');
   // stateLabel が無いときに空の .state を出すと、色の点だけが残って意味を持たない
@@ -666,20 +732,58 @@ function renderHead(row) {
     if (row.run?.state === 'budget') state.dataset.mark = 'budget';
     line.append(state);
   }
-  if (row.cwd) {
-    const path = el('span', 'path', row.cwd);
-    path.title = row.cwd;
-    line.append(path);
+  // 置き場所の札。**作業フォルダの全文は出さない**（title に入れる）。長いパスが1行を食い、
+  // 次の一手と同じ行で取り合っていた。全文は右の紙の「診断」にもある。
+  // 押せないので枠も面も持たせない（押せないものに枠と面を持たせない）
+  const place = row.project ?? row.cwd;
+  if (place) {
+    const tag = el('span', 'place');
+    tag.append(icon('folder', 13), el('span', null, place));
+    tag.title = row.cwd ?? place;
+    line.append(tag);
   }
-  line.append(detailActions(row));
-  inner.append(line);
-  // メモは事実の1行の下に、そのまま見せる（書くのは ✎ の窓）
+  main.append(line);
+
+  const step = nextStep(row, { runState: runFor(row.sessionId)?.state ?? null, composer });
+  const act = el('div', 'detail-actions');
+  act.append(pinButton(row), memoButton(row), inspButton(), ...detailActions(row, step));
+  top.append(main, act);
+  inner.append(top);
+
+  // メモは群の下に1行で出す（書くのは ✎ の窓）。全文は title 属性
   if (row.memo) {
     const memo = el('p', 'detail-memo');
     memo.append(el('span', 'k', 'メモ'), document.createTextNode(row.memo));
+    memo.title = row.memo;
     inner.append(memo);
   }
   dom.detailHead.append(inner);
+}
+
+/**
+ * 頭の「数値」の絵。**右の紙を開く口と閉じる口を兼ねる**（`toggleInspector`）。
+ *
+ * 前は右端のレールに数値と診断の絵が縦に並んでいて、そちらが開く口だった。
+ * レールをやめて、開く口はここ1つ、数値と診断の切り替えは紙の頭に置いた（画面刷新④）。
+ * 狭い窓（860px 以下）の下から出る紙でも、頭は紙の上に見えたままなので同じ口で足りる。
+ *
+ * 押している印（aria-pressed）は「紙が開いているか」。`store.inspector` から引く（旗を2つ持たない）。
+ * 頭は作り直されるので `data-refocus` を付ける。
+ *
+ * @returns {HTMLElement}
+ */
+function inspButton() {
+  const on = Boolean(store.inspector);
+  const btn = el('button', 'ibtn detail-insp');
+  btn.type = 'button';
+  btn.dataset.refocus = 'insp';
+  btn.setAttribute('aria-pressed', String(on));
+  btn.title = on ? '数値と診断を畳む' : '数値と診断を右に出す';
+  btn.setAttribute('aria-label', btn.title);
+  // 絵は数値の形（chart）。開く口は1つで、診断もここから開く（紙の頭で切り替える）
+  btn.append(icon('chart', 16));
+  btn.addEventListener('click', () => toggleInspector());
+  return btn;
 }
 
 /**
@@ -752,17 +856,19 @@ function renderDetailInner() {
   RunView.detach();
   RunResume.detach();
   dom.detail.replaceChildren();
+  // 入力欄は詳細ペインの外。どのタブでも、取得に失敗していても同じ場所に留める。
+  // **頭より先に合わせる。** 入力欄が出るかどうかで、頭の次の一手を塗るかが決まる
+  // （画面での位置は頭が1行目・入力欄が2行目。呼ぶ順とは関係ない）
+  const composer = syncComposer(row);
   // 頭は入力欄より前（ペインの1行目）。選んでいないあいだは出すものが無いので畳む
-  renderHead(row);
+  renderHead(row, composer);
   // 右も同じ材料で組み直す。中央だけ差し替えると、選び直したあとも
   // 右に前のセッションの数字が残ったままになる
   dom.inspBody.replaceChildren();
-  syncRail(row);
+  syncInspTabs();
   // 選ぶ前は出すものが無いので閉じる。store.inspector は残しておいて、
   // 選んだら開いた状態で戻る（URL に ?insp= で渡した指定も保たれる）
   applyInspOpen(Boolean(store.inspector) && Boolean(row));
-  // 入力欄は詳細ペインの外。どのタブでも、取得に失敗していても同じ場所に留める
-  syncComposer(row);
 
   // 入口を3つに割る。ひとまとめにすると「選んでいない」「取得中」「取得に失敗した」が
   // すべて同じ空表示になり、存在しない id を開いても何も起きていないように見える
@@ -795,24 +901,23 @@ function renderDetailInner() {
   const wrap = el('div', 'detail');
   const d = store.detail?.sessionId === store.selected ? store.detail : null;
 
-  // なぜこの作業をしているか。どのタブを見ていても要るので、帯より上に置く。
-  // 題名を渡すのは、同じ文なら見出しを出さないため（題名は頭に出ている）
-  if (d) {
-    const summary = summaryBlock(d.summary, titleOf(row));
-    if (summary) wrap.append(summary);
-  }
-
   const ctx = { row, d, error, tab: effectiveTab(d, error) };
 
-  // **答えないと1行も進まない待ちは、タブ帯より上に出す。**
-  // 既定のタブを「経過」にしたので、ここに置かないと止まっていることが
-  // タブの向こうに隠れる。判断は row.blocking だけ（headingOf と同じ出どころ）
+  // **タブ帯は流れる箱の先頭。上に何も置かない。** 前は目的（.purpose）と
+  // 答えないと進まない待ちを帯より上に置いていたので、その長さ（待ちは Markdown で
+  // 24rem まで）でタブ帯が上下し、押す位置がセッションごと・時刻ごとに変わっていた。
+  // 目的は「いま」タブの先頭へ移した（fillTab）
+  wrap.append(tabBar(ctx));
+
+  // **答えないと1行も進まない待ちは、タブ帯の直下に、どのタブでも出す。**
+  // 既定のタブは「経過」なので、「いま」タブの中へ入れると止まっていることが
+  // タブの向こうに隠れる（倒すのは返信待ちを選んだ最初の1回だけ。settleAutoNow）。
+  // 帯の直下なら、どのタブを見ていても帯のすぐ下に出ていて、帯の位置も動かない。
+  // 判断は row.blocking だけ（headingOf と同じ出どころ）。「いま」の中では出さない（fillTab）
   if (row.blocking === true) {
     const wait = waitingBlock(row, d);
     if (wait) wrap.append(wait);
   }
-
-  wrap.append(tabBar(ctx));
 
   const stack = el('div', 'stack');
   // 全文が無いと何も組めないタブ。既存の取得中・失敗の表示へ倒す

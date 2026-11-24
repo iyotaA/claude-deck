@@ -12,8 +12,8 @@
  * 要求カードは正反対。追記されない。答えたら消える。守るべき状態は
  * 「送信中の askId」1つだけ。混ぜると `applyEnabled()` の `ops.busy || ops.over` に
  * 性質の違う4つ目が入り、`setBusy(true)` が要求カードのボタンまで殺すかどうかの
- * 判断が毎回要ることになる。`run-resume.js` が `run-view.js` を import せず
- * `RUN_OVER` をあえて重複させているのと同じ線。
+ * 判断が毎回要ることになる。`run-resume.js` が `run-view.js` を import しないのと同じ線
+ * （共通で要る終わりの語 `RUN_OVER` は、どちらも層0 の `run-over.js` から借りる）。
  *
  * ## 要求は「行」から読む。速報からは読まない
  *
@@ -42,27 +42,28 @@ import { bodyText } from './timeline/index.js';
 import { panel, SEC } from './panel.js';
 import { runFor } from './runs.js';
 import { postJson } from './api.js';
+// 子がもういない状態。**`run-view.js` から借りない**（同じ層3どうしで向きを作ると依存が1本増える）。
+// 層0 の1か所に置いてあるので、下向きの import で済む
+import { RUN_OVER } from './run-over.js';
 
 /**
- * 子がもういない状態。
+ * 聞かれ方ごとの見出し（何を決めるのか）。
  *
- * **`run-view.js` から import しない。** あちらとこちらは層が同じで、
- * 向きを作ると層3の中に依存が1本増える。`run-resume.js` が同じ判断をしている。
+ * **案内文は持たない。** 前は見出しの下に「このツールを実行してよいかを決めてください」の
+ * ような1行を添えていたが、見出しと同じことを言うだけだった（`detail-wait.js` の
+ * `WAIT_GUIDE` と同じ扱い）。要求が複数のときの「すべて答えるまで…」は件数の情報なので残す。
  */
-const RUN_OVER = new Set(['stopped', 'failed', 'done']);
-
-/** 聞かれ方ごとの、見出しと「何を決めるのか」。 */
 const ASK_GUIDE = {
-  plan: { title: 'プランを承認する', lead: 'この計画で進めてよいかを決めてください' },
-  question: { title: '質問に答える', lead: '選択肢を選ぶまで、この先へ進みません' },
-  tool: { title: '実行を許可する', lead: 'このツールを実行してよいかを決めてください' },
+  plan: { title: 'プランを承認する' },
+  question: { title: '質問に答える' },
+  tool: { title: '実行を許可する' },
 };
 
 /**
  * 権限モードの言い方。ボタンの括弧に出す。
  *
- * `spec.mjs` の `PERMISSION_MODE_LABELS` とわざと重複させている（`RUN_OVER` と同じ切り方。
- * ここへ配るために `run-view.js` の選択肢を借りると向きができる）。
+ * `spec.mjs` の `PERMISSION_MODE_LABELS` とわざと重複させている（サーバーの語は画面から
+ * import できない。ここへ配るために `run-view.js` の選択肢を借りると層3の中に向きができる）。
  * **括弧の中まで同じ言い方に揃える。** 片方だけ直すと、同じ語に別の説明が付く。
  */
 const THEN_LABELS = {
@@ -447,7 +448,6 @@ export function askBlock(row) {
   // 許可要求は定義上いつも「答えないと1行も進まない」ので、`row.blocking` を見ない。
   // このカードは台帳から直に組むので、一覧の行がまだ来ていない時期でも出る
   p.section.classList.add('is-block');
-  p.body.append(el('p', 'note', guide.lead));
   if (asks.length > 1) {
     p.body.append(el('p', 'settings-hint', 'すべて答えるまで、この先へ進みません。'));
   }

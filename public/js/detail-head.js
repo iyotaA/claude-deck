@@ -1,7 +1,8 @@
-/* 詳細ペインの頭。パネルを積むより前に出るもの。
+/* 詳細ペインの、パネルを使わない部品。
  *
- * 層1。操作ボタンと「なぜこの作業をしているか」の2つ。
+ * 層1。操作ボタン（頭に出す）と「なぜこの作業をしているか」（「いま」タブの先頭に出す）の2つ。
  * どちらもパネル（panel()）を使わないので、ここは util.js しか見ない。
+ * どこに置くかは detail.js が決める（目的は前は頭のすぐ下＝タブ帯より上だった）。
  */
 import { el, stamp } from './util.js';
 import { icon } from './icons.js';
@@ -32,50 +33,131 @@ export async function focusTerminal(pid) {
 }
 
 /**
- * 詳細の操作ボタン。
+ * 押した結果の一言。**節点ではなくここに持つ。**
+ *
+ * 頭は `detailKeyOf()` が動くたびに作り直されるので（動いているセッションでは数秒おき）、
+ * 一言を節点にだけ書くと、読む前に消える。セッションごとに1つ控えて、組み直すたびに書き戻す。
+ *
+ * **控えるのは `HINT_MS` のあいだだけ。** 期限が無いと「コピーしました」が、同じセッションの
+ * 作り直しのたびに何分経っても出続ける（押したことへの返事で、ずっと言い続ける話ではない）。
+ * **別のセッションへ移ったら消す**（他人の結果を出さない。戻ってきたときにも出さない）。
+ */
+let lastHint = { sessionId: null, text: '' };
+/** いま画面に出ている一言の節点と、そのセッション。await のあいだに組み直されても新しいほうへ書く */
+let hintNode = null;
+let hintSession = null;
+/** 一言を消すタイマー。言い直すたびに数え直す */
+let hintTimer = null;
+
+/** 押した結果の一言を出しておく時間。読むには足り、次に押すまで残らない長さ */
+const HINT_MS = 5000;
+
+/** 控えと、いま出ている一言を消す */
+function clearHint() {
+  clearTimeout(hintTimer);
+  hintTimer = null;
+  lastHint = { sessionId: null, text: '' };
+  if (hintNode?.isConnected) hintNode.textContent = '';
+}
+
+/**
+ * 一言を控えて、いま出ている節点にも書く。期限が来たら消す。
+ *
+ * **返事が着いたときに別のセッションへ移っていたら控えない**（窓を前に出す返事は待つことがある）。
+ * 控えると、期限内に戻ってきたとき前の結果が出る。
+ *
+ * @param {string} sessionId 押したときのセッション
+ * @param {string} text
+ */
+function sayHint(sessionId, text) {
+  if (hintSession !== sessionId) return;
+  lastHint = { sessionId, text };
+  if (hintNode?.isConnected) hintNode.textContent = text;
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(clearHint, HINT_MS);
+}
+
+/**
+ * 詳細の頭の右上に並べる操作のうち、ここが組むもの（コピー・次の一手・押した結果の一言）。
+ *
+ * ☆・✎・数値は `detail.js` が組んで前に並べる（ピンとメモは層2の `marks.js`、
+ * 数値は右の紙の開け閉めで、どれも層1のここからは呼べない）。
  *
  * 指示を送り込むことはしない（非公開の仕組みに乗ると壊れやすい）。
  * 窓を前面に出すところまでやって、あとは本人が打つ。それで用は足りる。
+ *
+ * 作り直しで消えても焦点が戻るよう、押せるものには `data-refocus` を付ける
+ * （拾い直すのは `detail.js` の `renderDetail`）。
+ *
+ * @param {object} row 一覧の行と同じ形のもの
+ * @param {{kind: string, label: string, title: string, lead: boolean}|null} step
+ *   次の一手（`next-step.js` の `nextStep` が決める）。出さないなら null
+ * @returns {HTMLElement[]} 右上の群へ並べる順の節点
  */
-export function detailActions(row) {
-  const box = el('div', 'detail-actions');
-  const hint = el('span', 'hint');
+export function detailActions(row, step) {
+  const out = [];
+  const sessionId = row.sessionId;
+  // 別のセッションへ移ったら、前の一言は期限の前でも捨てる
+  if (lastHint.sessionId !== null && lastHint.sessionId !== sessionId) clearHint();
 
-  if (row.alive && row.pid) {
-    const focus = el('button', 'btn', 'ターミナルを前面に');
-    focus.type = 'button';
-    // 絵は文字の前。上のバーの「起こす」（icon('plus') を prepend）と同じ並び
-    focus.prepend(icon('front', 14));
-    focus.addEventListener('click', async () => {
-      focus.disabled = true;
-      hint.textContent = '呼んでいます…';
-      hint.textContent = await focusTerminal(row.pid);
-      focus.disabled = false;
-    });
-    box.append(focus);
-  }
-
-  // 終了したセッションを開き直すときのコマンド。cwd を間違えると別のログになるので一緒に渡す
-  if (row.sessionId) {
-    const copy = el('button', 'btn', '再開コマンドをコピー');
-    copy.type = 'button';
-    copy.prepend(icon('copy', 14));
+  // 終了したセッションを開き直すときのコマンド。cwd を間違えると別のログになるので一緒に渡す。
+  // **絵だけにする**（どの場面でも出るので、字を持たせると次の一手より目立つ）。
+  // 名前は title と aria-label が持ち、title には中身のコマンドも添える（押す前に読める）
+  if (sessionId) {
     const command = row.cwd
-      ? `cd "${row.cwd}"; claude --resume ${row.sessionId}`
-      : `claude --resume ${row.sessionId}`;
+      ? `cd "${row.cwd}"; claude --resume ${sessionId}`
+      : `claude --resume ${sessionId}`;
+    const copy = el('button', 'ibtn detail-copy');
+    copy.type = 'button';
+    copy.dataset.refocus = 'copy';
+    copy.setAttribute('aria-label', '再開コマンドをコピー');
+    copy.title = `再開コマンドをコピー\n${command}`;
+    copy.append(icon('copy', 15));
     copy.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(command);
-        hint.textContent = 'コピーしました';
+        sayHint(sessionId, 'コピーしました');
       } catch {
-        hint.textContent = command;
+        // 書き込めないときはコマンドそのものを出す（手で選んでコピーできる）
+        sayHint(sessionId, command);
       }
     });
-    box.append(copy);
+    out.push(copy);
   }
 
-  box.append(hint);
-  return box;
+  // 次の一手。押したときにやることは3つとも同じ（窓を前面に出す）。
+  // **塗るかどうかは step.lead が決める**（入力欄があれば塗らない。1画面に塗った面は1つ）
+  if (step) {
+    const go = el('button', step.lead ? 'btn is-lead' : 'btn', step.label);
+    go.type = 'button';
+    go.dataset.refocus = 'next';
+    go.title = step.title;
+    // 絵は文字の前。上のバーの「起こす」（icon('plus') を prepend）と同じ並び
+    go.prepend(icon('front', 14));
+    // 二度押しは旗で止める。**disabled にしない** … 押せなくした瞬間に焦点が body へ落ち、
+    // 作り直しの拾い直し（data-refocus）が効かなくなる（☆ と同じ。実測）
+    let busy = false;
+    go.addEventListener('click', async () => {
+      if (busy) return;
+      busy = true;
+      go.setAttribute('aria-busy', 'true');
+      sayHint(sessionId, '呼んでいます…');
+      sayHint(sessionId, await focusTerminal(row.pid));
+      busy = false;
+      go.removeAttribute('aria-busy');
+    });
+    out.push(go);
+  }
+
+  // 押した結果の一言は残す（補足ではなく、押したことへの返事）。
+  // 読み上げにも届くよう polite で知らせる（コピーは絵だけなので、字の返事がここにしか無い）
+  const hint = el('span', 'hint');
+  hint.setAttribute('aria-live', 'polite');
+  if (lastHint.sessionId === sessionId) hint.textContent = lastHint.text;
+  hintNode = hint;
+  hintSession = sessionId;
+  out.push(hint);
+  return out;
 }
 
 /**
@@ -98,10 +180,14 @@ function sameText(a, b) {
 }
 
 /**
- * 「なぜこの作業をしているか」を先頭に畳んで置く。
+ * 「なぜこの作業をしているか」を「いま」タブの先頭に畳んで置く。
  *
  * 下のパネルを読めば分かることでも、切り替えのたびに読み下すのは重い。
  * 目的と直近の判断だけを最初に見せて、続きは下で追えるようにする。
+ *
+ * **置き場所を決めるのは detail.js の fillTab。** 前はタブ帯より上（どのタブでも）に
+ * 置いていたが、長さが変わるのでタブ帯が上下した。名前の「頭」は層の話（パネルを
+ * 使わない部品）で、置き場所は流れる箱の中の「いま」タブ
  */
 export function summaryBlock(summary, title = null) {
   if (!summary || summary.source === 'error') return null;
@@ -132,7 +218,8 @@ export function summaryBlock(summary, title = null) {
   if (summary.points?.length) {
     const dl = el('dl', 'purpose-points');
     for (const p of summary.points) {
-      // 待ちの中身はすぐ下の「あなたの番」で大きく出すので、ここでは繰り返さない。
+      // 待ちの中身は待ちのパネル（止まっていればタブ帯の直下、返信待ちならこのすぐ下）で
+      // 大きく出すので、ここでは繰り返さない。
       // 要約データ側からは消さない（画面を持たない使い道でも状態が読めるように）
       if (p.label === '待っているもの') continue;
       dl.append(el('dt', null, p.label));

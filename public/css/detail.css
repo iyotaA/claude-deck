@@ -1,17 +1,17 @@
 /* ClaudeDeck ── 詳細ペイン（中央）と右のインスペクタ
  *
  * 中央のタブ・パネルの器・待ちの中身・判断の記録・facts・本文の見た目、
- * それと右のインスペクタと、それを開閉するレール。
+ * それと右の紙（インスペクタ）。開く口は詳細の頭の「数値」の絵で、右端のレールはやめた。
  */
 
 /* ------------------------------------------------------------ 詳細（中央） */
 
-/* 詳細ペインは2段。上が流れる箱、下が留まる入力欄。
-   スクロールを内側（.detail-scroll）に持たせているのは、入力欄を一緒に流したくないため。
-   中身がどれだけ長くても手元は動かない */
-/* 留まる入力欄（1行目）＋ 流れる箱（2行目）。
-   入力欄が上なのは、答えないと進まない待ちをタブ帯より上へ出したため。
-   読む場所と書く場所を隣り合わせにする。
+/* 詳細ペインは3段。頭（1行目）→ 留まる入力欄（2行目）→ 流れる箱（3行目）。
+   スクロールを内側（.detail-scroll）に持たせているのは、頭と入力欄を一緒に流したくないため。
+   中身がどれだけ長くても、題名と手元は動かない。
+
+   流れる箱の中は タブ帯（先頭・sticky）→ 答えないと進まない待ち → 選んだタブの中身。
+   入力欄を流れる箱の上に置くので、書く場所と止まっている待ちの間に挟まるのはタブ帯1本だけ。
 
    **縦の予算は動いていない。** 入力欄はもともと固定部だったので、
    上下を入れ替えても中身に残る高さは同じ（実測で 869px のまま） */
@@ -21,11 +21,16 @@
      **頭を入力欄より前に置く。** 前は頭が流れる箱の中にあり、入力欄の下に来ていた
      （続きを起こす欄が題名より上に出た。UI レビューの F5） */
   grid-template-rows: auto auto minmax(0, 1fr);
+  /* **列を minmax(0, 1fr) に固定する。** 書かないと暗黙の列（auto）になり、
+     中身の折り返せない幅（min-content）まで列が広がる。頭のメモを1行で切った
+     （white-space: nowrap）ら、その全文の長さまでペインが窓の外へ伸びた（実測。820px の窓で 900px）。
+     固定すれば、切る指定（overflow / text-overflow）が本来の幅で効く */
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
 }
 
 /* 詳細の頭。流れないので、**場所を取りすぎないように詰める**
-   （題名は2行まで、状態・場所・ボタンは1行）。
+   （題名は2行まで、札は1行、メモは1行。押すものは右上の群に寄せる。並びは下の .dh）。
    読む幅の上限は中身（.detail）・入力欄（.composer-in）と同じ --read-max で揃える。
    左右の余白も流れる箱（.detail-scroll）と同じ 1.3rem。
    display を宣言したので [hidden] を必ず添える */
@@ -85,33 +90,65 @@
   text-align: center;
 }
 
-/* 題名と、その横のピン（☆）とメモ（✎）。ボタンは題名の1行目の高さに揃える */
-.detail-title {
+/* 頭の2つの群。左に題名と札（.dh-main）、右上に押すもの（.detail-actions）。
+   手本のモックの .dh と同じ組み方で、狭くなったら右の群が題名の下へ折り返す。
+
+   **左の群が先に幅を取る**（flex-grow 999）。右の群は中身なりの幅で、
+   題名が短くても長くても右上の位置が変わらない（押す場所が毎回同じところにある）。
+   20rem は題名が2行に収まって読める下限の目安 */
+.dh {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
-  gap: .25rem;
+  gap: .5rem 1rem;
 }
 
-.detail-title h2 { flex: 1; min-width: 0; }
+.dh-main {
+  flex: 999 1 20rem;
+  min-width: 0;
+}
 
-.detail-title .ibtn { flex: none; margin-top: .15rem; }
+/* 頭の「数値」の絵は右の紙の開け閉めの切り替え。開いているあいだは面で浮かせる
+   （紙の頭の切り替え .live-filter の押している側と同じ段。止まった絵で開閉が分かるように）。
+   **ラベンダーにしない** … 頭には塗った次の一手があり、同じ色の強い場所を増やさない。
+   前は右のレールの絵が押している印（枠・面・--accent の字）を持っていた */
+.detail-insp[aria-pressed="true"] {
+  background: var(--bg-hi);
+  color: var(--fg);
+  box-shadow: var(--sh-1);
+}
 
 /* ピンが付いているときは星を塗る。色は強調（--accent）。状態色は使わない */
 .detail-pin.is-pinned { color: var(--accent); }
 .detail-pin.is-pinned .icon path { fill: currentColor; }
 
-/* メモ。事実の1行の下に、そのまま見せる。書くのは ✎ の窓（marks.js） */
+/* メモ。事実の1行の下に、そのまま見せる。書くのは ✎ の窓（marks.js）。
+
+   **面を沈めて、枠は持たせない。** 読むだけで押せないので、`.settings-read` /
+   `.usage-read` と同じ「沈めた面」の段に置く（押せないものに枠を持たせない）。
+   頭の地は --bg なので、--bg-sunk の塊は1段明るく見える（名前で明暗を決めつけない）。
+   角は --r-sm。1行の高さに --r-md を当てると、押せるものの形（ピル型）に寄る。
+
+   **1行で切る**（全文は title 属性。detail.js の renderHead）。メモは 200 字まで入るので、
+   切らないと頭が数行に伸び、その下のタブ帯がメモの長さで上下する */
 .detail-memo {
-  margin: .35rem 0 0;
+  margin: .45rem 0 0;
+  padding: .35rem .6rem;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
   font-size: var(--fs-1);
   color: var(--fg-muted);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+/* 札「メモ」。**ラベンダーにしない。** あれは押すもの・あなたの番・選んでいる場所の色で、
+   メモはどれでもない（1色に役は1つ）。本文（--fg-muted）より1段沈めて札だと分からせる */
 .detail-memo .k {
   margin-right: .45rem;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--fg-faint);
 }
 
 /* 題名は2行で切る。全文は title 属性（detail.js の renderHead）。
@@ -128,8 +165,7 @@
   overflow: hidden;
 }
 
-/* 状態・場所・ボタンの1行。ボタンは右へ寄せ、場所は長ければ「…」で切る
-   （全文は title 属性）。狭い窓では折り返して2行になる */
+/* 題名の下の札の1行（状態・置き場所）。狭い窓では折り返す */
 .detail-sub {
   display: flex;
   flex-wrap: wrap;
@@ -138,6 +174,28 @@
   font-size: var(--fs-1);
   color: var(--fg-muted);
 }
+
+/* 置き場所の札（row.project。全文の作業フォルダは title 属性と右の「診断」）。
+   **押せないので枠も面も持たせない**（押せないものに枠と面を持たせない。手本のモックの
+   札は枠つきだが、あれは押せる札と見分けが付かなくなる）。絵と字だけ。
+   長い名前は「…」で切る */
+.detail-sub .place {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--fg-muted);
+}
+
+.detail-sub .place > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-sub .place .icon { color: var(--fg-faint); }
 
 /* 絵を持つボタンは flex にする。**理由が2つある。**
 
@@ -155,36 +213,44 @@
   gap: .35rem;
 }
 
+/* 右上の群。☆・✎・数値・コピー（絵だけ）→ 次の一手 → 押した結果の一言。
+   群ごと右へ寄せる（折り返して題名の下へ落ちたときも右端に付く） */
 .detail-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: .4rem .6rem;
-  /* 頭の1行の右端へ寄せる */
+  justify-content: flex-end;
+  gap: .4rem .3rem;
   margin-left: auto;
 }
 
+/* 次の一手は絵だけのボタンと少し離す。字のボタンが絵の列に食い込んで見えないように */
+.detail-actions > .btn { margin-left: .3rem; }
+
+/* 押した結果の一言は**ボタンの下の行**に出す（flex-basis 100% で折り返す）。
+   ボタンの横に出すと、一言の長さで右上のボタンが左へ押し出され、押した場所が動く。
+   空のあいだは行ごと消す（textContent を入れた瞬間に :empty が外れて出る） */
 .detail-actions .hint {
+  flex: 1 0 100%;
+  text-align: right;
   font-size: var(--fs-1);
   color: var(--fg-muted);
   overflow-wrap: anywhere;
 }
 
-.detail-sub .path {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-}
+.detail-actions .hint:empty { display: none; }
 
 /* このセッションの目的。枠を付けず、左の罫線だけで本文と区別する。
-   名前を .summary にしない（前は上のバーに同じ名前があり、両方に当たって縦積みが崩れた） */
+   名前を .summary にしない（前は上のバーに同じ名前があり、両方に当たって縦積みが崩れた）。
+
+   **置き場所は「いま」タブの先頭**（.stack の中）。下との間は .stack の gap が作るので、
+   ここに margin-bottom を持たせない（タブ帯より上に居た頃の 1.1rem を残すと、gap と足されて倍になる）。
+
+   **罫線は無彩色（--border-strong）。** 前はラベンダーだったが、目的は押すもの・
+   あなたの番・選んでいる場所のどれでもない（1色に役は1つ）。区別は線の太さで足りる */
 .purpose {
-  margin-bottom: 1.1rem;
   padding-left: .8rem;
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--border-strong);
 }
 
 .purpose-head {
@@ -239,11 +305,13 @@
 
 /* ------------------------------------------------------ 中央のタブ */
 
-/* 答えないと1行も進まない待ちは、タブ帯より上（.stack の外）に置いてある。
-   既定のタブを「経過」にしたので、ここに置かないと止まっていることがタブの向こうに隠れる。
+/* 答えないと1行も進まない待ちは、タブ帯の直下（.stack の外）にどのタブでも置いてある。
+   既定のタブを「経過」にしたので、「いま」の中に入れると止まっていることがタブの向こうに隠れる。
+   タブ帯より上には置かない（待ちの高さでタブ帯が上下する）。
 
    .stack の中のパネルは gap で間隔を作るが、こちらは器の外にいるので自分で下を空ける。
-   値は .stack の gap と .purpose の下 margin に合わせた 1.1rem */
+   上はタブ帯の下 margin（1.1rem）が空けている。値は .stack の gap に合わせた 1.1rem。
+   sticky のタブ帯（z-index: 2）が上に貼り付いたあと、このパネルは帯の下へ潜って流れる */
 .detail > .panel { margin-bottom: 1.1rem; }
 
 /* 以前はここに目次（パネルへ飛ぶリンクの帯）があった。
@@ -364,33 +432,33 @@
 
 .panel > .panel-body { padding: .8rem; }
 
-/* 急ぎのパネル。**新しい色は作らない。**
-   枠と光の輪はどちらも --hot から color-mix で作る。面も塗らない
-   （塗ると「状態色は点と細いバーだけ」の約束と競合する）。
-   見出しの帯にだけごく薄く敷くのは、あれが面ではなく帯だから */
-.panel.is-hot {
-  border-color: color-mix(in srgb, var(--hot) 45%, var(--border));
-  box-shadow: var(--sh-2), 0 0 0 3px color-mix(in srgb, var(--hot) 9%, transparent), var(--hi);
-}
-.panel.is-hot > h3 { color: var(--hot); background: color-mix(in srgb, var(--hot) 6%, var(--bg-elev)); }
-.panel.is-warn { border-color: var(--warn); }
+/* 急ぎのパネル（待ちのパネル・許可要求・実行のパネル）。**色を持つのは見出しの字だけ。**
+   枠・光の輪・見出しの帯には状態色を敷かない。器は他のパネルと同じ（.panel の枠と影）。
+
+   前は枠と光の輪を --hot から混ぜ、見出しの帯にも薄く敷いていた。枠・輪・帯・字の4か所が
+   同じことを言っていたことになる。色は「あなたが何かすること」にだけ使う約束で、
+   1か所（見出しの字）で言えば足りる（画面刷新④。手本のモックの「1 色の役」）。
+   **枠と帯に戻さない。** 新しい色も作らない（字の色は既存の状態色そのまま） */
+.panel.is-hot > h3 { color: var(--hot); }
 .panel.is-warn > h3 { color: var(--warn); }
 
 /* --------------------------------------------------------- 何を待っているか */
 
-/* 待ちのパネルだけは中身を縦に積む（案内文・質問・コマンドが続くため） */
+/* 待ちのパネルだけは中身を縦に積む（質問・コマンド・プランの本文が続くため） */
 .panel.is-wait > .panel-body {
   display: flex;
   flex-direction: column;
   gap: .5rem;
 }
 
-/* 答えないと1行も進まないものの印。**色は上の `.is-hot` が持つ。**
-   ここで新しい色トークンを作ると、1つの状態に色が2つできる（色は1つの役に1色）。
-   面も塗らない。太さと見出し1段（.82rem → .88rem）だけにしてあるのは、
-   色を見分けにくい人にも届く印を1つ持たせるため。
-   タブの帯を太字にする案は捨てた（隣のタブの位置が動いて押し間違いが起きる） */
-.panel.is-block { border-left-width: 3px; }
+/* 答えないと1行も進まないものの印。**太さと見出し1段（--fs-2 → --fs-3）だけ。**
+   色は上の `.is-hot` の見出しの字が持つ。ここで線まで赤くすると、色が言うことが2か所になる
+   （上の「色を持つのは見出しの字だけ」）。新しい色トークンも作らない（1つの状態に色が2つできる）。
+
+   太い線を残すのは、色を見分けにくい人にも届く印を1つ持たせるため。
+   線の色は無彩色だが、細い枠（--border）のままだと太さが読めないので1段濃い --border-strong。
+   面も塗らない。タブの帯を太字にする案は捨てた（隣のタブの位置が動いて押し間違いが起きる） */
+.panel.is-block { border-left: 3px solid var(--border-strong); }
 .panel.is-block > h3 { font-size: var(--fs-3); }
 
 .wait-lead {
@@ -558,10 +626,13 @@ details.rejected ul { margin: .35rem 0 0; padding-left: 1.1rem; color: var(--fg-
 details.rejected li { margin-bottom: .2rem; }
 details.rejected .label { color: var(--fg); }
 
-/* ------------------------------------------------- 右のインスペクタ */
+/* ------------------------------------------------- 右の紙（インスペクタ） */
 
-/* 数値・成果・状態はここへ寄せた。中央のタブに混ぜると、
+/* 数値と診断はここへ寄せた。中央のタブに混ぜると、
    数字を見るために作業の手元（いま・経過）を隠すことになる。
+
+   **開く口は詳細の頭の「数値」の絵**（右端のレールはやめた）。広い窓では覚えた開閉で始まり
+   （既定は開く）、狭い窓では閉じて始まる（insp-open.js）。
 
    閉じているあいだは JS が hidden を立てて grid の列ごと消す。
    **[hidden] は UA 側の指定なので、こちらの display: flex に負ける。**
@@ -576,19 +647,28 @@ details.rejected .label { color: var(--fg); }
 
 .insp[hidden] { display: none; }
 
+/* 紙の頭。数値｜診断の切り替え → 見出し → ×。
+   切り替えは一覧の頭の「すべて｜稼働中」（list.css の .live-filter）を借りる。押せる切り替えなので
+   面と影で浮かせる段（押している側は面 --bg-hi・影 --sh-1）で、**新しい見た目を作らない**。
+   見出しは開いた紙が何かを言い直す1行。狭い紙では折り返さずに「…」で切る */
 .insp-head {
   display: flex;
   align-items: center;
-  gap: .5rem;
+  gap: .6rem;
   padding: .55rem .75rem;
   border-bottom: 1px solid var(--border);
 }
 
 .insp-head h2 {
-  margin: 0 auto 0 0;
-  font-size: var(--fs-2);
-  font-weight: 700;
-  color: var(--fg-muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-1);
+  font-weight: 400;
+  color: var(--fg-faint);
 }
 
 /* 閉じるボタン。見た目は引き出しの .drawer-close と揃えてある
@@ -618,50 +698,3 @@ details.rejected .label { color: var(--fg); }
   overflow-y: auto;
   padding: .9rem .75rem 2rem;
 }
-
-/* ------------------------------------------------------- 右端のレール */
-
-/* 閉じていても幅は取ったままにする。消すと押すたびに中央の幅が跳ねる。
-   縦線1本で中央と切り分けるだけにして、面は塗らない */
-.rail {
-  display: flex;
-  flex-direction: column;
-  gap: .15rem;
-  padding: .5rem .2rem;
-  background: var(--bg);
-  border-left: 1px solid var(--border);
-}
-
-/* レールのボタン。**絵だけ。** 縦のレールに字を積むと1文字ずつ折り返すか、
-   レールそのものを広げることになる。名前は title と aria-label が持つ。
-   大きさは上のバーの絵だけボタン（.ibtn）に合わせてある */
-.rail-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.9rem;
-  height: 1.9rem;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  background: none;
-  color: var(--fg-muted);
-}
-
-.rail-btn:hover:not(:disabled) { color: var(--fg); }
-
-/* 開いているものだけ枠と色を付ける。開閉の正は aria-pressed 1つにする。
-   専用のクラスを足すと、JS が2つの真偽を同期する義理を負う */
-.rail-btn[aria-pressed="true"] {
-  border-color: var(--border);
-  background: var(--bg-elev);
-  color: var(--accent);
-}
-
-/* まだ出す中身が無いとき。薄くするだけで隠さない（隠すと列の幅が変わる） */
-.rail-btn:disabled {
-  cursor: default;
-  color: var(--fg-faint);
-  opacity: .55;
-}
-

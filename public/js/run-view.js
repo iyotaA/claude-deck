@@ -31,9 +31,10 @@ import {
 import { getJson, postJson } from './api.js';
 import { fillSelect, gridRow } from './form-kit.js';
 import { closeOnBackdrop } from './modal.js';
+import { RUN_OVER } from './run-over.js';
 
 /**
- * 状態に応じたパネルの色。
+ * 状態に応じたパネルの色（見出しの字だけに付く。枠と帯は素のまま）。
  *
  * 色を付けるのは待たせているときと、うまくいっていないときだけ。
  * 実行中に色を付けると、動いている＝急ぎに見えて一覧の状態色と意味がぶつかる。
@@ -66,7 +67,7 @@ function factsOf(row) {
   // **6つ落とした。どれも同じ値が別の場所に出ている。**
   //
   //   モデル・権限   … 入力欄のすぐ上の札（.composer-now）。押せば替えられる側
-  //   フォルダ       … 詳細の頭の .path
+  //   フォルダ       … 詳細の頭の置き場所の札（名前だけ。全文は title）と、右の「診断」（全文）
   //   思考の深さ・PID・始めた時刻 … 右の「診断」（basicsPanel）
   //
   // 画面から起こした行でも synthRow() がこの5つを入れているので、
@@ -108,15 +109,11 @@ export function detach() {
 
 /* ── 操作（送る・止める・替える）───────────────────────────── */
 
-/**
- * もう手を出せない状態。
- *
- * サーバー側（run/index.mjs の isRunOver）と同じ3つにしてある。
- * **stopping と switching を入れない。** どちらも途中の姿で、そこから running へ戻る。
- * **budget（予算切れ）も入れない。** 上限を上げれば続けられるので、
- * ここに入れると3つのボタンが全部落ちて出口が無くなる。
+/*
+ * もう手を出せない状態（`RUN_OVER`）は層0 の `run-over.js` から借りる（サーバーの isRunOver と同じ3つ）。
+ * **budget（予算切れ）が入っていないことに頼っている。** 上限を上げれば続けられるので、
+ * 入ると3つのボタンが全部落ちて出口が無くなる。
  */
-const RUN_OVER = new Set(['stopped', 'failed', 'done']);
 
 /**
  * 子プロセスがもういない状態。**終わったもの ＋ 予算切れ。**

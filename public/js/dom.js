@@ -80,13 +80,14 @@ export const dom = {
   listToggle: document.getElementById('list-toggle'),
   listClose: document.getElementById('list-close'),
   scrim: document.getElementById('scrim'),
-  // 右のインスペクタと、その開閉をするレール。detail.js だけが使う。
-  // 器は index.html に置いたまま作り直さず、中身（inspBody）だけを差し替える
+  // 右の紙。detail.js だけが使う。器は index.html に置いたまま作り直さず、
+  // 中身（inspBody）だけを差し替える。開く口は詳細の頭の「数値」の絵（右のレールはやめた）。
+  // 切り替え（inspTabs）の札は detail.js の initInspector が1回だけ組む
   insp: document.getElementById('insp'),
+  inspTabs: document.getElementById('insp-tabs'),
   inspTitle: document.getElementById('insp-title'),
   inspClose: document.getElementById('insp-close'),
   inspBody: document.getElementById('insp-body'),
-  rail: document.getElementById('rail'),
   liveHead: document.getElementById('live-head'),
   archiveHead: document.getElementById('archive-head'),
   archive: document.getElementById('archive'),
