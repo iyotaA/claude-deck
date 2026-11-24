@@ -8,7 +8,7 @@
  * 同じ名前をトップレベルに2つ置くと SyntaxError で丸ごと落ちていた。
  *
  * 依存は上から下へ一方向にだけ流す。逆向きに import したくなったら置き場所が間違っている。
- *   層0  util.js / perf.js / timeline/kinds.js       誰にも依存しない
+ *   層0  util.js / perf.js / timeline/kinds.js / nav.js   誰にも依存しない
  *   層1  store.js（kinds.js を直に見る）/ panel.js / detail-head.js / usage-chart.js
  *   層2  rows.js / drawer.js / zoom.js / resize.js / runs.js /
  *        timeline/（外からは index.js の1枚として見る）
@@ -73,7 +73,7 @@ import { initSettings } from './settings.js';
 import { initAbout } from './about.js';
 import { initUpdate } from './update.js';
 import { initRunForm } from './run-form.js';
-import { initPalette } from './palette.js';
+import { initPalette, openPalette } from './palette.js';
 
 /**
  * 一覧の中で上下キーで移動できるようにする。
@@ -172,16 +172,33 @@ subscribeRuns(() => {
   renderDetailIfNeeded();
 });
 
-// 上のバーのアイコン。**起動時に1回だけ差す。**
+// 上のバーと左のレールのアイコン。**起動時に1回だけ差す。**
 //
 // HTML 側は空のボタンにしてある。innerHTML を使わない決まりなので、
 // SVG は icons.js が createElementNS で組んだ節点をここで append する。
-// 名前は title と aria-label が持つので、絵だけにしても意味は消えない。
+// 名前は aria-label（上のバーの絵だけボタンは title も）が持つので、絵だけにしても意味は消えない。
 //
-// 「起こす」だけ 14px にする。文字と並ぶので、16px だと絵のほうが大きく見える
+// 「起こす」と探す欄は 14px にする。文字と並ぶので、16px だと絵のほうが大きく見える
 dom.listToggle.append(icon('sidebar'));
-dom.brand.prepend(icon('deck'));
 dom.runformOpen.prepend(icon('plus', 14));
+dom.paletteOpen.prepend(icon('search', 14));
+dom.reload.append(icon('refresh'));
+// 探す欄は入口のボタン。開くのは Ctrl+K と同じパレット（判断は持たず、口を呼ぶだけ）
+dom.paletteOpen.addEventListener('click', openPalette);
+
+// 左のレール。**札は 20px で描く**（44px の札の中で 16px だと絵が小さく沈む）。
+// 頭の印だけ 24px にする。押せる札ではなく看板なので、札と同じ大きさだと
+// 並びの先頭が札の1枚に見える（モックも印を札より1段大きく描いている）。
+// 線の太さはどちらも base.css が 1.5px に揃え直す（20px は 1.2、24px は 1 で補正）。
+// 設定は歯車（gear）のまま。横スライダーは 16px で「多」の字に見えた実測があるので使わない。
+// 作業台の札はバッジ（#rail-badge）を中に持つので、絵は先頭へ差す
+dom.navrailLogo.append(icon('deck', 24));
+dom.modeWork.prepend(icon('work', 20));
+dom.modeArchive.append(icon('archive', 20));
+dom.modeUsage.append(icon('chart', 20));
+dom.todayOpen.append(icon('today', 20));
+dom.settingsOpen.append(icon('gear', 20));
+dom.aboutOpen.append(icon('info', 20));
 // 選ぶ口の絵。**12箇所をまとめて1回で舐める。**
 // ネイティブの矢印は base.css が消しているので、代わりに置く形が要る。
 // chevron を 90 度回して下向きにするのは CSS 側（`.selectbox > .sel-mark`）。
@@ -197,9 +214,6 @@ for (const box of document.querySelectorAll('.selectbox')) {
   mark.classList.add('sel-mark');
   box.append(mark);
 }
-dom.aboutOpen.append(icon('info'));
-dom.reload.append(icon('refresh'));
-dom.settingsOpen.append(icon('gear'));
 
 fetchOnce().then(() => {
   // つなぎっぱなしの接続があるとヘッドレスブラウザがロード完了を待ち続ける。

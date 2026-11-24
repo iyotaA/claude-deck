@@ -1,6 +1,7 @@
-/* ClaudeDeck ── 骨・上のバー・共通の部品
+/* ClaudeDeck ── 骨・左のレール・上のバー・共通の部品
  *
- * リセット、body、全体の骨、上のバー、ボタン、つながり具合の点。
+ * リセット、body、全体の骨、左のレール（と枠の輪）、上のバー、ボタン、つながり具合の点。
+ * 狭い窓の上書き（レールを下の横帯にする）は narrow.css が持つ。
  * 色は tokens.css の意味トークン（--bg など）だけを使う。
  */
 
@@ -83,18 +84,28 @@ body {
 
 /* ---------------------------------------------------------------- 全体の骨 */
 
-/* 上のバー ／ ボールの所在の帯 ／ 作業台 の3行。
-   **子を足したら必ずここも直す。** 宣言した行より子が多いと、
+/* 左のレール ＋ 残り の2列と、上のバー ／ ボールの所在の帯 ／ 作業台 の3行。
+   レールは1列目を縦いっぱいに使い、残りの3つは2列目に**行も列も明示して置く。**
+   **子を足したら必ずここも直す。** 宣言した行と列より子が多いと、
    はみ出したぶんが暗黙の行になって高さの配分が崩れる。
+
    帯は 0 件のとき `hidden` で消える（待ちが無い時間のほうが長い）。
-   **作業台は3行目に明示して置く**（`.deck` の grid-row）。置かないと帯が消えたとき
-   作業台が2行目（auto）へ繰り上がり、1fr の3行目が空のまま残る。実測では auto の行が
-   余りを分けてもらって伸びるので崩れていなかったが、それはたまたまで、頼らない */
+   行を明示しないと、帯が消えたとき作業台が2行目（auto）へ繰り上がり、1fr の3行目が
+   空のまま残る。実測では auto の行が余りを分けてもらって伸びるので崩れていなかったが、
+   それはたまたまで、頼らない。
+
+   引き出しの膜（`.scrim`）も `.app` の子だが、広い窓では `display: none`、狭い窓では
+   `position: fixed` なので、どちらでもセルを取らない。
+   狭い窓ではレールが下の横帯（fixed）になり、列は1本に戻る（narrow.css） */
 .app {
   display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr);
   height: 100vh;
 }
+
+.topbar { grid-column: 2; grid-row: 1; }
+.hero-wrap { grid-column: 2; grid-row: 2; }
 
 /* 左右の幅。つまみ（.splitter）をドラッグすると resize.js が --list-w / --insp-w を書く。
 
@@ -118,9 +129,14 @@ body {
   --insp-w: 23rem;
   --list-col: clamp(16rem, var(--list-w), min(40rem, 40vw));
   --insp-col: clamp(15rem, var(--insp-w), min(34rem, 34vw));
+  /* 左のレールの札1つぶんの四角（44px）。札・印・枠の輪の器がこの大きさで並ぶ。
+     **:root に置くのは、輪が説明モーダルの凡例（about.css）でも同じ大きさで使われるから。**
+     .navrail に置くとモーダルの中から見えない。数を3箇所に書くと、片方だけ直した日に
+     札と輪の大きさが食い違う */
+  --navrail-cell: 2.75rem;
 }
 
-/* 左端のレール ＋ 一覧 ＋ 読む面 ＋ 右端のレール。
+/* 一覧 ＋ 読む面 ＋ 右端のレール。
    レールの幅は auto にしてボタン側で決める（数字を2箇所に焼き込まない）。
 
    **一覧は列のまま。ただし畳める。** 畳むと列が 0 になり、幅が中央へ渡る。
@@ -132,28 +148,33 @@ body {
 
    **4通りを明示して書く。** .is-list-open .deck と .is-insp-open .deck は
    どちらも (0,2,0) で、読む順で後のほうが勝ってしまう。
-   両方立っているときは (0,3,0) の側が要る（.is-archive.is-insp-open と同じ形） */
+   両方立っているときは (0,3,0) の側が要る（.is-archive.is-insp-open と同じ形）。
+
+   **子と列の数は開閉のどの組み合わせでも釣り合う。** 作業台の in-flow な子は
+   一覧・詳細・（開いているときだけ）インスペクタ・右のレールで、閉じた2つは 3/3、
+   インスペクタを開いた2つは 4/4（書庫と数値の頭と器は作業台では hidden） */
 .deck {
-  /* .app の3行目（上の説明）。帯が消えても繰り上がらない */
+  /* .app の2列目・3行目（上の説明）。帯が消えても繰り上がらない */
+  grid-column: 2;
   grid-row: 3;
   display: grid;
-  grid-template-columns: auto 0 minmax(0, 1fr) auto;
+  grid-template-columns: 0 minmax(0, 1fr) auto;
   gap: 0;
   min-height: 0;
 }
 
 .is-list-open .deck {
-  grid-template-columns: auto var(--list-col) minmax(0, 1fr) auto;
+  grid-template-columns: var(--list-col) minmax(0, 1fr) auto;
 }
 
 /* インスペクタが開いたら、中央を削って右に場所を作る。
    目印を .app に付けているのは .is-list-open と同じ流儀 */
 .is-insp-open .deck {
-  grid-template-columns: auto 0 minmax(0, 1fr) var(--insp-col) auto;
+  grid-template-columns: 0 minmax(0, 1fr) var(--insp-col) auto;
 }
 
 .is-list-open.is-insp-open .deck {
-  grid-template-columns: auto var(--list-col) minmax(0, 1fr) var(--insp-col) auto;
+  grid-template-columns: var(--list-col) minmax(0, 1fr) var(--insp-col) auto;
 }
 
 /* 幅を変えるつまみ。列の境目にまたがらせる。
@@ -207,57 +228,247 @@ body {
 
 .is-resizing { user-select: none; }
 
-/* ------------------------------------------------------------------ 見出し */
+/* ---------------------------------------------------------- 左のレール */
 
-/* 行の間（row-gap）を padding の上下と同じ .7rem にする。
-   1rem のままだと、下段や更新の帯が自分の行へ折り返したときに
+/* 画面の切り替え。**どのモードにいても、左の同じ場所に出す。**
+   止まっているセッションの数（作業台の札のバッジ）と行き先（モード・今日のまとめ・設定・説明）を
+   ここ1箇所に集める。モードを替えても数と入口が動かないので、探さずに済む。
+
+   面は地（--bg）、右に線1本。**色を新しく作らない**（上のバーと同じ地と線）。
+   幅は札（--navrail-cell）＋ 左右の余白で決まる。余白は --navrail-pad の1つに置き、
+   いまの札の左の縦棒（::before）もそこから位置を出す（数字を2箇所に焼き込まない）。
+
+   **overflow を持たせない。** 吹き出し（::after）はレールの外（右）へはみ出して出るので、
+   ここで切ると吹き出しごと消える */
+.navrail {
+  --navrail-pad: .625rem;
+  grid-column: 1;
+  grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .375rem;
+  padding: .875rem var(--navrail-pad) .75rem;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+/* 印。飾り（aria-hidden）。押せないので面も反応も持たない */
+.navrail-logo {
+  display: grid;
+  place-items: center;
+  width: var(--navrail-cell);
+  height: var(--navrail-cell);
+  margin-bottom: .5rem;
+  color: var(--fg);
+}
+
+/* 札。**絵だけ。** 名前は aria-label、目で読む名前は吹き出し（data-tip）が持つ。
+   ふだんは面を持たず字を沈め（--fg-muted）、触れたとき・いまの札だけ面（--bg-hi）を出す。
+   札は 44px の器なので、ボタン（--r-sm）より1段丸める */
+.navrail-item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--navrail-cell);
+  height: var(--navrail-cell);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--fg-muted);
+}
+
+/* 絵の線は 1.5px に揃える（icons.js の 16px と同じ太さ）。
+   レールの札の絵は 20px で描くので、そのままだと線も 1.25 倍に太る（1.5 × 16/20 = 1.2）。
+   頭の印だけ 24px（札より1段大きい看板）なので、こちらは 1.5 × 16/24 = 1 で戻す */
+.navrail .icon { stroke-width: 1.2; }
+.navrail-logo .icon { stroke-width: 1; }
+
+.navrail-item:hover,
+.navrail-item[aria-current="page"] {
+  background: var(--bg-hi);
+  color: var(--fg);
+}
+
+/* いまの札の左の縦棒。**ラベンダー（--accent）は「選んでいる場所」の色。**
+   面（--bg-hi）は触れたときと同じなので、いまの札をそれと分けるのはこの棒の役目 */
+.navrail-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--navrail-pad));
+  top: .625rem;
+  bottom: .625rem;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+/* 吹き出し。**title の代わり。** title だと OS の札が遅れて出るうえ、
+   キーボードで来た人には出ない。:hover と :focus-visible の両方で出す。
+   中身は data-tip（改行を活かすので white-space: pre）。
+   枠の輪（.navrail-rate）は押せないので焦点を受けず、触れたときだけ出る */
+.navrail-item[data-tip]::after,
+.navrail-rate[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + .75rem);
+  top: 50%;
+  z-index: 40;
+  padding: .375rem .625rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  box-shadow: var(--sh-2);
+  color: var(--fg);
+  font-size: var(--fs-1);
+  font-weight: 400;
+  line-height: var(--lh-tight);
+  text-align: left;
+  white-space: pre;
+  opacity: 0;
+  transform: translateY(-50%);
+  pointer-events: none;
+  transition: opacity .12s ease;
+}
+
+.navrail-item:hover::after,
+.navrail-item:focus-visible::after,
+.navrail-rate:hover::after { opacity: 1; }
+
+/* 作業台の札の、止まっているものの数。**面は --hot、字は地の色**（6.88:1）。
+   数字は飾り（aria-hidden）で、件数は札の aria-label が言う。
+   丸め（--r-pill）は押せる札の一部だから使える（ピル型は押せるものだけの形） */
+.navrail-badge {
+  position: absolute;
+  top: -.1875rem;
+  right: -.3125rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 .3125rem;
+  border-radius: var(--r-pill);
+  background: var(--hot);
+  /* 絵と重なる所を地の色で縁取って、数字を絵から切り離す */
+  box-shadow: 0 0 0 2px var(--bg);
+  color: var(--bg);
+  font-size: var(--fs-0);
+  font-weight: 700;
+  line-height: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* 札とその下の道具を分ける空き。枠の輪・設定・説明はレールの下へ寄せる */
+.navrail-space { flex: 1; }
+
+/* 区切り。行き先（上）と、いつでも使う道具（設定・説明）を分ける */
+.navrail-sep {
+  width: 2rem;
+  height: 1px;
+  margin: .375rem 0;
+  background: var(--border);
+}
+
+/* 枠の使用率の器。中身（輪）は usage-chart.js の rateRing が組む。
+   display を宣言したので [hidden] を必ず添える（作者側の display は属性に勝つ） */
+.navrail-rate {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.navrail-rate[hidden] { display: none; }
+
+/* ------------------------------------------------------------ 枠の輪 */
+
+/* 枠の使用率の二重の輪。**外が5時間の枠、内が7日の枠。** 真ん中は高いほうの数。
+   組むのは usage-chart.js の rateRing の1つで、レールと「このアプリについて」の凡例が同じものを使う。
+   半径と線の太さは JS（属性）が持ち、ここは色と字だけを当てる。
+
+   溝は --bg-hi。弧は**ふだん無彩色**（--fg-muted）で、80% から --warn、90% から --hot
+   （しきい値は runs.js の RATE_WARN / RATE_HOT。どの段かは JS が data-tone に1語で書く）。
+   読めていない枠は溝だけ残して弧を描かない（JS が弧を置かない） */
+.rate-ring {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--navrail-cell);
+  height: var(--navrail-cell);
+  flex: none;
+}
+
+/* 絵は器いっぱいに広げ、寸法は viewBox に任せる（usage-chart.js の RING は viewBox の座標）。
+   器が 44px のとき 1 単位がちょうど 1px になるよう、RING.view を --navrail-cell と揃えてある */
+.rate-ring svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.rate-ring-track { stroke: var(--bg-hi); }
+.rate-ring-arc { stroke: var(--fg-muted); }
+.rate-ring-arc[data-tone="warn"] { stroke: var(--warn); }
+.rate-ring-arc[data-tone="hot"] { stroke: var(--hot); }
+
+/* 真ん中の数。12px（--fs-0）で 3桁（100）が内側の輪（内径 27px）に収まる。
+   % は付けない（4字だと収まらない。% は吹き出しと読み上げが持つ） */
+.rate-ring-num {
+  position: relative;
+  font-size: var(--fs-0);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+/* 古い観測。**古い枠の数を今の数の顔で出さない。** 弧を沈め、数も添え物の濃さへ落とす。
+   何分前かは吹き出しが言う（ringView の label） */
+.rate-ring[data-stale] .rate-ring-arc { opacity: .45; }
+.rate-ring[data-stale] .rate-ring-num { color: var(--fg-faint); }
+
+/* ------------------------------------------------------------- 上のバー */
+
+/* **「探す・起こす」だけに絞る。** 行き先（モード・設定・説明）は左のレールにある。
+   並びは 一覧の開閉 → 題 → 接続の札 → 探す欄 →（空き）→ 再読み込み → 起こす。
+
+   行の間（row-gap）を padding の上下と同じ .7rem にする。
+   1rem のままだと、更新の帯が自分の行へ折り返したときに
    「padding-top .7rem ＋ row-gap 1rem」で上下が食い違う（実測で上 11px・下 27px） */
 .topbar {
   display: flex;
   align-items: center;
-  gap: .7rem 1rem;
+  gap: .7rem .75rem;
   flex-wrap: wrap;
   padding: .7rem 1rem;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 
-/* 題名。**毎日開く画面なので、名前は一度覚えれば済む。**
-   前は 1rem の太字で、バーの中でいちばん大きい字だった。
-   いちばん情報の少ないものがいちばん強く出ていたので、字を落として脇へ寄せる。
-   副題（「セッションの状態」）は消した。画面そのものがそれを示している */
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: .4rem;
+/* いまのモードの名前。レールの札は絵だけなので、どこにいるかを字で言う場所がここになる。
+   **読む面の題（--fs-5）より1段下げる。** 作業台では詳細の題がすぐ下に来るので、
+   同じ大きさだと2つの題が目を取り合う */
+.page-title {
   margin: 0;
-  font-size: var(--fs-2);
+  font-size: var(--fs-4);
   font-weight: 700;
-  letter-spacing: .01em;
-  color: var(--fg-muted);
+  letter-spacing: .02em;
+  color: var(--fg);
   white-space: nowrap;
 }
-
-.brand .icon { color: var(--accent); }
 
 /* アイコンの器。線は currentColor なので、置いた場所の字の色をそのまま継ぐ。
    縮まないようにするのだけがここの仕事（形は icons.js が持つ） */
 .icon { flex: none; }
 
-/* 一覧を畳む・出す口。**常時出す。**
-   一覧が畳める列になったので、これと Ctrl+K が開閉の道になった。
+/* 一覧を畳む・出す口。**広い窓でも狭い窓でも同じボタン1つ。**
+   広い窓では列を畳み、狭い窓では引き出しを出す（姿の違いは CSS が持ち、drawer.js は開閉だけを持つ）。
 
    **3本線（ハンバーガー）から替えた。** あれは「メニューを開く」の記号で、
    左の列を畳む・出すことを示していない（押した先が読めない、という指摘を受けた）。
    いまは画面の枠と左の帯で描いたサイドバーの記号で、帯の塗りが開閉を示す */
-/* 一覧の開閉（狭い窓だけ）。
-
-   **広い窓では出さない。** あちらは左端のレールが開閉を持つので、
-   同じことをする口が上のバーと左端の2つ並ぶ。
-   狭い窓ではレールを消してある（3本目の縦帯を置くと読む面が削れる）ので、
-   引き出しの入り口はここだけになる ―― narrow.css が inline-flex へ戻す */
 .list-toggle {
-  display: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 2.15rem;
@@ -275,157 +486,53 @@ body {
    出し分けは aria-expanded に乗せてある（drawer.js が付け替えるので JS は増えない） */
 .list-toggle[aria-expanded="true"] .icon .pane { fill: currentColor; }
 
-/* 下段。**ボールの所在だけを置く帯。**
-   上段と同じ行に混ぜない。混ぜると「どれから手をつけるか」が
-   道具（起こす・説明・設定）と横幅を取り合い、状態の名前を出せなくなる。
+/* 一覧があるのは作業台だけ。**書庫と数値では出さない。**
+   残すと、押しても見えない一覧が開閉するだけのボタンになる */
+.is-archive .list-toggle,
+.is-usage .list-toggle { display: none; }
 
-   .topbar の padding を負の margin で相殺して、幅いっぱいに沈める。
-   面を1段落とすので、上段の道具と混ざらない */
-.statusbar {
-  /* **100% ではなく calc(100% + 2rem)。**
-     flex-basis の 100% は .topbar の padding を除いた幅なので、
-     負の margin で左へ寄せただけだと右が 2rem ぶん足りない（実測で 32px 切れていた）。
-     左右へ 1rem ずつ食い込ませるぶんを、幅にも足しておく */
-  flex: 0 0 calc(100% + 2rem);
-  display: flex;
+/* 探す欄。**押すとパレット（Ctrl+K）が開くボタン。** 打つ場所はパレットの中にある。
+   入力欄の顔（沈んだ面 --bg-sunk ＋ 細い枠）にして「ここで探せる」を形で示し、
+   Ctrl+K を知らない人への看板も兼ねる。キーの札は palette.css の .kbd を借りる */
+.topbar-find {
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: .2rem 1.3rem;
-  /* 上は .topbar の row-gap（.7rem）に任せる。ここで足すと二重に空く */
-  margin: 0 -1rem -.7rem;
-  padding: .38rem 1rem;
+  gap: .5rem;
+  width: min(380px, 34vw);
+  height: 2.25rem;
+  padding: 0 .5rem 0 .75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
   background: var(--bg-sunk);
-  border-top: 1px solid var(--border);
-}
-
-.summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .2rem 1.3rem;
-  min-width: 0;
-}
-
-/* 状態の数。**面も枠も持たない。**
-   前は .chip（ピル型＋枠＋面）だったが、あれは押せる .composer-now と
-   枠の色・角丸・面の色・字の色がすべて同じで、差は字の 0.02rem と
-   余白の 0.1rem しか無かった。しかも上のバーは常に見えているので、
-   押せないものと押せるものが同時に画面へ出ていた。
-   押せないものから枠と面を外して、押せるものが自然に浮くようにする */
-.tally {
-  display: inline-flex;
-  align-items: baseline;
-  gap: .32rem;
-  font-size: var(--fs-1);
-  color: var(--fg-muted);
-  white-space: nowrap;
-}
-
-/* 点は baseline ではなく行の中心に置く。文字と違って上下の伸びが無い */
-.tally .state { align-self: center; }
-
-.tally strong {
-  color: var(--fg);
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 答えないと1行も進まないもの。数を1段大きくして色を乗せる。
-   **どれが止まっているかの判定は画面側に持たない**（meta.stateBlocking から引く） */
-.tally.is-hot { color: var(--hot); }
-.tally.is-hot strong { color: var(--hot); font-size: var(--fs-4); }
-
-/* 止まっているものが無い、の1行。上の帯が空のとき丸ごと消えるので、
-   「見ていない」と「無い」を分ける役目をここが持つ（list.js の renderSummary）。
-   **数ではないので字は落とさない**（--fg-muted のまま）。点は「通っている」の色 */
-.tally.is-calm { align-items: center; }
-
-.calm-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--done);
-  flex: none;
-}
-
-/* 枠の使用率。アカウント共通の値なので画面に1つだけ出す。
-   状態ではないので下段の右端へ寄せる。
-   display を宣言したので [hidden] を必ず添える（flex は hidden 属性に勝つ） */
-.rate {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-}
-
-.rate[hidden] { display: none; }
-
-/* 数そのものは状態より一段うしろ。字を落として添え物に見せる */
-.rate-val {
-  display: inline-flex;
-  align-items: baseline;
-  gap: .35rem;
-  font-family: var(--font-mono);
-  font-size: var(--fs-0);
   color: var(--fg-faint);
+  font-size: var(--fs-1);
+  text-align: left;
+}
+
+.topbar-find:hover { border-color: var(--border-strong); color: var(--fg-muted); }
+
+.topbar-find-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.rate-val strong { color: var(--fg-muted); font-weight: 400; }
-.rate-val.is-hot { color: var(--hot); }
+/* 探す欄と道具のあいだの空き。道具（再読み込み・起こす）を右端へ寄せる */
+.topbar-space { flex: 1; }
 
-/* 枠ごとのメーター。名前・棒・数の3つで1組。
-   **色は状態色の使い回し**（ふだんは --calm、80% で --warn、90% で --hot）。
-   どの段かは JS（runs.js の rateView）が data-tone に1語で書き、ここは当てるだけ */
-.rate-meter {
+/* 起こす。**塗らない普通のボタン**（.btn）。塗った面（.btn.is-lead）は1画面に1つで、
+   それは詳細の次の一手に譲る。絵（plus）だけ --accent にして、
+   押すと新しいものが生まれることを残す（ラベンダー＝押すもの） */
+.topbar-run {
   display: inline-flex;
   align-items: center;
   gap: .3rem;
+  padding-left: .5rem;
 }
 
-.rate-label { color: var(--fg-faint); }
-
-/* 溝は --bg-hi。沈んだ帯（--bg-sunk）の上でも「ここが全体」が見える */
-.rate-bar {
-  display: inline-block;
-  width: 3.5rem;
-  height: 5px;
-  border-radius: var(--r-pill);
-  background: var(--bg-hi);
-  overflow: hidden;
-}
-
-.rate-bar i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--calm);
-}
-
-.rate-meter[data-tone="warn"] .rate-bar i { background: var(--warn); }
-.rate-meter[data-tone="warn"] strong { color: var(--warn); font-weight: 700; }
-.rate-meter[data-tone="hot"] .rate-bar i { background: var(--hot); }
-.rate-meter[data-tone="hot"] strong { color: var(--hot); font-weight: 700; }
-
-/* 「いつ測ったか」。数そのものではないので、さらに落とす */
-.rate-age {
-  font-size: var(--fs-0);
-  color: var(--fg-faint);
-}
-
-/* 道具は右端へ寄せる。
-   前はここを押していたのが .summary の margin-right: auto だったが、
-   あれは下段（.statusbar）へ移った。押すものが無くなると道具が題名の隣に来て、
-   「現在地」と「道具」が同じかたまりに見える */
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  margin-left: auto;
-  /* アイコンボタンは 1.9rem の箱の中に 1rem の絵を置くので、
-     箱の右端を padding に揃えると、絵の右端は .45rem 内側に見える。
-     左端のロゴ（絵がそのまま端に来る）と揃わないので、箱のぶんだけ外へ出す */
-  margin-right: -.45rem;
-}
+.topbar-run .icon { color: var(--accent); }
 
 button {
   font: inherit;
@@ -454,17 +561,23 @@ button {
   transform: translateY(-1px);
 }
 
-/* 押すと新しいものが生まれるボタン。**ここだけ面を塗る。**
+/* 次に押すボタン。**ここだけ面を塗る。** その画面で「いま押せば話が進む」1つに付ける ――
+   帯の札の「答える／開く」、入力欄の「送る」、続きを起こす欄の「続きを起こす」、
+   モーダルの足の「保存」「起こす」「この内容にする」、更新の覆いの押す口。
 
    長く「面は塗らない」で通してきた。理由は「状態色は点と細いバーだけ」の約束と
-   競合して、上のバーでいちばん強い面がボタンになるから。
+   競合して、画面でいちばん強い面がボタンになるから。
 
    **その心配のほうが実態と合わなくなった。** 数えたら画面には塗った面が
    1つも無く（影も 0 箇所）、いちばん強い場所がどこにも作れていなかった。
    競合しないのは --accent が**状態色ではない**ため ―― hot / warn / calm / off の
    面は1つも塗らないので、「どれから手をつけるか」の読み方は動かない。
 
-   **1画面に1つだけ**が条件。ここを増やすと、また強さの差が消える */
+   **1画面に1つだけ**が条件。ここを増やすと、また強さの差が消える。
+   だから上のバーの「起こす」（どのモードにも常に出ている道具）は塗らない（.topbar-run）。
+   モーダルの中の1つは、開いているあいだの「1画面」がそのモーダルなので数が合う。
+   **いま約束から外れているのは作業台** ―― 帯の札が並ぶと「答える／開く」が枚数ぶん出て、
+   入力欄の「送る」（または「続きを起こす」）とも同じ画面に並ぶ */
 .btn.is-lead {
   display: inline-flex;
   align-items: center;
@@ -599,7 +712,7 @@ select { appearance: none; }
 }
 
 /* つながっているか。押せないので面も枠も持たない。
-   触ると詳しい文が出ることを、形（カーソル）で知らせる（.ver と同じ） */
+   触ると詳しい文（title）が出ることを、形（カーソル）で知らせる */
 .live {
   display: inline-flex;
   align-items: center;
@@ -622,5 +735,11 @@ select { appearance: none; }
   box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent);
 }
 
-.live[data-live="on"]::before { color: var(--calm); }
 .live[data-live="off"]::before { color: var(--hot); }
+
+/* **つながっているあいだと、立ち上がりの「接続中」は出さない。**
+   同じことを言い続ける札は読まれなくなるので、言うことがあるとき
+   （切れた・更新でサーバーを入れ替えている）だけ出す。
+   役目は stream.js の setLive が data-live に1語で書き、出し入れはここが決める */
+.live[data-live="on"],
+.live[data-live="wait"] { display: none; }

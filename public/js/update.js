@@ -20,7 +20,7 @@
  */
 import { query, store } from './store.js';
 import { dom } from './dom.js';
-import { el, stamp } from './util.js';
+import { el } from './util.js';
 import { postJson } from './api.js';
 import { OUTDATED, STEPS, bannerOf, stepsOf } from './update-banner.js';
 
@@ -153,54 +153,6 @@ let ticker = 0;
 
 /** 読み込み直すまでの残り秒数。null は「数えていない」 */
 let countLeft = null;
-
-/**
- * 版の脇に出す印。
- *
- * @param {string} state サーバから来た状態
- * @returns {string} 'new'（新しい版がある） / 'bad'（確認できていない） / ''（言うことは無い）
- */
-function markOf(state) {
-  if (state === 'available') return 'new';
-  // stale と unknown は紙のほうがおかしい。どちらも「確認できていない」で足りる
-  if (state === 'unreachable' || state === 'failed' || state === 'stale' || state === 'unknown') {
-    return 'bad';
-  }
-  return '';
-}
-
-/**
- * 版の脇に出す説明。触らないと見えないので、長く書いてよい。
- *
- * @param {object} up /api/update の応答
- * @returns {string}
- */
-function versionTitle(up) {
-  const lines = [up.label];
-  if (up.state === 'available' && up.available) lines.push(`新しい版: ${up.available}`);
-  if (up.error) lines.push(up.error);
-  if (up.checkedAt) lines.push(`確認: ${stamp(up.checkedAt)}`);
-  return lines.join('\n');
-}
-
-/**
- * 上のバーの版を書き換える。
- *
- * 新しい版が無くても常に出す。渡された側が「自分は新しいほうか古いほうか」を
- * 確かめられる場所が、画面にはここしか無い。
- *
- * @param {object|null} up /api/update の応答。まだ読めていなければ null
- */
-function fillVersion(up) {
-  const version = up?.current ?? null;
-  // 版が読めないときは出さない。「不明」と書いても誰も使えない
-  dom.ver.hidden = !version;
-  if (!version) return;
-
-  dom.ver.textContent = `v${version}`;
-  dom.ver.title = versionTitle(up);
-  dom.ver.dataset.update = markOf(up.state);
-}
 
 /**
  * 紙が動いたかどうかを見るための鍵。
@@ -515,7 +467,6 @@ function tick() {
 /** 応答を画面へ反映する。出すか出さないかもここで決める。 */
 function render() {
   const up = store.update;
-  fillVersion(up);
 
   // 紙が動いたら、時間切れの申告と断りの帯を取り下げて時計を巻き戻す。
   // ここを1箇所に寄せておくと、動いた瞬間に古い言い分が消える

@@ -1,6 +1,6 @@
 /* 一覧の開閉。
  *
- * 層2。store.js だけを見る。
+ * 層2。dom.js だけを見る。
  *
  * **広い窓では列を畳む。狭い窓では手前に重なる引き出し。**
  * 姿は CSS が決める（base.css の grid と narrow.css の position: fixed）。
@@ -12,25 +12,10 @@
  * 押されたときに setListOpen(false) を呼ぶため。main.js に置くと
  * list.js -> main.js -> list.js の循環になって立ち上がらない。
  */
-import { el } from './util.js';
-import { icon } from './icons.js';
 import { dom } from './dom.js';
 
 /** 開閉を覚えておく鍵。「見たいときだけ開く」運用なので、次に開いたときも同じ形にする */
 const LIST_OPEN_KEY = 'claude-deck.listOpen';
-
-/**
- * 左のレールの開閉ボタン。**`initListDrawer()` が組むまで null。**
- *
- * もとは `store.js` の `dom` へ後から差していた（`dom.railList = railBtn`）。
- * あちらは 102 個の節点を1つのオブジェクトリテラルで固定して持つ器で、
- * **外から生えるキーが1つあると「画面の節点の全一覧」として読めなくなる。**
- *
- * ここに置いても `setListOpen()` が先に呼ばれ得ることは変わらないので、
- * 下のガードは残る。**変わるのは「なぜ null がありうるか」が読める場所。**
- * `store.js` を見ても分からなかったものが、同じファイルの中で完結する。
- */
-let railBtn = null;
 
 /**
  * 手前に重なる形か。CSS のメディアクエリと同じ値にする。
@@ -67,18 +52,10 @@ function syncListInert() {
 export function setListOpen(open, moveFocusTo = null, remember = true) {
   const changed = dom.app.classList.contains('is-list-open') !== open;
   dom.app.classList.toggle('is-list-open', open);
+  // 開閉の口は上のバーの1つだけ（広い窓でも狭い窓でも同じボタン）。
+  // **旗を2つ持たない** ―― 正は .app のクラス1つで、ここは名前と aria-expanded を合わせるだけ
   dom.listToggle.setAttribute('aria-expanded', String(open));
   dom.listToggle.setAttribute('aria-label', open ? 'セッション一覧を閉じる' : 'セッション一覧を開く');
-  // 左のレールも同じ状態を映す。**旗を2つ持たない** ―― 正は .app のクラス1つで、
-  // ここは見た目を合わせるだけ（右のレールの aria-pressed と同じ流儀）
-  // **まだ組んでいないことがある。** レールを組むのは initListDrawer() で、
-  // main.js の初期化はそこへ辿り着く前にも setListOpen() を通る
-  // （覚えている開閉を当てるため）。だから存在を確かめてから触る
-  if (railBtn) {
-    railBtn.setAttribute('aria-pressed', String(open));
-    railBtn.title = open ? 'セッション一覧を閉じる' : 'セッション一覧を開く';
-    railBtn.setAttribute('aria-label', railBtn.title);
-  }
   syncListInert();
 
   if (remember) localStorage.setItem(LIST_OPEN_KEY, open ? '1' : '0');
@@ -130,26 +107,16 @@ export function initialListOpen() {
 }
 
 /**
- * 一覧の引き出しを配線する。レール・上のバー・Esc・外側の押下。
+ * 一覧の引き出しを配線する。上のバーの開閉・引き出しの中の ×・Esc・外側の押下。
+ *
+ * **開閉の口は上のバーの `#list-toggle` 1つ。** 広い窓でも狭い窓でも同じボタンで、
+ * 一覧の無い書庫と数値のあいだは CSS（base.css）が隠す。
+ * 前は広い窓だけ作業台の左端の細い帯にもう1つ組んでいて、同じことをする口が2つあった。
  *
  * **窓の広さは見張らない。** 広さで形が変わらなくなったので要らなくなった
  * （前は広くなった時点で `setListOpen(false)` して列へ戻していた）。
  */
 export function initListDrawer() {
-  // 左端のレール。**右のレール（detail.js の initInspector）と同じ形で組む。**
-  // 開閉の口が上のバーと一覧の帯に散っていて、右の「数値・診断」とは作法が違った。
-  // ここへ寄せると、書庫や数値のあいだは .rail ごと消えるので、
-  // 一覧が無い画面に開閉ボタンだけが残ることもない
-  railBtn = el('button', 'rail-btn');
-  railBtn.type = 'button';
-  // 右のレールと同じく絵だけ。形は上のバーのハンバーガーと同じ sidebar を借りる
-  // （同じことをする口なので、別の形にすると覚え直しになる）
-  railBtn.append(icon('sidebar', 17));
-  railBtn.addEventListener('click', () => {
-    setListOpen(!dom.app.classList.contains('is-list-open'), railBtn);
-  });
-  dom.railLeft.append(railBtn);
-
   dom.listToggle.addEventListener('click', () => {
     const open = !dom.app.classList.contains('is-list-open');
     setListOpen(open, dom.listToggle);

@@ -23,6 +23,7 @@
  * **水位取りごと消してはいけない。** つなぎ直しは /api/runs/stream?from=<seq> なので、
  * 起点が 0 に戻ると、切れるたびにサーバー側のリング（最大1000件）を送り直させる。
  */
+import { stamp } from './util.js';
 
 /**
  * 思考量の言い方。
@@ -349,11 +350,20 @@ function takeRate(next) {
  */
 export const RATE_STALE_MS = 5 * 60_000;
 
-/** この割合を超えたら目に入るようにする。色は `.chip.is-hot` の使い回しで、新しい色は作らない */
+/**
+ * 7日の枠を出してよい観測の古さの上限。**これより古い（ちょうど7日は含まない）観測の7日の枠は落とす。**
+ *
+ * 7日の枠を測った数は、測ってから7日経てば今の枠を何も表していない（その7日間に使ったぶんは、
+ * もう枠の外へ出ている）。古い印（何日前）を添えても、輪の長さと真ん中の数は今の数の顔で出てしまう。
+ * 5時間枠は `resetsAt`（枠が空く時刻）で落とすので、こちらは観測の古さだけで決める。
+ */
+export const RATE_WEEK_MS = 7 * 24 * 60 * 60_000;
+
+/** この割合を超えたら赤（`--hot`）の段にする。色は状態色の使い回しで、新しい色は作らない */
 export const RATE_HOT = 0.9;
 
 /**
- * この割合を超えたら、メーターを黄色（`--warn`）にする。
+ * この割合を超えたら黄（`--warn`）の段にする。
  *
  * RATE_HOT の手前に1段置く。赤になってからでは、走らせている作業を畳む余裕が無い。
  * 色は状態色の使い回しで、新しい色は作らない。
@@ -361,7 +371,7 @@ export const RATE_HOT = 0.9;
 export const RATE_WARN = 0.8;
 
 /**
- * メーターの色の段。**判断はここに置き、CSS は語を当てるだけ。**
+ * 色の段。**判断はここに置き、CSS は語を当てるだけ。**
  * @param {number} v 0〜1 の割合
  * @returns {'hot'|'warn'|''}
  */
@@ -372,63 +382,125 @@ function toneOfRate(v) {
 }
 
 /**
- * 1本ぶんのメーター。読めなければ null（**0 は 0 として出す**）。
- * @param {string} label 枠の名前（5h / 7d）
- * @param {unknown} v 0〜1 の割合
+ * 0〜1 の割合を百分率の数に。**丸め方はここ1つ**（輪の名前の字と真ん中の数が同じ丸めを通る）。
+ * @param {number} v
+ * @returns {number}
  */
-function meterOf(label, v) {
-  if (typeof v !== 'number') return null;
-  // 棒の長さは 0〜1 に丸める。届いた値が 1 を超えても器からはみ出させない
-  const ratio = Math.min(1, Math.max(0, v));
-  return { label, ratio, text: pct(v), tone: toneOfRate(v) };
+function percent(v) {
+  return Math.round(v * 100);
 }
 
 /**
- * 枠の使用率を、出す形まで決める。**DOM を触らない純関数。**
+ * 1つの枠の形。読めなければ null（**0 は 0 として持つ**。読めなかった＝不明とは別物）。
  *
- * 判断がここに要るのは3つ。
+ * 丸める前の値（`value`）も持つ。弧の長さ（`ratio`）は 0〜1 に丸めるので、
+ * どちらの枠が高いかはこちらで比べる（どちらも 100% を超えたときに取り違えない）。
+ *
+ * @param {unknown} v 0〜1 の割合
+ * @returns {{value: number, ratio: number, text: string, tone: string}|null}
+ */
+function slotOf(v) {
+  if (typeof v !== 'number') return null;
+  return {
+    value: v,
+    // 弧の長さは 0〜1 に丸める。届いた値が 1 を超えても輪からはみ出させない
+    ratio: Math.min(1, Math.max(0, v)),
+    // 字は届いた値のまま（120% は 120% と言う）
+    text: `${percent(v)}%`,
+    tone: toneOfRate(v),
+  };
+}
+
+/**
+ * 枠の使用率を、枠ごとの形まで決める。**DOM を触らない純関数。**
+ *
+ * 判断がここに要るのは4つ。
  *
  * - `resetsAt` を過ぎた5時間枠は**落とす。** 空いているのに古い数を今の数の顔で出さない
  *   （新しい数は次の `rate_limit_event` が来るまで分からないので、そこは黙る）
+ * - 観測が7日（`RATE_WEEK_MS`）より古ければ7日の枠を**落とす。** 理由は同じで、
+ *   7日経った7日の枠の数は今の枠を表していない。両方落ちたら null（輪ごと出さない）
  * - 5分より古い観測には「いつ測ったか」を添える
- * - 0 は `0%` として出す。**読めなかった（不明）とは別物**
+ * - 0 は `0%` として持つ。**読めなかった（不明）とは別物**
+ *
+ * 枠は名前で探させない（`five` / `seven` の2つの鍵で持つ）。表示の字（「5h」など）で
+ * 探し直す形にすると、字を変えた日に輪が黙って壊れる。
  *
  * @param {object|null|undefined} rl `newestRateLimit()` の戻り
  * @param {number} now いまの時刻（ms）
- * `meters` はメーターの形（枠ごとに長さ・文字・色の段）。読めた枠だけが入る。
- * 空いた5時間枠も落ちる（上と同じ理由）。
- *
- * @returns {{fiveHour: ?string, sevenDay: ?string, age: ?string, hot: boolean,
- *            gone: boolean, at: number, resetsAt: ?number,
- *            meters: Array<{label: string, ratio: number, text: string, tone: string}>}|null}
+ * @returns {{five: ?{value: number, ratio: number, text: string, tone: string},
+ *            seven: ?{value: number, ratio: number, text: string, tone: string},
+ *            age: ?string, gone: boolean, weekOld: boolean, at: number, resetsAt: ?number}|null}
+ *          `gone` は5時間枠が空いたので落とした、`weekOld` は7日の枠を古さで落とした（名前でそう言うため）
  *          出すものが無ければ null
  */
 export function rateView(rl, now) {
   // resetsAt は**秒**の unix 時刻（実測）。ミリ秒として比べると必ず過去になる
   const resetsAt = typeof rl?.resetsAt === 'number' ? rl.resetsAt * 1000 : null;
   const gone = resetsAt !== null && now >= resetsAt;
-  const five = gone ? null : rl?.fiveHour;
-  const seven = rl?.sevenDay;
-  const fiveHour = pct(five);
-  const sevenDay = pct(seven);
-  if (fiveHour === null && sevenDay === null) return null;
+  const five = slotOf(gone ? null : rl?.fiveHour);
+  // 7日より古い観測の7日の枠は落とす（RATE_WEEK_MS の説明）。ちょうど7日は残す
+  const weekOld = typeof rl?.at === 'number' && now - rl.at > RATE_WEEK_MS;
+  const seven = slotOf(weekOld ? null : rl?.sevenDay);
+  if (five === null && seven === null) return null;
 
   const elapsed = now - rl.at;
   return {
-    fiveHour,
-    sevenDay,
+    five,
+    seven,
     age: elapsed >= RATE_STALE_MS ? ageText(elapsed) : null,
-    hot: [five, seven].some((v) => typeof v === 'number' && v >= RATE_HOT),
-    meters: [meterOf('5h', five), meterOf('7d', seven)].filter(Boolean),
     gone,
+    weekOld,
     at: rl.at,
     resetsAt,
   };
 }
 
-/** 0〜1 の割合を百分率に。読めなければ null（**0 は 0% として出す**） */
-function pct(v) {
-  return typeof v === 'number' ? `${Math.round(v * 100)}%` : null;
+/**
+ * レールの輪に出す形まで決める。**DOM を触らない純関数。** 描くのは `usage-chart.js` の `rateRing`。
+ * 説明モーダルの凡例の見本もここを通す（`about.js` の `fillMeters`）。
+ *
+ * **二重の輪。外が5時間の枠、内が7日の枠。** 位置に意味を持たせるので、
+ * 片方しか読めていないときもその輪の位置は動かさない（`five` / `seven` が null なら
+ * 溝だけ残して弧を描かない）。外が空いたからといって7日を外へ繰り上げると、
+ * 外＝5時間の読み方が崩れる。
+ *
+ * **真ん中は高いほうの数で、% を付けない。** 12px で「100%」を書くと内側の輪に収まらない
+ * （輪の内径 27px に対して 4字で約 30px）。% は吹き出しと読み上げ（`label`）が持つ。
+ * 高いほうは**丸める前の値（`value`）**で比べる。弧の長さ（`ratio`）は 0〜1 に丸めてあるので、
+ * どちらも 100% を超えたときに ratio だけで比べると取り違える。
+ *
+ * **古い観測は `stale` を立てる。** 描く側は輪を沈め、吹き出しに何分前かを出す
+ * （古い枠の数を今の数の顔で出さない）。
+ *
+ * @param {ReturnType<typeof rateView>} v `rateView()` の戻り
+ * @returns {{five: ?{value: number, ratio: number, text: string, tone: string},
+ *            seven: ?{value: number, ratio: number, text: string, tone: string},
+ *            peak: string, stale: boolean, label: string}|null} 出すものが無ければ null
+ */
+export function ringView(v) {
+  if (!v) return null;
+  const { five, seven } = v;
+  // rateView は「どちらも読めなければ null」なので、ここへ来たら少なくとも1つはある
+  const top = [five, seven].filter(Boolean).reduce((a, b) => (b.value > a.value ? b : a));
+
+  const lines = ['枠の使用率'];
+  lines.push(five ? `5時間　${five.text}`
+    : v.gone ? '5時間枠は空いたはず（新しい数はまだ届いていません）'
+      : '5時間　読めていません');
+  lines.push(seven ? `7日　${seven.text}`
+    : v.weekOld ? '7日枠は測ってから7日を過ぎたので出していません'
+      : '7日　読めていません');
+  lines.push(`測ったのは ${stamp(v.at)}${v.age ? `（${v.age}）` : ''}`);
+  if (v.resetsAt !== null && !v.gone) lines.push(`5時間枠が空くのは ${stamp(v.resetsAt)}`);
+
+  return {
+    five,
+    seven,
+    peak: String(percent(top.value)),
+    stale: v.age !== null,
+    label: lines.join('\n'),
+  };
 }
 
 /** 「いつ測ったか」。**分より細かくしない**（毎秒呼ばれるので、印が毎秒変わると止められない） */

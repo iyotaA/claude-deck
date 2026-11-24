@@ -240,7 +240,7 @@ test('押したあとに知らない状態が来たら、来た言い方をそ�
 /* ------------------------------------------------------------------ 形の約束 */
 
 test('OUTDATED は /api/update の応答と同じ形をしている', () => {
-  // 読む側（render / fillVersion）に分岐を増やさないため、鍵を欠かさない
+  // 読む側（update.js の render・about.js の版の1行）に分岐を増やさないため、鍵を欠かさない
   for (const key of Object.keys(paper())) {
     assert.ok(key in OUTDATED, `${key} が無い`);
   }

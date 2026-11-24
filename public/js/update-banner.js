@@ -46,7 +46,7 @@ const DONE_FRESH_MS = 600000;
  * npm start も ClaudeDeck.exe も「もう動いている」を見つけて窓を開くだけで終わるため、
  * 直したはずのコードが一度も走らなかった。画面はいつもどおりに見えるので気づけない。
  *
- * 形は /api/update の応答に合わせる。読む側（render / fillVersion）に分岐を増やさないため。
+ * 形は /api/update の応答に合わせる。読む側（update.js の render・about.js の版の1行）に分岐を増やさないため。
  * 版は入れない。取れなかったものを埋めると、古いサーバの版を知っているように見えてしまう
  */
 export const OUTDATED = Object.freeze({

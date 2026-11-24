@@ -21,10 +21,12 @@
 食い違っても左のカードと右のヘッダは揃う。
 
 `summarizeRows()` の `needsYou` は `row.blocking === true` だけを数える。
-**`ball === 'master'` で数えない**（返信待ちが混ざって、上のバーの数が
+**`ball === 'master'` で数えない**（返信待ちが混ざって、「あなた待ち」の数が
 「いま手を止めている件数」ではなくなる）。判断は `parse/state.mjs` の `isBlocking` が持ち、
 ここは配るだけ。`=== true` で見るのは、台帳側（`run/ledger.mjs`）が項目を足し忘れた将来でも
-`undefined` を「数えない」に倒して落ちないため。唯一の消費者は上のバーと `cli.mjs`。
+`undefined` を「数えない」に倒して落ちないため。`needsYou` を読むのは `cli.mjs`（「あなた待ち N」）だけ。
+画面の左のレールのバッジは `meta.counts` と `meta.stateBlocking` から数え直している
+（`public/js/nav.js` の `blockingCount`。「止まっているか」の出どころは `isBlocking` と同じ `STATE_BLOCKING` の表）。
 
 **数値（`view/usage.mjs`）の設計は `src/parse/CLAUDE.md` にある。**
 集計そのものは `parse/usage.mjs` にあり、両方を1枚にまとめてあるため。

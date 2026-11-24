@@ -4,53 +4,10 @@
  * narrow.css が上を全部上書きするので、あれより後ろには置けない。
  */
 
-/* 上のバーの版。
- *
- * .topbar-actions の先頭に置く。新しい版が無くても常に出す
- * （渡された側が自分の版を確かめられる場所が、画面にはここしか無い） */
-.ver {
-  font-family: var(--font-mono);
-  font-size: var(--fs-1);
-  color: var(--fg-faint);
-  /* 触ると説明が出ることを、形で知らせる */
-  cursor: help;
-  white-space: nowrap;
-}
-
-/* hidden は display: inline-flex に負ける。必ず自分で消す */
-.ver[hidden] { display: none; }
-
-/* 状態の印。
- *
- * 点だけにして、面は塗らない。全面を塗ると版のラベルが主役になってしまう。
- *
- * 点は文字の前に置く。隣にいる .live も ::before なので、後ろに付けると
- * 点が2つ隣り合って（v0.1.0 ● ● 自動更新なし）どちらの印か分からなくなる */
-.ver[data-update='new'],
-.ver[data-update='bad'] {
-  display: inline-flex;
-  align-items: center;
-  gap: .35rem;
-}
-
-.ver[data-update='new']::before,
-.ver[data-update='bad']::before {
-  content: '';
-  width: .5rem;
-  height: .5rem;
-  border-radius: 50%;
-}
-
-/* 色だけ分ける。形（点）は上で共通に作ってある。
-   **確認できていない側を、新しい版があるのと同じ色にしない。** */
-.ver[data-update='new']::before { background: var(--accent); }
-.ver[data-update='bad']::before { background: var(--warn); }
-
 /* お知らせの帯。
  *
  * 置き場所は <header class="topbar"> の中。.app 直下ではない。
- * .app は grid-template-rows に2行しか宣言していないので、
- * 3つ目の子を足すと高さの配分が崩れる。
+ * .app の行と列はレール・上のバー・帯・作業台で埋まっていて、子を足すと高さの配分が崩れる。
  * .topbar は既に flex-wrap: wrap なので、幅いっぱいを取れば自分の行へ折り返す */
 .update {
   flex: 0 0 100%;
@@ -58,8 +15,7 @@
   align-items: center;
   gap: .6rem 1rem;
   flex-wrap: wrap;
-  /* 上は .topbar の row-gap（.7rem）に任せる。ここで足すと二重に空く
-     （下の .statusbar と同じ理由） */
+  /* 上は .topbar の row-gap（.7rem）に任せる。ここで足すと二重に空く */
   padding: .5rem .7rem;
   border: 1px solid var(--border);
   /* 面は塗らず、左の1本だけで知らせる */
@@ -77,8 +33,7 @@
 /* このサーバが古い、の知らせ。新しい版があるのと同じ色にしない。
  *
  * あちらは「よければどうぞ」だが、こちらは手を打たないと直らない。
- * 版の脇の印（.ver[data-update='bad']）と同じ色を使って、
- * 「うまくいっていない側」の色をこの画面で1つに保つ */
+ * 「うまくいっていない側」の色（--warn）をこの画面で1つに保つ */
 .update[data-tone='warn'] { border-left-color: var(--warn); }
 
 /* 作業中（取り寄せ・入れ替え）。

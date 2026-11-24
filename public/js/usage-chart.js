@@ -300,6 +300,76 @@ export function sparkline(values, label) {
 }
 
 /**
+ * 枠の使用率の二重の輪の形。**外が5時間の枠、内が7日の枠。**
+ *
+ * どれも **viewBox の座標**（`view` 四方）。器の大きさは CSS（base.css の `.rate-ring` が
+ * `--navrail-cell` = 2.75rem = 44px）が持ち、SVG は器いっぱいに広がる。`view` を 44 に揃えてあるので、
+ * いまは 1 単位がちょうど 1px になる（器の大きさを変えるなら、ここの数は比として読み替わる）。
+ * 線の太さ 3、輪と輪の隙間 1.5。内側の輪の内径は 27（半径 15 − 線の半分 1.5 の倍）で、
+ * 真ん中の数（12px。こちらは器と一緒に伸び縮みしない）の「100」が収まる幅にしてある。
+ * 「100%」は収まらないので % は付けない（runs.js の ringView）。
+ */
+const RING = { view: 44, stroke: 3, outer: 19.5, inner: 15 };
+
+/**
+ * 枠の使用率の二重の輪を組む。**左のレール（list.js の renderRate）と、説明モーダルの凡例
+ * （about.js の fillMeters）が同じものを使う。** 凡例を別の部品で描くと、輪を直した日に凡例だけ古くなる。
+ *
+ * 何を描くかは渡されたものに従うだけで、ここでは判断しない（判断は runs.js の ringView）。
+ * - 読めていない枠（`five` / `seven` が null）は**溝だけ残して弧を描かない。**
+ *   外＝5時間・内＝7日の位置の意味を動かさないため（片方しか無いときに繰り上げない）
+ * - 弧の長さは `stroke-dasharray` を**属性で**入れる（CSS 変数にすると、JS が書く変数の一覧
+ *   ―― `test/screen.test.mjs` の `FROM_JS` ―― に足す口が増える）
+ * - 0% は長さ 0 の弧を置く。線の端が丸い（`stroke-linecap: round`）ので点が1つ出て、
+ *   「読めていない（弧が無い）」と見分けが付く
+ * - 色の段は `data-tone` に1語で書き、色そのものは CSS（base.css の `.rate-ring-*`）が当てる
+ * - 古い観測（`stale`）は器に `data-stale` を立てる（CSS が沈める）
+ *
+ * SVG は `svgEl()`（createElementNS）で組む。`innerHTML` は使わない。
+ * 絵は飾り（aria-hidden）で、名前は置く側（`#rate` の aria-label）が持つ。
+ *
+ * @param {{five: ?{ratio: number, tone: string}, seven: ?{ratio: number, tone: string},
+ *          peak: string, stale?: boolean}} ring `ringView()` の戻り（凡例の見本も同じ道で組む）
+ * @returns {HTMLElement}
+ */
+export function rateRing(ring) {
+  const box = el('span', 'rate-ring');
+  if (ring.stale) box.dataset.stale = '';
+
+  const { view, stroke } = RING;
+  const c = view / 2;
+  // 幅と高さは書かない（器の CSS に任せる。数を2箇所に持たない）
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${view} ${view}`,
+    'aria-hidden': 'true',
+    focusable: 'false',
+  });
+  for (const [part, r] of [[ring.five, RING.outer], [ring.seven, RING.inner]]) {
+    // 溝。読めていてもいなくても置く（輪の位置そのものが「どちらの枠か」を語る）
+    svg.append(svgEl('circle', {
+      class: 'rate-ring-track', cx: c, cy: c, r, fill: 'none', 'stroke-width': stroke,
+    }));
+    if (!part) continue;
+    const len = 2 * Math.PI * r;
+    svg.append(svgEl('circle', {
+      class: 'rate-ring-arc',
+      cx: c,
+      cy: c,
+      r,
+      fill: 'none',
+      'stroke-width': stroke,
+      'stroke-linecap': 'round',
+      'stroke-dasharray': `${(part.ratio * len).toFixed(2)} ${len.toFixed(2)}`,
+      // 12時の位置から時計回りに伸ばす（円の既定の始点は3時）
+      transform: `rotate(-90 ${c} ${c})`,
+      'data-tone': part.tone || null,
+    }));
+  }
+  box.append(svg, el('b', 'rate-ring-num', ring.peak));
+  return box;
+}
+
+/**
  * スパークラインを1行ずつ並べる。
  *
  * 器は `barList` と同じ4列（名前・絵・値・添え）を借りる。

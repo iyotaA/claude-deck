@@ -7,10 +7,13 @@
  * ―― あちらは起動時に決まって二度と変わらない参照の表、こちらは動くたびに書き換わる状態。
  * この塊が同居していたころ、`store.js` の 24% が節点の索引だった。
  *
- * import してよいのは timeline/kinds.js だけ。**直に** import するのが要点で、
- * timeline/index.js 経由にすると index → view → store の循環になって立ち上がらない。
+ * import してよいのは層0 の2枚（timeline/kinds.js と nav.js）だけ。
+ * kinds.js は**直に** import するのが要点で、timeline/index.js 経由にすると
+ * index → view → store の循環になって立ち上がらない。
+ * nav.js はモードの id の出どころ（下の MODES）。どちらも import ゼロなので循環は起きない。
  */
 import { initialHiddenKinds, hideQueryValue } from './timeline/kinds.js';
+import { MODE_LIST } from './nav.js';
 
 /**
  * `localStorage` の鍵。
@@ -104,7 +107,7 @@ export const QUIET_MODES = new Set(['auto', 'default', 'normal', 'acceptEdits'])
  *
  * `keepEmpty`（0 件でも見出しを残す）という道具は残してある。あれが守っていたのは
  * 「見ていない」と「無い」を同じ顔にしないことで、その役目は帯と、
- * 帯が空のときに上のバーの下段が言う1行（`.tally.is-calm`）が引き継いだ。
+ * 左のレールの作業台の札の名前（0 件なら「止まっているものはありません」）が引き継いだ。
  * 空の見出しを4本とも残すと、静かな日に一覧の場所を食う。
  */
 export const STATE_GROUPS = [
@@ -124,7 +127,8 @@ export const STATE_GROUPS = [
 export const HERO_STATES = new Set(['needs-answer', 'needs-plan-approval', 'needs-approval']);
 
 /**
- * 一覧の上に出すまとめ。並び順もこの順にする。
+ * 状態を並べる順。説明モーダルの凡例と、設定の「鳴らす状態」がこの順で並ぶ。
+ * 上から手をつける順（サーバ側の STATE_RANK と同じ考え）。
  *
  * ラベルの日本語はここに持たない。サーバが meta.stateLabels で渡してくる。
  * 状態を1つ増やしたときに、直す場所が state.mjs だけで済むようにするため。
@@ -210,9 +214,12 @@ export const USAGE_DEFAULTS = Object.freeze({
  * 選ぶための場所に、選んでいるものと関係のない数字が出ることになる。
  *
  * 集合で持つ。三項演算子で二値に畳むと、3つ目を足した日に
- * 黙って 'work' へ落ちる形になる（実際に3つ目を足した）
+ * 黙って 'work' へ落ちる形になる（実際に3つ目を足した）。
+ *
+ * **id の出どころは nav.js の MODE_LIST**（レールの並び・名前・数字キーと同じ表）。
+ * ここに語を書き写すと、モードを1つ足した日にレールと URL の照合が食い違う
  */
-export const MODES = new Set(['work', 'archive', 'usage']);
+export const MODES = new Set(MODE_LIST.map((m) => m.id));
 
 /**
  * 開くモードを決める。

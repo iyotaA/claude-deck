@@ -1,7 +1,8 @@
 /**
  * 画面の節点の索引。層1。
  *
- * `index.html` に置いた 102 個の id を、起動時に1回だけ引いて固定する。
+ * `index.html` に置いた id を、起動時に1回だけ引いて固定する
+ * （数は書かない。前は「102 個」と書いてあり、節点を足すたびに腐っていた）。
  * **ここが「画面の節点の全一覧」。** 探すのに `querySelector` を書き散らさずに済む。
  *
  * もとは `store.js` に同居していた（あちらの 24% がこの塊だった）。
@@ -10,16 +11,18 @@
  *
  * ## 外からキーを足さない
  *
- * かつて `drawer.js` が `dom.railList = railBtn` と後から差していた。
+ * かつて `drawer.js` が自分で組んだボタンを `dom.railList` と後から差していた。
  * 1つあるだけで、この表を読んでも画面の節点が分からなくなる
  * （実際、`dom.*` の参照を全部集めて突き合わせたとき `railList` だけが定義に無かった）。
- * いまはあちらのモジュール変数に閉じてある。
+ * JS が組む節点は、組んだファイルのモジュール変数に閉じる。
  *
- * ## 引いていない id が4つある
+ * ## 引いていない id がある
  *
  * `split-list` / `split-insp` は `resize.js` が名前を組み立てて動的に引く（`split-${name}`）。
- * `runform-title` / `settings-title` は `aria-labelledby` の宛先で、JS からは触らない。
- * **どちらも「引き忘れ」ではない。**
+ * `*-title`（`runform-title` / `settings-title` / `about-title` / `memo-title` / `today-title`）は
+ * `aria-labelledby` の宛先で、JS からは触らない。`navrail` は左のレールの器で、
+ * JS が触るのは中の札だけ（器ごと掴む用が無い）。**どれも「引き忘れ」ではない。**
+ * 数は書かない（前は「4つ」と書いてあり、足すたびに腐っていた）。
  */
 
 export const dom = {
@@ -30,8 +33,12 @@ export const dom = {
   // list.js の renderHero() だけが書く
   heroWrap: document.getElementById('hero-wrap'),
   heroBand: document.getElementById('hero-band'),
-  summary: document.getElementById('summary'),
-  // 枠の使用率（上のバー）。list.js の renderRate() だけが書く
+  // 左のレール（#navrail）の頭の印（飾り）。絵は main.js が1回だけ差す。
+  // レールそのものは JS から触らない（札は下の modeWork などで1つずつ引く）
+  navrailLogo: document.getElementById('navrail-logo'),
+  // 作業台の札の、止まっているものの数。list.js の renderRailBadge() だけが書く
+  railBadge: document.getElementById('rail-badge'),
+  // 枠の使用率（レールの輪）。list.js の renderRate() だけが書く
   rate: document.getElementById('rate'),
   detail: document.getElementById('detail'),
   // 詳細ペインそのもの。zoom.js が節点ごとモーダルへ運ぶので、器の側にも取っ手が要る。
@@ -45,9 +52,10 @@ export const dom = {
   memoSave: document.getElementById('memo-save'),
   memoClear: document.getElementById('memo-clear'),
   memoClose: document.getElementById('memo-close'),
-  // 今日のまとめの窓と、書庫の頭の入口。today.js だけが使う
+  // 今日のまとめの窓と、その入口2つ（左のレール・書庫の頭）。today.js だけが使う
   today: document.getElementById('today'),
   todayOpen: document.getElementById('today-open'),
+  archiveToday: document.getElementById('archive-today'),
   todayAgo: document.getElementById('today-ago'),
   todayCopy: document.getElementById('today-copy'),
   todayClose: document.getElementById('today-close'),
@@ -58,11 +66,13 @@ export const dom = {
   // 中央下の入力欄の器。詳細ペインの外に置いてあるので replaceChildren() で消えない
   composer: document.getElementById('composer'),
   live: document.getElementById('live'),
-  // 題名。脇の印（SVG）を main.js が1回だけ差す
-  brand: document.getElementById('brand'),
+  // 上のバーの題（いまのモードの名前）。mode.js だけが書く
+  pageTitle: document.getElementById('page-title'),
+  // 上のバーの探す欄。押すとパレットが開く（配線は main.js）
+  paletteOpen: document.getElementById('palette-open'),
   reload: document.getElementById('reload'),
   onlyLive: document.getElementById('only-live'),
-  // モードの札（mode.js）。骨格の組み替えは .app のクラスが受け持つ
+  // モードの札（左のレール。mode.js）。骨格の組み替えは .app のクラスが受け持つ
   modeWork: document.getElementById('mode-work'),
   modeArchive: document.getElementById('mode-archive'),
   modeUsage: document.getElementById('mode-usage'),
@@ -77,8 +87,6 @@ export const dom = {
   inspClose: document.getElementById('insp-close'),
   inspBody: document.getElementById('insp-body'),
   rail: document.getElementById('rail'),
-  // 左端のレール（一覧の開閉）。中身は drawer.js が1回だけ組む
-  railLeft: document.getElementById('rail-left'),
   liveHead: document.getElementById('live-head'),
   archiveHead: document.getElementById('archive-head'),
   archive: document.getElementById('archive'),
@@ -195,7 +203,6 @@ export const dom = {
   palList: document.getElementById('pal-list'),
   palMsg: document.getElementById('pal-msg'),
   // 更新のお知らせ。update.js だけが使う
-  ver: document.getElementById('ver'),
   update: document.getElementById('update'),
   updateText: document.getElementById('update-text'),
   updateNote: document.getElementById('update-note'),

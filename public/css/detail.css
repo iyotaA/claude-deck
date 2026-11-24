@@ -180,7 +180,7 @@
 }
 
 /* このセッションの目的。枠を付けず、左の罫線だけで本文と区別する。
-   上のバーの .summary とは名前を分ける（同名だと両方に当たって縦積みが崩れる） */
+   名前を .summary にしない（前は上のバーに同じ名前があり、両方に当たって縦積みが崩れた） */
 .purpose {
   margin-bottom: 1.1rem;
   padding-left: .8rem;
@@ -630,13 +630,6 @@ details.rejected .label { color: var(--fg); }
   padding: .5rem .2rem;
   background: var(--bg);
   border-left: 1px solid var(--border);
-}
-
-/* 左端のレール（一覧の開閉）。右のレールと同じ形・同じ大きさにする。
-   **境目の線だけ向きを返す。** 右は左辺に、左は右辺に引く */
-.rail.is-left {
-  border-left: 0;
-  border-right: 1px solid var(--border);
 }
 
 /* レールのボタン。**絵だけ。** 縦のレールに字を積むと1文字ずつ折り返すか、

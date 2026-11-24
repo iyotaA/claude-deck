@@ -44,49 +44,78 @@
 <a class="skip" href="#detail">本文へ移動</a>
 <div class="app" id="app">
 
+  <!-- 左のレール（画面の切り替え）。**どのモードにいても、左の同じ場所に出す。**
+       止まっているセッションの数（作業台の札のバッジ）と、行き先（モード・今日のまとめ・設定・説明）を
+       ここ1箇所に集める。モードを替えても数と入口が動かないので、探さずに済む。
+
+       **押せるものは絵だけ。** 縦に字を積むと1文字ずつ折り返すか、レールそのものを広げることになる。
+       名前は aria-label、目で読む名前は吹き出し（data-tip を CSS の ::after で出す）が持つ。
+       **title は付けない。** 吹き出しと OS の札が二重に出る。
+
+       モードの札の名前と吹き出しは mode.js が nav.js の MODE_LIST から入れる（ここに書き写さない）。
+       絵（SVG）は main.js が差す（形は icons.js の1箇所で持つ）。
+
+       いまのモードの札は aria-current="page"。ナビゲーションなので aria-pressed は使わない。
+       **role="tab" も使わない。** 正式なタブは矢印キーでタブ間を移動する約束が付くが、
+       左の一覧が上下キーを行の移動に使っている。同じ画面に矢印キーの契約を2つ置かない -->
+  <nav class="navrail" id="navrail" aria-label="画面の切り替え">
+    <!-- 印。飾りなので読み上げに乗せない（名前はタブの <title> が持つ） -->
+    <span class="navrail-logo" id="navrail-logo" aria-hidden="true"></span>
+    <button class="navrail-item" id="mode-work" type="button">
+      <!-- 止まっているものの数。**数字は飾り**で、件数は札の aria-label が言う（list.js が両方を書く）。
+           0 件と「まだ一覧を受け取っていない」ときは出さない -->
+      <span class="navrail-badge" id="rail-badge" aria-hidden="true" hidden></span>
+    </button>
+    <button class="navrail-item" id="mode-archive" type="button"></button>
+    <button class="navrail-item" id="mode-usage" type="button"></button>
+    <!-- 今日のまとめ。モードではなく窓が開く（today.js）。書庫の頭にも同じ入口がある -->
+    <button class="navrail-item" id="today-open" type="button"
+            aria-label="今日のまとめ" data-tip="今日のまとめ"></button>
+    <div class="navrail-space"></div>
+    <!-- 枠の使用率（アカウントで1つ）。二重の輪で、外が5時間・内が7日。
+         押せないので button にしない。名前は list.js の renderRate が aria-label と data-tip に入れる。
+         この画面から起こした実行が1本も無ければ出ない（hidden のまま） -->
+    <div class="navrail-rate" id="rate" role="img" hidden></div>
+    <div class="navrail-sep"></div>
+    <button class="navrail-item" id="settings-open" type="button"
+            aria-label="設定を開く" data-tip="設定"></button>
+    <button class="navrail-item" id="about-open" type="button"
+            aria-label="このアプリについて" data-tip="このアプリについて"></button>
+  </nav>
+
+  <!-- 上のバー。**「探す・起こす」だけに絞る。** 行き先（モード・設定・説明）は左のレールにある。
+       ここに残すのは、いまの場所の名前（題）と、どのモードからでも使う道具だけ -->
   <header class="topbar">
-    <!-- 狭い画面でだけ出る。一覧を手前に引き出す -->
-    <!-- 一覧の開閉。絵（SVG）は main.js が差す（形は icons.js の1箇所で持つ） -->
+    <!-- 一覧の開閉。**広い窓でも狭い窓でも同じボタン1つ**（広い窓は列を畳む・狭い窓は引き出し）。
+         一覧があるのは作業台だけなので、書庫と数値では出さない（base.css）。
+         絵（SVG）は main.js が差す -->
     <button class="list-toggle" id="list-toggle" type="button"
             aria-expanded="false" aria-controls="list-pane" aria-label="セッション一覧を開く"></button>
-    <!-- 題名は落とす。毎日開く画面なので、名前は一度覚えれば済む。
-         前はここがバーでいちばん大きい字で、いちばん情報の少ないものが
-         いちばん目立っていた。脇の印（SVG）は main.js が差す -->
-    <h1 class="brand" id="brand">ClaudeDeck</h1>
-    <!-- 見る目的が2つあるので、モードで分ける。同居させると「どれから手をつけるか」と
-         「いまの作業」が同じ画面で場所を取り合う（それが組み替えの発端そのもの）。
-         押した状態は aria-pressed で表す。**role="tab" は使わない。**
-         正式なタブは矢印キーでタブ間を移動する約束が付くが、下の一覧が
-         上下キーをカードの移動に使っている。同じ画面に矢印キーの契約を2つ置かない -->
-    <div class="modes" role="group" aria-label="画面のモード">
-      <button class="tab" id="mode-work" type="button" aria-pressed="true">作業台</button>
-      <button class="tab" id="mode-archive" type="button" aria-pressed="false">書庫</button>
-      <button class="tab" id="mode-usage" type="button" aria-pressed="false">数値</button>
-    </div>
-    <div class="topbar-actions">
-      <!-- いまの版。触ると更新の確認の結果が出る。
-           渡された側が自分の版を確かめられる場所が、画面にはここしか無い -->
-      <span class="ver" id="ver" hidden></span>
-      <!-- 押せないものは面も枠も持たない。隣のボタンと形で分ける -->
-      <span class="live" id="live" role="status" data-live="wait">接続中</span>
-      <!-- ここだけ文字を残す。他の3つと違って、押すと新しいものが生まれる -->
-      <button class="btn is-lead" id="runform-open" type="button" aria-label="新しいセッションを起こす">起こす</button>
-      <!-- 補助の3つはアイコンだけにする。名前は title と aria-label に残るので、
-           触れば出るし読み上げにも乗る。中身（SVG）は main.js が差す。
-
-           **説明を先頭に置く。** 渡された人がいちばん先に押すもので、
-           残り2つ（再読み込み・設定）は使い慣れてから触るものなので、
-           読む順（左から右）と押す順を合わせてある -->
-      <button class="ibtn" id="about-open" type="button" title="このアプリについて" aria-label="このアプリについて"></button>
-      <button class="ibtn" id="reload" type="button" title="再読み込み" aria-label="再読み込み"></button>
-      <button class="ibtn" id="settings-open" type="button" title="設定を開く" aria-label="設定を開く"></button>
-    </div>
+    <!-- いまのモードの名前。mode.js が nav.js の MODE_LIST から入れる。
+         レールの札は絵だけなので、どこにいるかを字で言う場所がここになる -->
+    <h1 class="page-title" id="page-title"></h1>
+    <!-- 接続の札。**つながっているあいだは出さない**（base.css が data-live で隠す）。
+         出すのは切れたときと、更新でサーバーを入れ替えているときだけ。
+         押せないものは面も枠も持たない -->
+    <span class="live" id="live" role="status" data-live="wait">接続中</span>
+    <!-- 探す欄。押すとパレット（Ctrl+K と同じもの）が開く。**打つ場所はパレットの中**で、
+         これは入口のボタン。Ctrl+K を知らない人への看板も兼ねる。絵は main.js が差す -->
+    <button class="topbar-find" id="palette-open" type="button"
+            aria-label="セッション・操作を探す" aria-keyshortcuts="Control+K">
+      <span class="topbar-find-text">セッション・操作を探す</span><kbd class="kbd">Ctrl K</kbd>
+    </button>
+    <span class="topbar-space"></span>
+    <!-- 再読み込みは絵だけ。名前は title と aria-label が持つ（触れば出るし読み上げにも乗る） -->
+    <button class="ibtn" id="reload" type="button" title="再読み込み" aria-label="再読み込み"></button>
+    <!-- 起こす。**塗らない普通のボタン。** 塗った面（.btn.is-lead）は1画面に1つの約束で、
+         そこは詳細の次の一手に譲る。絵（plus）だけ --accent の色にして、
+         押すと新しいものが生まれることを残す -->
+    <button class="btn topbar-run" id="runform-open" type="button" aria-label="新しいセッションを起こす">起こす</button>
 
     <!-- 更新のお知らせ。.app 直下ではなく topbar の中に置く。
-         .app は grid-template-rows に2行しか宣言していないので、3つ目の子を足すと
-         高さの配分が崩れる。topbar は flex-wrap: wrap なので、幅いっぱいを取れば自分の行へ折り返す。
-         **下の .statusbar より前に置く。** 後ろに置くと、帯が出るたびに
-         常設のステータスバーが下へずれて、状態を見る位置が動く -->
+         .app の行は3本（上のバー／帯／作業台）だけ宣言していて、子を足すと高さの配分が崩れる。
+         topbar は flex-wrap: wrap なので、幅いっぱいを取れば自分の行へ折り返す。
+         帯は稀にしか出ないので、出たときだけ上のバーが1行伸びる -->
     <div class="update" id="update" role="status" hidden>
       <span class="update-text" id="update-text"></span>
       <span class="update-note" id="update-note"></span>
@@ -100,26 +129,14 @@
       <!-- 道中の段（準備・取り寄せ・入れ替え）。覆いを畳んだあとも、どこまで来たかをここで見せる -->
       <ol class="upd-steps update-steps" id="update-steps" hidden></ol>
     </div>
-
-    <!-- 下段。ボールの所在だけを置く帯。
-         上段と同じ行に混ぜない。混ぜると「どれから手をつけるか」が
-         道具（起こす・説明・設定）と横幅を取り合い、状態の名前を出せなくなる。
-         枠の使用率は .summary とは別の器にする。あちらは renderSummary() が
-         replaceChildren() で毎回まるごと入れ替えるので、混ぜると出どころの違う2つが
-         同じ器を取り合う -->
-    <div class="statusbar">
-      <div class="summary" id="summary"></div>
-      <div class="rate" id="rate" role="status" hidden></div>
-    </div>
   </header>
 
   <!-- ボールの所在。**画面のいちばん上に、いちばん大きく出す。**
        前は左の列の中の、他と同じ大きさのカード1枚だった。
 
-       **`.app` の3行目として置く。** `.topbar` の中（`.statusbar` と同じ手）にも
+       **`.app` の2行目として置く。** `.topbar` の中（更新の帯と同じ手）にも
        できるが、あれは道具の帯で、これは作業そのもの。
-       子を足すぶん `.app` の `grid-template-rows` も3行に直してある
-       ―― 直さずに足すと高さの配分が崩れる。
+       行と列は base.css が明示して置く（帯が hidden で消えても作業台が繰り上がらない）。
 
        中身は `list.js` が組む。0件なら帯ごと消える（器に `hidden` が付く） -->
   <div class="hero-wrap" id="hero-wrap" hidden>
@@ -127,14 +144,6 @@
   </div>
 
   <main class="deck">
-    <!-- 左端のレール。一覧の開閉だけを持つ。中身は drawer.js が組む
-         （右のレールを detail.js が組むのと同じ流儀で、並びと語彙を1箇所に置く）。
-
-         **右のレールと同じ形にしてある。** 開閉の口が上のバー（ハンバーガー）と
-         一覧の帯（×）に散っていて、しかも右の「数値・診断」とは作法が違った。
-         レールなら、書庫や数値のあいだは .rail ごと消えるので、
-         一覧が無い画面に開閉ボタンだけが残ることもない -->
-    <nav class="rail is-left" id="rail-left" aria-label="セッション一覧を開く"></nav>
     <!-- 書庫（終了したものも含む全セッション）。数値と同じくモードなので
          .deck の中に置く。**左の列から出した。** 出すカードの項目が5つあるのに
          27rem の列に押し込んでいて、置き場所も期間も絞る場所が無かった。
@@ -142,8 +151,9 @@
          絞り込みの札は archive.js が組む（候補が応答から決まるため。器だけ置く） -->
     <div class="list-head archive-head" id="archive-head" hidden>
       <!-- 今日のまとめの入口（today.js）。**書庫の頭のいちばん前に置く。** 書庫は過去を探す場所で、
-           「きょう何をしたか」はその手前の問い。新しいモードは作らず、窓（#today）で開く -->
-      <button class="btn today-open" id="today-open" type="button">今日のまとめ</button>
+           「きょう何をしたか」はその手前の問い。新しいモードは作らず、窓（#today）で開く。
+           左のレールにも同じ入口（#today-open）がある。こちらは字を出せる場所なので名前ごと残す -->
+      <button class="btn today-open" id="archive-today" type="button">今日のまとめ</button>
       <!-- 検索欄。絵（虫めがね）は archive.js が差す。
            打つ前に「ここが検索欄」と分かる合図が、いままで placeholder しか無かった -->
       <span class="archive-field is-q">
@@ -194,7 +204,7 @@
     </div>
     <ul class="archive-grid" id="archive" hidden></ul>
     <!-- 数値（横断）。書庫と同じくモードなので、.deck の中に置く（.app 直下には
-         置けない。grid-template-rows が2行しか宣言していないため）。
+         置けない。.app の行と列はレール・上のバー・帯・作業台の4つで埋まっている）。
          ログを全文読む一番重い窓口なので、開いたときに1回だけ引く。
          モデルの選択肢は応答から組むので、ここには「すべて」だけを置く -->
     <div class="list-head usage-head" id="usage-head" hidden>
@@ -239,7 +249,7 @@
       <div class="list-head" id="live-head">
         <label><input type="checkbox" id="only-live"> 稼働中だけ</label>
         <span id="list-count"></span>
-        <!-- 引き出しのときだけ出る。開いている間はハンバーガーが下に隠れるため -->
+        <!-- 引き出しのときだけ出る。開いている間は上のバーの開閉ボタンが下に隠れるため -->
         <button class="drawer-close" id="list-close" type="button" aria-label="一覧を閉じる">&#215;</button>
       </div>
       <ul class="list" id="list"></ul>
@@ -507,7 +517,7 @@
      （run-form.js が借りたのと同じ作法。器の寸法だけ about.css に書いてある）。
      左で節を選び右に中身を出す形も同じで、出し分けは CSS が data-sec でやる。
 
-     **中身のほとんどは静的に置く。** JS が組むのは凡例4つ（状態の点・経過の印・札・上のバーのメーター）と
+     **中身のほとんどは静的に置く。** JS が組むのは凡例4つ（状態の点・経過の印・札・レールの輪）と
      版の1行と本文の絵だけで、どれも既にある表から引く ―― 種類や状態が1つ増えた日に
      凡例だけが古くなることを防ぐため -->
 <dialog class="settings about" id="about" data-sec="what" aria-labelledby="about-title">
@@ -579,11 +589,20 @@
           <p class="settings-hint"><strong>作業台</strong> — いま動いているものを見て、答える場所。</p>
           <p class="settings-hint"><strong>書庫</strong> — 終わったものも含めて、過去を探す場所。</p>
           <p class="settings-hint"><strong>数値</strong> — セッションを跨いで、何が文脈を食っているかを見る場所。</p>
+          <p class="settings-hint">左のレールの絵か、数字キーの <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> で移ります。</p>
+        </section>
+
+        <section class="settings-sec">
+          <h3 class="settings-h3">左のレール</h3>
+          <p class="settings-hint">どのモードでも左端に出ます。上から作業台・書庫・数値・今日のまとめ、
+            下に枠の使用率の輪と、設定・このアプリについて。絵に触ると名前が出ます。</p>
+          <p class="settings-hint">作業台の絵の赤い数は、<strong>答えないと1行も進まないセッションの数</strong>です。
+            無いときは数を出しません。</p>
         </section>
 
         <section class="settings-sec">
           <h3 class="settings-h3">作業台は上から5つ</h3>
-          <p class="settings-hint"><strong>上のバー</strong> — 状態ごとの数と、枠の使用率（5時間・7日）。</p>
+          <p class="settings-hint"><strong>上のバー</strong> — 一覧の開閉・いまの場所・探す欄（Ctrl+K と同じ）・起こす。</p>
           <p class="settings-hint"><strong>あなたの番の帯</strong> — 答えないと1行も進まないものだけが並びます。
             「開く」「答える」を押すと1行に畳み、右上の ⌄ で広げます。</p>
           <p class="settings-hint"><strong>左の一覧</strong> — いちばん上にピン留め、その下は状態ごと。終わったものは新しい5件だけ出します。</p>
@@ -597,6 +616,8 @@
           <!-- **どこにも書いていなかった。** Ctrl+K は知らないと一生使われない -->
           <ul class="about-keys">
             <li><span class="k"><kbd>Ctrl</kbd><kbd>K</kbd></span><span>やりたいことを打って探す</span></li>
+            <!-- 入力欄に焦点があるときと窓が開いているときは効かない（指示文に数字を書いている最中に画面を替えない） -->
+            <li><span class="k"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span>作業台・書庫・数値へ移る（入力欄の外で）</span></li>
             <li><span class="k"><kbd>↑</kbd><kbd>↓</kbd></span><span>一覧のセッションを移る</span></li>
             <li><span class="k"><kbd>Ctrl</kbd><kbd>Enter</kbd></span><span>指示を送る・セッションを起こす</span></li>
             <li><span class="k"><kbd>Esc</kbd></span><span>開いている窓を閉じる</span></li>
@@ -641,8 +662,8 @@
             ピンを付けたものは<strong>終わっても作業台のいちばん上に残ります。</strong>メモはこの PC だけに置きます。</p>
         </section>
         <section class="settings-sec">
-          <h3 class="settings-h3 has-icon" data-icon="doc">今日のまとめ</h3>
-          <p class="settings-hint">書庫の頭の <strong>今日のまとめ</strong> か Ctrl+K から。
+          <h3 class="settings-h3 has-icon" data-icon="today">今日のまとめ</h3>
+          <p class="settings-hint">左のレールの <strong>今日のまとめ</strong>、書庫の頭のボタン、Ctrl+K のどれからでも開けます。
             その日に決めたことと書き換えたファイルを1枚に並べ、Markdown でコピーできます。</p>
         </section>
       </div>
@@ -655,7 +676,7 @@
         </section>
 
         <!-- 行に足されるもの。絵は about.js が data-icon から差す。
-             **メーターの段（何 % で色が変わるか）は about.js が runs.js の RATE_WARN / RATE_HOT から組む**
+             **輪の色の段（何 % で色が変わるか）は about.js が runs.js の RATE_WARN / RATE_HOT から組む**
              （しきい値を2箇所に書かない） -->
         <section class="settings-sec">
           <h3 class="settings-h3">一覧の行に足されるもの</h3>
@@ -667,10 +688,11 @@
         </section>
 
         <section class="settings-sec">
-          <h3 class="settings-h3">上のバーのメーター — 枠の使用率</h3>
+          <h3 class="settings-h3">左のレールの輪 — 枠の使用率</h3>
           <ul class="about-legend is-meter" id="about-meters"></ul>
-          <p class="settings-hint">5h は5時間ごとの枠、7d は7日の枠。アカウントで1つなので、上のバーにだけ出します。
-            古い値には「いつ測ったか」を添えます。</p>
+          <p class="settings-hint">外側の輪が5時間ごとの枠、内側の輪が7日の枠。真ん中の数は高いほうの割合（%）です。
+            アカウントで1つなので、レールにだけ出します。読めていない枠は輪の溝だけになります。
+            古い値は輪を薄くし、触ると「いつ測ったか」が出ます。</p>
         </section>
 
         <section class="settings-sec">
@@ -730,7 +752,7 @@
         <section class="settings-sec">
           <h3 class="settings-h3">この版</h3>
           <!-- 版は about.js が /api/update の current から入れる。
-               **画面に版を2つの出どころで書かない**（上のバーの #ver と同じところから取る） -->
+               **画面に版を出すのはここ1箇所だけ**（上のバーには置かない。渡された人が版を確かめる場所はここ） -->
           <p class="about-lead" id="about-version">ClaudeDeck</p>
           <p class="settings-hint">iyotaA</p>
         </section>
@@ -861,7 +883,7 @@
 
 </dialog>
 
-<!-- 画面の中のコマンド入力（Ctrl+K）。セッションへ移る・情報を出す・起こす を横断で引く。
+<!-- 画面の中のコマンド入力（Ctrl+K と、上のバーの探す欄）。セッションへ移る・情報を出す・起こす を横断で引く。
      中身は開くたびに palette.js が組む。ここに置くのは器だけ -->
 <dialog class="pal" id="palette" aria-label="コマンド入力">
   <div class="pal-in">
@@ -912,7 +934,7 @@
   </div>
 </dialog>
 
-<!-- 今日のまとめ（today.js）。入口は書庫の頭のボタンと Ctrl+K。
+<!-- 今日のまとめ（today.js）。入口は左のレール・書庫の頭のボタン・Ctrl+K の3つ。
      中身は開いたときに /api/today から1回だけ引いて組む。頭と足は設定モーダルのクラスを借りる -->
 <dialog class="today-win" id="today" aria-labelledby="today-title">
   <div class="settings-head today-head">
