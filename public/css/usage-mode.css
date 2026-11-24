@@ -126,6 +126,19 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* **概要だけは帯にしない**（画面刷新⑤の K13）。概要の札の下は2列（.usage-over）で、見出しは列の中に入る。
+   帯のまま残すと、左右の負の margin（器の padding を相殺して器の端まで伸ばす分）が列の外へはみ出して
+   隣の列や隙間に重なり、sticky も列ごとにばらばらに貼り付く（紙の中に帯ができる）。
+   概要は1画面にほぼ収まる短い節なので、スクロール中に見出しを残す要もない。
+   下線と太字はそのまま残し、「ここから別の話」は帯なしでも読めるようにする。
+   帯が要る長い節（ツール・スキル・セッションなど）はそのまま帯 */
+.is-usage .usage-sec[data-sec="over"] .usage-block > h4 {
+  position: static;
+  margin: 0 0 .5rem;
+  padding: 0 0 .35rem;
+  background: none;
+}
+
 /* ------------------------------------------------------------ 節の出し分け */
 
 /* **出し分けは CSS がやる。** JS は器の data-sec に名前を書くだけで、
@@ -186,54 +199,75 @@
 
 /* ------------------------------------- 概要の「いちばん重いもの」 */
 
-/* 3つのテーマの代表値と行き先。**押せる行き先と、押せない代表値を同じ行に置く**ので、
-   前者だけが印（chevron）を持つ。止まった絵で見分けが付く */
-.usage-peek {
-  list-style: none;
+/* テーマごとの札（1位＋「次は」。usage-tab.js の heavyBlock。画面刷新⑤の D18）。
+   前は上位3つを ／ でつないだ行（.usage-peek）だった。
+
+   **札は押せない。沈めた面だけ**（.stat と同じ段。枠も影も持たない）。押せるのは中の行き先のボタン
+   （行き先の印 chevron）だけで、止まった絵で見分けが付く。手本のモックは札にカードの面と枠を持たせ、
+   左上の絵を --accent-soft の面で置いていたが、どちらも採らない ―― 押せない器にカードの面を持たせると
+   中のボタンだけが押せることが形で読めず、ラベンダーは押すものの色なので飾りに使うと役が増える。
+
+   列は器の幅で決める（左の列の中で3枚並べ、狭くなれば畳む）。min() で包むのは、12rem より細い器で溢れないため */
+.usage-heavy {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
+  gap: .6rem;
   margin: 0;
   padding: 0;
+  list-style: none;
 }
 
-.usage-peek li {
-  display: grid;
-  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
-  align-items: center;
-  gap: .6rem;
-  padding: .45rem .1rem;
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-1);
-}
-
-.usage-peek li:last-child { border-bottom: 0; }
-
-.usage-peek .peek-k { color: var(--fg-muted); }
-
-.usage-peek .peek-v {
+.usage-heavy .heavy {
   display: flex;
   flex-direction: column;
-  gap: .15rem;
+  gap: .1rem;
   min-width: 0;
+  padding: .6rem .7rem;
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
 }
 
-.usage-peek .peek-head {
-  font-family: var(--font-mono);
+/* テーマの名前（ツール・スキル・セッション）。札のラベル（.stat-label）と同じ段 */
+.usage-heavy .heavy-k {
+  font-size: var(--fs-1);
+  color: var(--fg-muted);
+}
+
+/* 1位の名前。1行で「…」で切り、全文は title。ツール名・スキル名は等幅（is-code） */
+.usage-heavy .heavy-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+
+.usage-heavy .heavy-name.is-code { font-family: var(--font-mono); }
+
+/* 1位の量。単位は .usage-pane .stat-unit が小さく出す（.6em で 12.6px） */
+.usage-heavy .heavy-v {
+  margin-top: .2rem;
+  font-size: var(--fs-5);
+  font-weight: 700;
+  line-height: 1.2;
   font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
 }
 
-/* **何で並べているかを必ず書く。** 3つの行はそれぞれ別のものさしなので、
-   書かないと同じ順序で並んでいると読まれる */
-.usage-peek .peek-basis {
+/* **何で並べているかを必ず書く。** 3枚はそれぞれ別のものさしなので、
+   書かないと同じ順序で並んでいると読まれる。2位（次は）も同じ段 */
+.usage-heavy .heavy-basis,
+.usage-heavy .heavy-next {
   font-size: var(--fs-0);
   color: var(--fg-faint);
 }
 
-/* 行き先。触れたときだけ枠が出る形（base.css の .ibtn と同じ流儀）。
+/* 行き先。触れたときだけ枠が出る形（base.css の .ibtn と同じ流儀）。札の下端に寄せる。
    ピル型にしないのは、あれを押せるものの中でも「主役」の形に取ってあるため */
-.usage-peek .peek-go {
+.usage-heavy .heavy-go {
   display: flex;
+  align-self: flex-start;
   align-items: center;
   gap: .2rem;
+  margin: .3rem 0 0 -.4rem;
   padding: .2rem .4rem;
   border: 1px solid transparent;
   border-radius: var(--r-sm);
@@ -245,7 +279,7 @@
   transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
-.usage-peek .peek-go:hover { border-color: var(--border-strong); background: var(--bg-hi); }
+.usage-heavy .heavy-go:hover { border-color: var(--border-strong); background: var(--bg-hi); }
 
 /* 読む幅の上限。ここは全幅の器なので、但し書きが1行 120 字を超えて読まれなくなる。
 
@@ -260,17 +294,32 @@
   max-width: 46rem;
 }
 
-/* 最初の節（.stats のすぐ下）には区切り線を引かない。
-   器の上端に線が近すぎて、ヘッダの下線と二重に見える */
-/* 概要の「この期間の内訳」と「いちばん重いもの」を2列に並べる。
-   前は縦に積んでいて、全幅の器では右半分が空いていた（UI レビューの F9）。
-   列の幅は器で決まるので、窓ではなく器の幅で折り返す（auto-fit の下限 26rem。820px の窓では1列。22rem だと2列のまま右が窮屈だった）。
-   左右で背が揃わなくても上へ詰める（align-items: start） */
-.usage-two {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(26rem, 100%), 1fr));
+/* 概要の札の下の2列（usage-tab.js の overviewBlock。画面刷新⑤の D17。手本のモックの .u-body）。
+   左の列は 日ごとの線グラフ → いちばん重いもの、右の列は この期間の内訳 → 読み方。
+
+   **左が太く、右は細い。** 前は内訳と重いものの2つを同じ幅の2列（auto-fit の grid）に並べていた。
+   いまは左に線グラフが入るので、手本のモックどおり右を読むだけの細い列（20rem 前後）にする。
+   flex の伸び方の比（999 : 1）で、余った幅はほぼ全部が左へ行く。
+
+   **狭い窓では1列に落ちる。** 器（.usage-pane の中身）が 30rem ＋ 20rem ＋ 隙間に足りなくなると右の列が
+   下へ折り返し、折り返した行では右の列が1つだけなので全幅まで伸びる。列は min-width: 0 で器より細くなれる
+   （左の列の土台 30rem より細い窓でも横にはみ出さない）。窓ではなく器の幅で畳む（.stats と同じ考え）。
+   左右で背が揃わなくても上へ詰める（align-items: flex-start） */
+.usage-over {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 0 1.5rem;
-  align-items: start;
+}
+
+.usage-over-main {
+  flex: 999 1 30rem;
+  min-width: 0;
+}
+
+.usage-over-side {
+  flex: 1 1 20rem;
+  min-width: 0;
 }
 
 /* 札の下の推移の線。札は沈めた面（--bg-sunk）なので、.spark（同じ面を敷く）は使えない。
@@ -321,12 +370,6 @@
   font-size: .6em;
   font-weight: 500;
   color: var(--fg-faint);
-}
-
-.usage-pane > .stats + .usage-block,
-.usage-pane > .stats + .usage-two > .usage-block:first-child {
-  border-top: 0;
-  padding-top: .2rem;
 }
 
 .usage-rows {

@@ -20,7 +20,7 @@ import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaPath } from './card.js';
 import {
   block, readNote, hitRateNote, statTile, barList, shareBar, trendList, tableDetails,
-  foldBlock, deltaText, sparkline, dayChart,
+  foldBlock, deltaText, sparkline, dayChart, splitUnit,
   tokensStrict, pctStrict, numStrict,
   toolsBlock as toolsBlockOf,
 } from './usage-chart.js';
@@ -172,17 +172,16 @@ function scanNote(d) {
 }
 
 /**
- * 上に並べる4枚の札。
+ * 上に並べる4枚の札。**札だけを返す。** 札の読み方（比べ方・読んだ本数・命中率の但し書き）は
+ * 下段の右の列の `readBlock` が持つ（画面刷新⑤の D17）。
  *
  * @param {object} d
+ * @param {ReturnType<typeof halfTrend>} trend 新旧の差と推移（読み方の塊と同じものを使う）
  * @returns {HTMLElement}
  */
-function tiles(d) {
-  const out = new DocumentFragment();
+function tiles(d, trend) {
   const box = el('div', 'stats');
-  // 新旧の差と推移。同じ窓を時刻で半分に割る（理由は usage-trend.js の冒頭）
-  const trend = halfTrend(d.rows);
-  // 札には短く「古い N 本より ±x%」。何と何を比べたかの説明は下の注記に1回だけ置く
+  // 札には短く「古い N 本より ±x%」。何と何を比べたかの説明は読み方の塊に1回だけ置く
   // （札ごとに繰り返すと、狭い窓で折り返して数より長くなる）
   const delta = (pair) => {
     const t = trend ? deltaText(pair.now, pair.base) : null;
@@ -212,11 +211,25 @@ function tiles(d) {
   const hit = statTile('キャッシュ命中率', pctStrict(d.cache.hitRate), null, null, { smallUnit: true });
   if (d.cache.hitRate !== null) addSpark(hit, trend?.series.hitRate, 'キャッシュ命中率の推移（古い順・1本ずつ）');
   box.append(hit);
-  out.append(box);
+  return box;
+}
 
-  // **1本も減らしていない。** 札から外したぶんは、そのまま下の塊へ移すだけ。
-  // 札に付けたままだと、長い但し書きを持つ札（命中率）だけ背が高くなり、
-  // 面も枠も持たない4枚がどこで区切れているのか読めなかった
+/**
+ * 札の読み方（概要の下段・右の列）。**1本も減らしていない。**
+ *
+ * 前は札の直下に全幅で置いていた。手本のモックどおり右の列の「読み方」へ移しただけで、文はそのまま
+ * （D17。「読み方の文は枠なしで右へ」）。面は `.usage-read`（沈めた面・枠なし）のまま。
+ * 札に付けたままにしないのは前と同じ理由 ―― 長い但し書きを持つ札（命中率）だけ背が高くなり、
+ * 面も枠も持たない4枚がどこで区切れているのか読めなかった。
+ *
+ * **誤読を防ぐ注記なので吹き出し（tip）へ移さない**（読んだ本数の断り・命中率の但し書き。
+ * `test/usage-mode.test.mjs` が字面で見ている）。
+ *
+ * @param {object} d `/api/usage` の応答
+ * @param {ReturnType<typeof halfTrend>} trend
+ * @returns {HTMLElement|null}
+ */
+function readBlock(d, trend) {
   const read = readNote([
     '1要求あたりは長さの違いを均した値です。作業の中身でも動きます。',
     trend
@@ -226,8 +239,10 @@ function tiles(d) {
     scanNote(d),
     crossHitRateNote(d),
   ]);
-  if (read) out.append(read);
-  return out;
+  if (!read) return null;
+  const box = block('読み方');
+  box.append(read);
+  return box;
 }
 
 /**
@@ -250,13 +265,13 @@ function addSpark(tile, values, label) {
 /**
  * 概要の節。**開いたときに最初に出るのはここ。**
  *
- * 4札と、この期間の内訳（帰属バー）と、3つのテーマの代表値だけを置く。
- * 数えられる値は約19個で、下の3節（ツール・スキル・セッション）はどれも
- * ここからは畳まれている。
+ * 4札の下を2列にする（画面刷新⑤の D17。手本のモックの概要と同じ並び）。
+ * 左の列は 日ごとの線グラフ → いちばん重いもの、右の列は この期間の内訳 → 読み方。
+ * 前は「内訳」と「いちばん重いもの」の2つだけを2列（`.usage-two`）にし、札の読み方は札の直下に
+ * 全幅で置いていた。線グラフ（段2）が入って左が主役の列になったので、読むだけのもの（内訳の注記・読み方）を
+ * 右の細い列へ寄せた。**注記は1本も減らしていない**（置き場所が変わっただけ）。
  *
- * **並べ方が3つとも違うので、各行にその基準を書く。** ツールは文脈への積み上がり、
- * スキルは全体に占める割合、セッションは実消費。1画面に3つの順序が混ざるので、
- * 書かないと「同じものさしで並んでいる」と読まれる。
+ * 狭い窓では1列に落ちる（左の列 → 右の列の順。`usage-mode.css` の `.usage-over`）。
  *
  * @param {object} d `/api/usage` の応答
  * @param {(sec: string) => void} go 節を切り替える口
@@ -264,50 +279,103 @@ function addSpark(tile, values, label) {
  */
 function overviewBlock(d, go) {
   const out = new DocumentFragment();
-  out.append(tiles(d));
-  out.append(daysBlock(d));
+  // 新旧の差と推移。同じ窓を時刻で半分に割る（理由は usage-trend.js の冒頭）。
+  // 札（差と線）と読み方（比べ方の説明）が同じものを読むので、ここで1回だけ出す
+  const trend = halfTrend(d.rows);
+  out.append(tiles(d, trend));
 
-  // **内訳と重いものを2列に並べる。** 前は縦に積んでいて、全幅の器では右半分が
-  // 空いていた（UI レビューの F9）。狭い窓では1列に戻る（usage-mode.css）
-  const two = el('div', 'usage-two');
-  out.append(two);
+  const cols = el('div', 'usage-over');
+  const main = el('div', 'usage-over-main');
+  const side = el('div', 'usage-over-side');
 
+  main.append(daysBlock(d));
+  const heavy = heavyBlock(d, go);
+  if (heavy) main.append(heavy);
+
+  const share = shareBlock(d);
+  if (share) side.append(share);
+  const read = readBlock(d, trend);
+  if (read) side.append(read);
+
+  cols.append(main);
+  // 右の列が空なら置かない（空の列が幅だけ取る）
+  if (side.children.length) cols.append(side);
+  out.append(cols);
+  return out;
+}
+
+/**
+ * 概要の「この期間の内訳」（右の列）。**横棒のまま**（D16。ドーナツにしない）。
+ *
+ * 節「スキル」も同じ横棒（`shareBar`）で始まるので、同じ形で読める。ドーナツにすると部品が1つ増え、
+ * モックの色（緑と斜線）は「終わって通ったもの」の緑とトークンに無い色で、使えない。
+ *
+ * **因果の注記を折りたたまずに常時出す。** 帰属ラベルは「どのスキルの文脈下で走ったか」で、
+ * 「そのスキルのせいで増えた」ではない。**これが無い状態で出荷しない**（`src/parse/CLAUDE.md`）。
+ *
+ * @param {object} d `/api/usage` の応答
+ * @returns {HTMLElement|null} 無帰属が読めなければ null
+ */
+function shareBlock(d) {
   const un = d.skillsUnattributed;
-  if (un) {
-    const box = block('この期間の内訳');
-    box.append(shareBar('スキルに帰属', un.share === null ? null : 1 - un.share,
-      `残り ${pctStrict(un.share)}`));
-    const read = readNote([
-      'Claude Code が要求ごとに付けた帰属ラベルで数えています。'
-      + '帰属は原因ではありません — 重かったのは仕事の内容かもしれません。',
-      '残りはどのスキルにも紐づいていません。スキルを使わずに進めたぶんが入ります。',
-    ]);
-    if (read) box.append(read);
-    two.append(box);
-  }
+  if (!un) return null;
+  const box = block('この期間の内訳');
+  box.append(shareBar('スキルに帰属', un.share === null ? null : 1 - un.share,
+    `残り ${pctStrict(un.share)}`));
+  const read = readNote([
+    'Claude Code が要求ごとに付けた帰属ラベルで数えています。'
+    + '帰属は原因ではありません — 重かったのは仕事の内容かもしれません。',
+    '残りはどのスキルにも紐づいていません。スキルを使わずに進めたぶんが入ります。',
+  ]);
+  if (read) box.append(read);
+  return box;
+}
 
-  const box = block('いちばん重いもの');
-  const list = el('ul', 'usage-peek');
+/**
+ * 概要の「いちばん重いもの」（左の列・線グラフの下）。**1位の札と「次は」**（D18）。
+ *
+ * 前は上位3つを ／ でつないだ行だった。手本のモックどおり、テーマごとに1位を大きく出して2位を「次は」で添える。
+ * 3位は節（ツール・スキル・セッション）の横棒で読む。
+ *
+ * **札ごとに何で並べているかを書く。** ツールは文脈への積み上がり、スキルは全体に占める割合、
+ * セッションは実消費で、**1画面に3つのものさしが混ざる**。書かないと同じ順序で並んでいると読まれる。
+ *
+ * **絵は付けない**（D18）。モックは札の左上に絵（ツール・スキル・吹き出し）を `--accent-soft` の面で置いていたが、
+ * ラベンダーは押すものの色で、押せない飾りに使うと役が増える。字の「ツール」「スキル」で足りる。
+ * **札は押せない**（沈めた面だけ。`.stat` と同じ段）。押せるのは行き先のボタン（行き先の印 chevron）だけ。
+ *
+ * @param {object} d `/api/usage` の応答
+ * @param {(sec: string) => void} go 節を切り替える口
+ * @returns {HTMLElement|null} どのテーマも空なら null
+ */
+function heavyBlock(d, go) {
+  const list = el('ul', 'usage-heavy');
 
   /**
-   * 1行ぶん。名前・代表値・行き先。
+   * 札1枚。
    *
-   * @param {string} key テーマの名前
-   * @param {string} sec 行き先の節
-   * @param {string} head 代表値（既に整形済みの文字列）
-   * @param {string} basis 何で並べているか
+   * @param {{key: string, sec: string, name: string, code: boolean, value: string, basis: string,
+   *          next: string|null}} t
+   *   key: テーマの名前。sec: 行き先の節。name: 1位の名前。code: 名前を等幅で出すか（ツール名・スキル名）。
+   *   value: 1位の量（整形済み）。basis: 何で並べているか。next: 2位（無ければ null）
    */
-  const row = (key, sec, head, basis) => {
-    const li = el('li');
-    li.append(el('span', 'peek-k', key));
-    const v = el('span', 'peek-v');
-    v.append(el('span', 'peek-head', head));
-    v.append(el('span', 'peek-basis', basis));
+  const tile = ({ key, sec, name, code, value, basis, next }) => {
+    const li = el('li', 'heavy');
+    li.append(el('span', 'heavy-k', key));
+    const nm = el('span', code ? 'heavy-name is-code' : 'heavy-name', name);
+    // 1行で「…」で切るので、全文は title で読めるようにする
+    nm.title = name;
+    li.append(nm);
+    // 単位は数値モードの札と同じく小さく出す（D13。見た目は .usage-pane .stat-unit）
+    const v = el('span', 'heavy-v');
+    const { num: n, unit } = splitUnit(value);
+    v.append(n);
+    if (unit) v.append(el('span', 'stat-unit', unit));
     li.append(v);
-
-    // **押せるものは行き先の印を持つ。** 隣の代表値（押せない）と
-    // 止まった絵で見分けが付くようにする
-    const btn = el('button', 'peek-go', `${key}を見る`);
+    li.append(el('span', 'heavy-basis', basis));
+    if (next) li.append(el('span', 'heavy-next', `次は ${next}`));
+    // **押せるものは行き先の印を持つ。** 札（押せない）と止まった絵で見分けが付くようにする
+    const btn = el('button', 'heavy-go', `${key}を見る`);
     btn.type = 'button';
     btn.append(icon('chevron'));
     btn.addEventListener('click', () => go(sec));
@@ -315,29 +383,39 @@ function overviewBlock(d, go) {
     list.append(li);
   };
 
-  const tools = (d.tools ?? []).slice(0, 3);
+  const tools = d.tools ?? [];
   if (tools.length) {
-    row('ツール', 'tools',
-      tools.map((t) => `${t.tool} ${tokensStrict(t.tokens)}`).join(' ／ '),
-      '文脈への積み上がりが多い順');
+    tile({
+      key: 'ツール', sec: 'tools', name: tools[0].tool, code: true,
+      value: tokensStrict(tools[0].tokens),
+      basis: '文脈への積み上がりが多い順',
+      next: tools[1] ? `${tools[1].tool} ${tokensStrict(tools[1].tokens)}` : null,
+    });
   }
-  const skills = (d.skills ?? []).slice(0, 3);
+  const skills = d.skills ?? [];
   if (skills.length) {
-    row('スキル', 'skills',
-      skills.map((x) => `${x.skill} ${pctStrict(x.share)}`).join(' ／ '),
-      '全体の実消費に占める割合が大きい順');
+    tile({
+      key: 'スキル', sec: 'skills', name: skills[0].skill, code: true,
+      value: pctStrict(skills[0].share),
+      basis: '全体の実消費に占める割合が大きい順',
+      next: skills[1] ? `${skills[1].skill} ${pctStrict(skills[1].share)}` : null,
+    });
   }
-  const rows = (d.rows ?? []).slice(0, 3);
+  const rows = d.rows ?? [];
   if (rows.length) {
-    row('セッション', 'rows',
-      rows.map((r) => tokensStrict(r.ite)).join(' ／ '),
-      '実消費が多い順');
+    tile({
+      key: 'セッション', sec: 'rows', name: rowName(rows[0]), code: false,
+      value: tokensStrict(rows[0].ite),
+      basis: '実消費が多い順',
+      // セッションは題が長いので、2位は量だけ（モックと同じ）
+      next: rows[1] ? tokensStrict(rows[1].ite) : null,
+    });
   }
 
-  if (!list.children.length) return out;
+  if (!list.children.length) return null;
+  const box = block('いちばん重いもの');
   box.append(list);
-  two.append(box);
-  return out;
+  return box;
 }
 
 /**

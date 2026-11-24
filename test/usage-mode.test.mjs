@@ -15,6 +15,9 @@
  * - 概要に日ごとの線グラフを1枚（D6）。期間の切り替えは置かない（D1）。字は HTML で置く。
  *   「これより前は一部しか読んでいません」を線グラフと節「推移」の両方に添える（D2。消さない）。
  *   何を描くかの判断そのもの（境目・0 埋め・山）は `usage-days.test.mjs` が関数を呼んで見ている
+ * - 概要の札の下は2列（D17。左: 線グラフ・いちばん重いもの／右: 内訳・読み方）。内訳は横棒のまま（D16）、
+ *   いちばん重いものは1位＋「次は」の札で、何で並べているかを消さない（D18）。概要の見出しは帯にしない（K13）
+ * - 横断（`usage-tab.js`）の誤読を防ぐ注記が字のまま残っている（右の紙のぶんは `detail-pane.test.mjs`）
  *
  * 主役の札の上の字の比（4.5:1）は `tokens.test.mjs` が見ている（比の計算はあちらにある）。
  * 字面はコメントを落としてから読む。このリポジトリは説明が厚く、経緯がコメントに残るため。
@@ -146,7 +149,7 @@ test('主役の塗りは数値モード（.usage-pane）に絞り、右の紙の
 test('主役の札も押せない札のまま。塗るのは面だけで、枠と影と押せる印は持たない', () => {
   // 押せる .card.is-usage（枠＋面＋行き先の印）と止まった絵で見分けが付かなくなる
   const bad = declsOf(HERO)
-    .filter((d) => /^(border|box-shadow|cursor|outline)/.test(d.prop))
+    .filter((d) => /^(border(?!-radius)|box-shadow|cursor|outline)/.test(d.prop))
     .map((d) => `${d.prop}: ${d.value}`);
   assert.deepEqual(bad, [], `主役の札が押せるものの形を持っている:\n  ${bad.join('\n  ')}`);
 });
@@ -250,7 +253,7 @@ test('数値の頭は1行の帯。節ナビが行をまるごと取らず、狭�
 
 test('概要に日ごとの線グラフを1枚置く。何を描くかは層0（usage-days.js）が決める', () => {
   const code = tabCode();
-  assert.match(fnBody(code, 'overviewBlock'), /out\.append\(daysBlock\(d\)\)/, '概要が線グラフの節を置いていない');
+  assert.match(fnBody(code, 'overviewBlock'), /main\.append\(daysBlock\(d\)\)/, '概要が線グラフの節を（左の列に）置いていない');
   const days = fnBody(code, 'daysBlock');
   assert.match(days, /dayChartView\(d\)/, '描いてよい日を層0 の dayChartView で決めていない');
   assert.match(days, /view\.status === 'ok'[\s\S]*dayChart\(view\)/, '描けるときだけ線を描く形になっていない');
@@ -301,6 +304,118 @@ test('線グラフの色は数値モードのグラフと同じ受け方（var(-
   }
   assert.deepEqual(bad, [], `線グラフの色の受け方が違う:\n  ${bad.join('\n  ')}`);
   assert.ok(declsOf('.day-chart-line').some((d) => d.prop === 'stroke' && d.value === 'var(--chart-hi, var(--accent))'));
+});
+
+/* ── 概要の下段（D16〜D18）────────────────────────────────── */
+
+test('概要の札の下は2列。左に線グラフと重いもの、右に内訳と読み方', () => {
+  const body = fnBody(tabCode(), 'overviewBlock');
+  const at = (re) => {
+    const m = body.match(re);
+    assert.ok(m, `${re} が概要に無い`);
+    return m.index;
+  };
+  // 左の列（main）と右の列（side）。手本のモックの .u-body / .side と同じ並び
+  assert.ok(at(/main\.append\(daysBlock\(d\)\)/) < at(/main\.append\(heavy\)/), '左の列が 線グラフ → 重いもの の順でない');
+  assert.ok(at(/side\.append\(share\)/) < at(/side\.append\(read\)/), '右の列が 内訳 → 読み方 の順でない');
+  assert.match(body, /heavyBlock\(d, go\)/);
+  assert.match(body, /shareBlock\(d\)/);
+  assert.match(body, /readBlock\(d, trend\)/);
+  // 札の読み方は札の直下ではなく右の列へ（札の器 tiles は札だけを返す）
+  assert.doesNotMatch(fnBody(tabCode(), 'tiles'), /readNote\(/, '札の読み方が札の直下に残っている');
+
+  // 狭い窓では1列に落ちて、横にはみ出さない（列は縮められる。右の列は折り返すと全幅へ伸びる）
+  const cols = declsOf('.usage-over');
+  assert.ok(cols.some((d) => d.prop === 'flex-wrap' && d.value === 'wrap'), '2列が折り返さない（狭い窓で横にはみ出す）');
+  for (const sel of ['.usage-over-main', '.usage-over-side']) {
+    const d = declsOf(sel);
+    assert.ok(d.some((x) => x.prop === 'min-width' && x.value === '0'), `${sel} が器より細くなれない`);
+    assert.ok(d.some((x) => x.prop === 'flex' && /^\d+ 1 /.test(x.value)), `${sel} が縮めない・伸びない`);
+  }
+});
+
+test('いちばん重いものは1位＋「次は」の札。何で並べているかを消さない。絵は付けない', () => {
+  const body = fnBody(tabCode(), 'heavyBlock');
+  // 1画面に3つのものさしが混ざるので、札ごとに基準を書く（書かないと同じ順序で並んでいると読まれる）
+  for (const basis of ['文脈への積み上がりが多い順', '全体の実消費に占める割合が大きい順', '実消費が多い順']) {
+    assert.ok(body.includes(`'${basis}'`), `「${basis}」が消えている`);
+  }
+  assert.match(body, /次は /, '2位（次は）を出していない');
+  // 絵は行き先の印（chevron）だけ。ツール・スキル・セッションの飾りの絵は付けない（D18）
+  const icons = [...body.matchAll(/icon\('([\w-]+)'/g)].map((m) => m[1]);
+  assert.deepEqual(icons, ['chevron'], `重いものの札に飾りの絵がある: ${icons.join(', ')}`);
+  // 押せない札は沈めた面だけ（.stat と同じ段）。押せるのは行き先のボタンだけ
+  const face = declsOf('.usage-heavy .heavy');
+  assert.ok(face.some((d) => d.prop === 'background' && d.value === 'var(--bg-sunk)'), '重いものの札が沈めた面でない');
+  // 角丸（border-radius）は札の形なので数えない（.stat も --r-md を持つ）
+  assert.deepEqual(face.filter((d) => /^(border(?!-radius)|box-shadow|cursor)/.test(d.prop)).map((d) => d.prop), [],
+    '重いものの札が押せるものの形（枠・影・手の形）を持っている');
+});
+
+test('内訳は横棒のまま（ドーナツにしない）。因果の注記も同じ節に字で残す', () => {
+  const body = fnBody(tabCode(), 'shareBlock');
+  assert.match(body, /shareBar\('スキルに帰属'/, '内訳の横棒が無い');
+  assert.match(body, /帰属は原因ではありません/, '内訳の節から因果の注記が消えている');
+  const donut = jsFiles().filter((f) => /donut/i.test(jsCode(read(f)))).map((f) => path.basename(f));
+  assert.deepEqual(donut, [], `ドーナツを組んでいる所がある: ${donut.join(', ')}`);
+});
+
+test('消した部品（.usage-two と、行で並べていた .usage-peek / peek-*）が戻っていない', () => {
+  const GONE = /usage-two|usage-peek|\bpeek-(k|v|head|basis|go)\b/;
+  const hits = [];
+  for (const f of jsFiles()) if (GONE.test(jsCode(read(f)))) hits.push(path.relative(REPO, f));
+  for (const f of fs.readdirSync(CSS_DIR).filter((n) => n.endsWith('.css'))) {
+    if (GONE.test(cssCode(read(path.join(CSS_DIR, f))))) hits.push(`public/css/${f}`);
+  }
+  if (GONE.test(htmlCode(read(path.join(REPO, 'public', 'index.html'))))) hits.push('public/index.html');
+  for (const f of fs.readdirSync(path.join(REPO, 'test')).filter((n) => n.endsWith('.mjs') && n !== 'usage-mode.test.mjs')) {
+    if (GONE.test(read(path.join(REPO, 'test', f)))) hits.push(`test/${f}`);
+  }
+  assert.deepEqual(hits, [], `消した部品の名前が残っている:\n  ${hits.join('\n  ')}`);
+});
+
+test('概要の節見出しは sticky の帯にしない（2列の中で帯が列からはみ出す）。ほかの節は帯のまま', () => {
+  const over = declsOf('.is-usage .usage-sec[data-sec="over"] .usage-block > h4');
+  assert.ok(over.some((d) => d.prop === 'position' && d.value === 'static'), '概要の節見出しが sticky のまま');
+  assert.ok(over.some((d) => d.prop === 'margin' && !/-/.test(d.value)), '概要の節見出しが負の margin（列の外へ伸びる帯）のまま');
+  assert.ok(declsOf('.is-usage .usage-block > h4').some((d) => d.prop === 'position' && d.value === 'sticky'),
+    'ほかの節の見出しまで sticky でなくなっている');
+});
+
+test('数値モード（横断）の誤読を防ぐ注記は字のまま残っている（1本も減らさない）', () => {
+  // 右の紙のぶんは detail-pane.test.mjs が見ている。こちらは横断（usage-tab.js）のぶん
+  const code = tabCode();
+  const KEEP = [
+    [/帰属は原因ではありません/, '因果の注記（これが無い状態で出荷しない）'],
+    [/残りはどのスキルにも紐づいていません/, '内訳の残り（無帰属）'],
+    [/下の割合を足しても 100% にならないのは/, 'スキルの割合を足しても 100% にならない理由'],
+    [/1要求あたりは長さの違いを均した値です/, '1要求あたりの読み方'],
+    [/差は、読んだ本数を時刻で半分に割り/, '差が何と何の比較か'],
+    [/本まで読みました/, '上限で切ったこと（読んだ本数）'],
+    [/本は要求なし/, '要求0本で外したもの'],
+    [/モデルを1つ選ぶと出ます/, '命中率が出ない理由と出し方'],
+    [/比べる相手が足りないものは差を出しません/, 'スキルの推移の差を出さないとき'],
+    [/回は絵から外しました/, '絵から外した回（切ったこと）'],
+    [/推移に並べていません/, '時刻の読めなかった回'],
+    [/は上限で切りました/, 'スキルを上限で切ったこと'],
+    [/読んだセッションを日ごとに足したものです/, '日ごとの合計が何か'],
+    [/どの日にも入っていません/, '時刻の取れなかった要求'],
+    [/同じ名前の別フォルダーは分けられません/, '置き場所のまとめ方'],
+  ];
+  const lost = KEEP.filter(([re]) => !re.test(code)).map(([, label]) => label);
+  assert.deepEqual(lost, [], `横断の注記が消えている: ${lost.join(' / ')}`);
+  // 因果の注記は2か所（概要の内訳とスキルの節）。片方だけ消えても気づけるよう数で見る
+  assert.ok((code.match(/帰属は原因ではありません/g) ?? []).length >= 2, '因果の注記が概要とスキルの節の両方に無い');
+  // 読み方の塊が、読んだ本数の断りと命中率の但し書きを右の列で出す
+  const readBody = fnBody(code, 'readBlock');
+  assert.match(readBody, /scanNote\(d\)/, '読み方から読んだ本数の断りが消えた');
+  assert.match(readBody, /crossHitRateNote\(d\)/, '読み方から命中率の但し書きが消えた');
+  // 層0・層1 に置いてある注記の文
+  assert.match(jsCode(read(path.join(JS_DIR, 'usage-days.js'))), /より前は一部しか読んでいません/, '一部の日の一言が消えた');
+  assert.match(chartCode(), /モデルまたぎでは比べられません/, '命中率のモデルの注記が消えた');
+  // **注記を吹き出しへ移さない。** 数値モードは全幅で場所があるので、読み方も本文に置いている。
+  // 吹き出し（tip）を使い始めるなら、移すものが誤読を防ぐ注記でないことを確かめてからここを直す
+  assert.doesNotMatch(code, /\btip:/, '数値モードが見出しの吹き出し（tip）を使っている');
 });
 
 test('節ナビを組み直しても、押していた札へ焦点を名前で拾い直す', () => {
