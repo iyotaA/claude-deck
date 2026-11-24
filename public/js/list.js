@@ -1,15 +1,17 @@
-/* 稼働中の一覧（左のペイン）と、上のバーのまとめ。
+/* 稼働中の一覧（左のペイン）と、左のレールに出す数（止まっているものの数・枠の輪）。
  *
  * 層6。押されたときに select（session.js）と setListOpen（drawer.js）を呼ぶ。
  * setListOpen が drawer.js に居るのは、main.js に置くとここと循環するため。
  */
 import { el, since, stamp, tokens, agentTag } from './util.js';
 import {
-  store, colorOf, toneOf, QUIET_MODES, SUMMARY_ORDER, STATE_GROUPS, HERO_STATES, LS,
+  store, colorOf, toneOf, QUIET_MODES, STATE_GROUPS, HERO_STATES, LS,
 } from './store.js';
 import { dom } from './dom.js';
+import { blockingCount, workName, workTip } from './nav.js';
 import { idleOf, headOf, visibleRows } from './rows.js';
-import { newestRateLimit, rateView, runFor } from './runs.js';
+import { newestRateLimit, rateView, ringView, runFor } from './runs.js';
+import { rateRing } from './usage-chart.js';
 import { closeListAfterPick } from './drawer.js';
 import { select } from './session.js';
 import { cardShell, cardTitle, closeCardMeta, metaBranch, metaPath } from './card.js';
@@ -424,10 +426,10 @@ function buildHeroChip(row, fresh) {
  * 折り返して縦に伸ばすと、下の圧縮行（全体を見せる役目）が押し出される。
  *
  * 0 件なら帯ごと消す（`hidden`）。**黙っては消さない** ――
- * 「承認や質問で止まっているセッションはありません」を上のバーの下段が言う
- * （`renderSummary`）。帯ごと黙って消えると、静かな日に「見ていない」と
- * 「無い」が同じ顔になる。前は帯の中に1行置いていたが、下段とあわせて
- * 2段を取っていたので、言う場所を下段の1つへ寄せた。
+ * 「止まっているものはありません」を左のレールの作業台の札の名前が言う
+ * （`renderRailBadge`）。帯ごと黙って消えると、静かな日に「見ていない」と
+ * 「無い」が同じ顔になる。帯の中に1行置くと、待ちが無い時間（のほうが長い）に
+ * 1段ぶん場所を取る。
  */
 export function renderHero() {
   const rows = heroRows();
@@ -440,8 +442,8 @@ export function renderHero() {
   dom.heroBand.replaceChildren();
 
   // **空のときは帯ごと消す。** 「止まっているものはありません」は
-  // 上のバーの下段（renderSummary）が言う。前は帯の中に1行置いていたが、
-  // 下段のすぐ下にもう1段ぶん場所を取っていた（待ちが無い時間のほうが長い）
+  // 左のレールの作業台の札（renderRailBadge）が言う（待ちが無い時間のほうが長いので、
+  // 帯の中に1行置いて場所を取らない）
   if (rows.length === 0) {
     dom.heroWrap.hidden = true;
     dom.heroWrap.dataset.edge = 'none';
@@ -732,58 +734,38 @@ export function renderList() {
   }
 }
 
-export function renderSummary() {
-  dom.summary.replaceChildren();
-  const counts = store.meta?.counts ?? {};
-  // ラベルはサーバ側の STATE_LABELS。まだ受け取っていない間はキーをそのまま出す
-  const labels = store.meta?.stateLabels ?? {};
-  // **「答えないと1行も進まないか」も画面側に持たない。** サーバの表から引く。
-  // 前は key.startsWith('needs') で見ていたが、あれは名前の付け方への当て推量で、
-  // 接頭辞の違う状態を1つ足した日にここだけ古くなる（行の blocking と同じ出どころに揃える）
-  const blocking = store.meta?.stateBlocking ?? {};
-
-  // **止まっているものが無ければ、まずそう言う。** 上の帯は空のとき丸ごと消えるので
-  // （renderHero）、「見ていない」と「無い」を分ける役目をここが持つ。
-  // 言うのは帯が見ているもの（止まっているもの）だけ。返信待ちは後ろの数に出るので、
-  // 「返事を待っているものはありません」と言って数と食い違わせない
-  // **meta を受け取る前は言わない。** counts が空のうちは「無い」ではなく「まだ知らない」。
-  // セッションが1本も無いときも言わない（下の「動いているセッションなし」と2文が並ぶ）
-  // 数えるのは下で数を出す状態（SUMMARY_ORDER）だけ。知らない状態まで数えると、
-  // それしか居ないときに「動いているセッションなし」と2文が並ぶ
-  const any = SUMMARY_ORDER.some((k) => (counts[k] ?? 0) > 0);
-  if (any && !SUMMARY_ORDER.some((k) => blocking[k] && (counts[k] ?? 0) > 0)) {
-    const calm = el('span', 'tally is-calm');
-    calm.append(el('span', 'calm-dot'), document.createTextNode('承認や質問で止まっているセッションはありません'));
-    dom.summary.append(calm);
-  }
-
-  for (const key of SUMMARY_ORDER) {
-    const n = counts[key] ?? 0;
-    if (n === 0) continue;
-    const label = labels[key] ?? key;
-    const item = el('span', 'tally');
-    // 点だけを出す。`.state` は色を --state-color から取るが、
-    // ここは点1つなので color を直に置く（インラインなので変数より先に効く）
-    const dot = el('span', 'state');
-    dot.style.color = colorOf(key);
-    dot.dataset.s = toneOf(key);
-    item.append(dot, document.createTextNode(label), el('strong', null, n));
-    if (blocking[key]) item.classList.add('is-hot');
-    dom.summary.append(item);
-  }
-  // 数が1つも出なかったときだけ。止まっていない、の1行は数ではないので数えない
-  if (!dom.summary.querySelector('.tally:not(.is-calm)')) {
-    dom.summary.append(el('span', 'tally', '動いているセッションなし'));
-  }
+/**
+ * 左のレールの作業台の札に、止まっているものの数を出す。
+ *
+ * バッジ（数字）と札の名前（aria-label と吹き出し）を**同じ数から**書く。
+ * 数字は飾りなので読み上げに乗せず（aria-hidden）、件数は札の名前が言う。
+ *
+ * **どの状態が止まっているかを画面側に持たない。** `meta.stateBlocking` から引く
+ * （判断は nav.js の blockingCount）。名前の接頭辞（`needs`）で見ると、
+ * 接頭辞の違う状態を1つ足した日にここだけ古くなる。
+ *
+ * **0 件のときは数字を出さず、名前で「ありません」と言う。** 止まっているものが無いと
+ * 上の帯は丸ごと消えるので、「見ていない」と「無い」を分ける役目をここが持つ。
+ * **meta を受け取る前は件数の言葉を付けない**（「無い」ではなく「まだ知らない」）。
+ *
+ * 書庫・数値のあいだも呼ぶ（stream.js の apply）。どのモードからでも
+ * 「誰かが待っている」が見える唯一の合図なので。
+ */
+export function renderRailBadge() {
+  const n = blockingCount(store.meta?.counts, store.meta?.stateBlocking);
+  dom.railBadge.hidden = !n;
+  dom.railBadge.textContent = n ? String(n) : '';
+  dom.modeWork.setAttribute('aria-label', workName(n));
+  dom.modeWork.dataset.tip = workTip(n);
 }
 
-/* ── 枠の使用率（上のバーに1つだけ） ───────────────────────────── */
+/* ── 枠の使用率（左のレールに1つだけ） ───────────────────────────── */
 
-/** 同じ文字なら組み直さない。1秒ごとに呼ばれるので、印で止める（fillSlash と同じ作法） */
+/** 同じ字なら組み直さない。1秒ごとに呼ばれるので、印で止める（fillSlash と同じ作法） */
 let rateKey = null;
 
 /**
- * 枠の使用率を上のバーに出す。
+ * 枠の使用率を左のレールの輪に出す。
  *
  * **アカウント共通の値なので、画面に1つだけ。** セッションごとの詳細には出さない。
  * 同じ数がいくつも並ぶうえ、「この実行が使った枠」だと読めてしまうため。
@@ -792,51 +774,35 @@ let rateKey = null;
  * 会話ログにも `~/.claude` の下にも無い（実測 2.1.245）。
  * だから**この画面から起こした実行が1本も無ければ何も出ない。**
  * ターミナルで動かしているだけの人には、今までどおり1ドットも変わらない。
+ *
+ * 何を出すか（輪の長さ・色の段・真ん中の数・名前）は runs.js の純関数（rateView → ringView）が決め、
+ * 輪を組むのは usage-chart.js の rateRing（説明モーダルの凡例と同じ部品）。ここは置くだけ。
  */
 export function renderRate() {
-  // 何を出すかを決めるのは runs.js の純関数。ここは組み立てるだけ
-  const v = rateView(newestRateLimit(), Date.now());
+  const v = ringView(rateView(newestRateLimit(), Date.now()));
 
   if (v === null) {
     rateKey = null;
     dom.rate.hidden = true;
     dom.rate.replaceChildren();
+    dom.rate.removeAttribute('aria-label');
+    delete dom.rate.dataset.tip;
     return;
   }
 
   // 色の段も鍵に混ぜる。字は丸めた百分率なので、79.6% → 80.0% のように
-  // 字が同じ「80%」のまま黄色の段を跨ぐと、混ぜないと色が古いまま残る
-  const key = [v.fiveHour, v.sevenDay, v.age, v.hot, ...v.meters.map((m) => m.tone)].join('|');
+  // 字が同じ「80」のまま黄色の段を跨ぐと、混ぜないと色が古いまま残る。
+  // 名前（label）には何分前かが入るが、分より細かくならないので毎秒は動かない
+  const part = (r) => (r ? `${r.ratio}:${r.tone}` : '-');
+  const key = [part(v.five), part(v.seven), v.peak, v.stale, v.label].join('|');
   if (rateKey === key) return;
   rateKey = key;
 
-  const box = el('span', 'rate-val');
-  if (v.hot) box.classList.add('is-hot');
-  box.append(document.createTextNode('枠'));
-  // **数だけでなく長さで見せる。** 前は「5h:42%」の 11px の字だけで、
-  // 上限が近づいても目に入らなかった。色の段（黄・赤）は rateView が決める。
-  // 棒の長さは style.width で直に入れる（CSS 変数にすると screen.test の FROM_JS に足す口が増える）
-  for (const m of v.meters) {
-    const meter = el('span', 'rate-meter');
-    if (m.tone) meter.dataset.tone = m.tone;
-    const fill = el('i');
-    fill.style.width = `${Math.round(m.ratio * 100)}%`;
-    const bar = el('span', 'rate-bar');
-    bar.append(fill);
-    meter.append(el('span', 'rate-label', m.label), bar, el('strong', null, m.text));
-    box.append(meter);
-  }
-  if (v.age) box.append(el('span', 'rate-age', v.age));
-
-  const note = [`測ったのは ${stamp(v.at)}`];
-  if (v.resetsAt !== null) {
-    note.push(v.gone
-      ? '5時間枠は空いたはず（新しい数はまだ届いていません）'
-      : `5時間枠が空くのは ${stamp(v.resetsAt)}`);
-  }
-  box.title = note.join(' / ');
-
-  dom.rate.replaceChildren(box);
+  dom.rate.replaceChildren(rateRing(v));
+  // 押せない絵（role="img"）なので、名前は aria-label が持つ。目で読む名前は吹き出し（data-tip）。
+  // **title は付けない**（吹き出しと OS の札が二重に出る）
+  dom.rate.setAttribute('aria-label', v.label);
+  dom.rate.dataset.tip = v.label;
   dom.rate.hidden = false;
 }
 

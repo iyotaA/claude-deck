@@ -1,6 +1,7 @@
-/* 画面の中のコマンド入力（Ctrl+K）。
+/* 画面の中のコマンド入力（Ctrl+K と、上のバーの探す欄）。
  *
  * 層7。キーボードだけで「移る・出す・起こす」を通せるようにする1枚。
+ * 開く口は2つ。Ctrl+K（ここで拾う）と上のバーの探す欄（main.js が openPalette を差す）。
  *
  * **自分では何も決めない。** すでにある窓口（select / setDetailTab / setInspector /
  * setListOpen / openRunForm / openZoom / focusTerminal）を呼ぶだけの器にしてある。
@@ -35,18 +36,34 @@ import { setMode } from './mode.js';
 import { closeOnBackdrop } from './modal.js';
 import { setPin, openMemo } from './marks.js';
 import { openToday } from './today.js';
+import { MODE_LIST } from './nav.js';
+
+// パレットだけが持つモードの言い方（何をする項目か・探すときの手がかり）。
+// **モードの名前（label）とキーはここに書かない。** 出どころは nav.js の MODE_LIST で、
+// レールの札・上のバーの題と同じ表から引く（写しを作ると1つ足した日に食い違う）
+const MODE_WORDS = {
+  work: { name: '作業台へ戻る', desc: 'いまの作業に集中する', hay: 'モード work 作業' },
+  archive: { name: '書庫へ移る', desc: '終わったものも含めて過去を探す',
+    hay: 'モード archive 過去 探す 検索 アーカイブ' },
+  usage: { name: '数値へ移る', desc: '何にトークンを使ったかを横断で見る',
+    hay: 'モード usage トークン 集計 横断 スキル' },
+};
 
 // モードの札。**二値に畳まない。** 三項で「監視盤か作業台か」と書くと、
 // モードが1つ増えた日に文言と行き先の2箇所を直すことになる
-// （store.js の MODES を集合のままにしてあるのと同じ理由）
-const MODE_DEFS = [
-  { id: 'work', label: '作業台', name: '作業台へ戻る', desc: 'いまの作業に集中する',
-    hay: '作業台 モード work 作業' },
-  { id: 'archive', label: '書庫', name: '書庫へ移る', desc: '終わったものも含めて過去を探す',
-    hay: '書庫 モード archive 過去 探す 検索 アーカイブ' },
-  { id: 'usage', label: '数値', name: '数値へ移る', desc: '何にトークンを使ったかを横断で見る',
-    hay: '数値 モード usage トークン 集計 横断 スキル' },
-];
+// （store.js の MODES を集合のままにしてあるのと同じ理由）。
+// 言い方を持たないモードが増えても項目は出す（名前から「〜へ移る」を組む）
+const MODE_DEFS = MODE_LIST.map((m) => {
+  const w = MODE_WORDS[m.id] ?? {};
+  return {
+    id: m.id,
+    label: m.label,
+    name: w.name ?? `${m.label}へ移る`,
+    desc: w.desc ?? null,
+    // 名前とキーも探す手がかりに入れる（「1」と打っても作業台に当たる）
+    hay: [m.label, m.key, w.hay].filter(Boolean).join(' '),
+  };
+});
 
 // 開いたときに組んだ全部と、絞り込んで残ったぶんと、選んでいる位置。
 // **開いているあいだは組み直さない。** 裏で一覧は毎秒動いているので、
@@ -196,7 +213,7 @@ function buildAll() {
     // 拡大は出してよい側。モーダルが開くだけで子プロセスには触らない
     // （出さない3つ = 止める・替える・続ける と違う）。
     //
-    // **畳むほうは出さない。** open() が「ほかの dialog が開いていたら開かない」で
+    // **畳むほうは出さない。** openPalette() が「ほかの dialog が開いていたら開かない」で
     // 弾くので、拡大しているあいだパレットは出てこない。畳む口は
     // 帯のボタン・Esc・×・背面の4つで足りる
     out.push({
@@ -210,7 +227,7 @@ function buildAll() {
   }
 
   // 一覧は窓の広さに関わらず引き出しになったので、常に項目に出す。
-  // **三本線と並ぶ、一覧へ行く2本目の道**（前は狭い窓でしか出していなかった）
+  // **上のバーの開閉ボタンと並ぶ、一覧へ行く2本目の道**（前は狭い窓でしか出していなかった）
   {
     const open = dom.app.classList.contains('is-list-open');
     out.push({
@@ -330,12 +347,12 @@ async function exec() {
 }
 
 /**
- * パレットを開く。
+ * パレットを開く。上のバーの探す欄からも呼ぶ（main.js が差す）。
  *
  * 中身は開くたびに組み直す（一覧も選んでいるものも動くので）。
  * 開いてから閉じるまでは組み直さない
  */
-function open() {
+export function openPalette() {
   // ほかのモーダルが開いているあいだは重ねない。
   // 重ねると Esc がどちらに効くのか読めなくなる
   if (document.querySelector('dialog[open]')) return;
@@ -386,7 +403,7 @@ export function initPalette() {
       dom.palette.close();
       return;
     }
-    open();
+    openPalette();
   });
 
   dom.palQ.addEventListener('input', () => {

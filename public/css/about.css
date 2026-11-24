@@ -173,13 +173,13 @@
   color: var(--fg-faint);
 }
 
-/* メーターの見本。棒は上のバーと同じ部品（base.css の `.rate-meter`）。
-   1列目は棒の長さぶん広げる（ほかの凡例の 1.6rem では棒が入らない） */
+/* 枠の輪の見本。輪は左のレールと同じ部品（base.css の `.rate-ring`。組むのは usage-chart.js の rateRing）。
+   1列目は輪の大きさぶん広げる（ほかの凡例の 1.6rem では輪が入らない）。
+   輪は名前と説明の2行より背が高いので、上下の真ん中に揃える */
 .about-legend.is-meter li {
-  grid-template-columns: 3.5rem minmax(0, 1fr);
+  grid-template-columns: var(--navrail-cell) minmax(0, 1fr);
+  align-items: center;
 }
-
-.about-legend.is-meter .rate-meter { padding-top: .45rem; }
 
 /* -------------------------------------------------------------- キー操作 */
 
@@ -203,8 +203,15 @@
 .about-keys .k { display: inline-flex; gap: .2rem; }
 
 /* キーの札。**`palette.css` の `.kbd` と同じ形**にしたいが、あちらは
-   パレットの中に閉じた名前なので、素の `<kbd>` に同じ寸法を持たせる */
-.about-keys kbd {
+   パレットの中に閉じた名前なので、素の `<kbd>` に同じ寸法を持たせる。
+   **キー操作の一覧に限らず、このモーダルの `<kbd>` 全部に当てる**（「画面の見かた」の本文にも
+   数字キーが出る）。同じモーダルの中でキーの札が2つの顔にならないように。
+   **高さも揃える。** 一覧の札は flex の子（行の高さで背が決まる）、本文の札は文の中の inline で、
+   そのままだと本文のほうが 4px 低く出る（実測 18.6px / 22.6px）。inline-block にして行の高さを
+   固定すれば、どちらも同じ背になる */
+.about kbd {
+  display: inline-block;
+  line-height: var(--lh-tight);
   padding: .05rem .35rem;
   border: 1px solid var(--border-strong);
   border-bottom-width: 2px;

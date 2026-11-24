@@ -6,7 +6,7 @@
 import { query, store, syncQuery } from './store.js';
 import { dom } from './dom.js';
 import { visibleRows } from './rows.js';
-import { renderList, renderSummary, refreshTimes } from './list.js';
+import { renderList, renderRailBadge, refreshTimes } from './list.js';
 import { loadDetail } from './session.js';
 import { renderDetailIfNeeded } from './detail.js';
 import { isZoomed, syncZoomWaits } from './zoom.js';
@@ -44,8 +44,9 @@ function apply(payload) {
   // 開いているものを URL に残す。押して選んだときは select が書くが、
   // ここで自動的に決まった分（先頭を開く・?session= の取り込み）は通らない
   syncQuery();
-  // まとめは書庫を出しているあいだも動かす。「誰かが待っている」の唯一の合図なので
-  renderSummary();
+  // レールの数（止まっているもの）は書庫・数値のあいだも動かす。
+  // どのモードからでも見える「誰かが待っている」の唯一の合図なので
+  renderRailBadge();
   // 拡大モーダルの「次の待ち」も動かす（開いていなければ何もしない）。
   // 待ちは答えたそばから減るので、もう居ないセッションへ飛ぶボタンを残さない
   syncZoomWaits();
@@ -76,7 +77,11 @@ function apply(payload) {
 }
 
 /**
- * 上のバーに出す短い語。詳しい文は title へ回す。
+ * 上のバーの接続の札に出す短い語。詳しい文は title へ回す。
+ *
+ * **出るのは切れたとき（off）と更新中（upd）だけ。** つながっている（on）と
+ * 立ち上がりの接続中（wait）は base.css が data-live を見て隠す。語は持っておく
+ * （隠すかどうかは CSS の1箇所で決め、ここは何を言うかだけを持つ）。
  *
  * 知らない状態が来たら、渡された文をそのまま出す（黙って空にしない）。
  */
@@ -91,7 +96,7 @@ export function setLive(state, label) {
     label = '更新のためにサーバーを入れ替えています';
   }
   dom.live.dataset.live = state;
-  // **出すのは短い語だけ。** ここは道具（起こす・説明・設定）の並ぶ場所なので、
+  // **出すのは短い語だけ。** ここは道具（探す欄・再読み込み・起こす）の並ぶ場所なので、
   // 押せない文が伸びると、押せるものを画面の端へ押しのける
   dom.live.textContent = LIVE_SHORT[state] ?? label;
   dom.live.title = label;

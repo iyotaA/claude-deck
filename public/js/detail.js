@@ -566,7 +566,7 @@ export function initInspector() {
     b.setAttribute('aria-pressed', 'false');
     // **絵だけにする。** 縦のレールに字を積むと1文字ずつ折り返すか、
     // レールそのものを広げることになる。名前は title と aria-label に残るので、
-    // 触れば出るし読み上げにも乗る（上のバーの補助3つと同じ流儀）
+    // 触れば出るし読み上げにも乗る（上のバーの再読み込みと同じ流儀）
     b.append(icon(t.icon, 17));
     b.title = `${t.label} — ${t.title}`;
     b.setAttribute('aria-label', b.title);

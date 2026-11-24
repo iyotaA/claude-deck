@@ -61,7 +61,8 @@ Node 22 以降は引数をグロブとして解釈するため、フォルダ名
 | `screen.test.mjs` | 画面側の、**ブラウザで開くまで気づけないのに字面で分かること**。import した名前が相手側で export されているか・CSS が参照するトークンが定義されているか・使う先の無い意味トークンが残っていないか・ボールの所在の帯の約束（一覧と状態が重ならない／鍵に時刻を混ぜない／`refreshTimes` が帯も見る／`.card` だけ掴んで `.row` を取りこぼしていない）。**このリポジトリに linter は無い**ので、ここが代わりになる |
 | `tokens.test.mjs` | 色と字の段（`public/css/tokens.css` ほか）。明るいテーマの名残（`--l-` / `--d-` / `prefers-color-scheme` / `data-theme`）が無いこと・意味トークンが `:root` に全部在って `#RRGGBB` で書いてあること（`--accent-soft` だけ `rgb()`）・**字の色が全部の面で 4.5:1 以上**なことと `--accent-fg` が `--accent` の上で 4.5:1 以上なこと（落ちたら「どの字がどの面で何:1」まで出す）・`color-scheme: dark`・字の段が 12px 以上で小さい順なこと・`public/css/` に 12px 未満の直書きが無いこと・`index.html` と `public/js/` に配色の切り替え（`theme-toggle` / `?theme=` を読む口 / `claude-deck.theme`）が戻っていないこと。CSS は解析せず字面で読む。**崩れても画面を開くまで何のエラーも出ない**種類の約束（`contract.test.mjs` と同じ性質） |
 | `md.test.mjs` | Markdown のパーサ。記法を読めることと、途中で切れた入力で壊れないこと。頭出しが中途半端な単位で終わらないこと（印を落とさないこと）。チェックリストの印を、印でないもの（`- [2] …`）と分けること。**リンクに http / https 以外を通さないこと**（`javascript:` と相対パスは表示名だけ）と、`blocksText` がリンクの URL を数えないこと |
-| `runs.test.mjs` | 上のバーに出す枠の使用率の判断（`rateView`）。0 と不明の分け方・`resetsAt` を過ぎた枠を落とすこと・`resetsAt` を**秒**として読むこと・メーターの色の段（`RATE_WARN` で黄、`RATE_HOT` で赤。境目ちょうどは上の段）と棒の長さを 0〜1 に丸めること |
+| `runs.test.mjs` | 左のレールに出す枠の使用率の判断（`rateView` → `ringView`）。0 と不明の分け方・枠を表示の字ではなく鍵（`five` / `seven`）で持ち、丸める前の値（`value`）も持つこと・`resetsAt` を過ぎた枠を落とすこと・`resetsAt` を**秒**として読むこと・**測ってから7日より古い観測の7日の枠を落とすこと**（ちょうど7日は残す・5時間枠も無ければ null・7日以内なら古い印つきで出す）・色の段（`RATE_WARN` で黄、`RATE_HOT` で赤。境目ちょうどは上の段）と弧の長さを 0〜1 に丸めること。**輪**は、片方しか読めないときにもう片方を null にする（外＝5時間・内＝7日の位置を動かさない）・真ん中の数を `%` 無しで高いほうにする（比べるのは丸める前の値）・古い観測で `stale` を立てる・名前に両方の % と測った時刻を入れ、読めない枠を 0% と書かないこと |
+| `navrail.test.mjs` | 左のレールと上のバー。`public/js/nav.js` の判断（モードの名前とキーの出どころ `MODE_LIST`・数字キーを効かせない条件（Ctrl/Meta/Alt・IME の変換中・入力欄・`<dialog>`）・止まっている数を `meta.stateBlocking` の真のキーだけで数え、meta が無ければ null・作業台の札の名前で「無い」と「まだ知らない」を分けること・件数を名前に持つ札が `counts` の1つだけで、ほかの札の名前と吹き出し（`modeName` / `modeTip`）は件数で変わらないこと）と、`index.html` / `public/js/` の字面（レールと上のバーに置く節点・レールに `title` を付けないこと・「起こす」を塗らないこと・**消した部品（下段の帯・版・左の細い帯・`.modes`）と口（`renderSummary` など）が戻っていないこと**）。字面はコメントを落としてから読む |
 | `run-dirs.test.mjs` | 起こしてよいフォルダの登録。ドライブ直下・相対パス・`-` 始まりを断ること、大小違いの重複、登録済みの配下、上限、紙の知らないキーを残すこと |
 | `run-rate.test.mjs` | 枠の使用率の紙。壊れた紙・前の版が書いた紙で落ちないことと、`at`（測った時刻）の無いものを通さないこと |
 | `run-defaults.test.mjs` | 起こすときの既定値。壊れた紙・知らない語で落ちないこと、**`bypassPermissions` が紙からは入らないこと**（環境変数の関門を紙で迂回させない）、予算を範囲へ丸めること（「指定なし」に倒すと上限を掛けたい意図が消える）、知らないキーを残すこと |
@@ -114,15 +115,16 @@ import で確かめられるのは Node 側の半分だけになり、それで�
 読み取り層（`read/`）と画面側にはテストが無い。
 そこは実物で確かめる。
 
-例外は5枚。`public/js/md.js`（Markdown のパーサ）、`public/js/runs.js` の `rateView()`、
+例外は6枚。`public/js/md.js`（Markdown のパーサ）、`public/js/runs.js` の `rateView()` / `ringView()`、
 `public/js/update-banner.js`（更新の帯の組み立て）、`public/js/usage-trend.js`（数値の新旧の差）、
-`public/js/today-md.js`（今日のまとめの Markdown）。
+`public/js/today-md.js`（今日のまとめの Markdown）、`public/js/nav.js`（左のレールの判断）。
 どれも DOM を1つも触らない純関数なので、`.js` のまま Node から import できる
 （`package.json` が `type:module`）。`runs.js` は `EventSource` を関数の中でしか呼ばないので、
-読み込むだけなら何も起きない。`update-banner.js` は import そのものがゼロ。
+読み込むだけなら何も起きない（import しているのは `util.js` だけで、あちらも `document` を関数の中でしか触らない）。
+`update-banner.js` と `nav.js` は import そのものがゼロ。
 **画面側のファイルでも、判断だけを切り出せばテストに乗る**という前例にしてある。
 
-更新の帯は**この3枚の中でいちばんテストの値打ちが大きい。**
+更新の帯は**ここに並べた中でいちばんテストの値打ちが大きい。**
 出るのは更新の道中だけで、紙（`update.json`）を書くのは C# のランチャなので、
 手で出そうとすると本物の更新を走らせるか紙を偽装するしかない
 （実地で確かめるには `%LOCALAPPDATA%` を差し替えて `update.json` を置く。やり方は次の節）。

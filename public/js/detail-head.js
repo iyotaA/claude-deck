@@ -106,7 +106,7 @@ function sameText(a, b) {
 export function summaryBlock(summary, title = null) {
   if (!summary || summary.source === 'error') return null;
 
-  // 上のバーの .summary とは別物。名前を分けておかないと両方に同じ CSS が当たる
+  // 名前を .summary にしない（前は上のバーに同じ名前があり、両方に同じ CSS が当たった）
   const box = el('div', 'purpose');
   // **題名と同じ文なら見出しを出さない。** 題名が最初の指示から作られることが多く、
   // 同じ文が見出し（3行）と引用（3行）に2回並んでいた（UI レビューの F3）

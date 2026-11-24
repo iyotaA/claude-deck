@@ -22,6 +22,73 @@
    上半分を一覧に取られると詳細が読めないので、左上のボタンで手前に引き出す形にする。
    閉じているあいだは詳細が全面を使う */
 @media (max-width: 860px) {
+  /* 左のレールは**画面の下の横帯にする。** 縦のまま残すと、2列しか無いところへ
+     3本目の縦帯が入って読む面が削れる。
+
+     **設定・このアプリについて・枠の輪は残す。** パレット（Ctrl+K）に設定と説明の入口が無いので、
+     ここで隠すと狭い窓では設定に辿り着けなくなる。隠すのは飾り（印）と空き・区切りだけ。
+     吹き出しも出さない（指で触る窓では :hover が押したあとまで残る）。名前は aria-label が持つ。
+
+     帯のぶん .app の下に余白を取る（box-sizing は border-box なので高さ 100vh の内側で取れる）。
+     帯の高さと余白は --navrail-bar の1つから出す（2箇所に書くと、帯だけ伸びた日に中身が帯の下へ潜る）。
+     引き出し（.list-pane の 40）と膜（.scrim の 30）は帯（25）より上に重なる。
+     下から出る紙（.insp）は .deck の中＝余白より上に居るので、帯とは重ならない */
+  :root {
+    --navrail-bar: 3.5rem;
+  }
+
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: var(--navrail-bar);
+  }
+
+  .topbar,
+  .hero-wrap,
+  .deck { grid-column: 1; }
+
+  .navrail {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 25;
+    flex-direction: row;
+    justify-content: space-around;
+    height: var(--navrail-bar);
+    padding: .375rem .5rem;
+    border-right: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .navrail-logo,
+  .navrail-space,
+  .navrail-sep { display: none; }
+
+  .navrail-item::after,
+  .navrail-rate::after { display: none; }
+
+  /* いまの札の印は、帯の下の縁に横の棒で出す（縦のレールの左の棒と同じ役目） */
+  .navrail-item[aria-current="page"]::before {
+    left: .75rem;
+    right: .75rem;
+    top: auto;
+    bottom: -.375rem;
+    width: auto;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+  }
+
+  /* 上のバーの探す欄は絵だけにする。字とキーの札を出す幅が無い。
+     名前は aria-label が持つ */
+  .topbar-find {
+    width: 2.25rem;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .topbar-find-text,
+  .topbar-find .kbd { display: none; }
+
   /* レールの分だけ右に残して、残りを中央に全部渡す。
 
      **base の4通りを全部ここで2列へ落とす。** 狭い窓の一覧は列ではなく
@@ -59,14 +126,8 @@
 
   .rail { grid-area: 1 / 2; }
 
-  /* **左のレールは狭い窓では出さない。** ここは2列しか無いので、
-     3本目の縦帯を置くと読む面がそのぶん削れる。
-     開閉の口は上のバーのハンバーガー（.list-toggle）が受け持つ */
-  .rail.is-left { display: none; }
-
-  .list-toggle { display: inline-flex; }
-
-  /* 引き出しは手前に重なるので、中から閉じる口が要る */
+  /* 引き出しは手前に重なるので、中から閉じる口が要る
+     （開閉の口は広い窓と同じ上のバーの .list-toggle。引き出しがその上に重なって隠す） */
   #live-head .drawer-close { display: inline-flex; }
 
   /* **膜を出さない。** 引き出しは一覧を選ぶための一時的な寄り道なので背面を止めるが、

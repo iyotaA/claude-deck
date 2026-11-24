@@ -311,7 +311,7 @@
   color: var(--fg-muted);
 }
 
-/* 数の帯。押せないので面も枠も持たない（上のバーの .tally と同じ形） */
+/* 数の帯。押せないので面も枠も持たない（押せない札は字だけにする約束） */
 .today-sum {
   display: flex;
   flex-wrap: wrap;

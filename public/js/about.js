@@ -1,10 +1,10 @@
 /* このアプリの説明。層7。
  *
- * 上のバーの `info` から開く `<dialog>`。器と作法は設定モーダル（`settings.js`）と同じで、
+ * 左のレールの `info` から開く `<dialog>`。器と作法は設定モーダル（`settings.js`）と同じで、
  * `<dialog>` ＋ `showModal()`（Esc・背面の膜・焦点の閉じ込めがタダで付く）。
  *
  * **中身のほとんどは `index.html` に静的に置いてある。**
- * ここが組むのは凡例4つ（状態の点・経過の印・札・上のバーのメーター）と版の1行、本文の絵だけ。
+ * ここが組むのは凡例4つ（状態の点・経過の印・札・レールの枠の輪）と版の1行、本文の絵だけ。
  *
  * ## 凡例を画面側に持たない
  *
@@ -19,8 +19,8 @@
  * | 止まっているか | `/api/sessions` の `meta.stateBlocking` |
  * | 群と種類の対応 | `timeline/kinds.js` の `KIND_MARK` ＋ `MARK_GROUPS` |
  * | 種類の日本語 | `timeline/kinds.js` の `KIND_LABELS` |
- * | 版 | `/api/update` の `current`（上のバーの `#ver` と同じ出どころ） |
- * | メーターの色が変わる割合 | `runs.js` の `RATE_WARN` / `RATE_HOT` |
+ * | 版 | `/api/update` の `current`（画面に版を出すのはここ1箇所） |
+ * | 輪の色が変わる割合 | `runs.js` の `RATE_WARN` / `RATE_HOT` |
  *
  * **形の名前（菱形・輪…）は1文字も書かない。** 実物の点をそのまま置けば、
  * 形は見れば分かるし、`list.css` を直した日にここが嘘になることもない。
@@ -36,7 +36,8 @@ import { dom } from './dom.js';
 import { closeOnBackdrop } from './modal.js';
 import { store, SUMMARY_ORDER, STATE_TONE, toneOf, colorOf } from './store.js';
 import { KIND_LABELS, KIND_MARK, MARK_GROUPS } from './timeline/kinds.js';
-import { RATE_HOT, RATE_WARN } from './runs.js';
+import { RATE_HOT, RATE_WARN, rateView, ringView } from './runs.js';
+import { rateRing } from './usage-chart.js';
 
 /**
  * 節の左ナビに差す絵。**この6つはここでしか使わない**ので、
@@ -72,7 +73,7 @@ const TAGS = [
  * （`needs-answer` と `needs-approval` は同じ菱形）。
  * 同じ調子の状態は名前を並べて出す。
  *
- * 並びは `SUMMARY_ORDER`（上のバーと同じ順）。そこに無い状態は後ろへ回す
+ * 並びは `SUMMARY_ORDER`（設定の「鳴らす状態」と同じ順）。そこに無い状態は後ろへ回す
  * ―― サーバが1つ足しても黙って消えない。
  */
 function fillStates() {
@@ -173,39 +174,41 @@ function fillTags() {
 }
 
 /**
- * 上のバーのメーターの凡例。**何 % で色が変わるかは `runs.js` の定数から作る**
+ * 左のレールの枠の輪の凡例。**何 % で色が変わるかは `runs.js` の定数から作る**
  * （しきい値を2箇所に書くと、片方だけ直した日に凡例が嘘になる）。
- * 見本の棒は上のバーと同じ部品（`.rate-meter` と `data-tone`）で描く。
+ *
+ * **見本もレールと同じ道で組む。** 見本の割合を観測の形にして `rateView` → `ringView` に通し、
+ * 輪はレールと同じ部品（`usage-chart.js` の `rateRing`）で描く。色の段・真ん中の数・字の作り方を
+ * ここで手で組むと、レールの側を直した日に凡例だけ古くなる（段の割り当ても `rateView` が決める）。
+ *
+ * 見本は外（5時間）と内（7日）を同じ割合にする。ここで見せたいのは色の段だけで、
+ * 片方を空けると「読めていない枠」の見本に見えてしまう。
  */
 function fillMeters() {
-  const pct = (v) => `${Math.round(v * 100)}%`;
+  const now = Date.now();
+  /** 割合1つを観測の形にして、レールと同じ判断に通す（測ったばかりなので古くない） */
+  const view = (v) => rateView({ fiveHour: v, sevenDay: v, at: now }, now);
+  // しきい値の字（「80%」）も同じ丸めを通す
+  const pct = (v) => view(v).five.text;
   const rows = [
-    { tone: '', ratio: RATE_WARN / 2, name: `${pct(RATE_WARN)} 未満`, note: 'ふだんの色' },
-    { tone: 'warn', ratio: (RATE_WARN + RATE_HOT) / 2, name: `${pct(RATE_WARN)} から`, note: 'そろそろ枠が尽きます。走らせている作業を畳む頃合い' },
-    { tone: 'hot', ratio: (RATE_HOT + 1) / 2, name: `${pct(RATE_HOT)} から`, note: 'もうすぐ止まります' },
+    { ratio: RATE_WARN / 2, name: `${pct(RATE_WARN)} 未満`, note: 'ふだんの色' },
+    { ratio: (RATE_WARN + RATE_HOT) / 2, name: `${pct(RATE_WARN)} から`, note: 'そろそろ枠が尽きます。走らせている作業を畳む頃合い' },
+    { ratio: (RATE_HOT + 1) / 2, name: `${pct(RATE_HOT)} から`, note: 'もうすぐ止まります' },
   ];
   dom.aboutMeters.replaceChildren();
   for (const r of rows) {
-    const meter = el('span', 'rate-meter');
-    if (r.tone) meter.dataset.tone = r.tone;
-    const bar = el('span', 'rate-bar');
-    const fill = el('i');
-    fill.style.width = pct(r.ratio);
-    bar.append(fill);
-    meter.append(bar);
     const text = el('span');
     text.append(el('span', 'lg-name', r.name), el('span', 'lg-kinds', r.note));
     const li = el('li');
-    li.append(meter, text);
+    li.append(rateRing(ringView(view(r.ratio))), text);
     dom.aboutMeters.append(li);
   }
 }
 
 /**
- * 版の1行。
+ * 版の1行。**画面に版を出すのはここ1箇所だけ**（上のバーには置かない）。
  *
- * **出どころは `/api/update` の `current`。** 上のバーの `#ver` と同じところから取る
- * （画面に版を2つの出どころで書かない）。まだ引けていなければ名前だけ出す
+ * **出どころは `/api/update` の `current`。** まだ引けていなければ名前だけ出す
  * ―― 0 と不明を分けるのと同じで、「不明」とは書かない。
  */
 function fillVersion() {

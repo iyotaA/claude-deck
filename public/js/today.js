@@ -2,8 +2,8 @@
  * 今日のまとめの窓（`<dialog id="today">`）。層7。
  *
  * その日に動いたセッションの「決めたこと」と「書き換えたファイル」を1枚に並べる。
- * 日報や引き継ぎの下書きに使う。**新しいモードは作らない** ―― 入口は書庫の頭のボタンと
- * Ctrl+K で、開くのは窓。見終わったら閉じて元の画面へ戻る。
+ * 日報や引き継ぎの下書きに使う。**新しいモードは作らない** ―― 入口は左のレール・書庫の頭のボタン・
+ * Ctrl+K の3つで、開くのは窓。見終わったら閉じて元の画面へ戻る。
  *
  * 中身は `/api/today` から**開いたときに1回だけ**引く（全文を読む重い窓口なので、毎秒は撃たない）。
  * Markdown の組み立てと、画面とコピーで共有する言い方は `today-md.js`（層0）に置く。
@@ -191,10 +191,13 @@ function fillAgo() {
 /** 配線。main.js から1回だけ呼ぶ */
 export function initToday() {
   fillAgo();
-  dom.todayOpen.prepend(icon('doc', 14));
+  // 書庫の頭の入口。**レールの札と同じ絵（today）にする**（同じことをする口なので、
+  // 別の形にすると覚え直しになる）。レールの札の絵は main.js が他の札とまとめて差す
+  dom.archiveToday.prepend(icon('today', 14));
   dom.todayCopy.prepend(icon('copy', 14));
   dom.todayAgo.closest('.archive-field').prepend(icon('clock', 14));
-  dom.todayOpen.addEventListener('click', openToday);
+  // 入口は2つ（左のレール・書庫の頭）。どちらも同じ窓を開く
+  for (const btn of [dom.todayOpen, dom.archiveToday]) btn.addEventListener('click', openToday);
   dom.todayClose.addEventListener('click', () => dom.today.close());
   dom.todayCopy.addEventListener('click', copy);
   dom.todayAgo.addEventListener('change', () => {
