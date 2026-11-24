@@ -148,8 +148,9 @@
 .about-legend.is-tag .lg-kinds { margin-top: 0; }
 
 /* 一覧の行に足されるもの。**見本は実物と同じ色・同じ字の段にする**
-   （hero.css の `.row .memo .k` と `.row .now`、`.group-head .icon` の塗った星）。
-   画面で探すときの手がかりにならないと凡例の意味が無い */
+   （list.css の `.row .pin-mark` の塗った星・`.row .memo-mark` の絵・`.row .now`）。
+   画面で探すときの手がかりにならないと凡例の意味が無い。
+   札「画面」はここに並べない（1列目の 1.6rem に収まらない）。「できること」の節が名前で言う */
 .about-legend .lg-star,
 .about-legend .lg-memo,
 .about-legend .lg-now {
@@ -161,11 +162,7 @@
 .about-legend .lg-star { color: var(--accent); }
 .about-legend .lg-star path { fill: currentColor; }
 
-.about-legend .lg-memo {
-  font-size: var(--fs-0);
-  font-weight: 700;
-  color: var(--accent);
-}
+.about-legend .lg-memo { color: var(--fg-faint); }
 
 .about-legend .lg-now {
   font-family: var(--font-mono);

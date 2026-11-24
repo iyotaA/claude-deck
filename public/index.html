@@ -15,8 +15,6 @@
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/list.css">
-<!-- カードの定義（.card / .state / .tag）を借りるので list.css の直後に置く -->
-<link rel="stylesheet" href="css/hero.css">
 <link rel="stylesheet" href="css/detail.css">
 <link rel="stylesheet" href="css/timeline.css">
 <link rel="stylesheet" href="css/panels.css">
@@ -86,11 +84,6 @@
   <!-- 上のバー。**「探す・起こす」だけに絞る。** 行き先（モード・設定・説明）は左のレールにある。
        ここに残すのは、いまの場所の名前（題）と、どのモードからでも使う道具だけ -->
   <header class="topbar">
-    <!-- 一覧の開閉。**広い窓でも狭い窓でも同じボタン1つ**（広い窓は列を畳む・狭い窓は引き出し）。
-         一覧があるのは作業台だけなので、書庫と数値では出さない（base.css）。
-         絵（SVG）は main.js が差す -->
-    <button class="list-toggle" id="list-toggle" type="button"
-            aria-expanded="false" aria-controls="list-pane" aria-label="セッション一覧を開く"></button>
     <!-- いまのモードの名前。mode.js が nav.js の MODE_LIST から入れる。
          レールの札は絵だけなので、どこにいるかを字で言う場所がここになる -->
     <h1 class="page-title" id="page-title"></h1>
@@ -113,7 +106,7 @@
     <button class="btn topbar-run" id="runform-open" type="button" aria-label="新しいセッションを起こす">起こす</button>
 
     <!-- 更新のお知らせ。.app 直下ではなく topbar の中に置く。
-         .app の行は3本（上のバー／帯／作業台）だけ宣言していて、子を足すと高さの配分が崩れる。
+         .app の行は2本（上のバー／作業台）だけ宣言していて、子を足すと高さの配分が崩れる。
          topbar は flex-wrap: wrap なので、幅いっぱいを取れば自分の行へ折り返す。
          帯は稀にしか出ないので、出たときだけ上のバーが1行伸びる -->
     <div class="update" id="update" role="status" hidden>
@@ -131,19 +124,18 @@
     </div>
   </header>
 
-  <!-- ボールの所在。**画面のいちばん上に、いちばん大きく出す。**
-       前は左の列の中の、他と同じ大きさのカード1枚だった。
-
-       **`.app` の2行目として置く。** `.topbar` の中（更新の帯と同じ手）にも
-       できるが、あれは道具の帯で、これは作業そのもの。
-       行と列は base.css が明示して置く（帯が hidden で消えても作業台が繰り上がらない）。
-
-       中身は `list.js` が組む。0件なら帯ごと消える（器に `hidden` が付く） -->
-  <div class="hero-wrap" id="hero-wrap" hidden>
-    <div class="hero-band" id="hero-band"></div>
-  </div>
-
+  <!-- ボールの所在（誰が自分の返事を待っているか）は、一覧のいちばん上の枠「あなたの番」に出す。
+       中身は list.js が #list の中に組む。前はここ（上のバーの下）に大きい札の帯があり、
+       詳細を押し下げていた -->
   <main class="deck">
+    <!-- 一覧の開閉。**広い窓でも狭い窓でも同じボタン1つ**（広い窓は列を畳む・狭い窓は引き出し）。
+         **作業台の左上に固定し、開いても閉じても位置を変えない。** 開いているときは一覧の頭の行の左に、
+         閉じているときは詳細の頭の左に乗る（base.css の絶対配置。grid のセルは取らない）。
+         **#list-pane の中に置かない。** 閉じると一覧は幅 0 と inert になるので、中だと押せなくなる。
+         一覧があるのは作業台だけなので、書庫と数値では出さない（base.css）。
+         絵（SVG）は main.js が差す -->
+    <button class="list-toggle" id="list-toggle" type="button"
+            aria-expanded="false" aria-controls="list-pane" aria-label="セッション一覧を開く"></button>
     <!-- 書庫（終了したものも含む全セッション）。数値と同じくモードなので
          .deck の中に置く。**左の列から出した。** 出すカードの項目が5つあるのに
          27rem の列に押し込んでいて、置き場所も期間も絞る場所が無かった。
@@ -204,7 +196,7 @@
     </div>
     <ul class="archive-grid" id="archive" hidden></ul>
     <!-- 数値（横断）。書庫と同じくモードなので、.deck の中に置く（.app 直下には
-         置けない。.app の行と列はレール・上のバー・帯・作業台の4つで埋まっている）。
+         置けない。.app の行と列はレール・上のバー・作業台の3つで埋まっている）。
          ログを全文読む一番重い窓口なので、開いたときに1回だけ引く。
          モデルの選択肢は応答から組むので、ここには「すべて」だけを置く -->
     <div class="list-head usage-head" id="usage-head" hidden>
@@ -246,10 +238,19 @@
       <!-- タブは外した。書庫はモード（.deck の直下）へ出したので、ここに出せるものは
            稼働中の一覧ひとつしか無い。**閉じるボタンはこの帯へ移した。**
            前はタブ行に置いていたが、その行ごと消えるため -->
+      <!-- 一覧の頭。左は開閉ボタン（.deck の左上に固定）のぶん空けてある（base.css）。
+           並びは（ボタンのぶんの空き）→ 書庫への一言 → 「すべて｜稼働中」→ ×（狭い窓だけ） -->
       <div class="list-head" id="live-head">
-        <label><input type="checkbox" id="only-live"> 稼働中だけ</label>
+        <!-- 件数（稼働中 N / 表示 N）は出さない。見出しの件数と同じことを言うため。
+             出すのは終了済みを上限で切ったときの「終了済み N 件は書庫へ」だけ（切ったことは黙らない） -->
         <span id="list-count"></span>
-        <!-- 引き出しのときだけ出る。開いている間は上のバーの開閉ボタンが下に隠れるため -->
+        <!-- 何を出すか。状態は store.onlyLive の1つ（main.js）。押している側を aria-pressed で示す。
+             前はチェックボックス（「稼働中だけ」）で、開閉ボタンを左に置くと頭の行が詰まった -->
+        <div class="live-filter" role="group" aria-label="表示するセッション">
+          <button type="button" id="show-all" aria-pressed="true">すべて</button>
+          <button type="button" id="show-live" aria-pressed="false">稼働中</button>
+        </div>
+        <!-- 引き出しのときだけ出る（狭い窓）。開いている間は作業台の左上の開閉ボタンが引き出しの下に隠れるため -->
         <button class="drawer-close" id="list-close" type="button" aria-label="一覧を閉じる">&#215;</button>
       </div>
       <ul class="list" id="list"></ul>
@@ -601,11 +602,12 @@
         </section>
 
         <section class="settings-sec">
-          <h3 class="settings-h3">作業台は上から5つ</h3>
-          <p class="settings-hint"><strong>上のバー</strong> — 一覧の開閉・いまの場所・探す欄（Ctrl+K と同じ）・起こす。</p>
-          <p class="settings-hint"><strong>あなたの番の帯</strong> — 答えないと1行も進まないものだけが並びます。
-            「開く」「答える」を押すと1行に畳み、右上の ⌄ で広げます。</p>
-          <p class="settings-hint"><strong>左の一覧</strong> — いちばん上にピン留め、その下は状態ごと。終わったものは新しい5件だけ出します。</p>
+          <h3 class="settings-h3">作業台は4つ</h3>
+          <p class="settings-hint"><strong>上のバー</strong> — いまの場所・探す欄（Ctrl+K と同じ）・起こす。</p>
+          <p class="settings-hint"><strong>左の一覧</strong> — いちばん上の枠「あなたの番」に、あなたの返事を待っているもの
+            （許可・質問で止まっているものと、返信待ち）がまとまります。その下にピン留め、実行中、終了。
+            終了はたたんであり、見出しの右の ＞ で開きます。
+            一覧は左上のボタンで開け閉めでき（閉じても同じ場所に残ります）、頭の右の「すべて｜稼働中」で終わったものを隠せます。</p>
           <p class="settings-hint"><strong>中央の詳細</strong> — 題・メモ・☆ の頭、入力欄、タブ（経過・成果・いま・調査）の順。
             「拡大」で大きく開けます。</p>
           <p class="settings-hint"><strong>右のレール</strong> — そのセッションの数値と診断。</p>
@@ -642,14 +644,14 @@
         <section class="settings-sec">
           <h3 class="settings-h3 has-icon" data-icon="plus">起こす・答える</h3>
           <p class="settings-hint">上のバーの <strong>＋起こす</strong> で、作業フォルダに新しいセッションを起こせます。
-            この画面から起こしたもの（札「この画面から」）は、許可や質問にここから答えられ、
+            この画面から起こしたもの（一覧の札「画面」）は、許可や質問にここから答えられ、
             止める・モデルを替えて続けるもできます。</p>
           <p class="settings-hint">ターミナルで動いているものは、<strong>窓を前に出すところまで</strong>です。</p>
         </section>
         <section class="settings-sec">
           <h3 class="settings-h3 has-icon" data-icon="front">待ちを順に片づける</h3>
           <p class="settings-hint">拡大で開いているとき、頭の <strong>← 前／次の待ち →</strong> で、
-            止まっているセッションを帯と同じ順に回れます。</p>
+            許可・質問で止まっているセッションを一覧と同じ順に回れます（返信待ちは回りません）。</p>
         </section>
         <section class="settings-sec">
           <h3 class="settings-h3 has-icon" data-icon="bell">通知</h3>
@@ -659,7 +661,8 @@
         <section class="settings-sec">
           <h3 class="settings-h3 has-icon" data-icon="star">ピン留めとメモ</h3>
           <p class="settings-hint">詳細の頭の ☆ でピン留め、✎ でひとことメモ。
-            ピンを付けたものは<strong>終わっても作業台のいちばん上に残ります。</strong>メモはこの PC だけに置きます。</p>
+            ピンを付けたものは<strong>終わっても一覧の「ピン留め」に残ります</strong>
+            （返事を待っているあいだは「あなたの番」に入り、☆ が付きます）。メモはこの PC だけに置きます。</p>
         </section>
         <section class="settings-sec">
           <h3 class="settings-h3 has-icon" data-icon="today">今日のまとめ</h3>
@@ -681,9 +684,10 @@
         <section class="settings-sec">
           <h3 class="settings-h3">一覧の行に足されるもの</h3>
           <ul class="about-legend">
-            <li><span class="lg-star" data-icon="star"></span><span><span class="lg-name">ピン留め</span><span class="lg-kinds">終わっても作業台のいちばん上に残します</span></span></li>
-            <li><span class="lg-memo">メモ</span><span><span class="lg-name">メモ</span><span class="lg-kinds">自分で書いたひとこと。行の2行目と詳細の頭に出ます</span></span></li>
-            <li><span class="lg-now">4/7</span><span><span class="lg-name">いま何をしているか</span><span class="lg-kinds">動いている行だけの2行目。TODO の進みと、いま走っている手</span></span></li>
+            <li><span class="lg-star" data-icon="star"></span><span><span class="lg-name">ピン留め</span><span class="lg-kinds">終わっても一覧の「ピン留め」に残します。「あなたの番」に入っているあいだは行の右に出ます</span></span></li>
+            <li><span class="lg-memo" data-icon="pencil"></span><span><span class="lg-name">メモ</span><span class="lg-kinds">自分で書いたひとこと。行の右の絵に触ると読めます（詳細の頭にも出ます）</span></span></li>
+            <li><span class="lg-now">4/7</span><span><span class="lg-name">いま何をしているか</span><span class="lg-kinds">動いている行だけの2行目。TODO の進みと、いま走っている手。
+              許可・質問で止まっている行の2行目は、何を求めているか（ツールと中身）</span></span></li>
           </ul>
         </section>
 
@@ -958,7 +962,8 @@
 <dialog class="zoom" id="zoom" aria-label="セッションの詳細（拡大）">
   <div class="settings-head">
     <h2>いま見ているセッション</h2>
-    <!-- 止まっているセッション（上の帯と同じ顔ぶれ）を順に片づける口。zoom.js が出し入れする。
+    <!-- 止まっているセッション（一覧の枠「あなたの番」の「許可・質問で止まっている」と同じ顔ぶれ。
+         返信待ちは回らない）を順に片づける口。zoom.js が出し入れする。
          **詳細を組み直さずに選び直すだけ**（ペインの節点はこのモーダルの中に居たまま） -->
     <div class="zoom-waits" id="zoom-waits" hidden>
       <span class="zoom-waits-label" id="zoom-waits-label"></span>

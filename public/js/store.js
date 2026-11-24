@@ -34,13 +34,13 @@ import { MODE_LIST } from './nav.js';
  * 前の版は配色の選択もここ（鍵の末尾 `.theme`）に覚えていた。配色を暗い1種類に
  * そろえたので、もう読まない。**消しにも行かない** … 残っていても何も起きないので、
  * 消す処理を足すと「誰も読まない鍵のための道具」が1つ増えるだけになる。
+ * 上の帯（大きい札）を畳んでいたかの鍵も同じ扱い。帯を外して一覧の頭の枠
+ * 「あなたの番」に替えたので、前の版が残した値は読まないし消さない。
  */
 export const LS = Object.freeze({
   onlyLive: 'claude-deck.onlyLive',
   newestFirst: 'claude-deck.newestFirst',
   onlyDecisions: 'claude-deck.onlyDecisions',
-  // 上の帯を1行の札に畳んでいるか（list.js）。待ちが0件になったら解く
-  heroFolded: 'claude-deck.heroFolded',
 });
 
 /**
@@ -87,44 +87,11 @@ export function colorOf(state) {
   return `var(--${toneOf(state)})`;
 }
 
-/** 一覧のタグに出さない権限モード。どちらも「特別なことは起きていない」を意味する。 */
-export const QUIET_MODES = new Set(['auto', 'default', 'normal', 'acceptEdits']);
-
-/**
- * 一覧を区切る見出し。上から手をつける順（サーバ側の STATE_RANK と同じ考え）。
- *
- * **これは監視盤の COLUMNS をそのまま引き継いだもの。** あちらは4つの列への割り当てで、
- * こちらは縦一覧への割り当て。材料（store.rows）も並び順も同じなので、
- * 列を畳んで見出しに替えただけ。
- *
- * 状態ラベルの日本語を画面側に持たない決まりの**例外**になる。
- * サーバが渡す `meta.stateLabels` は状態1つずつの名前で、
- * 「あなたの番」のような**まとめた名前**は向こうに無い（監視盤の COLUMNS も同じ理由）。
- * 状態が1つ増えたときは、どの見出しにも入らず末尾へ落ちる。消えはしない。
- *
- * **「あなたの番」の見出しはここに無い。** 上の帯（`.hero-wrap`）が
- * 答えないと進まないものを全部さらっていくので、残すと**永久に 0 件の見出し**が居座る。
- *
- * `keepEmpty`（0 件でも見出しを残す）という道具は残してある。あれが守っていたのは
- * 「見ていない」と「無い」を同じ顔にしないことで、その役目は帯と、
- * 左のレールの作業台の札の名前（0 件なら「止まっているものはありません」）が引き継いだ。
- * 空の見出しを4本とも残すと、静かな日に一覧の場所を食う。
+/*
+ * 一覧を区切る見出し（枠「あなたの番」の小見出し・実行中・終了）と、
+ * 止まっている状態の集合は `groups.js`（層0 の純関数）に置いてある。
+ * どの行をどの束へ置くかの判断ごと Node からテストするため。
  */
-export const STATE_GROUPS = [
-  { id: 'run', label: '実行中', states: ['running'] },
-  { id: 'reply', label: '返信待ち', states: ['awaiting-reply'] },
-  { id: 'done', label: '終了', states: ['ended'] },
-];
-
-/**
- * 上の帯へ出す状態。**`STATE_GROUPS` から外したぶんと同じ顔ぶれ。**
- *
- * ここに書くのは「どこへ出すか」の割り当てで、急ぎかどうかの判定ではない
- * （そちらは行の `blocking` ＝ サーバ由来を見る。`meta.stateBlocking` が出どころ）。
- * 2つの表が食い違う日は来るが、**足りないほうへ落ちても行は消えない** ――
- * 帯に出なければ「そのほか」の見出しへ回る。
- */
-export const HERO_STATES = new Set(['needs-answer', 'needs-plan-approval', 'needs-approval']);
 
 /**
  * 状態を並べる順。説明モーダルの凡例と、設定の「鳴らす状態」がこの順で並ぶ。

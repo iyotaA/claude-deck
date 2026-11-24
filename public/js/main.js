@@ -8,7 +8,7 @@
  * 同じ名前をトップレベルに2つ置くと SyntaxError で丸ごと落ちていた。
  *
  * 依存は上から下へ一方向にだけ流す。逆向きに import したくなったら置き場所が間違っている。
- *   層0  util.js / perf.js / timeline/kinds.js / nav.js   誰にも依存しない
+ *   層0  util.js / perf.js / timeline/kinds.js / nav.js / groups.js   誰にも依存しない
  *   層1  store.js（kinds.js を直に見る）/ panel.js / detail-head.js / usage-chart.js
  *   層2  rows.js / drawer.js / zoom.js / resize.js / runs.js /
  *        timeline/（外からは index.js の1枚として見る）
@@ -62,7 +62,7 @@ import { initMarks } from './marks.js';
 import { initResize } from './resize.js';
 import { initRuns, subscribeRuns } from './runs.js';
 import { renderDetail, renderDetailIfNeeded, initInspector } from './detail.js';
-import { renderList, renderRate, initHero } from './list.js';
+import { renderList, renderRate } from './list.js';
 import { initArchive, showArchive } from './archive.js';
 import { initToday } from './today.js';
 import { showUsage, initUsageTab } from './usage-tab.js';
@@ -112,7 +112,6 @@ setListOpen(initialListOpen(), null, false);
 // 「作業台で開く」の行き先もここで差す（zoom.js は層2 なので mode.js を import しない）
 // 「次の待ち →」の選び直しもここで差す（zoom.js は層2 なので session.js を import しない）
 initZoom({ onChange: renderDetail, onOpenInWork: () => setMode('work'), onPick: (id) => select(id, 'live') });
-initHero();
 // ピン留めとメモ（段8）。メモの窓の配線
 initMarks();
 initInspector();
@@ -142,17 +141,37 @@ initPalette();
 initListKeys(dom.list, 'live');
 initListKeys(dom.archive, 'archive');
 
-dom.onlyLive.checked = store.onlyLive;
-dom.onlyLive.addEventListener('change', () => {
-  store.onlyLive = dom.onlyLive.checked;
-  localStorage.setItem(LS.onlyLive, store.onlyLive ? '1' : '0');
+/**
+ * 一覧の頭の「すべて｜稼働中」の押している側を、いまの `store.onlyLive` に合わせる。
+ * **状態は store の1つだけ。** ボタンの aria-pressed は写しで、旗を2つ持たない
+ */
+function syncShowButtons() {
+  dom.showAll.setAttribute('aria-pressed', String(!store.onlyLive));
+  dom.showLive.setAttribute('aria-pressed', String(store.onlyLive));
+}
+
+/**
+ * 一覧に何を出すかを替える（すべて／稼働中）。
+ * いま押している側をもう一度押したときは何もしない（一覧を引き直す理由が無い）。
+ *
+ * @param {boolean} on 稼働中のセッションだけを出すなら true
+ */
+function setOnlyLive(on) {
+  if (store.onlyLive === on) return;
+  store.onlyLive = on;
+  localStorage.setItem(LS.onlyLive, on ? '1' : '0');
+  syncShowButtons();
   renderList();
   // 絞り込みで選んでいた行が消えたら、見えている先頭に移す
   const visible = visibleRows();
   if (!visible.some((r) => r.sessionId === store.selected)) {
     select(visible[0]?.sessionId ?? null);
   }
-});
+}
+
+syncShowButtons();
+dom.showAll.addEventListener('click', () => setOnlyLive(false));
+dom.showLive.addEventListener('click', () => setOnlyLive(true));
 
 // 手で押したときは詳細も取り直す。中身が同じでも読み直したい場面のためのボタンなので
 dom.reload.addEventListener('click', () => {
@@ -172,14 +191,15 @@ subscribeRuns(() => {
   renderDetailIfNeeded();
 });
 
-// 上のバーと左のレールのアイコン。**起動時に1回だけ差す。**
+// 上のバー・作業台の左上・左のレールのアイコン。**起動時に1回だけ差す。**
 //
 // HTML 側は空のボタンにしてある。innerHTML を使わない決まりなので、
 // SVG は icons.js が createElementNS で組んだ節点をここで append する。
-// 名前は aria-label（上のバーの絵だけボタンは title も）が持つので、絵だけにしても意味は消えない。
+// 名前は aria-label（絵だけのボタンは title も）が持つので、絵だけにしても意味は消えない。
 //
+// 一覧の開閉は 18px。面も枠も持たないボタン（2rem）の中の絵だけが目印なので、16px だと器に対して小さく沈む。
 // 「起こす」と探す欄は 14px にする。文字と並ぶので、16px だと絵のほうが大きく見える
-dom.listToggle.append(icon('sidebar'));
+dom.listToggle.append(icon('sidebar', 18));
 dom.runformOpen.prepend(icon('plus', 14));
 dom.paletteOpen.prepend(icon('search', 14));
 dom.reload.append(icon('refresh'));

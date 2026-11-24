@@ -660,7 +660,9 @@ function renderHead(row) {
     const state = el('span', 'state', row.stateLabel);
     state.style.color = colorOf(row.state);
     state.dataset.s = toneOf(row.state);
-    // 予算切れだけは点ではなく印にする（理由は list.js の buildCard 側に書いた）
+    // 予算切れだけは点ではなく「$」の印にする。予算切れは返信待ち（awaiting-reply）と同じ位置・
+    // 同じ色に並ぶので、印が無いと札の文字を読むまで見分けが付かない。
+    // 台帳の状態は overlay / synthRow が row.run に丸ごと写している
     if (row.run?.state === 'budget') state.dataset.mark = 'budget';
     line.append(state);
   }

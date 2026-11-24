@@ -1,4 +1,9 @@
-/* ClaudeDeck ── 一覧と書庫のカード（左のペイン） */
+/* ClaudeDeck ── 一覧（左のペイン）と書庫のカード
+ *
+ * 一覧は上から 枠「あなたの番」→ ピン留め → 実行中 → 終了 → そのほか（振り分けは js/groups.js）。
+ * 行は圧縮した1行（.row）で、**全体が一度に見えること**が役目。そのために字も行間も
+ * 詰めるほう（--fs-0 / --fs-1・--lh-tight）に寄せる。
+ */
 
 /* -------------------------------------------------------------- 一覧（左） */
 
@@ -52,14 +57,57 @@
   border-bottom-color: var(--accent);
 }
 
-/* 閉じる口は一覧の帯の右端。**広い窓では出さない。**
-   広い窓の一覧は列なので、上のバーの開閉ボタンが隠れずに見えている。
+/* 閉じる口は一覧の頭の右端（「すべて｜稼働中」のさらに右）。**広い窓では出さない。**
+   広い窓の一覧は列なので、作業台の左上の開閉ボタンが隠れずに見えている。
    ここにも置くと同じことをする口が2つ並ぶ。
-   狭い窓（引き出し）だけは残す ―― 手前に重なった紙が上のバーの開閉ボタンを覆うので、
-   紙の中に閉じる口が要る（narrow.css が出す） */
-#live-head .drawer-close {
-  display: none;
-  margin-left: auto;
+   狭い窓（引き出し）だけは残す ―― 手前に重なった紙が開閉ボタンを覆うので、
+   紙の中に閉じる口が要る（narrow.css が出す）。
+   右へ寄せるのは書庫への一言（#list-count）の margin-left: auto に任せる。
+   ここにも auto を持たせると空きが2つに割れ、切り替えが行の真ん中に浮く */
+#live-head .drawer-close { display: none; }
+
+/* 一覧の頭の行。**左は開閉ボタン（.deck の左上に固定。base.css）のぶん空ける。**
+   高さはボタン＋上下の距離から出し、ボタンが行の上下の真ん中に来るようにする
+   （数は base.css の :root の --list-toggle-* の2つ。手で足し算して書き写さない） */
+#live-head {
+  min-height: calc(var(--list-toggle-size) + 2 * var(--list-toggle-inset));
+  padding-left: calc(var(--list-toggle-inset) + var(--list-toggle-size) + .5rem);
+}
+
+/* 「すべて｜稼働中」。何を出すかの切り替え（状態は store.onlyLive の1つ。main.js）。
+   前はチェックボックス（「稼働中だけ」）だった。開閉ボタンを頭の左へ入れると行が詰まるので、右端へ移した。
+
+   **押せるものなので面と影で浮かせる。** 押している側は面 --bg-hi・字 --fg・影 --sh-1、
+   もう片方は字 --fg-muted だけ。器は沈んだ面（--bg-sunk）に細い枠で、2つが1組だと形で分かる。
+   焦点は base.css の :focus-visible（光の輪）のまま */
+.live-filter {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+}
+
+.live-filter button {
+  height: 1.5rem;
+  padding: 0 .6rem;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--fs-1);
+  cursor: pointer;
+}
+
+.live-filter button:hover { color: var(--fg); }
+
+.live-filter button[aria-pressed="true"] {
+  background: var(--bg-hi);
+  color: var(--fg);
+  box-shadow: var(--sh-1);
 }
 
 .list-head {
@@ -177,10 +225,17 @@
 
 .drawer-close:hover { border-color: var(--border-strong); box-shadow: var(--sh-2), var(--hi); color: var(--fg); }
 
+/* 余白の値を2つ持つ。どちらも見出しの位置の計算に引くので、数を直に書き散らさない。
+   --list-pad      一覧の内側の余白。見出しはこれを負 margin で打ち消して列いっぱいへ広がる
+   --group-head-x  見出しの字が、入れ物（一覧の列・枠）の内側の縁から入る量のうち、--list-pad より奥のぶん。
+                   通常の見出しも、枠「あなたの番」の中の小見出しも、入れ物の縁から
+                   「--list-pad ＋ --group-head-x」の位置に字が来る（両方がこの式を引く） */
 .list {
+  --list-pad: .5rem;
+  --group-head-x: .35rem;
   list-style: none;
   margin: 0;
-  padding: .5rem;
+  padding: var(--list-pad);
   overflow-y: auto;
   min-height: 0;
   display: flex;
@@ -210,18 +265,22 @@
    面（--bg）を敷くのは見た目のためではなく、sticky で下のカードが透けないため。
    左右の負 margin は、面を列の幅いっぱいへ広げるため（カードだけ内側に残す）。
 
+   **字は無彩色（--fg-muted）。** 色は「あなたが何かすること」にだけ使う約束で、
+   見出しの字まで状態色で塗ると、枠「あなたの番」の --accent と色の声量を取り合う。
+   状態は点（.state の形と色。色は li に置いた --state-color を継ぐ）が言う。
+
    押せないものなので枠も面のピルも持たない（押せない札は字だけにする約束） */
 .group-head {
   position: sticky;
-  top: -.5rem;
+  top: calc(-1 * var(--list-pad));
   z-index: 1;
   display: flex;
   align-items: center;
   gap: .35rem;
-  margin: 0 -.5rem;
-  padding: .35rem .85rem .3rem;
+  margin: 0 calc(-1 * var(--list-pad));
+  padding: .35rem calc(var(--list-pad) + var(--group-head-x)) .3rem;
   background: var(--bg);
-  color: var(--state-color, var(--fg));
+  color: var(--fg-muted);
   font-size: var(--fs-1);
   font-weight: 700;
 }
@@ -238,6 +297,263 @@
 /* 点は .state の ::before がそのまま描く。**ここで自前に描かない**
    （背景で丸を置くと、疑似要素の点と重なって二重になる）。
    色は li に置いた --state-color を .state が継いで currentColor に流す */
+
+/* 「ピン留め」の見出しの星は塗って、強調色にする（詳細の頭の ☆ と同じ形・同じ色）。
+   **直下の絵だけに絞る**（`>`）。終了の開け閉めのボタンの chevron まで塗ると、線の絵が三角の塊になる */
+.group-head > .icon { color: var(--accent); }
+.group-head > .icon path { fill: currentColor; }
+
+/* 終了の見出しの右の開け閉め。**絵（chevron）だけ。** たたんでいるときは右向き、開いたら下向き。
+   判断は JS の aria-expanded だけで、ここは当てるだけ。
+   .ibtn（1.9rem）は見出しの字より背が高いので、小さくしたうえで上下を負 margin で打ち消し、
+   見出しの高さを変えない（ほかの見出しと背が揃う） */
+.group-head .fold-btn {
+  width: 1.6rem;
+  height: 1.6rem;
+  margin: -.3rem -.45rem -.3rem 0;
+}
+
+.fold-btn .icon { transition: transform .15s ease; }
+.fold-btn[aria-expanded="true"] .icon { transform: rotate(90deg); }
+
+/* ------------------------------------------------- 枠「あなたの番」 */
+
+/* 一覧のいちばん上で、ボールが自分にあるセッション（許可・質問で止まっているものと、返信待ち）を
+   1つの枠に束ねる。作業台を開けば最初に目に入る。前は上に大きい札の帯があり、詳細を押し下げていた。
+
+   **面は塗らない。** 枠の線と見出しの字の --accent（あなたの番の色）で「ここ」を示し、
+   面はごく薄く敷くだけ。明るく塗った面は「次に押すボタン」（.btn.is-lead）1つだけの約束。
+   線も面も color-mix() で --accent から作る（新しい色を足さない）。
+
+   **線は 42%、面は 5%。** 線は --border（灰）と見分けが付く濃さにしつつ、--accent の純色
+   （押すもの・選んでいる場所の色）より1段弱くする。純色にすると、枠そのものが押せるものや
+   選んでいるものに見える。面は線より十分薄く、地の色が変わったと分かるだけにとどめる。
+
+   li（一覧の項目）は並ぶだけで、枠の見た目は内側の器が持つ
+   （role="group" を li に付けると一覧の子が項目でなくなる。js/list.js の buildYours）。
+   --yours-pad-x は枠の左右の内側の余白。中の小見出しの位置の計算にも引く */
+.yours-frame {
+  --yours-pad-x: .35rem;
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  padding: .55rem var(--yours-pad-x) .35rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+/* 頭。「あなたの番」（--accent の字）＋ 件数（大きい数字）＋「件」。
+   見出しの要素は h2 なので、ブラウザ既定の余白と大きさをここで打ち消す */
+.yours-title {
+  display: flex;
+  align-items: baseline;
+  gap: .4rem;
+  margin: 0;
+  padding: 0 .5rem;
+  font-size: var(--fs-2);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.yours-label { color: var(--accent); }
+
+.yours-count {
+  font-family: var(--font-mono);
+  font-size: var(--fs-5);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.yours-unit {
+  font-size: var(--fs-1);
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+
+/* 枠の中の小見出し（許可・質問で止まっている／返信待ち）。**貼り付けない。**
+   枠は一覧のいちばん上にあって短いので sticky にする理由が無いうえ、
+   列いっぱいへ広げる負 margin と透けないための面が枠の線をはみ出す。形（点・名前・件数）はそのまま。
+   字の位置は通常の見出しと同じ式（入れ物の縁から --list-pad ＋ --group-head-x）。
+   入れ物が枠なので、枠の内側の余白（--yours-pad-x）を差し引いたぶんを padding に置く */
+.yours-frame .group-head {
+  position: static;
+  margin: .45rem 0 .1rem;
+  padding: 0 calc(var(--list-pad) + var(--group-head-x) - var(--yours-pad-x));
+  background: none;
+}
+
+/* 0 件。**枠は残す**（消すと「見ていない」と「無い」が同じ顔になる）。
+   線を --border に戻して面も外し、頭の字も沈める ―― あなたにやることは無い */
+.yours-frame.is-empty {
+  border-color: var(--border);
+  background: none;
+}
+
+.yours-frame.is-empty .yours-title,
+.yours-frame.is-empty .yours-label { color: var(--fg-muted); }
+
+.yours-none {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  margin: .35rem .5rem .15rem;
+  font-size: var(--fs-1);
+  color: var(--fg-muted);
+}
+
+/* 点は --done の塗った丸（呼ばれていない・通って済んだ、の色と形）。
+   形は .state::before の既定（塗った丸）のまま、色だけ替える */
+.yours-none .state { color: var(--done); }
+
+/* -------------------------------------------------------- 圧縮した行 */
+
+/* **ここだけ字も行間も詰めるほうに寄せる。**
+   読む面（--fs-4 / --lh-read）の尺で組むと1行が 28px から 47px へ伸び、
+   12本並べたときに 377px が 568px になる（＝全体が一度に見えなくなる）。
+
+   1行目は点・題・置き場所・右の端（印と経過）。スキルやブランチは、選んだときに詳細ペインで読める。
+   置き場所は消さない ―― 同じ題が並ぶと見分けられなかった（UI レビューの F4）。2行目には置かず、題の右に薄く出す。
+   2行目を出すのは止まっている行（.wants）と動いている行（.now）だけ */
+.row {
+  display: grid;
+  /* 点・題・置き場所・右の端。置き場所の列は auto だが、.p の max-width で頭打ちにする */
+  grid-template-columns: .55rem minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: .5rem;
+  width: 100%;
+  padding: .32rem .5rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: var(--lh-tight);
+  text-align: left;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.row:hover { background: var(--bg-hi); }
+
+/* 選んでいる行。面 --bg-hi ＋ 枠 --border-strong。**光の輪は付けない。**
+   行は枠「あなたの番」（--accent の線）の中にも並ぶので、選んだ印までラベンダーにすると
+   枠と選択が同じ色で重なる（ラベンダーを減らす決め）。線の色だけで示すのではなく、
+   面ごと持ち上げたうえに枠を1本足す（触れたときの面より1段はっきりする） */
+.row[aria-current="true"] {
+  background: var(--bg-hi);
+  border-color: var(--border-strong);
+}
+
+/* 点は `.state::before` を借りない。**あちらは字と並ぶ前提**（inline-flex ＋ gap）で、
+   ここは列そのものが点1つぶん。形の割り当てだけ同じ語（data-s）で受ける */
+.row .dot {
+  width: .5rem;
+  height: .5rem;
+  border-radius: 50%;
+  background: var(--state-color, var(--off));
+}
+
+.row[data-s="hot"] .dot {
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+}
+
+.row[data-s="warn"] .dot {
+  background: none;
+  box-shadow: inset 0 0 0 2px var(--state-color, var(--off));
+}
+
+.row[data-s="off"] .dot {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--state-color, var(--off));
+}
+
+.row .t {
+  font-size: var(--fs-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .t.is-empty { color: var(--fg-faint); }
+
+/* 置き場所。**題より一段うしろ。** 同じ題が並んだときに見分けるための添え物で、
+   読ませたいのは題のほう。長いフォルダ名で題を押し潰さないよう、幅に上限を置く */
+.row .p {
+  max-width: 8.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+}
+
+/* 右の端。印（札「画面」・星・メモの絵）と経過を1つの器に並べる。
+   **印の有無で grid の列を増やさない** ―― 空の列にも gap が付いて、行ごとに経過の位置がずれる */
+.row .end {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+
+.row .pin-mark,
+.row .memo-mark { display: inline-flex; }
+
+/* 枠の中のピンの行の星。塗って強調色（ピン留めの見出しの星・詳細の頭の ☆ と同じ形・同じ色） */
+.row .pin-mark { color: var(--accent); }
+.row .pin-mark path { fill: currentColor; }
+
+/* メモの絵は添え物の色。**本文は字で出さない**（吹き出しと読み上げに入れてある） */
+.row .memo-mark { color: var(--fg-faint); }
+
+/* 札「画面」。この画面から起こしたセッション（ここから答えられる）の印で、枠の中の行だけに付く。
+   **塗った札にしない。** 面 --bg-hi・字 --fg-muted。押せないので枠も影も持たず、角も丸めきらない
+   （ピル型は押せるものの形）。前の上の帯の「この画面から」の役目を引き継いだ */
+.row .here-badge {
+  padding: 0 .35rem;
+  border-radius: var(--r-xs);
+  background: var(--bg-hi);
+  color: var(--fg-muted);
+  font-size: var(--fs-0);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* 2行目（止まっている行の「何を求めているか」と、動いている行の「いま何をしているか」）。
+   行は1行に詰める決まり（上の .row の説明）の例外で、いつも数本しか無い。
+   押せないので字だけ（--fg-faint）。長いと「…」で切り、全文は title */
+.row .wants,
+.row .now {
+  grid-column: 2 / -1;
+  margin-top: -.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+}
+
+/* 何を求めているか。ツールの名前だけ1段濃く。**状態色で塗らない** ――
+   止まっていることは点の菱形と赤が言っている。中身は作るときに1回だけ書く（js/list.js の wantsLine） */
+.row .wants .tool {
+  font-weight: 700;
+  color: var(--fg-muted);
+}
+
+/* いま何をしているか（TODO の進みと、いまの手）。空のときは hidden で消え、行は1行のまま。
+   文字は js/list.js の refreshTimes() が差し替える（組み直さない） */
+.row .now[hidden] { display: none; }
+
+.row .m {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-0);
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
 
 /* hidden 属性で消えるのはブラウザ既定の [hidden] { display: none } によるもので、
    作者側が display を1つ書いた時点で必ず負ける（詳細度ではなく出どころの優先順）。
@@ -314,10 +630,10 @@
 /* 点は1つだけ。**形は data-s で替える。要素を増やさない。**
    `.state::before` が既に点を描いているので、別の節点を足すと二重になる（実測）。
 
-   **色だけに頼らない理由。** 強調（--accent）をテラコッタにしたので --hot と色相が近い。
-   `tokens.css` が長く避けていた組み合わせで、約30度離してはあるが、
-   隣り合って出る場面（ヒーローの札と「起こす」ボタン）では色だけだと弱い。
-   形なら色覚の差にも効く。
+   **色だけに頼らない理由。** 形を足したきっかけは、前の強調（テラコッタ）と --hot の
+   色相が約30度しか離れておらず、隣り合って出る場面で色だけだと弱かったこと。
+   いまの強調（ラベンダー）は --hot から離れているが、実行中（--calm）を無彩色にしたので
+   色の無い点を形で見分ける場面はむしろ増えている。形なら色覚の差にも効く。
 
    形の割り当てを CSS に列挙しない ―― 出どころは store.js の STATE_TONE ひとつで、
    ここは受け取った語（hot / warn / calm / off）を描くだけにしてある */
@@ -330,7 +646,8 @@
 }
 
 /* あなたの操作で止まっている＝菱形。ひと目で他と違う形にする。
-   輪は静かに出したまま（動かすのはヒーローの札だけ。段6） */
+   輪は静かに出したまま動かさない（画面に動くものを置かない。止まっていることは
+   一覧の枠「あなたの番」と左のレールのバッジが言う） */
 .state[data-s="hot"]::before {
   border-radius: 1.5px;
   transform: rotate(45deg);
@@ -351,12 +668,6 @@
   box-shadow: inset 0 0 0 1.5px currentColor;
 }
 
-.state[data-guess="true"]::after {
-  content: "?";
-  font-weight: 400;
-  color: var(--fg-faint);
-}
-
 .idle {
   margin-left: auto;
   font-size: var(--fs-1);
@@ -374,31 +685,6 @@
 }
 
 .card-title.is-empty { color: var(--fg-faint); font-weight: 400; }
-
-.waiting {
-  display: flex;
-  gap: .4rem;
-  align-items: baseline;
-  padding: .3rem .45rem;
-  border-radius: var(--r-xs);
-  background: var(--bg-sunk);
-  font-size: var(--fs-1);
-  color: var(--fg-muted);
-  overflow: hidden;
-}
-
-.waiting .tool {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  color: var(--state-color, var(--fg));
-  white-space: nowrap;
-}
-
-.waiting .detail {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* カードの下段（置き場所・ブランチ・スキル・サブエージェント）。
 
@@ -437,10 +723,12 @@
    輪郭だけの札が横に何枚も並ぶ中で、いちばん引きたい1枚を面で分ける。
    **色は増やさない** … --accent から作った1つを使い回している */
 .tag.is-skill { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--accent-soft); color: var(--accent); }
+/* .is-plan と .is-deck を付ける画面はいま説明モーダルの凡例（about.js の TAGS）だけ。
+   稼働中の一覧は圧縮した行に替わり、この画面から起こした印は行の札「画面」（.row .here-badge）が持つ */
 .tag.is-plan { border-color: var(--warn); color: var(--warn); }
 
 /* この画面から起こしたセッションの印。
-   一覧で唯一の「塗った」タグにしてある。輪郭だけのタグが並ぶ中で確実に目に留まり、
+   唯一の「塗った」タグにしてある。輪郭だけのタグが並ぶ中で確実に目に留まり、
    同時に出るのは多くて3本（RUN_MAX）なのでうるさくならない。
    使うのは --accent で、状態色（hot / warn / calm / off）には手を出さない。
    あちらは「どれから手をつけるか」の色なので、別の意味を混ぜると読めなくなる */

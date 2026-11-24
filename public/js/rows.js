@@ -76,7 +76,7 @@ export function headOf(sessionId) {
   return head;
 }
 
-/** 一覧に出す行。「稼働中だけ」を押しているあいだは終わったものを落とす */
+/** 一覧に出す行。頭の「すべて｜稼働中」で「稼働中」を選んでいるあいだは終わったものを落とす */
 export function visibleRows() {
   return store.onlyLive ? store.rows.filter((r) => r.alive) : store.rows;
 }

@@ -52,10 +52,13 @@ function syncListInert() {
 export function setListOpen(open, moveFocusTo = null, remember = true) {
   const changed = dom.app.classList.contains('is-list-open') !== open;
   dom.app.classList.toggle('is-list-open', open);
-  // 開閉の口は上のバーの1つだけ（広い窓でも狭い窓でも同じボタン）。
-  // **旗を2つ持たない** ―― 正は .app のクラス1つで、ここは名前と aria-expanded を合わせるだけ
+  // 開閉の口は作業台の左上の1つだけ（広い窓でも狭い窓でも同じボタン。開いても閉じても同じ位置）。
+  // **旗を2つ持たない** ―― 正は .app のクラス1つで、ここは名前と aria-expanded を合わせるだけ。
+  // 絵だけのボタンなので、名前は aria-label と title の両方に入れる（触れば名前が出る）
+  const name = open ? 'セッション一覧を閉じる' : 'セッション一覧を開く';
   dom.listToggle.setAttribute('aria-expanded', String(open));
-  dom.listToggle.setAttribute('aria-label', open ? 'セッション一覧を閉じる' : 'セッション一覧を開く');
+  dom.listToggle.setAttribute('aria-label', name);
+  dom.listToggle.title = name;
   syncListInert();
 
   if (remember) localStorage.setItem(LIST_OPEN_KEY, open ? '1' : '0');
@@ -107,11 +110,15 @@ export function initialListOpen() {
 }
 
 /**
- * 一覧の引き出しを配線する。上のバーの開閉・引き出しの中の ×・Esc・外側の押下。
+ * 一覧の引き出しを配線する。作業台の左上の開閉・引き出しの中の ×・Esc・外側の押下。
  *
- * **開閉の口は上のバーの `#list-toggle` 1つ。** 広い窓でも狭い窓でも同じボタンで、
+ * **開閉の口は作業台の左上の `#list-toggle` 1つ。** 広い窓でも狭い窓でも同じボタンで、
+ * 開いても閉じても画面の上の位置は変わらない（`.deck` の左上に絶対配置。base.css）。
+ * `#list-pane` の外に置いてあるのは、閉じると一覧が幅 0 と inert になって中のものを押せなくなるため。
+ * 押したボタンは作り直さないので、焦点はボタンに残る。
  * 一覧の無い書庫と数値のあいだは CSS（base.css）が隠す。
- * 前は広い窓だけ作業台の左端の細い帯にもう1つ組んでいて、同じことをする口が2つあった。
+ * 前は上のバーの左端に居て、作業台のときだけそこに出るのが浮いていた（ユーザーの声）。
+ * さらに前は広い窓だけ作業台の左端の細い帯にもう1つ組んでいて、同じことをする口が2つあった。
  *
  * **窓の広さは見張らない。** 広さで形が変わらなくなったので要らなくなった
  * （前は広くなった時点で `setListOpen(false)` して列へ戻していた）。

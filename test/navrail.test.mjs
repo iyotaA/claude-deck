@@ -196,11 +196,42 @@ test('消した部品が index.html に戻っていない', () => {
   assert.deepEqual(bad, [], `消したはずの部品が残っている: ${bad.join(' / ')}`);
 });
 
-test('上のバーに 一覧の開閉・題・接続の札・探す欄・再読み込み・起こす が居る', () => {
+test('上のバーに 題・接続の札・探す欄・再読み込み・起こす が居る', () => {
   const bar = section('<header class="topbar">', '</header>');
-  for (const id of ['list-toggle', 'page-title', 'live', 'palette-open', 'reload', 'runform-open']) {
+  for (const id of ['page-title', 'live', 'palette-open', 'reload', 'runform-open']) {
     assert.ok(tagWithId(bar, id), `#${id} が上のバーに無い`);
   }
+});
+
+test('一覧の開閉（#list-toggle）は上のバーに無く、作業台（.deck）の中・#list-pane の外に居る', () => {
+  // 上のバーに置くと「作業台のときだけ左上に出る」ボタンになって浮く（ユーザーの声）。
+  // 一覧の中（#list-pane）に置くと、閉じたときに一覧ごと幅 0 と inert になって押せなくなる
+  const bar = section('<header class="topbar">', '</header>');
+  assert.equal(tagWithId(bar, 'list-toggle'), null, '#list-toggle が上のバーに残っている');
+  const deck = section('<main class="deck"', '</main>');
+  assert.ok(tagWithId(deck, 'list-toggle'), '#list-toggle が作業台（main.deck）の中に無い');
+  const pane = section('<section class="list-pane"', '</section>');
+  assert.equal(tagWithId(pane, 'list-toggle'), null, '#list-toggle が #list-pane の中にある（閉じると押せなくなる）');
+});
+
+/* ── 字面：一覧の頭の「すべて｜稼働中」 ─────────────────────── */
+
+test('「稼働中だけ」のチェックボックス（#only-live）が index.html に無い', () => {
+  assert.equal(tagWithId(HTML, 'only-live'), null, '#only-live が残っている。切り替え（すべて｜稼働中）に替えた');
+});
+
+test('一覧の頭（#live-head）に「すべて｜稼働中」の切り替えがある（role="group"・ボタン2つに aria-pressed）', () => {
+  // 頭の行は #list-pane の中の最初の器。#list（一覧そのもの）の手前までを頭として読む
+  const head = section('<div class="list-head" id="live-head"', '<ul class="list"');
+  const open = head.match(/<([a-z]+)\b[^>]*\brole="group"[^>]*>/);
+  assert.ok(open, '#live-head の中に role="group" の器が無い');
+  assert.match(open[0], /aria-label="表示するセッション"/, '切り替えに名前（aria-label）が無い');
+  // 器の開きタグから、同じ名前の閉じタグまで（中に同名の器は入れていない）
+  const inner = head.slice(head.indexOf(open[0]) + open[0].length);
+  const body = inner.slice(0, inner.indexOf(`</${open[1]}>`));
+  const buttons = [...body.matchAll(/<button\b[^>]*>/g)].map((m) => m[0]);
+  assert.equal(buttons.length, 2, `切り替えのボタンが2つでない: ${buttons.length}`);
+  for (const b of buttons) assert.match(b, /aria-pressed="(true|false)"/, `aria-pressed が無い: ${b}`);
 });
 
 test('上のバーの「起こす」は塗らない（塗った面は1画面に1つ。詳細の次の一手に譲る）', () => {
@@ -218,6 +249,8 @@ test('public/js に消した口（下段のまとめ・版・左の帯のボタ�
     [/dom\.summary\b/, 'dom.summary'],
     [/dom\.ver\b/, 'dom.ver（上のバーの版）'],
     [/railBtn/, 'railBtn（作業台の左端の帯のボタン）'],
+    // 「稼働中だけ」はチェックボックスから「すべて｜稼働中」の切り替えに替えた
+    [/dom\.onlyLive\b|onlyLive\.checked/, 'dom.onlyLive / .checked（「稼働中だけ」のチェックボックス）'],
   ];
   const bad = [];
   for (const dir of [JS_DIR, path.join(JS_DIR, 'timeline')]) {

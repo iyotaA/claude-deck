@@ -207,12 +207,6 @@ export function shortModel(model) {
   return model.replace(/^claude-/, '').replace(/-\d{8}$/, '');
 }
 
-export function tokens(n) {
-  if (!n) return null;
-  if (n < 1000) return String(n);
-  return `${Math.round(n / 1000)}k`;
-}
-
 /* ------------------------------------------------------------------ カードのタグ */
 
 /**

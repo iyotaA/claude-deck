@@ -270,11 +270,10 @@ export function select(sessionId, from = 'live') {
   store.selectedFrom = store.selected ? from : null;
   // 印は両方の一覧に付け直す。書庫で選んだあと稼働中に戻ったとき、
   // 同じセッションが両方に居ることがある。
-  // **稼働中は圧縮した行（`.row`）**、書庫はカードのままなので両方を拾う
+  // **稼働中は圧縮した行（`.row`。枠「あなたの番」の中の行も含む）**、
+  // 書庫はカードのままなので両方を拾う
   for (const node of [
     ...dom.list.querySelectorAll('.card, .row'),
-    // 帯は広げた札（.hero-card）と、畳んだ1行の札（.hero-chip）のどちらか
-    ...dom.heroBand.querySelectorAll('.hero-card, .hero-chip'),
     ...dom.archive.querySelectorAll('.card'),
   ]) {
     node.setAttribute('aria-current', String(node.dataset.sessionId === store.selected));
