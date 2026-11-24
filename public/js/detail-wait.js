@@ -15,31 +15,19 @@ import { panel, SEC } from './panel.js';
 import { askBlock } from './run-ask.js';
 
 /**
- * 待ちの種類ごとの、見出しと「何をすれば進むのか」。
+ * 待ちの種類ごとの、見出し（何をすれば進むのか）と色。
  *
  * ここに無い状態（実行中・終了）は待っていないので、パネルそのものを出さない。
+ *
+ * **案内文（見出しの下の1行）は持たない。** 前は「このツールを実行してよいかを
+ * 決めてください」のような1行を添えていたが、見出し（「あなたの番 — 実行を許可する」）と
+ * 同じことを言うだけだった（補足と重複をしまう）。中身のほうを先に読ませる。
  */
 const WAIT_GUIDE = {
-  'needs-answer': {
-    title: '質問に答える',
-    tone: 'hot',
-    lead: '選択肢を選ぶまで、この先へ進みません',
-  },
-  'needs-plan-approval': {
-    title: 'プランを承認する',
-    tone: 'hot',
-    lead: 'この計画で進めてよいかを決めてください',
-  },
-  'needs-approval': {
-    title: '実行を許可する',
-    tone: 'hot',
-    lead: 'このツールを実行してよいかを決めてください',
-  },
-  'awaiting-reply': {
-    title: '次の指示を出す',
-    tone: 'warn',
-    lead: 'Claude は応答を返し終えて止まっています',
-  },
+  'needs-answer': { title: '質問に答える', tone: 'hot' },
+  'needs-plan-approval': { title: 'プランを承認する', tone: 'hot' },
+  'needs-approval': { title: '実行を許可する', tone: 'hot' },
+  'awaiting-reply': { title: '次の指示を出す', tone: 'warn' },
 };
 
 /**
@@ -115,9 +103,8 @@ export function waitingBlock(row, d) {
   const p = panel(headingOf(row, guide), { id: SEC.wait, tone: guide.tone });
   p.section.classList.add('is-wait');
   // 答えないと1行も進まないものだけ、左の縁を太くして見出しを1段上げる。
-  // 色は既存の `.panel.is-hot` が持つので、ここで新しい色を作らない
+  // 色は `.panel.is-hot` の見出しの字だけが持つ（太い線は無彩色）。ここで新しい色を作らない
   if (row.blocking === true) p.section.classList.add('is-block');
-  p.body.append(el('p', 'note', guide.lead));
 
   const items = d?.digest?.items ?? [];
   const lastOf = (pred) => {
@@ -147,11 +134,11 @@ export function waitingBlock(row, d) {
       if (row.waitingFor.detail) p.body.append(el('pre', null, row.waitingFor.detail));
     }
   } else if (row.state === 'awaiting-reply') {
+    // 最後の応答だけを出す。**「Claude の最後の応答」の札は付けない** ―― 見出しが
+    // 「返信待ち — 次の指示を出す」と言っている以上、その下に来る本文が何かは札なしで読める。
+    // 札ではなくパスそのものが中身の「プランの保存先」（上の枝）とは扱いが違う
     const say = lastOf((i) => i.kind === 'say' && i.text);
-    if (say) {
-      p.body.append(el('div', 'wait-lead', 'Claude の最後の応答'));
-      p.body.append(mdView(say.text));
-    }
+    if (say) p.body.append(mdView(say.text));
   }
 
   return p.section;

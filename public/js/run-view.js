@@ -33,7 +33,7 @@ import { fillSelect, gridRow } from './form-kit.js';
 import { closeOnBackdrop } from './modal.js';
 
 /**
- * 状態に応じたパネルの色。
+ * 状態に応じたパネルの色（見出しの字だけに付く。枠と帯は素のまま）。
  *
  * 色を付けるのは待たせているときと、うまくいっていないときだけ。
  * 実行中に色を付けると、動いている＝急ぎに見えて一覧の状態色と意味がぶつかる。

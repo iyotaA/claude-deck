@@ -6,18 +6,21 @@
  *
  * **新しい色は1つも作らない。** 乗るのは既存のクラスと変数だけ
  * （.wait-tool / .settings-msg[data-tone] / .settings-hint / .btn / .btn.is-armed /
- *  --border-strong / --hot / --bg-elev / --code-bg）。
+ *  --border-strong / --bg-elev / --code-bg）。
  */
 
-/* 要求が来ていることは**枠の太さで示し、面を色で塗らない。**
-   塗ると、同じパネルに複数並んだときに画面がその色だけになる */
+/* 要求が来ていることは**枠の太さで示し、面も線も色で塗らない。**
+   面を塗ると、同じパネルに複数並んだときに画面がその色だけになる。
+   左の線も無彩色にする。前は --hot だったが、外の待ちのパネルの見出し
+   （「あなたの番 — …」の赤い字）と同じことを言っていた（detail.css の
+   「急ぎのパネルで色を持つのは見出しの字だけ」と同じ線） */
 .ask {
   display: flex;
   flex-direction: column;
   gap: .5rem;
   padding: .6rem .7rem;
   border: 1px solid var(--border-strong);
-  border-left: 3px solid var(--hot);
+  border-left-width: 3px;
   border-radius: 0 8px 8px 0;
   background: var(--bg-elev);
 }

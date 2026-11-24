@@ -100,18 +100,28 @@
 .detail-pin.is-pinned { color: var(--accent); }
 .detail-pin.is-pinned .icon path { fill: currentColor; }
 
-/* メモ。事実の1行の下に、そのまま見せる。書くのは ✎ の窓（marks.js） */
+/* メモ。事実の1行の下に、そのまま見せる。書くのは ✎ の窓（marks.js）。
+
+   **面を沈めて、枠は持たせない。** 読むだけで押せないので、`.settings-read` /
+   `.usage-read` と同じ「沈めた面」の段に置く（押せないものに枠を持たせない）。
+   頭の地は --bg なので、--bg-sunk の塊は1段明るく見える（名前で明暗を決めつけない）。
+   角は --r-sm。1行の高さに --r-md を当てると、押せるものの形（ピル型）に寄る */
 .detail-memo {
-  margin: .35rem 0 0;
+  margin: .45rem 0 0;
+  padding: .35rem .6rem;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
   font-size: var(--fs-1);
   color: var(--fg-muted);
   overflow-wrap: anywhere;
 }
 
+/* 札「メモ」。**ラベンダーにしない。** あれは押すもの・あなたの番・選んでいる場所の色で、
+   メモはどれでもない（1色に役は1つ）。本文（--fg-muted）より1段沈めて札だと分からせる */
 .detail-memo .k {
   margin-right: .45rem;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--fg-faint);
 }
 
 /* 題名は2行で切る。全文は title 属性（detail.js の renderHead）。
@@ -180,11 +190,14 @@
 }
 
 /* このセッションの目的。枠を付けず、左の罫線だけで本文と区別する。
-   名前を .summary にしない（前は上のバーに同じ名前があり、両方に当たって縦積みが崩れた） */
+   名前を .summary にしない（前は上のバーに同じ名前があり、両方に当たって縦積みが崩れた）。
+
+   **罫線は無彩色（--border-strong）。** 前はラベンダーだったが、目的は押すもの・
+   あなたの番・選んでいる場所のどれでもない（1色に役は1つ）。区別は線の太さで足りる */
 .purpose {
   margin-bottom: 1.1rem;
   padding-left: .8rem;
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--border-strong);
 }
 
 .purpose-head {
@@ -364,33 +377,33 @@
 
 .panel > .panel-body { padding: .8rem; }
 
-/* 急ぎのパネル。**新しい色は作らない。**
-   枠と光の輪はどちらも --hot から color-mix で作る。面も塗らない
-   （塗ると「状態色は点と細いバーだけ」の約束と競合する）。
-   見出しの帯にだけごく薄く敷くのは、あれが面ではなく帯だから */
-.panel.is-hot {
-  border-color: color-mix(in srgb, var(--hot) 45%, var(--border));
-  box-shadow: var(--sh-2), 0 0 0 3px color-mix(in srgb, var(--hot) 9%, transparent), var(--hi);
-}
-.panel.is-hot > h3 { color: var(--hot); background: color-mix(in srgb, var(--hot) 6%, var(--bg-elev)); }
-.panel.is-warn { border-color: var(--warn); }
+/* 急ぎのパネル（待ちのパネル・許可要求・実行のパネル）。**色を持つのは見出しの字だけ。**
+   枠・光の輪・見出しの帯には状態色を敷かない。器は他のパネルと同じ（.panel の枠と影）。
+
+   前は枠と光の輪を --hot から混ぜ、見出しの帯にも薄く敷いていた。枠・輪・帯・字の4か所が
+   同じことを言っていたことになる。色は「あなたが何かすること」にだけ使う約束で、
+   1か所（見出しの字）で言えば足りる（画面刷新④。手本のモックの「1 色の役」）。
+   **枠と帯に戻さない。** 新しい色も作らない（字の色は既存の状態色そのまま） */
+.panel.is-hot > h3 { color: var(--hot); }
 .panel.is-warn > h3 { color: var(--warn); }
 
 /* --------------------------------------------------------- 何を待っているか */
 
-/* 待ちのパネルだけは中身を縦に積む（案内文・質問・コマンドが続くため） */
+/* 待ちのパネルだけは中身を縦に積む（質問・コマンド・プランの本文が続くため） */
 .panel.is-wait > .panel-body {
   display: flex;
   flex-direction: column;
   gap: .5rem;
 }
 
-/* 答えないと1行も進まないものの印。**色は上の `.is-hot` が持つ。**
-   ここで新しい色トークンを作ると、1つの状態に色が2つできる（色は1つの役に1色）。
-   面も塗らない。太さと見出し1段（.82rem → .88rem）だけにしてあるのは、
-   色を見分けにくい人にも届く印を1つ持たせるため。
-   タブの帯を太字にする案は捨てた（隣のタブの位置が動いて押し間違いが起きる） */
-.panel.is-block { border-left-width: 3px; }
+/* 答えないと1行も進まないものの印。**太さと見出し1段（--fs-2 → --fs-3）だけ。**
+   色は上の `.is-hot` の見出しの字が持つ。ここで線まで赤くすると、色が言うことが2か所になる
+   （上の「色を持つのは見出しの字だけ」）。新しい色トークンも作らない（1つの状態に色が2つできる）。
+
+   太い線を残すのは、色を見分けにくい人にも届く印を1つ持たせるため。
+   線の色は無彩色だが、細い枠（--border）のままだと太さが読めないので1段濃い --border-strong。
+   面も塗らない。タブの帯を太字にする案は捨てた（隣のタブの位置が動いて押し間違いが起きる） */
+.panel.is-block { border-left: 3px solid var(--border-strong); }
 .panel.is-block > h3 { font-size: var(--fs-3); }
 
 .wait-lead {

@@ -1,0 +1,182 @@
+/**
+ * 詳細ペイン（中央）の、字面で分かる約束。
+ *
+ * 画面刷新④（詳細と右）で決めたものを見張る。`detail.js` / `detail-wait.js` / `run-ask.js` は
+ * DOM を触るので素の node では import できない。`navrail.test.mjs` / `groups.test.mjs` と
+ * 同じく字面で見る。**崩れても画面を開くまで何のエラーも出ない**種類の約束なので。
+ *
+ * - 色の役（1色に役は1つ）。急ぎのパネル（`.panel.is-hot` / `.is-warn`）で色を持つのは
+ *   見出しの字だけで、枠・光の輪・見出しの帯に状態色を敷かない。
+ *   止まっている待ち（`.panel.is-block`）の左の太い線は太さだけ残して色を持たせない。
+ *   許可要求カードの左の線・目的の左の線・メモの札も中立。メモは面を沈める
+ * - 補足と重複をしまう。待ちのパネルの案内文（見出しと同じことを言う1行）と
+ *   「Claude の最後の応答」の札が戻っていないこと。**中身は残す**
+ *   （プランの保存先・許可要求が複数のときの「すべて答えるまで」）
+ *
+ * 字面はコメントを落としてから読む。このリポジトリは説明が厚く、
+ * 「前は案内文があった」のような経緯がコメントに残るため。
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const REPO = fileURLToPath(new URL('..', import.meta.url));
+const JS_DIR = path.join(REPO, 'public', 'js');
+const CSS_DIR = path.join(REPO, 'public', 'css');
+
+/** @param {string} p @returns {string} */
+const read = (p) => fs.readFileSync(p, 'utf8');
+
+/** CSS のコメントを落とした本文 */
+const cssCode = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '');
+
+/**
+ * JS のコメントを落とした本文。落とし方は `navrail.test.mjs` / `groups.test.mjs` の `jsCode` と同じ
+ * （行頭の `//` と `*`、行末の `//`）。
+ */
+const jsCode = (text) => text
+  .split('\n')
+  .map((line) => (/^\s*(\/\/|\/?\*)/.test(line) ? '' : line.replace(/\s\/\/.*$/, '')))
+  .join('\n');
+
+/** 画面側の .js を全部（`timeline/` も含む） */
+function jsFiles() {
+  const out = [];
+  for (const dir of [JS_DIR, path.join(JS_DIR, 'timeline')]) {
+    for (const f of fs.readdirSync(dir)) {
+      if (f.endsWith('.js')) out.push(path.join(dir, f));
+    }
+  }
+  return out;
+}
+
+/**
+ * `public/css/` の規則を全部、`{ file, selectors, decls }` の並びにする。
+ *
+ * 解析器は持たない。入れ子は `@media` の1段だけなので、`{` と `}` を含まない
+ * 「セレクタ { 宣言 }」を拾えば中の規則も外の規則も取れる（`@media (…) {` の頭は
+ * 宣言の側に `{` が来るので一致しない）。セレクタは空白を1つに均してから比べる。
+ *
+ * @returns {{ file: string, selectors: string[], decls: { prop: string, value: string }[] }[]}
+ */
+function cssRules() {
+  const out = [];
+  for (const file of fs.readdirSync(CSS_DIR).filter((n) => n.endsWith('.css'))) {
+    for (const m of cssCode(read(path.join(CSS_DIR, file))).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selectors = m[1].split(',').map((s) => s.trim().replace(/\s+/g, ' '));
+      const decls = m[2].split(';').map((d) => d.trim()).filter(Boolean).map((d) => {
+        const i = d.indexOf(':');
+        return { prop: d.slice(0, i).trim(), value: d.slice(i + 1).trim() };
+      });
+      out.push({ file, selectors, decls });
+    }
+  }
+  return out;
+}
+
+/**
+ * そのセレクタを名指しした規則の宣言を、ファイル名つきで全部。
+ * @param {string} selector 空白を1つに均した形
+ */
+function declsOf(selector) {
+  return cssRules()
+    .filter((r) => r.selectors.includes(selector))
+    .flatMap((r) => r.decls.map((d) => ({ ...d, file: r.file })));
+}
+
+/** 状態色とラベンダー。中立へ戻した場所に、どれも戻ってきてはいけない */
+const TONE_RE = /var\(--(hot|warn|accent)\)/;
+
+/* ── 色の役：急ぎのパネルで色を持つのは見出しの字だけ ─────────────── */
+
+test('急ぎのパネル（.panel.is-hot / .is-warn）は字の色しか持たない。枠・光の輪・見出しの帯に色を敷かない', () => {
+  // 前は枠と光の輪を --hot から混ぜ、見出しの帯にも薄く敷いていた。
+  // 色は「あなたが何かすること」にだけ使う約束で、帯と枠まで塗ると1画面に赤い面が何重にもなる
+  const bad = [];
+  for (const r of cssRules()) {
+    const hits = r.selectors.filter((s) => /\.panel\.is-(hot|warn)\b/.test(s));
+    if (hits.length === 0) continue;
+    for (const d of r.decls) {
+      if (d.prop !== 'color') bad.push(`${r.file} … ${hits.join(', ')} { ${d.prop}: ${d.value} }`);
+    }
+  }
+  assert.deepEqual(bad, [], `急ぎのパネルに字の色以外の指定がある:\n  ${bad.join('\n  ')}`);
+});
+
+test('急ぎのパネルの見出しの字は状態色のまま（止まっている＝--hot、うまくいっていない＝--warn）', () => {
+  // 色を外しすぎない。見出しの字まで無彩色にすると、急ぎの印が太さだけになる
+  const colorOf = (sel) => declsOf(sel).filter((d) => d.prop === 'color').map((d) => d.value);
+  assert.deepEqual(colorOf('.panel.is-hot > h3'), ['var(--hot)']);
+  assert.deepEqual(colorOf('.panel.is-warn > h3'), ['var(--warn)']);
+});
+
+test('止まっている待ち（.panel.is-block）は左の太い線（3px）を残し、線に色を持たせない', () => {
+  const decls = declsOf('.panel.is-block');
+  // 太さは色を見分けにくい人にも届く印なので残す
+  assert.ok(
+    decls.some((d) => /^border-left(-width)?$/.test(d.prop) && /\b3px\b/.test(d.value)),
+    '.panel.is-block の左の線が 3px でなくなっている',
+  );
+  const toned = decls.filter((d) => TONE_RE.test(d.value)).map((d) => `${d.file} … ${d.prop}: ${d.value}`);
+  assert.deepEqual(toned, [], `.panel.is-block に色が戻っている:\n  ${toned.join('\n  ')}`);
+});
+
+test('許可要求カード（.ask）・目的（.purpose）・メモの札（.detail-memo .k）に状態色もラベンダーも付けない', () => {
+  // .ask の左の赤い線は、外の待ちのパネル（見出しが赤い）と同じことを言っていた。
+  // 目的の左の線とメモの札のラベンダーは、押すもの・あなたの番・選んでいる場所のどれでもない
+  const bad = [];
+  for (const sel of ['.ask', '.purpose', '.detail-memo .k']) {
+    for (const d of declsOf(sel)) {
+      if (TONE_RE.test(d.value)) bad.push(`${d.file} … ${sel} { ${d.prop}: ${d.value} }`);
+    }
+  }
+  assert.deepEqual(bad, [], `中立へ戻した線と札に色が戻っている:\n  ${bad.join('\n  ')}`);
+});
+
+test('メモは面を沈める（--bg-sunk）。押せないので枠は持たせない', () => {
+  const decls = declsOf('.detail-memo');
+  assert.ok(
+    decls.some((d) => /^background(-color)?$/.test(d.prop) && d.value === 'var(--bg-sunk)'),
+    '.detail-memo の面が --bg-sunk でない',
+  );
+  const borders = decls.filter((d) => /^border(-(top|right|bottom|left))?(-(width|color|style))?$/.test(d.prop));
+  assert.deepEqual(borders.map((d) => `${d.prop}: ${d.value}`), [], '.detail-memo に枠がある（押せないものに枠を持たせない）');
+});
+
+/* ── 補足と重複をしまう：案内文と札が戻っていない ─────────────────── */
+
+test('待ちのパネルの案内文と「Claude の最後の応答」の札が public/js に戻っていない', () => {
+  // 案内文は見出し（「あなたの番 — 実行を許可する」など）と同じことを言う1行だった
+  const WORDS = [
+    [/guide\.lead\b/, 'guide.lead（待ち・許可要求の案内文を差す口）'],
+    [/'選択肢を選ぶまで、この先へ進みません'/, '案内文「選択肢を選ぶまで、この先へ進みません」'],
+    [/'この計画で進めてよいかを決めてください'/, '案内文「この計画で進めてよいかを決めてください」'],
+    [/'このツールを実行してよいかを決めてください'/, '案内文「このツールを実行してよいかを決めてください」'],
+    [/'Claude は応答を返し終えて止まっています'/, '案内文「Claude は応答を返し終えて止まっています」'],
+    [/'Claude の最後の応答'/, '札「Claude の最後の応答」'],
+  ];
+  const bad = [];
+  for (const file of jsFiles()) {
+    const code = jsCode(read(file));
+    const rel = path.relative(JS_DIR, file).replace(/\\/g, '/');
+    for (const [re, label] of WORDS) {
+      if (re.test(code)) bad.push(`${rel} … ${label}`);
+    }
+  }
+  assert.deepEqual(bad, [], `消した案内文と札が残っている:\n  ${bad.join('\n  ')}`);
+});
+
+test('待ちの表（WAIT_GUIDE / ASK_GUIDE）が案内文（lead）を持たない', () => {
+  // 使う口を消したのに表に文だけ残ると、次に触る人が「どこに出ているのか」を探すことになる
+  const bad = ['detail-wait.js', 'run-ask.js']
+    .filter((f) => /\blead\s*:/.test(jsCode(read(path.join(JS_DIR, f)))));
+  assert.deepEqual(bad, [], `案内文（lead:）が表に残っている: ${bad.join(' / ')}`);
+});
+
+test('札ではなく中身のもの（プランの保存先・「すべて答えるまで」）は残っている', () => {
+  // 保存先はパスそのものが中身。「すべて答えるまで」は要求が何件来ているかの情報
+  assert.match(jsCode(read(path.join(JS_DIR, 'detail-wait.js'))), /'プランの保存先 '/);
+  assert.match(jsCode(read(path.join(JS_DIR, 'run-ask.js'))), /すべて答えるまで/);
+});

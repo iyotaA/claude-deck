@@ -51,11 +51,17 @@ import { postJson } from './api.js';
  */
 const RUN_OVER = new Set(['stopped', 'failed', 'done']);
 
-/** 聞かれ方ごとの、見出しと「何を決めるのか」。 */
+/**
+ * 聞かれ方ごとの見出し（何を決めるのか）。
+ *
+ * **案内文は持たない。** 前は見出しの下に「このツールを実行してよいかを決めてください」の
+ * ような1行を添えていたが、見出しと同じことを言うだけだった（`detail-wait.js` の
+ * `WAIT_GUIDE` と同じ扱い）。要求が複数のときの「すべて答えるまで…」は件数の情報なので残す。
+ */
 const ASK_GUIDE = {
-  plan: { title: 'プランを承認する', lead: 'この計画で進めてよいかを決めてください' },
-  question: { title: '質問に答える', lead: '選択肢を選ぶまで、この先へ進みません' },
-  tool: { title: '実行を許可する', lead: 'このツールを実行してよいかを決めてください' },
+  plan: { title: 'プランを承認する' },
+  question: { title: '質問に答える' },
+  tool: { title: '実行を許可する' },
 };
 
 /**
@@ -447,7 +453,6 @@ export function askBlock(row) {
   // 許可要求は定義上いつも「答えないと1行も進まない」ので、`row.blocking` を見ない。
   // このカードは台帳から直に組むので、一覧の行がまだ来ていない時期でも出る
   p.section.classList.add('is-block');
-  p.body.append(el('p', 'note', guide.lead));
   if (asks.length > 1) {
     p.body.append(el('p', 'settings-hint', 'すべて答えるまで、この先へ進みません。'));
   }
