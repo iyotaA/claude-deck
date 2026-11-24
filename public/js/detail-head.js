@@ -1,7 +1,8 @@
-/* 詳細ペインの頭。パネルを積むより前に出るもの。
+/* 詳細ペインの、パネルを使わない部品。
  *
- * 層1。操作ボタンと「なぜこの作業をしているか」の2つ。
+ * 層1。操作ボタン（頭に出す）と「なぜこの作業をしているか」（「いま」タブの先頭に出す）の2つ。
  * どちらもパネル（panel()）を使わないので、ここは util.js しか見ない。
+ * どこに置くかは detail.js が決める（目的は前は頭のすぐ下＝タブ帯より上だった）。
  */
 import { el, stamp } from './util.js';
 import { icon } from './icons.js';
@@ -98,10 +99,14 @@ function sameText(a, b) {
 }
 
 /**
- * 「なぜこの作業をしているか」を先頭に畳んで置く。
+ * 「なぜこの作業をしているか」を「いま」タブの先頭に畳んで置く。
  *
  * 下のパネルを読めば分かることでも、切り替えのたびに読み下すのは重い。
  * 目的と直近の判断だけを最初に見せて、続きは下で追えるようにする。
+ *
+ * **置き場所を決めるのは detail.js の fillTab。** 前はタブ帯より上（どのタブでも）に
+ * 置いていたが、長さが変わるのでタブ帯が上下した。名前の「頭」は層の話（パネルを
+ * 使わない部品）で、置き場所は流れる箱の中の「いま」タブ
  */
 export function summaryBlock(summary, title = null) {
   if (!summary || summary.source === 'error') return null;
@@ -132,7 +137,8 @@ export function summaryBlock(summary, title = null) {
   if (summary.points?.length) {
     const dl = el('dl', 'purpose-points');
     for (const p of summary.points) {
-      // 待ちの中身はすぐ下の「あなたの番」で大きく出すので、ここでは繰り返さない。
+      // 待ちの中身は待ちのパネル（止まっていればタブ帯の直下、返信待ちならこのすぐ下）で
+      // 大きく出すので、ここでは繰り返さない。
       // 要約データ側からは消さない（画面を持たない使い道でも状態が読めるように）
       if (p.label === '待っているもの') continue;
       dl.append(el('dt', null, p.label));

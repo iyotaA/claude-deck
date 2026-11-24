@@ -180,3 +180,75 @@ test('札ではなく中身のもの（プランの保存先・「すべて答�
   assert.match(jsCode(read(path.join(JS_DIR, 'detail-wait.js'))), /'プランの保存先 '/);
   assert.match(jsCode(read(path.join(JS_DIR, 'run-ask.js'))), /すべて答えるまで/);
 });
+
+/* ── 置き場所：タブ帯は題の下で動かない ───────────────────────── */
+
+/**
+ * 関数1本の本体（`{` から対応する `}` まで）。コメントを落とした本文から切り出す。
+ * 括弧を数えるだけなので、文字列の中に片方だけの `{` `}` があると狂う
+ * （`detail.js` には無い。落ちたら「本体を切り出せない」で止まる）。
+ *
+ * @param {string} code コメントを落とした本文
+ * @param {string} name 関数名
+ * @returns {string}
+ */
+function fnBody(code, name) {
+  const head = code.search(new RegExp(`function\\s+${name}\\s*\\(`));
+  assert.ok(head >= 0, `${name} が見つからない`);
+  const open = code.indexOf('{', code.indexOf(')', head));
+  let depth = 0;
+  for (let i = open; i < code.length; i += 1) {
+    if (code[i] === '{') depth += 1;
+    else if (code[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return code.slice(open, i + 1);
+    }
+  }
+  assert.fail(`${name} の本体を切り出せない（括弧が閉じていない）`);
+}
+
+const detailCode = () => jsCode(read(path.join(JS_DIR, 'detail.js')));
+
+test('答えないと進まない待ちはタブ帯の直下（タブ帯より上に置かない）', () => {
+  // タブ帯より上に置くと、待ちの高さ（Markdown は 24rem まで）でタブ帯が上下し、
+  // 押す位置が毎回変わる。直下に置けば、どのタブを見ていても止まっていることは見える
+  const body = fnBody(detailCode(), 'renderDetailInner');
+  const bar = body.indexOf('wrap.append(tabBar(ctx))');
+  const wait = body.search(/if \(row\.blocking === true\) \{[^}]*waitingBlock\(row, d\)/);
+  const stack = body.indexOf('wrap.append(stack)');
+  assert.ok(bar >= 0, 'renderDetailInner がタブ帯を積んでいない');
+  assert.ok(wait >= 0, 'renderDetailInner が答えないと進まない待ち（row.blocking === true）を積んでいない');
+  assert.ok(bar < wait, '答えないと進まない待ちがタブ帯より上に積まれている');
+  assert.ok(wait < stack, '答えないと進まない待ちが選んだタブの中身より後ろに積まれている');
+});
+
+test('目的（summaryBlock）は「いま」タブの先頭。タブ帯より上に戻さない', () => {
+  const code = detailCode();
+  // 目的は長さがセッションごと・時刻ごとに違うので、タブ帯より上に置くとタブ帯が上下する
+  assert.doesNotMatch(fnBody(code, 'renderDetailInner'), /summaryBlock\(/, '目的がタブ帯より上（renderDetailInner）で組まれている');
+  const fill = fnBody(code, 'fillTab');
+  const now = fill.slice(fill.indexOf('default:'));
+  assert.ok(fill.indexOf('default:') >= 0, 'fillTab に「いま」の枝（default）が無い');
+  const purpose = now.search(/summaryBlock\(/);
+  assert.ok(purpose >= 0, '「いま」タブで目的を組んでいない');
+  for (const later of ['waitingBlock(', 'RunView.runPanel(', 'RunResume.resumePanel(']) {
+    const at = now.indexOf(later);
+    assert.ok(at >= 0, `「いま」タブに ${later} が無い`);
+    assert.ok(purpose < at, `目的が ${later} より後ろにある（先頭に置く）`);
+  }
+  // 組む場所は1つだけ（2か所で組むと、同じ目的が1画面に2回並ぶ）
+  assert.equal(code.match(/summaryBlock\(/g).length, 1, 'summaryBlock を呼ぶ場所が1つでない');
+});
+
+test('待ちは両方に出さない（タブ帯の直下は blocking だけ、「いま」の中は blocking でないものだけ）', () => {
+  const code = detailCode();
+  assert.equal(code.match(/waitingBlock\(/g).length, 2, 'waitingBlock を呼ぶ場所が2つでない');
+  // 「いま」の中は blocking でないもの（返信待ち）だけ。条件を外すと同じパネルが1画面に2枚並ぶ
+  assert.match(fnBody(code, 'fillTab'), /if \(row\.blocking !== true\) add\(waitingBlock\(row, d\)\)/);
+});
+
+test('答えないと進まない待ちの高さの上限（24rem）は残す', () => {
+  // どのタブでも出るので、長いプラン1本で選んだタブの中身が画面の外まで押し出される
+  const decls = declsOf('.is-block .md');
+  assert.ok(decls.some((d) => d.prop === 'max-height' && d.value === '24rem'), '.is-block .md の 24rem が無い');
+});
