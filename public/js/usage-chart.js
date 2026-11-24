@@ -169,21 +169,49 @@ export function deltaText(value, base, { kind = 'ratio', unit = '' } = {}) {
 }
 
 /**
+ * 札の値を「数」と「単位」に割る（`150.6M` → `150.6` と `M`）。
+ *
+ * 数値モードの札だけが単位を小さく出す（画面刷新⑤の D13。`statTile` の `smallUnit`）。
+ * 30px の数字の後ろに同じ大きさの「M」が並ぶと、桁の数字と単位が同じ重さで読まれる。
+ *
+ * **整形そのものは変えない。** `tokensStrict` / `pctStrict` が組んだ字を後から割るだけなので、
+ * 0 と「不明」の分け方（`—`）はそのまま残る。数字で始まらない字（`—`）と、
+ * 単位の無い値（`850`）は割らない。
+ *
+ * @param {string} text 整形済みの値
+ * @returns {{num: string, unit: string|null}}
+ */
+export function splitUnit(text) {
+  const s = String(text ?? '');
+  const m = s.match(/^([−+]?\d[\d,]*(?:\.\d+)?)\s*([^\d\s.,][^\d]*)$/);
+  return m ? { num: m[1], unit: m[2] } : { num: s, unit: null };
+}
+
+/**
  * 数値を1つ大きく出す札。
  *
  * 単一の現在値なので棒グラフにしない（棒は比べるためのもので、
  * 比べる相手がいない値を棒にすると、長さに意味があるように見えてしまう）。
  *
+ * **右の紙と数値モードで共有する。** `smallUnit` は数値モードの札だけが渡す（D13）。
+ * 既定は割らないので、右の紙の札は1本の字のまま。単位の見た目（`.stat-unit`）も
+ * `usage-mode.css` に `.usage-pane` で絞って置いてある。
+ *
  * @param {string} label 何の数か
  * @param {string} value 既に文字列にしたもの（`tokensStrict` などを通す）
  * @param {string} [note] 小さく添える但し書き
  * @param {string|null} [delta] いつもとの差（`deltaText` の戻り値をそのまま渡す）
+ * @param {{smallUnit?: boolean}} [opts] smallUnit: 単位を数と分けて小さく出す
  * @returns {HTMLElement}
  */
-export function statTile(label, value, note, delta) {
+export function statTile(label, value, note, delta, { smallUnit = false } = {}) {
   const box = el('div', 'stat');
   box.append(el('div', 'stat-label', label));
-  box.append(el('div', 'stat-value', value));
+  const v = el('div', 'stat-value', value);
+  const split = smallUnit ? splitUnit(value) : null;
+  // 字をそのまま並べ直すだけなので、選んでコピーしたときは「150.6M」と1続きに取れる
+  if (split?.unit) v.replaceChildren(split.num, el('span', 'stat-unit', split.unit));
+  box.append(v);
   // 差は値のすぐ下。但し書きより先に置く（値と一続きに読ませたい）
   if (delta) box.append(el('div', 'stat-delta', delta));
   if (note) box.append(el('div', 'stat-note', note));

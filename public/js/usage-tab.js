@@ -188,21 +188,27 @@ function tiles(d) {
     return t ? `古い ${trend.half} 本より ${t}` : null;
   };
 
+  // **単位（M・k・%・本）は4枚とも小さく出す**（D13。smallUnit）。数値モードの札だけで、右の紙の札は渡さない。
+  //
   // 実消費の但し書きだけは札に残す。あれは「その数がどこから出たか」の内訳で、
   // 数を読むときに一緒に読む値だから（他の3本は読み方の断り書き）
   const ite = statTile('実消費', tokensStrict(d.totals.ite), `${numStrict(d.requests)} 回の要求`,
-    trend ? delta(trend.ite) : null);
+    trend ? delta(trend.ite) : null, { smallUnit: true });
+  // **主役の札。面を塗るのはこの1枚だけ**（D7）。数値モードの主題は「全体でどれだけ使ったか」で、
+  // この画面には押す主ボタンが無いので、塗った面を「いちばん先に読む数」に使う。
+  // 押せない札のままなので枠も影も足さない（見た目は usage-mode.css の .usage-pane に絞ってある）
+  ite.classList.add('is-hero');
   addSpark(ite, trend?.series.ite, '実消費の推移（古い順・1本ずつ）');
   box.append(ite);
   // 本数で割ると「長く話したセッションが多い月」というだけで動く。
   // 要求あたりなら、セッションの長さの違いを気にせず並べられる
   const per = statTile('1要求あたり', tokensStrict(d.requests > 0 ? d.totals.ite / d.requests : null),
-    null, trend ? delta(trend.perReq) : null);
+    null, trend ? delta(trend.perReq) : null, { smallUnit: true });
   addSpark(per, trend?.series.perReq, '1要求あたりの推移（古い順・1本ずつ）');
   box.append(per);
-  box.append(statTile('セッション', `${numStrict(d.sessions)} 本`));
+  box.append(statTile('セッション', `${numStrict(d.sessions)} 本`, null, null, { smallUnit: true }));
   // 命中率は差を出さない（行から正しく組み直せない。usage-trend.js）。線だけ
-  const hit = statTile('キャッシュ命中率', pctStrict(d.cache.hitRate));
+  const hit = statTile('キャッシュ命中率', pctStrict(d.cache.hitRate), null, null, { smallUnit: true });
   if (d.cache.hitRate !== null) addSpark(hit, trend?.series.hitRate, 'キャッシュ命中率の推移（古い順・1本ずつ）');
   box.append(hit);
   out.append(box);
@@ -735,19 +741,26 @@ function setUsageSec(sec) {
 /**
  * 節ナビの札を組み直す。件数が変わるので、引き直すたびに呼ぶ。
  *
- * 見た目は `list.css` の `.tab`（下線式）を借りている
- * （**顔の語彙を増やさない**）。前は `settings.css` の `.settings-navb` だったが、
- * あれは縦ナビの作法（選んだものの左に棒）で、横に並ぶ帯で使っているのは
- * ここだけだった。`.tab` に寄せると、画面のタブの顔が3種から2種に減る。
+ * 見た目は器（`#usage-nav`）に付けた `.live-filter`（一覧の頭の「すべて｜稼働中」）が持つ。
+ * **札にはクラスを付けない**（顔の語彙を増やさない。画面刷新⑤の D14）。前は `list.css` の
+ * `.tab`（下線式）を借りていたが、押せる切り替えの顔が `.tab` と `.live-filter` の2つに割れていた。
+ * 寄せた先は右の紙の頭の「数値｜診断」と同じで、使い手の居なくなった `.tab` は消した。
+ *
+ * **組み直しても焦点を名前で拾い直す**（`data-refocus`）。引き直すたびに札を作り直すので、
+ * キーボードで札にいた人の焦点が body へ落ちる（一覧の開け閉めと同じ作法）。
  *
  * @param {object|null} d `/api/usage` の応答
  */
 function renderUsageNav(d) {
+  const refocus = dom.usageNav.contains(document.activeElement)
+    ? document.activeElement.dataset.refocus ?? null
+    : null;
   dom.usageNav.replaceChildren();
   for (const sec of SECTIONS) {
-    const btn = el('button', 'tab', sec.label);
+    const btn = el('button', null, sec.label);
     btn.type = 'button';
     btn.dataset.sec = sec.id;
+    btn.dataset.refocus = `usec:${sec.id}`;
     btn.setAttribute('aria-pressed', String(sec.id === usageSec));
     const n = d ? sec.count?.(d) : null;
     // 0 と「まだ分からない」を分ける。0 件なら 0 と書く（消さない）
@@ -755,6 +768,7 @@ function renderUsageNav(d) {
     btn.addEventListener('click', () => setUsageSec(sec.id));
     dom.usageNav.append(btn);
   }
+  if (refocus) dom.usageNav.querySelector(`[data-refocus="${CSS.escape(refocus)}"]`)?.focus();
 }
 
 /** 数値モードの中身を描き直す */

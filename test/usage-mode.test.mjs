@@ -1,0 +1,251 @@
+/**
+ * 数値モード（横断。`usage-tab.js` / `usage-mode.css`）の、字面で分かる約束（画面刷新⑤）。
+ *
+ * `usage-tab.js` は DOM を触るので素の node では import できない。`detail-pane.test.mjs` と
+ * 同じく字面で見る。**崩れても画面を開くまで何のエラーも出ない**種類の約束なので。
+ * 整形の小道具（`usage-chart.js` の `splitUnit`）だけは関数を呼ぶ ―― あのファイルは
+ * `document` を関数の中でしか触らないので、読み込むだけなら何も起きない。
+ *
+ * - 主役の札（実消費）だけを `--accent` で塗る。範囲は数値モード（`.usage-pane`）だけで、
+ *   右の紙の札は塗らない（D7）。押せない札のままなので枠も影も持たない
+ * - 主役の上の線は `.is-hero` が `--chart-hi` を宣言して受ける（D8。右の紙の `.insp` と同じ受け方）
+ * - 単位（M・k・%・本）を小さく出すのは数値モードの札だけ（D13）
+ * - 節ナビは一覧の「すべて｜稼働中」（`.live-filter`）を借り、使い手の居なくなった `.tab` は消す（D14）。
+ *   頭は1行の帯で、狭い窓では折り返す（横にはみ出さない）
+ *
+ * 主役の札の上の字の比（4.5:1）は `tokens.test.mjs` が見ている（比の計算はあちらにある）。
+ * 字面はコメントを落としてから読む。このリポジトリは説明が厚く、経緯がコメントに残るため。
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { splitUnit } from '../public/js/usage-chart.js';
+
+const REPO = fileURLToPath(new URL('..', import.meta.url));
+const JS_DIR = path.join(REPO, 'public', 'js');
+const CSS_DIR = path.join(REPO, 'public', 'css');
+
+/** @param {string} p @returns {string} */
+const read = (p) => fs.readFileSync(p, 'utf8');
+
+/** CSS のコメントを落とした本文 */
+const cssCode = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '');
+
+/** HTML のコメントを落とした本文 */
+const htmlCode = (text) => text.replace(/<!--[\s\S]*?-->/g, '');
+
+/** JS のコメントを落とした本文（`detail-pane.test.mjs` の `jsCode` と同じ落とし方） */
+const jsCode = (text) => text
+  .split('\n')
+  .map((line) => (/^\s*(\/\/|\/?\*)/.test(line) ? '' : line.replace(/\s\/\/.*$/, '')))
+  .join('\n');
+
+/** 画面側の .js を全部（`timeline/` も含む） */
+function jsFiles() {
+  const out = [];
+  for (const dir of [JS_DIR, path.join(JS_DIR, 'timeline')]) {
+    for (const f of fs.readdirSync(dir)) {
+      if (f.endsWith('.js')) out.push(path.join(dir, f));
+    }
+  }
+  return out;
+}
+
+/**
+ * `public/css/` の規則を全部、`{ file, selectors, decls }` の並びにする
+ * （`detail-pane.test.mjs` の `cssRules` と同じ読み方。入れ子は `@media` の1段だけ）。
+ *
+ * @returns {{ file: string, selectors: string[], decls: { prop: string, value: string }[] }[]}
+ */
+function cssRules() {
+  const out = [];
+  for (const file of fs.readdirSync(CSS_DIR).filter((n) => n.endsWith('.css'))) {
+    for (const m of cssCode(read(path.join(CSS_DIR, file))).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selectors = m[1].split(',').map((s) => s.trim().replace(/\s+/g, ' '));
+      const decls = m[2].split(';').map((d) => d.trim()).filter(Boolean).map((d) => {
+        const i = d.indexOf(':');
+        return { prop: d.slice(0, i).trim(), value: d.slice(i + 1).trim() };
+      });
+      out.push({ file, selectors, decls });
+    }
+  }
+  return out;
+}
+
+/**
+ * そのセレクタを名指しした規則の宣言を、ファイル名つきで全部。
+ * @param {string} selector 空白を1つに均した形
+ */
+function declsOf(selector) {
+  return cssRules()
+    .filter((r) => r.selectors.includes(selector))
+    .flatMap((r) => r.decls.map((d) => ({ ...d, file: r.file })));
+}
+
+/**
+ * 関数の本体を括弧を数えて切り出す（`detail-pane.test.mjs` の `fnBody` と同じ）。
+ * @param {string} code コメントを落とした本文
+ * @param {string} name 関数名
+ */
+function fnBody(code, name) {
+  const head = code.search(new RegExp(`function\\s+${name}\\s*\\(`));
+  assert.ok(head >= 0, `${name} が見つからない`);
+  const open = code.indexOf('{', code.indexOf(')', head));
+  let depth = 0;
+  for (let i = open; i < code.length; i += 1) {
+    if (code[i] === '{') depth += 1;
+    else if (code[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return code.slice(open, i + 1);
+    }
+  }
+  assert.fail(`${name} の本体を切り出せない（括弧が閉じていない）`);
+}
+
+const tabCode = () => jsCode(read(path.join(JS_DIR, 'usage-tab.js')));
+const panelCode = () => jsCode(read(path.join(JS_DIR, 'usage-panel.js')));
+const chartCode = () => jsCode(read(path.join(JS_DIR, 'usage-chart.js')));
+
+/** 主役の札の規則。数値モードの器（.usage-pane）に絞ってある */
+const HERO = '.usage-pane .stat.is-hero';
+
+/* ── 主役の塗り（D7）──────────────────────────────────────── */
+
+test('主役の札は実消費の1枚だけ。印（is-hero）を付けるのは数値モードの札を組む所だけ', () => {
+  const tiles = fnBody(tabCode(), 'tiles');
+  assert.match(tiles, /const ite = statTile\('実消費'/, '実消費の札が tiles に無い');
+  assert.match(tiles, /ite\.classList\.add\('is-hero'\)/, '実消費の札に主役の印が付いていない');
+  assert.equal(tabCode().match(/is-hero/g)?.length, 1, '主役の印を実消費の札のほかにも付けている');
+  // 右の紙の札は塗らない（右の紙は「数値モードの主題」ではない）
+  assert.doesNotMatch(panelCode(), /is-hero/, '右の紙（usage-panel.js）が主役の印を付けている');
+  assert.doesNotMatch(chartCode(), /is-hero/, '共有の部品（usage-chart.js）が主役の印を持っている（右の紙にも付く）');
+});
+
+test('主役の塗りは数値モード（.usage-pane）に絞り、右の紙の札（素の .stat）は沈めた面のまま', () => {
+  const fill = declsOf(HERO).filter((d) => d.prop === 'background');
+  assert.deepEqual(fill.map((d) => `${d.file} … ${d.value}`), ['usage-mode.css … var(--accent)'],
+    `${HERO} の面が --accent でない（トークンを増やさず --accent で塗る）`);
+  const loose = [];
+  for (const r of cssRules()) {
+    for (const s of r.selectors) {
+      if (!/\bis-hero\b/.test(s)) continue;
+      if (r.file !== 'usage-mode.css' || !s.startsWith('.usage-pane ')) loose.push(`${r.file} … ${s}`);
+    }
+  }
+  assert.deepEqual(loose, [], `主役の指定が数値モードの外にもある（右の紙の札まで塗れる）:\n  ${loose.join('\n  ')}`);
+  // 共有の部品（usage.css）の札は今のまま。右の紙はこれを使う
+  const base = declsOf('.stat').filter((d) => d.file === 'usage.css' && d.prop === 'background');
+  assert.deepEqual(base.map((d) => d.value), ['var(--bg-sunk)'], '素の .stat の面が変わっている（右の紙の札まで変わる）');
+});
+
+test('主役の札も押せない札のまま。塗るのは面だけで、枠と影と押せる印は持たない', () => {
+  // 押せる .card.is-usage（枠＋面＋行き先の印）と止まった絵で見分けが付かなくなる
+  const bad = declsOf(HERO)
+    .filter((d) => /^(border|box-shadow|cursor|outline)/.test(d.prop))
+    .map((d) => `${d.prop}: ${d.value}`);
+  assert.deepEqual(bad, [], `主役の札が押せるものの形を持っている:\n  ${bad.join('\n  ')}`);
+});
+
+/* ── 主役の上の線（D8）────────────────────────────────────── */
+
+test('主役の上の線は .is-hero が --chart-hi を宣言して受ける。線と面を直に塗らない', () => {
+  // 塗った面（--accent）の上でラベンダーの線は消える。受け方は右の紙（.insp）と同じで、色の出どころを1か所に
+  const hi = declsOf(HERO).filter((d) => d.prop === '--chart-hi');
+  assert.deepEqual(hi.map((d) => d.value), ['var(--accent-fg)'], `${HERO} が --chart-hi を塗った面の上の字の色で宣言していない`);
+  const bad = [];
+  for (const r of cssRules()) {
+    for (const s of r.selectors) {
+      if (!/\bis-hero\b.*\.(spark-line|spark-area|bar-fill)\b/.test(s)) continue;
+      for (const d of r.decls) {
+        if (['background', 'fill', 'stroke'].includes(d.prop)) bad.push(`${r.file} … ${s} { ${d.prop}: ${d.value} }`);
+      }
+    }
+  }
+  assert.deepEqual(bad, [], `主役の線を直に塗っている（色の出どころが2か所になる）:\n  ${bad.join('\n  ')}`);
+});
+
+/* ── 単位を小さく（D13）──────────────────────────────────── */
+
+test('札の値を数と単位に割る（0 と不明はそのまま）', () => {
+  assert.deepEqual(splitUnit('150.6M'), { num: '150.6', unit: 'M' });
+  assert.deepEqual(splitUnit('42k'), { num: '42', unit: 'k' });
+  assert.deepEqual(splitUnit('98.2%'), { num: '98.2', unit: '%' });
+  assert.deepEqual(splitUnit('1,234 本'), { num: '1,234', unit: '本' });
+  // 単位の無い値と「測れない」は割らない（— を単位として小さくしない）
+  assert.deepEqual(splitUnit('850'), { num: '850', unit: null });
+  assert.deepEqual(splitUnit('0'), { num: '0', unit: null });
+  assert.deepEqual(splitUnit('—'), { num: '—', unit: null });
+  assert.deepEqual(splitUnit(''), { num: '', unit: null });
+});
+
+test('単位を小さく出すのは数値モードの札だけ。右の紙の札は今のまま', () => {
+  const tiles = fnBody(tabCode(), 'tiles');
+  assert.equal(tiles.match(/smallUnit: true/g)?.length, 4, '数値モードの4枚の札が単位を小さく出していない');
+  assert.doesNotMatch(panelCode(), /smallUnit/, '右の紙（usage-panel.js）の札まで単位を小さくしている');
+  // 既定は割らない。指定しなかった札（右の紙）の値は1本の字のまま
+  assert.match(chartCode(), /function statTile\([^)]*\{ smallUnit = false \} = \{\}\)/, 'statTile の既定が「割らない」でない');
+  assert.match(fnBody(chartCode(), 'statTile'), /smallUnit \? splitUnit\(value\) : null/, 'statTile が smallUnit のときだけ割る形になっていない');
+  const loose = [];
+  for (const r of cssRules()) {
+    for (const s of r.selectors) {
+      if (/\.stat-unit\b/.test(s) && !s.startsWith('.usage-pane ')) loose.push(`${r.file} … ${s}`);
+    }
+  }
+  assert.deepEqual(loose, [], `単位の見た目が数値モードの外にもある:\n  ${loose.join('\n  ')}`);
+});
+
+/* ── 節ナビと帯（D14）────────────────────────────────────── */
+
+test('節ナビは「すべて｜稼働中」（.live-filter）を借りる。押せる切り替えの組（role="group"）のまま', () => {
+  const html = htmlCode(read(path.join(REPO, 'public', 'index.html')));
+  const tag = html.match(/<div[^>]*\bid="usage-nav"[^>]*>/);
+  assert.ok(tag, '#usage-nav が index.html に無い');
+  assert.match(tag[0], /class="[^"]*\blive-filter\b[^"]*"/, '#usage-nav が .live-filter を借りていない');
+  assert.match(tag[0], /role="group"/, '#usage-nav が role="group" でない');
+  const nav = fnBody(tabCode(), 'renderUsageNav');
+  assert.match(nav, /el\('button', null, sec\.label\)/, '節ナビの札にクラスを付けている（見た目は器の .live-filter が持つ）');
+  assert.match(nav, /aria-pressed/, '節ナビの札が aria-pressed を持たない');
+});
+
+test('使い手の居なくなった .tab（下線式）は消した。CSS にも JS にも戻っていない', () => {
+  const css = [];
+  for (const r of cssRules()) {
+    for (const s of r.selectors) {
+      if (/(^|[\s>+~])\.tab(?![\w-])/.test(s)) css.push(`${r.file} … ${s}`);
+    }
+  }
+  assert.deepEqual(css, [], `.tab の規則が残っている:\n  ${css.join('\n  ')}`);
+  // URL の ?tab=（store.js）は別物なので、クラスとして付ける形だけを探す
+  const js = [];
+  for (const file of jsFiles()) {
+    const code = jsCode(read(file));
+    if (/el\('[a-z]+', 'tab'|className = 'tab'|classList\.add\('tab'\)/.test(code)) js.push(path.basename(file));
+  }
+  assert.deepEqual(js, [], `.tab を付けている所がある: ${js.join(', ')}`);
+});
+
+test('数値の頭は1行の帯。節ナビが行をまるごと取らず、狭い窓では縮んで折り返す', () => {
+  assert.ok(declsOf('.usage-head').some((d) => d.prop === 'flex-wrap' && d.value === 'wrap'), '.usage-head が折り返さない');
+  const nav = cssRules()
+    .filter((r) => r.selectors.some((s) => /\.usage-nav$/.test(s)))
+    .flatMap((r) => r.decls.map((d) => ({ ...d, sel: r.selectors.join(', ') })));
+  const full = nav.filter((d) => (d.prop === 'flex' && /100%/.test(d.value)) || (d.prop === 'flex-basis' && d.value === '100%'));
+  assert.deepEqual(full.map((d) => `${d.sel} { ${d.prop}: ${d.value} }`), [], '節ナビが帯の1行をまるごと取っている（帯が2行になる）');
+  // .live-filter は flex: none（縮まない）。借りたまま縮めないと、狭い窓で横にはみ出す。
+  // 上書きは読む順でなく詳細度で勝たせる（.live-filter は 0,1,0）
+  const own = declsOf('.usage-head .usage-nav');
+  assert.ok(own.some((d) => d.prop === 'flex' && /^0 1 /.test(d.value)), '.usage-head .usage-nav が縮めない（.live-filter の flex: none のまま）');
+  assert.ok(own.some((d) => d.prop === 'flex-wrap' && d.value === 'wrap'), '.usage-head .usage-nav が札を折り返さない');
+  assert.ok(own.some((d) => d.prop === 'min-width' && d.value === '0'), '.usage-head .usage-nav が器より細くなれない');
+  // 件数は同じ行の右端（一覧の #list-count と同じ作法）
+  assert.ok(declsOf('.usage-head #usage-count').some((d) => d.prop === 'margin-left' && d.value === 'auto'), '件数が右端へ寄っていない');
+});
+
+test('節ナビを組み直しても、押していた札へ焦点を名前で拾い直す', () => {
+  // 引き直すたびに札を作り直すので、キーボードで札にいた人の焦点が body へ落ちる
+  const nav = fnBody(tabCode(), 'renderUsageNav');
+  assert.match(nav, /dataset\.refocus = /, '節ナビの札が data-refocus を持たない');
+  assert.match(nav, /\.focus\(\)/, '節ナビを組み直したあと焦点を戻していない');
+});

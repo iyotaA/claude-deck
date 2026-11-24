@@ -200,7 +200,10 @@
          ログを全文読む一番重い窓口なので、開いたときに1回だけ引く。
          モデルの選択肢は応答から組むので、ここには「すべて」だけを置く -->
     <div class="list-head usage-head" id="usage-head" hidden>
-      <div class="usage-nav" id="usage-nav" role="group" aria-label="見る中身"></div>
+      <!-- 頭は1行の帯（節ナビ → 絞り込み → 件数。狭い窓では折り返す）。
+           節ナビの見た目は一覧の頭の「すべて｜稼働中」（.live-filter）を借りる
+           （右の紙の頭の「数値｜診断」と同じ。新しい見た目を作らない）。札は usage-tab.js が組む -->
+      <div class="live-filter usage-nav" id="usage-nav" role="group" aria-label="見る中身"></div>
       <!-- 絞り込みは**書庫と同じ形**にする（`.archive-field` を借りる）。
            前は素の <select> が3つ並んでいて、「30本」だけを見ても
            それが期間なのか本数なのか形からは出てこなかった。
@@ -230,7 +233,7 @@
       <button class="btn archive-clear" id="usage-clear" type="button" hidden
               title="絞り込みを外す" aria-label="絞り込みを外す"></button>
       <!-- 件数は絞り込みの結果の説明なので、**同じ行の右端**へ寄せる
-           （一覧の #list-count と同じ作法）。前は flex: 1 0 100% で3行目に居た -->
+           （一覧の #list-count と同じ作法）。前は節ナビが1行目をまるごと取り、件数は2行目に居た -->
       <span id="usage-count"></span>
     </div>
     <div class="usage-pane" id="usage" hidden></div>

@@ -33,30 +33,6 @@
 .list-pane > .splitter { display: none; }
 .is-list-open .list-pane > .splitter { display: block; }
 
-/* 押されているものだけ下に線を1本引く。面は塗らない
-   （一覧のカードと同じ理由で、塗ると重さの差が読めなくなる）。
-   **左の列のタブは無くなったが、この形は数値の節ナビ（.usage-nav .tab）が借りている。**
-   定義そのものは残す */
-.tab {
-  padding: .35rem .7rem .3rem;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: none;
-  font: inherit;
-  font-size: var(--fs-2);
-  color: var(--fg-faint);
-  cursor: pointer;
-  transition: border-color .15s ease, background .15s ease, color .15s ease;
-}
-
-.tab:hover { background: var(--bg-hi); color: var(--fg-muted); }
-
-.tab[aria-pressed="true"] {
-  color: var(--fg);
-  font-weight: 700;
-  border-bottom-color: var(--accent);
-}
-
 /* 閉じる口は一覧の頭の右端（「すべて｜稼働中」のさらに右）。**広い窓では出さない。**
    広い窓の一覧は列なので、作業台の左上の開閉ボタンが隠れずに見えている。
    ここにも置くと同じことをする口が2つ並ぶ。
@@ -79,7 +55,11 @@
 
    **押せるものなので面と影で浮かせる。** 押している側は面 --bg-hi・字 --fg・影 --sh-1、
    もう片方は字 --fg-muted だけ。器は沈んだ面（--bg-sunk）に細い枠で、2つが1組だと形で分かる。
-   焦点は base.css の :focus-visible（光の輪）のまま */
+   焦点は base.css の :focus-visible（光の輪）のまま。
+
+   **押せる切り替えの顔はこれ1つ。** 右の紙の頭の「数値｜診断」（#insp-tabs）と数値モードの節ナビ
+   （#usage-nav）も器にこのクラスを付けて借りる（前は数値の節ナビだけ下線式の .tab だったが、消した）。
+   セレクタを #live-head に絞らないのはそのため */
 .live-filter {
   display: inline-flex;
   flex: none;
