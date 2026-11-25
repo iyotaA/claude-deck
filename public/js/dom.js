@@ -54,8 +54,12 @@ export const dom = {
   todayOpen: document.getElementById('today-open'),
   archiveToday: document.getElementById('archive-today'),
   todayAgo: document.getElementById('today-ago'),
+  todayDay: document.getElementById('today-day'),
+  todayPrev: document.getElementById('today-prev'),
+  todayNext: document.getElementById('today-next'),
   todayCopy: document.getElementById('today-copy'),
   todayClose: document.getElementById('today-close'),
+  todayCloseFoot: document.getElementById('today-close-foot'),
   todayBody: document.getElementById('today-body'),
   todayMsg: document.getElementById('today-msg'),
   // 詳細の頭（題名・状態・場所・ボタン）。入力欄より前。detail.js が組む

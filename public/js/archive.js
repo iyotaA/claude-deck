@@ -111,8 +111,10 @@ function buildArchiveCard(row) {
   card.append(stats);
 
   card.addEventListener('click', () => {
-    select(row.sessionId, 'archive');
-    // 押されたあと何をするかは外から差す。いまは作業台へ移る
+    // 押した行を渡して控えさせる（store.pickedRow）。検索の引き直しの最中に押すと、届いた結果に
+    // そのセッションが居ないことがある。控えが無いと、詳細の届く前に拡大の窓が畳まれる（rows.js の rowOf）
+    select(row.sessionId, 'archive', row);
+    // 押されたあと何をするかは外から差す。いまは拡大の窓で開く（モードは書庫のまま。main.js）
     pick?.();
   });
   li.append(card);
@@ -275,7 +277,11 @@ async function loadArchive({ append = false } = {}) {
   }
 }
 
-/** 数値の4つ。作業台の右の枠（usage-panel.js）と同じ順・同じ出どころにする */
+/**
+ * 数値の4つ。作業台の右の枠（usage-panel.js）と同じ順・同じ出どころにする。
+ * カードでは4つの格子に並ぶ（1マスはラベルの下に値。見た目は archive.css の `.card-stats`）。
+ * **4つから増やしたら CSS の列の数も直す**（`repeat(4, …)`。あふれたぶんは次の行へ落ちる）
+ */
 const STAT_DEFS = [
   { key: 'ite', label: '実消費', of: (u) => tokensStrict(u?.totals?.ite) },
   { key: 'ctx', label: '文脈', of: (u) => tokensStrict(u?.context?.last) },
@@ -429,8 +435,9 @@ export function showArchive() {
  *
  * @param {object} [opts]
  * @param {?function} [opts.onPick] カードを押されたあとの後始末。
- *   main.js が `() => setMode('work')` を差す。**mode.js を import しない**
- *   （同じ層7 なので、向きを持たせずに済む形を選ぶ）
+ *   main.js が `() => openZoom()` を差す（拡大の窓で開き、モードは書庫のまま）。
+ *   **zoom.js も mode.js も import しない**（どう見せるかは main.js が決める。
+ *   mode.js とは同じ層7 なので、向きを持たせずに済む形を選ぶ）
  */
 export function initArchive({ onPick = null } = {}) {
   pick = onPick;
@@ -443,9 +450,9 @@ export function initArchive({ onPick = null } = {}) {
   renderProjects();
   renderSkills();
 
-  // 絵は絞り込みの札にだけ差す。**カードの中には置かない。**
-  // 横に3つ並ぶものは形で見分けられると速いが、項目が5つあるカードに足すと
-  // 読む量が増えるだけで、探す速さは上がらない
+  // 絵は絞り込みの札にだけ差す。**カードの中には置かない**（画面刷新⑤の D20）。
+  // 横に並ぶ札は形で見分けられると速いが、項目が5つあるカードに足すと
+  // 読む量が増えるだけで、探す速さは上がらない（手本のモックは置き場所とブランチに絵を付けていたが採らない）
   dom.archiveQ.closest('.archive-field').prepend(icon('search', 14));
   dom.archiveProject.closest('.archive-field').prepend(icon('folder', 14));
   // スキルは作業の道具なので、起こすフォームの「最初の指示」と同じ絵を借りる

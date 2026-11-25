@@ -33,30 +33,6 @@
 .list-pane > .splitter { display: none; }
 .is-list-open .list-pane > .splitter { display: block; }
 
-/* 押されているものだけ下に線を1本引く。面は塗らない
-   （一覧のカードと同じ理由で、塗ると重さの差が読めなくなる）。
-   **左の列のタブは無くなったが、この形は数値の節ナビ（.usage-nav .tab）が借りている。**
-   定義そのものは残す */
-.tab {
-  padding: .35rem .7rem .3rem;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: none;
-  font: inherit;
-  font-size: var(--fs-2);
-  color: var(--fg-faint);
-  cursor: pointer;
-  transition: border-color .15s ease, background .15s ease, color .15s ease;
-}
-
-.tab:hover { background: var(--bg-hi); color: var(--fg-muted); }
-
-.tab[aria-pressed="true"] {
-  color: var(--fg);
-  font-weight: 700;
-  border-bottom-color: var(--accent);
-}
-
 /* 閉じる口は一覧の頭の右端（「すべて｜稼働中」のさらに右）。**広い窓では出さない。**
    広い窓の一覧は列なので、作業台の左上の開閉ボタンが隠れずに見えている。
    ここにも置くと同じことをする口が2つ並ぶ。
@@ -79,13 +55,22 @@
 
    **押せるものなので面と影で浮かせる。** 押している側は面 --bg-hi・字 --fg・影 --sh-1、
    もう片方は字 --fg-muted だけ。器は沈んだ面（--bg-sunk）に細い枠で、2つが1組だと形で分かる。
-   焦点は base.css の :focus-visible（光の輪）のまま */
+   焦点は base.css の :focus-visible（光の輪）のまま。
+
+   **押せる切り替えの顔はこれ1つ。** 右の紙の頭の「数値｜診断」（#insp-tabs）と数値モードの節ナビ
+   （#usage-nav）も器にこのクラスを付けて借りる（前は数値の節ナビだけ下線式の .tab だったが、消した）。
+   セレクタを #live-head に絞らないのはそのため。
+
+   器の内側の余白と枠の太さは変数で持つ（`--seg-pad` / `--seg-line`）。数値の頭の節ナビ（usage-mode.css）が
+   帯の背（`--band-ctl-h`）からこの2つを引いて札の背を出すので、ここの数を変えても帯の背がずれない */
 .live-filter {
+  --seg-pad: 2px;
+  --seg-line: 1px;
   display: inline-flex;
   flex: none;
   gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
+  padding: var(--seg-pad);
+  border: var(--seg-line) solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-sunk);
 }
@@ -120,48 +105,9 @@
   color: var(--fg-muted);
 }
 
-/* 書庫のヘッダは項目が多い。折り返して2段になっても崩れないようにする */
-.archive-head { flex-wrap: wrap; }
-
-.archive-q {
-  flex: 1 1 9rem;
-  min-width: 0;
-  padding: .3rem .45rem;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-elev);
-  box-shadow: var(--hi);
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--fs-2);
-}
-
-/* 焦点は線の色だけで示さない。**外へ光の輪を回す。**
-   1px の枠を塗り替えるだけだと、どこに焦点があるか探すことになる。
-   base.css の :focus-visible（2px の outline）は入力欄でも出るので、
-   ここはその内側を面ごと持ち上げるぶんだけを足す */
-.archive-q:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.archive-head select {
-  padding: .25rem .3rem;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-elev);
-  box-shadow: var(--hi);
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--fs-1);
-}
-
-.archive-head #archive-count {
-  flex: 1 0 100%;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--fg-faint);
-}
+/* 書庫の探す帯（.archive-head）の指定は archive.css に1か所。ここには置かない
+   （書庫が左の列のタブだった頃の「単体で置く」指定が残っていて、器の中に丸い線を出していた）。
+   ここに残すのは書庫のカードのぶんだけ */
 
 /* 書庫のカードには状態色の帯を出さない。全部終わっているので、
    色を付けると稼働中の一覧と同じ重さに見えて手をつける順番が読めなくなる */
@@ -192,13 +138,6 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--fg-faint);
-}
-
-.list-head label {
-  display: inline-flex;
-  align-items: center;
-  gap: .3rem;
-  cursor: pointer;
 }
 
 /* 引き出しを閉じるボタン。広い画面には引き出しが無いので出さない */
@@ -599,16 +538,22 @@
   transform: translateY(-1px);
 }
 
-/* 選んでいるもの。**枠の色だけで示さない。**
+/* 選んでいるもの。**枠の色だけで示さない。面ごと持ち上げる。**
    1px の線を塗り替えるだけだと、隣のカードとの差が 1px ぶんしか無かった。
-   影を1段上げ、外側に光の輪（--accent-soft）を回して面ごと持ち上げる。
 
-   枠は --accent そのものではなく border と混ぜる。純色の輪郭に光の輪が重なると、
-   同じ色が2本並んで太い枠に見える */
+   **一覧の選んでいる行（.row[aria-current]）と同じ考え方** … 面 --bg-hi ＋ 枠 --border-strong、
+   **光の輪は付けない**（ラベンダーを減らす決め。選んだ印は押すもの・あなたの番の色と分ける）。
+   影は素の .card のまま（--sh-1 ＋ --hi）で、押せるカードの形は落とさない。
+
+   前は面を --bg に沈め、--accent を混ぜた枠と光の輪で示していた。画面刷新⑤で書庫の床も --bg にした
+   （数値モードの床はもともと --bg）ので、**選んだカードだけ面が床と同じ色に抜けて見えた**。
+   --bg-hi は面の段でいちばん明るく、字の比の表（tokens.css）も全部の字をこの面で 4.5:1 以上に保っている。
+
+   使っているのは書庫のカードだけ（稼働中の一覧は .row。数値モードのカードは aria-current を付けない。
+   usage-tab.js の usageCard）。素の .card に置くので、付けるカードが増えても同じ見え方になる */
 .card[aria-current="true"] {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: var(--bg);
-  box-shadow: var(--sh-2), 0 0 0 3px var(--accent-soft), var(--hi);
+  border-color: var(--border-strong);
+  background: var(--bg-hi);
 }
 
 .card-top {

@@ -2,10 +2,11 @@
  * 横断集計（/api/usage）のテスト。
  *
  * ディスクを読む listUsage は触らない（read 層にテストを置かない方針）。
- * 代わりに、判断だけを切り出した2つを見る。
+ * 代わりに、判断だけを切り出した3つを見る。
  *
  * - parseUsageQuery … 変な値でも 400 を返さず範囲へ丸めること
  * - aggregateUsage  … 束ねかたと、モデルが混ざったときに命中率を出さないこと
+ * - usageResponse   … 読み終えたあとの組み立て。応答の形と、どの日から全部数えてあるか（meta.scanFrom）
  *
  * 材料の usage は buildUsage が実際に返したものを使う。
  * 手で書いた形を渡すと、集計側のキー名が変わっても気づけない。
@@ -13,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseUsageQuery, aggregateUsage, baselineFrom, foldSubUsage, USAGE_SCAN_MAX,
+  parseUsageQuery, aggregateUsage, baselineFrom, foldSubUsage, usageResponse, USAGE_SCAN_MAX,
 } from '../src/view/usage.mjs';
 import { buildUsage } from '../src/parse/usage.mjs';
 import { reply, prompt, call, result, at } from './helpers.mjs';
@@ -311,6 +312,247 @@ test('行は実消費の多い順に並べ、ログのパスは載せない', ()
   assert.equal(agg.rows[0].file, undefined);
   assert.equal(agg.rows[0].logFile, undefined);
   assert.equal(agg.rows[0].cwd, undefined);
+});
+
+// --- 全部数えてある日の境目（meta.scanFrom） --------------------------------
+
+/**
+ * 地方時のその時刻。日ごとの鍵（daily.list[].day）は地方時で決まるので、材料も地方時で組む。
+ * こうしておけば、テストを走らせる機械の時間帯が変わっても期待する日の鍵は変わらない。
+ */
+const local = (y, mo, d, h = 12, mi = 0, s = 0, ms = 0) => new Date(y, mo - 1, d, h, mi, s, ms).getTime();
+
+/** 索引の1件。境目を決めるのに要るのは sessionId と最終更新（mtimeMs）だけ */
+const ix = (sessionId, mtimeMs) => ({ sessionId, mtimeMs });
+
+/**
+ * 読み終えた1本。要求は1つで、その時刻を地方時で渡す。
+ *
+ * @param {string} id
+ * @param {number} when 要求の時刻（ミリ秒）
+ * @param {{model?: string, empty?: boolean, timestamp?: string|null}} [opt]
+ *   empty: 要求0本（/clear の残骸）。timestamp: 時刻を直に与える（null で時刻の無い要求）
+ */
+const used = (id, when, { model = 'claude-opus-5', empty = false, timestamp } = {}) =>
+  rec(id, empty ? [] : [
+    reply('x', {
+      requestId: `${id}-1`,
+      model,
+      usage: { in: 10, out: 1 },
+      timestamp: timestamp === undefined ? new Date(when).toISOString() : timestamp,
+    }),
+  ]);
+
+/** いま。既定の材料はどれもこれより前に書かれている */
+const NOW = local(2026, 11, 24, 15);
+
+/**
+ * 読み終えたものから応答を組む。指定しなかったものは「絞り込みなし・切っていない」。
+ * scan を省くと all を全部開きに行ったことになる（read は scan と同じ並び）。
+ */
+const respond = ({ all, scan = all, read, q = parse(''), scanLimited = false, now = NOW }) =>
+  usageResponse({ q, now, all, scan, scanLimited, read });
+
+test('応答の形は前と同じで、meta に scanFrom が1つ増えただけ', () => {
+  const read = [used('a', local(2026, 11, 24, 9))];
+  const res = respond({ all: [ix('a', local(2026, 11, 24, 10))], read });
+
+  // **キーの名前と形は変えない。** 古い画面は scanFrom を知らないまま、ほかのキーだけ読む
+  assert.deepEqual(Object.keys(res).sort(), [
+    'cache', 'daily', 'days', 'filterModel', 'limit', 'meta', 'model', 'models', 'projects',
+    'requests', 'rows', 'sessions', 'skills', 'skillsOmitted', 'skillsUnattributed', 'skillsUndated',
+    'tools', 'totals',
+  ]);
+  assert.deepEqual(Object.keys(res.meta).sort(), [
+    'empty', 'indexed', 'now', 'scanFrom', 'scanLimited', 'scanMax', 'scanned',
+  ]);
+
+  // 集計の部分は aggregateUsage の戻りそのまま。組み立てを切り出しても中身は動いていない
+  const { limit, days, filterModel, meta, ...agg } = res;
+  assert.deepEqual(agg, aggregateUsage(read));
+  assert.equal(limit, 30);
+  assert.equal(days, null);
+  assert.equal(filterModel, null);
+  assert.deepEqual({ ...meta, scanFrom: undefined }, {
+    now: NOW, indexed: 1, scanned: 1, scanLimited: false, scanMax: USAGE_SCAN_MAX, empty: 0, scanFrom: undefined,
+  });
+});
+
+test('全部読めたら、数えた最初の日から全部そろっている', () => {
+  const res = respond({
+    all: [ix('a', local(2026, 11, 24, 10)), ix('b', local(2026, 11, 22, 18))],
+    read: [used('a', local(2026, 11, 24, 9)), used('b', local(2026, 11, 21, 20))],
+  });
+
+  // 欠けているログが1本も無いので、境目は「いちばん古い日ごとの行」。日の鍵は daily と同じ組み方
+  assert.equal(res.meta.scanFrom, '2026-11-21');
+  assert.equal(res.meta.scanFrom, res.daily.list[0].day);
+});
+
+test('読まなかったログがあれば、そのうち最も新しい最終更新の次の日から', () => {
+  const res = respond({
+    all: [
+      ix('a', local(2026, 11, 24, 10)),
+      ix('b', local(2026, 11, 23, 10)),
+      ix('c', local(2026, 11, 21, 15)),
+      ix('d', local(2026, 11, 19, 9)),
+    ],
+    scan: [ix('a', local(2026, 11, 24, 10)), ix('b', local(2026, 11, 23, 10))],
+    read: [used('a', local(2026, 11, 24, 9)), used('b', local(2026, 11, 23, 9))],
+    scanLimited: true,
+  });
+
+  // 読まなかった c と d の要求は、どれもそれぞれの最終更新より前にある（追記しか起きないので）。
+  // だから c の 11-21 15:00 より後の日には、読まなかったぶんが1つも無い。
+  // **読んだ最古（b の 11-23）から決めない。** それだと 11-24 からになり、そろっている 11-22・11-23 を捨てる
+  assert.equal(res.meta.scanFrom, '2026-11-22');
+});
+
+test('最終更新のその日は一部しか数えていない（0時ちょうどでも、23時59分でも次の日から）', () => {
+  const at0 = local(2026, 11, 20, 0, 0, 0, 0);
+  const at2359 = local(2026, 11, 20, 23, 59, 59, 999);
+  const read = [used('a', local(2026, 11, 24, 9))];
+
+  // 読まなかったログが、その日の 0 時からの要求を持っているかもしれない
+  for (const t of [at0, at2359]) {
+    const res = respond({
+      all: [ix('a', local(2026, 11, 24, 10)), ix('old', t)],
+      scan: [ix('a', local(2026, 11, 24, 10))],
+      read,
+      scanLimited: true,
+    });
+    assert.equal(res.meta.scanFrom, '2026-11-21', new Date(t).toString());
+  }
+});
+
+test('月と年をまたいでも暦の次の日', () => {
+  const at = (old) => respond({
+    all: [ix('a', local(2027, 1, 5, 10)), ix('old', old)],
+    scan: [ix('a', local(2027, 1, 5, 10))],
+    read: [used('a', local(2027, 1, 5, 9))],
+    scanLimited: true,
+    now: local(2027, 1, 5, 15),
+  }).meta.scanFrom;
+
+  assert.equal(at(local(2026, 12, 31, 18)), '2027-01-01');
+  // 2026 年は閏年ではない
+  assert.equal(at(local(2026, 2, 28, 18)), '2026-03-01');
+});
+
+test('期間で外したログも欠けに数える', () => {
+  // 期間は「最終更新がこの期間に入ったログ」を選ぶだけで、日で切っているのではない。
+  // 外したログ（最終更新 11-17 11:00）も 11-17 の要求を持っているかもしれない
+  const res = respond({
+    q: parse('days=7'),
+    all: [
+      ix('a', local(2026, 11, 24, 10)),
+      ix('b', local(2026, 11, 20, 10)),
+      ix('old', local(2026, 11, 17, 11)),
+    ],
+    scan: [ix('a', local(2026, 11, 24, 10)), ix('b', local(2026, 11, 20, 10))],
+    read: [used('a', local(2026, 11, 24, 9)), used('b', local(2026, 11, 18, 9))],
+  });
+
+  assert.equal(res.meta.scanLimited, false, '上限には当たっていない');
+  assert.equal(res.meta.scanFrom, '2026-11-18');
+});
+
+test('読めなかったログも欠けに数える', () => {
+  // 開きに行ったが読めなかった（消えた・掴まれていた）。中身が分からないので、最終更新の日までは一部
+  const res = respond({
+    all: [ix('a', local(2026, 11, 24, 10)), ix('b', local(2026, 11, 23, 10))],
+    read: [used('a', local(2026, 11, 24, 9)), null],
+  });
+
+  assert.equal(res.meta.scanned, 2, '開いた数の意味は変えない');
+  assert.equal(res.meta.scanFrom, '2026-11-24');
+});
+
+test('要求0本で外したもの・モデルで外したものは欠けに数えない', () => {
+  const input = {
+    all: [
+      ix('a', local(2026, 11, 24, 10)),
+      ix('e', local(2026, 11, 24, 8)),
+      ix('x', local(2026, 11, 23, 20)),
+      ix('old', local(2026, 11, 20, 10)),
+    ],
+    scan: [ix('a', local(2026, 11, 24, 10)), ix('e', local(2026, 11, 24, 8)), ix('x', local(2026, 11, 23, 20))],
+    read: [
+      used('a', local(2026, 11, 24, 9)),
+      used('e', 0, { empty: true }),
+      used('x', local(2026, 11, 23, 19), { model: 'claude-opus-4-7' }),
+    ],
+    scanLimited: true,
+  };
+
+  // 読んで中身が分かっている。0本は日ごとに何も足さず、モデル違いは絞り込みの意味として外したもの。
+  // 欠けているのは読まなかった old だけ。
+  // 画面側で rows の最古から推すと、ここで境目が新しい側にずれる（窓口に持たせた理由）
+  const filtered = respond({ ...input, q: parse('model=claude-opus-5') });
+  assert.equal(filtered.sessions, 1);
+  assert.equal(filtered.meta.empty, 1);
+  assert.equal(filtered.meta.scanFrom, '2026-11-21');
+
+  // モデルで絞っても絞らなくても境目は同じ
+  assert.equal(respond(input).meta.scanFrom, '2026-11-21');
+});
+
+test('今日まで欠けていれば明日を返す。null にはしない', () => {
+  // 本数を少なく選んだ日に、今日動いたログを読み切れなかった。今日のぶんも一部しか無い。
+  // 「そろっている日が1日も無い」は分かっている事実で、「決められない」（null）とは別物
+  const res = respond({
+    all: [ix('a', local(2026, 11, 24, 14)), ix('b', local(2026, 11, 24, 13))],
+    scan: [ix('a', local(2026, 11, 24, 14))],
+    read: [used('a', local(2026, 11, 24, 13, 30))],
+    scanLimited: true,
+  });
+
+  assert.equal(res.meta.scanFrom, '2026-11-25');
+});
+
+test('数えたセッションが無ければ null', () => {
+  // 描く日が無い。境目だけ返すと「全部読めて 0」に見える
+  assert.equal(respond({ all: [], read: [] }).meta.scanFrom, null, '索引が空');
+
+  const all = [ix('a', local(2026, 11, 24, 10)), ix('old', local(2026, 11, 20, 10))];
+  const scan = [all[0]];
+  assert.equal(respond({ all, scan, read: [null], scanLimited: true }).meta.scanFrom, null, '読めたものが無い');
+  assert.equal(respond({
+    all, scan, read: [used('a', local(2026, 11, 24, 9), { empty: true })], scanLimited: true,
+  }).meta.scanFrom, null, '要求0本だけ');
+  assert.equal(respond({
+    all,
+    scan,
+    read: [used('a', local(2026, 11, 24, 9), { model: 'claude-opus-4-7' })],
+    scanLimited: true,
+    q: parse('model=claude-opus-5'),
+  }).meta.scanFrom, null, 'モデルで絞って何も残らない');
+});
+
+test('最終更新の分からないログが欠けに混ざっていたら null', () => {
+  // どの日に要求を持っているか言えない。0 を「1970年」と読まない（0 と不明を分ける）
+  for (const bad of [Number.NaN, 0, undefined, null]) {
+    const res = respond({
+      all: [ix('a', local(2026, 11, 24, 10)), ix('bad', bad)],
+      scan: [ix('a', local(2026, 11, 24, 10))],
+      read: [used('a', local(2026, 11, 24, 9))],
+      scanLimited: true,
+    });
+    assert.equal(res.meta.scanFrom, null, String(bad));
+  }
+});
+
+test('全部読めても、時刻の付いた要求が1本も無ければ null', () => {
+  const res = respond({
+    all: [ix('a', local(2026, 11, 24, 10))],
+    read: [used('a', 0, { timestamp: null })],
+  });
+
+  // 合計には入るが、どの日にも置けない
+  assert.equal(res.sessions, 1);
+  assert.deepEqual(res.daily.list, []);
+  assert.equal(res.daily.undated, 1);
+  assert.equal(res.meta.scanFrom, null);
 });
 
 // --- 直近の中央値（baseline） ----------------------------------------------

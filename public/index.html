@@ -147,7 +147,9 @@
            左のレールにも同じ入口（#today-open）がある。こちらは字を出せる場所なので名前ごと残す -->
       <button class="btn today-open" id="archive-today" type="button">今日のまとめ</button>
       <!-- 検索欄。絵（虫めがね）は archive.js が差す。
-           打つ前に「ここが検索欄」と分かる合図が、いままで placeholder しか無かった -->
+           打つ前に「ここが検索欄」と分かる合図が、いままで placeholder しか無かった。
+           **文言に「題」を入れない**（手本のモックは「ID・題・置き場所で探す」）。浅い検索は題を読んでいない行が大半で、
+           題では当たらない（src/view/archive.mjs の matches）。文言が嘘になる -->
       <span class="archive-field is-q">
         <input class="archive-q" id="archive-q" type="search"
                placeholder="ID・置き場所で探す" aria-label="書庫を検索">
@@ -184,7 +186,9 @@
           <option value="size">大きい順</option>
         </select>
       </span>
-      <!-- 既定はファイルを開かない検索。タイトルまで探すのは押されたときだけ -->
+      <!-- 既定はファイルを開かない検索。本文まで探すのは入れたときだけ。
+           **チェックのまま置く**（手本のモックも同じ）。「どれを見るか」の切り替え（.live-filter）ではなく、
+           いまの検索に本文を足すかどうかの1つの選択なので。見た目は archive.css -->
       <label><input type="checkbox" id="archive-deep"> 中身も探す</label>
       <!-- 絞り込みを1つでも掛けているときだけ出す。押すと全部外す。
            **絵だけにする。** 隣の絞り込みと同じ形だと「もう1つの絞り込み」に見える。
@@ -200,7 +204,10 @@
          ログを全文読む一番重い窓口なので、開いたときに1回だけ引く。
          モデルの選択肢は応答から組むので、ここには「すべて」だけを置く -->
     <div class="list-head usage-head" id="usage-head" hidden>
-      <div class="usage-nav" id="usage-nav" role="group" aria-label="見る中身"></div>
+      <!-- 頭は1行の帯（節ナビ → 絞り込み → 件数。狭い窓では折り返す）。
+           節ナビの見た目は一覧の頭の「すべて｜稼働中」（.live-filter）を借りる
+           （右の紙の頭の「数値｜診断」と同じ。新しい見た目を作らない）。札は usage-tab.js が組む -->
+      <div class="live-filter usage-nav" id="usage-nav" role="group" aria-label="見る中身"></div>
       <!-- 絞り込みは**書庫と同じ形**にする（`.archive-field` を借りる）。
            前は素の <select> が3つ並んでいて、「30本」だけを見ても
            それが期間なのか本数なのか形からは出てこなかった。
@@ -230,7 +237,7 @@
       <button class="btn archive-clear" id="usage-clear" type="button" hidden
               title="絞り込みを外す" aria-label="絞り込みを外す"></button>
       <!-- 件数は絞り込みの結果の説明なので、**同じ行の右端**へ寄せる
-           （一覧の #list-count と同じ作法）。前は flex: 1 0 100% で3行目に居た -->
+           （一覧の #list-count と同じ作法）。前は節ナビが1行目をまるごと取り、件数は2行目に居た -->
       <span id="usage-count"></span>
     </div>
     <div class="usage-pane" id="usage" hidden></div>
@@ -669,7 +676,8 @@
         <section class="settings-sec">
           <h3 class="settings-h3 has-icon" data-icon="today">今日のまとめ</h3>
           <p class="settings-hint">左のレールの <strong>今日のまとめ</strong>、書庫の頭のボタン、Ctrl+K のどれからでも開けます。
-            その日に決めたことと書き換えたファイルを1枚に並べ、Markdown でコピーできます。</p>
+            その日に決めたことと書き換えたファイルを1枚に並べ、Markdown でコピーできます。
+            窓の頭の矢印（<strong>前の日・次の日</strong>）で1日ずつ、日付の欄で数日前まで一度に戻れます。</p>
         </section>
       </div>
 
@@ -941,19 +949,31 @@
 </dialog>
 
 <!-- 今日のまとめ（today.js）。入口は左のレール・書庫の頭のボタン・Ctrl+K の3つ。
-     中身は開いたときに /api/today から1回だけ引いて組む。頭と足は設定モーダルのクラスを借りる -->
+     中身は開いたときに /api/today から1回だけ引いて組み、日を替えたら引き直す。頭と足は設定モーダルのクラスを借りる。
+     頭は 題（日付つき）……（空き）……前の日 ・ 日の選択 ・ 次の日 → ×。足は 一言 → 閉じる → Markdown でコピー（塗る）。
+     **塗るのは足の「Markdown でコピー」の1つだけ**（窓の中の1画面に1つ。メモの窓の「保存」・起こすフォームの「起こす」と同じ位置）。
+     矢印は手本のモックでは題の両脇だが、**右端の × の隣で日の選択の両脇に置く**。題は日付の字数で幅が変わるので、
+     題の脇だと矢印が押すたびにずれる（選択の幅も archive.css で決めてある）。
+     矢印の絵は today.js が差す（icons.js の chevron。前の日は CSS で裏返す） -->
 <dialog class="today-win" id="today" aria-labelledby="today-title">
   <div class="settings-head today-head">
-    <h2 id="today-title">まとめ</h2>
-    <span class="archive-field selectbox">
-      <select id="today-ago" aria-label="どの日を見るか"></select>
-    </span>
-    <button class="btn" id="today-copy" type="button" disabled>Markdown でコピー</button>
+    <h2 id="today-title">まとめ <span class="today-day" id="today-day"></span></h2>
+    <div class="today-days" role="group" aria-label="見る日">
+      <button class="ibtn today-step is-prev" id="today-prev" type="button"
+              title="前の日" aria-label="前の日"></button>
+      <span class="archive-field selectbox">
+        <select id="today-ago" aria-label="どの日を見るか"></select>
+      </span>
+      <button class="ibtn today-step" id="today-next" type="button"
+              title="次の日" aria-label="次の日"></button>
+    </div>
     <button class="settings-x" id="today-close" type="button" aria-label="閉じる">&#215;</button>
   </div>
   <div class="today-body" id="today-body"></div>
   <div class="settings-foot">
-    <p class="settings-msg" id="today-msg" role="status"></p>
+    <p class="settings-msg" id="today-msg" role="status" data-tone=""></p>
+    <button class="btn" id="today-close-foot" type="button">閉じる</button>
+    <button class="btn is-lead" id="today-copy" type="button" disabled>Markdown でコピー</button>
   </div>
 </dialog>
 
@@ -972,8 +992,8 @@
       <button class="btn" id="zoom-prev" type="button">← 前</button>
       <button class="btn" id="zoom-next" type="button">次の待ち →</button>
     </div>
-    <!-- 書庫から開いたときだけ出す。**移るかどうかは押した人が決める。**
-         勝手に作業台へ飛ばすと、探していた結果がその場で消える -->
+    <!-- 作業台の外（書庫・数値）から開いたときだけ出す（zoom.js の openZoom）。**移るかどうかは押した人が決める。**
+         勝手に作業台へ飛ばすと、探していた結果・読み比べていた並びがその場で消える -->
     <button class="btn zoom-work" id="zoom-work" type="button" hidden>作業台で開く</button>
     <button class="settings-x" id="zoom-close" type="button" aria-label="拡大をやめる">&#215;</button>
   </div>

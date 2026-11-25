@@ -440,7 +440,7 @@ test('右の紙のグラフ（横棒の1位・スパークライン）は無彩�
   assert.deepEqual(bad, [], `右の紙のグラフを .insp の詳細度で塗り直している（色の出どころが2か所になる）:\n  ${bad.join('\n  ')}`);
 });
 
-test('数値モード（横断）のグラフの色は触らない（変数が無ければラベンダー。宣言するのは .insp だけ）', () => {
+test('数値モード（横断）のグラフの色は触らない（変数が無ければラベンダー。宣言するのは .insp と主役の札だけ）', () => {
   // ⑤で「バランスがいい」と言われた画面。部品は既定付きで受けるので、変数を宣言しない横断はそのまま
   const fill = declsOf('.bar.is-top .bar-fill').filter((d) => d.file === 'usage.css' && d.prop === 'background');
   assert.deepEqual(fill.map((d) => d.value), [CHART_HI], '素の .bar.is-top .bar-fill が変数（既定はラベンダー）で受けていない');
@@ -448,10 +448,14 @@ test('数値モード（横断）のグラフの色は触らない（変数が�
   assert.deepEqual(area.map((d) => d.value), [CHART_HI], '素の .spark-area が変数（既定はラベンダー）で受けていない');
   const line = declsOf('.spark-line').filter((d) => d.file === 'usage.css' && d.prop === 'stroke');
   assert.deepEqual(line.map((d) => d.value), [CHART_HI], '素の .spark-line が変数（既定はラベンダー）で受けていない');
+  // 宣言してよいのは2か所。右の紙（無彩色にする）と、数値モードの主役の札（塗った面の上で線を字の色にする。
+  // 画面刷新⑤の D8）。横断のほかのグラフは宣言しないのでラベンダーのまま
   const declared = cssRules()
     .filter((r) => r.decls.some((d) => d.prop === '--chart-hi'))
-    .map((r) => `${r.file} … ${r.selectors.join(', ')}`);
-  assert.deepEqual(declared, ['usage.css … .insp'], `--chart-hi を .insp 以外でも宣言している:\n  ${declared.join('\n  ')}`);
+    .map((r) => `${r.file} … ${r.selectors.join(', ')}`)
+    .sort();
+  assert.deepEqual(declared, ['usage-mode.css … .usage-pane .stat.is-hero', 'usage.css … .insp'],
+    `--chart-hi を .insp と主役の札のほかでも宣言している:\n  ${declared.join('\n  ')}`);
 });
 
 test('右の紙の横棒の名前は1行で「…」で切り、全文は title に入れる（1字ずつ折らない）', () => {
@@ -478,12 +482,19 @@ test('差（増減）に色を付けない', () => {
   // 実消費が多いのは、単に長く働いた日かもしれない。良し悪しを決めるのは読む人
   const bad = [];
   for (const r of cssRules()) {
-    if (!r.selectors.some((s) => /\.stat-delta\b/.test(s))) continue;
+    const hits = r.selectors.filter((s) => /\.stat-delta\b/.test(s));
+    if (hits.length === 0) continue;
+    // 数値モードの主役の札（--accent を塗った面。画面刷新⑤の D7）の中だけは、補助の字を面から混ぜたインクで書く。
+    // 混ぜる材料に --accent が出てくるが、差を塗り分けたのではない（下で、同じ札のラベルと同じ色なことを確かめる）
+    if (hits.every((s) => /\.is-hero\b/.test(s))) continue;
     for (const d of r.decls) {
       if (HUE_RE.test(d.value)) bad.push(`${r.file} … ${r.selectors.join(', ')} { ${d.prop}: ${d.value} }`);
     }
   }
   assert.deepEqual(bad, [], `差に色が付いている:\n  ${bad.join('\n  ')}`);
+  // 主役の札の差は、同じ札のラベルと同じ色。差だけを良し悪しで塗り分けない
+  const heroInk = (part) => declsOf(`.usage-pane .stat.is-hero ${part}`).filter((d) => d.prop === 'color').map((d) => d.value);
+  assert.deepEqual(heroInk('.stat-delta'), heroInk('.stat-label'), '主役の札の差がラベルと違う色になっている');
   assert.doesNotMatch(chartCode(), /stat-delta (is-|up|down|good|bad)/, '差に良し悪しのクラスを付けている');
 });
 

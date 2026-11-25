@@ -259,7 +259,7 @@ import は上から下へ一方向にだけ流れる。逆向きに import し�
 | `GET /api/sessions/:id/subagents/:agentId` | サブエージェント1件の記録。応答は詳細と同じ形（`digest` ＋ `log`）。ファイルパスは返さない |
 | `GET /api/sessions/:id/usage` | 1本ぶんの数値。詳細（`/api/sessions/:id`）には**混ぜない** |
 | `GET /api/sessions/:id/usage/baseline` | 直近24本の中央値。**これも `/usage` と分けてある**（400〜700ms 掛かるため） |
-| `GET /api/usage` | 数値の横断集計。`limit` `days` `model`。上限60件で切り詰め、切ったことを `scanLimited` で返す |
+| `GET /api/usage` | 数値の横断集計。`limit` `days` `model`。上限60件で切り詰め、切ったことを `scanLimited` で返す。日ごとの推移がどの日から全部数えてあるかを `scanFrom` で返す（決められなければ null） |
 | `GET /api/today` | 今日のまとめ。`ago`（0〜6日前）。その日に動いたセッションの決めたことと書き換えたファイル。**その日の行だけ**で digest を組み直す（全文の digest から拾うと前の日のぶんが混ざる）。上限60本で切り、切ったことを `scanLimited` で返す |
 | `GET /api/archive` | 書庫（終了したものも含む一覧）。`page` `per` `sort` `q` `deep` `project` `skill` `days`。置き場所とスキルの候補は `meta` に載る |
 | `GET /api/stream` | SSE。`sessions` / `tick` / `error` / `reveal` イベント |

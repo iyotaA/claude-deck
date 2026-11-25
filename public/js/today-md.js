@@ -1,6 +1,6 @@
 /**
- * 今日のまとめを Markdown の文字列にする。層0。**import ゼロの純関数**なので Node からテストできる
- * （`test/today-md.test.mjs`）。
+ * 今日のまとめを Markdown の文字列にする。層0。**純関数**で、import は層0 の `day-text.js`（日付の言い方）
+ * だけなので Node からテストできる（`test/today-md.test.mjs`）。
  *
  * 画面の「Markdown でコピー」が使う。手元のクリップボードに入れるだけで、外へは送らない。
  * 日報や引き継ぎに貼る下書きなので、**画面と同じ並び・同じ言い方**にする
@@ -8,7 +8,12 @@
  *
  * 画面の組み立て（`today.js`）もここの小道具（`isQuiet` / `shortPath` / `hm` / `spanText`）を使う。
  * 2箇所に書くと、片方だけ直した日に画面とコピーが食い違う。
+ *
+ * どの日を見るかの判断（選べる範囲 `TODAY_AGO_MAX_UI`・丸め方 `clampAgo`・日の言い方 `agoDate` / `agoLabel`・
+ * 前後の矢印の行き先 `agoSteps`）もここに置く。窓の題・日の選択肢・矢印が同じ範囲と言い方を使うため。
+ * 「M/D（曜）」の組み方そのものは `day-text.js` の `dayText`（数値モードの線グラフの日付と同じ言い方にする）。
  */
+import { dayText } from './day-text.js';
 
 /**
  * 何日前まで選べるか。サーバー（`src/view/today.mjs` の `TODAY_AGO_MAX`）と同じ値。
@@ -16,6 +21,65 @@
  * 揃っていることは `test/today-md.test.mjs` が見ている
  */
 export const TODAY_AGO_MAX_UI = 6;
+
+/**
+ * 何日前かを、選べる範囲（0〜`TODAY_AGO_MAX_UI`）の整数へ丸める。
+ * 数でないものは「きょう」へ倒す（select の値・URL・押した矢印のどこから来ても同じ丸め方にする）。
+ *
+ * @param {unknown} v
+ * @returns {number}
+ */
+export function clampAgo(v) {
+  const n = Math.trunc(Number(v));
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(Math.max(n, 0), TODAY_AGO_MAX_UI);
+}
+
+/**
+ * その日の「M/D（曜）」。地方時（サーバーの `/api/today` も地方時の日で切る）。
+ * 窓の題と日の選択肢が同じ言い方になるよう、どちらもここを通す。組み方は `day-text.js` の `dayText`
+ * （数値モードの線グラフの日付 `usage-days.js` の `dayLabel` と同じ言い方）。
+ *
+ * @param {number} ago 何日前か（0 = きょう）
+ * @param {number} now 基準の時刻（ms）。**外から渡す**（日付が変わったあとも開きっぱなしの画面で、
+ *   選択肢を作った日のまま固まらないように、組むたびにそのときの時刻を渡す）
+ * @returns {string}
+ */
+export function agoDate(ago, now) {
+  const d = new Date(now);
+  d.setDate(d.getDate() - clampAgo(ago));
+  return dayText(d);
+}
+
+/**
+ * 日の選択肢の札。「きょう」「きのう」のあとは日付だけ。
+ * @param {number} ago
+ * @param {number} now
+ * @returns {string}
+ */
+export function agoLabel(ago, now) {
+  const a = clampAgo(ago);
+  const date = agoDate(a, now);
+  if (a === 0) return `きょう ${date}`;
+  if (a === 1) return `きのう ${date}`;
+  return date;
+}
+
+/**
+ * 頭の前後の矢印が、押したらどの日へ行くか。**前の日 = 1日古い（ago + 1）、次の日 = 1日新しい（ago - 1）。**
+ * 端（きょうより先・`TODAY_AGO_MAX_UI` 日前より前）は null で、そちらの矢印は押せなくする。
+ * 行き先を決めるのはここだけで、画面は null かどうかを見て押せる・押せないを付けるだけ。
+ *
+ * @param {unknown} ago いま見ている日（範囲の外は丸めてから決める）
+ * @returns {{ prev: number|null, next: number|null }}
+ */
+export function agoSteps(ago) {
+  const a = clampAgo(ago);
+  return {
+    prev: a < TODAY_AGO_MAX_UI ? a + 1 : null,
+    next: a > 0 ? a - 1 : null,
+  };
+}
 
 /**
  * 時刻を HH:MM（地方時）で。

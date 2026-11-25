@@ -335,8 +335,8 @@
   border-bottom: 1px solid var(--border);
 }
 
-/* 下線で選択を示す。左ペインのタブ（.tab）と別の名前にしてあるのは、
-   あちらが「一覧／書庫／数値」で既に使っていて、見た目も密度も違うため */
+/* 下線で選択を示す（詳細ペインの中央のタブだけの顔）。
+   押せる切り替えの顔（一覧の頭・右の紙の頭・数値モードの節ナビ）は list.css の .live-filter で、別の部品 */
 .detail-tab {
   display: inline-flex;
   align-items: center;

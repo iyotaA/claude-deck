@@ -661,6 +661,27 @@ export function buildUsage(entries, { sidechain = false } = {}) {
 }
 
 /**
+ * 時刻を地方時の日の鍵（`YYYY-MM-DD`）にする。
+ *
+ * **日の鍵はここでしか組まない。** `groupByDay` の行の鍵と、横断の `meta.scanFrom`
+ * （どの日から全部数えてあるか。`view/usage.mjs`）は文字列のまま比べられる必要がある。
+ * 組み方を2箇所に書くと、片方だけ直した日に境目と行の鍵が食い違い、黙って1日ずれる。
+ * **例外は画面側の写し**（`public/js/usage-days.js` の `localDay`。線グラフの「今日」を `meta.now` から出す）。
+ * 画面は `src/` を import できないので写すしかなく、`test/usage-days.test.mjs` が両方を呼んで突き合わせている。
+ * ここを直したらあちらも直す。
+ *
+ * `toLocaleDateString` ではなく自前で組むのは、区切り文字と桁が環境で変わらないようにするため。
+ *
+ * @param {number} ms
+ * @returns {string}
+ */
+export function localDay(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
  * 要求を日ごとにまとめる。
  *
  * **`days` は「絞り込みの材料」ではなく「並べる材料」。** `/api/usage` の
@@ -668,8 +689,7 @@ export function buildUsage(entries, { sidechain = false } = {}) {
  * 「今週は先週より食ったか」に答えられないのはそのため。
  *
  * **地方時で丸める。** UTC で切ると、日本時間の朝9時までの作業が前日に積まれる
- * （「昨日はあまり使っていない」が嘘になる）。`toLocaleDateString` ではなく
- * 自前で組むのは、区切り文字と桁が環境で変わらないようにするため。
+ * （「昨日はあまり使っていない」が嘘になる）。日の鍵は `localDay` が組む。
  *
  * @param {Array<object>} requests 時刻順に並んだ要求
  * @returns {{list: Array<{day: string, ite: number, requests: number}>, undated: number}}
@@ -685,8 +705,7 @@ export function groupByDay(requests) {
       undated += 1;
       continue;
     }
-    const d = new Date(r.at);
-    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const day = localDay(r.at);
     const cur = byDay.get(day);
     if (cur) {
       cur.ite += r.ite;

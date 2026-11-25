@@ -1,7 +1,7 @@
 /**
  * 層1。数値を絵にするための小道具。
  *
- * ここは `util.js` しか見ない。**store も panel も見ない。**
+ * ここが見るのは層0（`util.js` と、絵の `icons.js`、日の名前の `usage-days.js`）だけ。**store も panel も見ない。**
  * 見た瞬間に「どのセッションの話か」を知ることになり、
  * 使い回せない部品になる。
  *
@@ -13,6 +13,7 @@
 
 import { el, num, shortModel, svgEl } from './util.js';
 import { icon } from './icons.js';
+import { dayLabel } from './usage-days.js';
 
 /**
  * 節を1つ作る。数値の枠の中の小見出し。
@@ -169,21 +170,66 @@ export function deltaText(value, base, { kind = 'ratio', unit = '' } = {}) {
 }
 
 /**
+ * 札の値を「数」と「単位」に割る（`150.6M` → `150.6` と `M`）。
+ *
+ * 数値モードの札だけが単位を小さく出す（画面刷新⑤の D13。`statTile` の `smallUnit`）。
+ * 30px の数字の後ろに同じ大きさの「M」が並ぶと、桁の数字と単位が同じ重さで読まれる。
+ *
+ * **整形そのものは変えない。** `tokensStrict` / `pctStrict` が組んだ字を後から割るだけなので、
+ * 0 と「不明」の分け方（`—`）はそのまま残る。数字で始まらない字（`—`）と、
+ * 単位の無い値（`850`）は割らない。
+ *
+ * @param {string} text 整形済みの値
+ * @returns {{num: string, unit: string|null}}
+ */
+export function splitUnit(text) {
+  const s = String(text ?? '');
+  const m = s.match(/^([−+]?\d[\d,]*(?:\.\d+)?)\s*([^\d\s.,][^\d]*)$/);
+  return m ? { num: m[1], unit: m[2] } : { num: s, unit: null };
+}
+
+/**
+ * 値を「数 ＋ 小さい単位」で器に入れる（`splitUnit` で割り、単位だけ `.stat-unit` で包む）。
+ * 単位の無い値と `—`（不明）は1本の字のまま入れる。
+ *
+ * **単位の span を組むのはここだけ**（クラス名 `stat-unit` もここ1か所）。使うのは数値モードの札
+ * （`statTile` の `smallUnit`）と、概要の「いちばん重いもの」の1位の量（`usage-tab.js` の `heavyBlock`）。
+ * 前は2か所が同じ組み方を書き写していて、片方だけ直すと単位の見た目が食い違った。
+ * 字をそのまま並べ直すだけなので、選んでコピーしたときは「150.6M」と1続きに取れる。
+ *
+ * @param {HTMLElement} node 入れる器（中身は差し替える）
+ * @param {string} value 整形済みの値（`tokensStrict` / `pctStrict` などを通したもの）
+ * @returns {HTMLElement} 受け取った器
+ */
+export function unitValue(node, value) {
+  const { num: n, unit } = splitUnit(value);
+  if (unit) node.replaceChildren(n, el('span', 'stat-unit', unit));
+  else node.replaceChildren(n);
+  return node;
+}
+
+/**
  * 数値を1つ大きく出す札。
  *
  * 単一の現在値なので棒グラフにしない（棒は比べるためのもので、
  * 比べる相手がいない値を棒にすると、長さに意味があるように見えてしまう）。
  *
+ * **右の紙と数値モードで共有する。** `smallUnit` は数値モードの札だけが渡す（D13）。
+ * 既定は割らないので、右の紙の札は1本の字のまま。割るときは `unitValue` を通す。単位の見た目（`.stat-unit`）も
+ * `usage-mode.css` に `.usage-pane` で絞って置いてある。
+ *
  * @param {string} label 何の数か
  * @param {string} value 既に文字列にしたもの（`tokensStrict` などを通す）
  * @param {string} [note] 小さく添える但し書き
  * @param {string|null} [delta] いつもとの差（`deltaText` の戻り値をそのまま渡す）
+ * @param {{smallUnit?: boolean}} [opts] smallUnit: 単位を数と分けて小さく出す
  * @returns {HTMLElement}
  */
-export function statTile(label, value, note, delta) {
+export function statTile(label, value, note, delta, { smallUnit = false } = {}) {
   const box = el('div', 'stat');
   box.append(el('div', 'stat-label', label));
-  box.append(el('div', 'stat-value', value));
+  // 単位を小さく出すのは渡されたときだけ（数値モードの札）。組み方は unitValue の1か所
+  box.append(smallUnit ? unitValue(el('div', 'stat-value'), value) : el('div', 'stat-value', value));
   // 差は値のすぐ下。但し書きより先に置く（値と一続きに読ませたい）
   if (delta) box.append(el('div', 'stat-delta', delta));
   if (note) box.append(el('div', 'stat-note', note));
@@ -336,6 +382,114 @@ export function sparkline(values, label) {
     'vector-effect': 'non-scaling-stroke',
   }));
   return svg;
+}
+
+/**
+ * 日ごとの実消費の線グラフ（数値モードの概要。画面刷新⑤の D2〜D6）。
+ *
+ * **何を描くかは決めない。** 描いてよい日・0 で埋める・山・目盛りの間引きは層0 の
+ * `usage-days.js` の `dayChartView` が決め、ここは `status: 'ok'` の結果を絵にするだけ。
+ * 描かないとき（境目が決められない・描ける日が無い）は呼ぶ側が一言を置く（空の箱を置かない）。
+ *
+ * **字は SVG の text にしない。HTML で置く。** 線は `preserveAspectRatio="none"` で器いっぱいに
+ * 伸ばす（スパークラインと同じ作り）ので、SVG の中の字は器の幅で伸び縮みして 12px を割る
+ * （手本のモックは 9px / 8.5px で描いていた）。目盛りの字・山の吹き出し・山の点は HTML にして、
+ * 位置だけ割合（`left` / `top` の %）で合わせる。点を SVG の circle にしないのも同じ理由（横に潰れて楕円になる）。
+ *
+ * **日の列と点を揃える。** 点の x は「日の列の真ん中」（`(i + 0.5) / n`）で、下の日付の字は同じ n 列の
+ * grid に入れる。両端の点が器の端に貼り付かないぶん、字の列とずれない。
+ *
+ * 色は数値モードのグラフと同じく `var(--chart-hi, var(--accent))` で受ける（`usage.css`）。
+ * 右の紙では使わない。
+ *
+ * @param {ReturnType<import('./usage-days.js').dayChartView>} view `status` が `ok` のもの
+ * @returns {HTMLElement}
+ */
+export function dayChart(view) {
+  const { days, peak, max } = view;
+  const n = days.length;
+  const box = el('div', 'day-chart');
+
+  // 山の吹き出し（日と量だけ。D5）。線の上の帯に置くので、線にも点にも重ならない。
+  // 両端の近くでは器の外へはみ出さないよう、片寄せにする
+  const band = el('div', 'day-chart-peak');
+  if (peak) {
+    const at = days[peak.index].x;
+    const tip = el('div', 'day-chart-tip');
+    tip.append(el('b', null, `${peak.label} ${tokensStrict(peak.ite)}`), el('span', null, '・いちばん重い日'));
+    tip.style.left = `${at * 100}%`;
+    tip.dataset.side = at < 0.2 ? 'start' : at > 0.8 ? 'end' : 'mid';
+    band.append(tip);
+  }
+  box.append(band);
+
+  // 縦の目盛り（上端・半分・0）。線は 0 から描くので、下端はいつも 0
+  const yAxis = el('div', 'day-chart-y');
+  yAxis.setAttribute('aria-hidden', 'true');
+  const marks = max > 0 ? [[max, 0], [max / 2, 50], [0, 100]] : [[0, 100]];
+  for (const [value, top] of marks) {
+    const s = el('span', null, tokensStrict(value));
+    s.style.top = `${top}%`;
+    yAxis.append(s);
+  }
+  box.append(yAxis);
+
+  // 読み上げの名前。**何日ぶんか・いちばん多い日**を言う（絵の中の字は aria-hidden）
+  const label = `日ごとの実消費の線。${dayLabel(view.from)}から${dayLabel(view.to)}までの ${n} 日ぶん。`
+    + (peak ? `いちばん多いのは ${peak.label}の ${tokensStrict(peak.ite)}。` : 'どの日も使っていません。');
+
+  const W = 100;
+  const H = 100;
+  const plot = el('div', 'day-chart-plot');
+  const svg = svgEl('svg', {
+    class: 'day-chart-svg',
+    viewBox: `0 0 ${W} ${H}`,
+    preserveAspectRatio: 'none',
+    role: 'img',
+    'aria-label': label,
+  });
+  // 目盛りの横線（上端・半分・0）。左の字と同じ高さ
+  for (const gy of [0, H / 2, H]) {
+    svg.append(svgEl('line', {
+      class: 'day-chart-grid', x1: 0, x2: W, y1: gy, y2: gy, 'vector-effect': 'non-scaling-stroke',
+    }));
+  }
+  const pts = days.map((p) => `${(p.x * W).toFixed(2)},${(p.y * H).toFixed(2)}`);
+  // 面 → 山の縦の補助線 → 線の順に足す。あとから足したほうが上に描かれる
+  svg.append(svgEl('polygon', {
+    class: 'day-chart-area',
+    points: `${(days[0].x * W).toFixed(2)},${H} ${pts.join(' ')} ${(days[n - 1].x * W).toFixed(2)},${H}`,
+  }));
+  if (peak) {
+    const px = (days[peak.index].x * W).toFixed(2);
+    svg.append(svgEl('line', {
+      class: 'day-chart-guide', x1: px, x2: px, y1: 0, y2: H, 'vector-effect': 'non-scaling-stroke',
+    }));
+  }
+  svg.append(svgEl('polyline', {
+    class: 'day-chart-line', points: pts.join(' '), 'vector-effect': 'non-scaling-stroke',
+  }));
+  plot.append(svg);
+  if (peak) {
+    const dot = el('span', 'day-chart-dot');
+    dot.setAttribute('aria-hidden', 'true');
+    dot.style.left = `${days[peak.index].x * 100}%`;
+    dot.style.top = `${days[peak.index].y * 100}%`;
+    plot.append(dot);
+  }
+  box.append(plot);
+
+  // 横の目盛り（日付と曜日）。間引いた日は空の列を置いて、列の数を点の数と揃える
+  const xAxis = el('div', 'day-chart-x');
+  xAxis.setAttribute('aria-hidden', 'true');
+  xAxis.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+  for (const p of days) {
+    const cell = el('span', 'day-chart-tick');
+    if (p.tick) cell.append(el('span', null, p.tick), el('span', null, p.weekday));
+    xAxis.append(cell);
+  }
+  box.append(xAxis);
+  return box;
 }
 
 /**

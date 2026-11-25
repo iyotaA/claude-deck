@@ -15,7 +15,7 @@ import { indexTranscripts, readAll, readAllOnce } from '../read/transcript.mjs';
 import { listSubagents, readSubagentLog } from '../read/subagents.mjs';
 import { extractMeta } from '../parse/meta.mjs';
 import {
-  buildUsage, byModelRequests, bySkillIte, byToolTokens, percentile,
+  buildUsage, byModelRequests, bySkillIte, byToolTokens, localDay, percentile,
 } from '../parse/usage.mjs';
 import { projectNameOf } from '../shared/text.mjs';
 import { createLru } from '../shared/lru.mjs';
@@ -772,6 +772,7 @@ export function aggregateUsage(recs) {
  * **穴を埋めない。** 使わなかった日は行ごと出さない ―― 0 を並べると
  * 「その日は0だった」と「その日は測っていない」が同じ顔になる
  * （上限で切っているので、後者は普通に起きる）。
+ * 埋めるのは画面の線グラフ（`public/js/usage-days.js`）で、全部数えてある日（`meta.scanFrom` 以降）だけ。
  *
  * @param {Array<object>} list 1本ぶんの集計の配列
  * @returns {{list: Array<object>, undated: number}}
@@ -838,10 +839,141 @@ function mergeProjects(recs) {
 }
 
 /**
+ * 地方時で、その時刻の次の日の鍵。
+ *
+ * 日付を1つ進めた 0 時から組む。`Date` は日の桁あふれを暦どおりに繰り上げるので、
+ * 月末・年末・閏年・夏時間の 23/25 時間の日でも「暦の次の日」になる
+ * （24時間を足すと、夏時間の切り替わる日に同じ日へ戻ることがある）。
+ *
+ * @param {number} ms
+ * @returns {string}
+ */
+function nextLocalDay(ms) {
+  const d = new Date(ms);
+  return localDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime());
+}
+
+/**
+ * 日ごとの推移（`daily`）が、どの日から全部数えてあるか。日の鍵（`YYYY-MM-DD`）で返す。
+ *
+ * 横断は新しい順に上限まで（期間で絞ったうえで）しか開かない。開かなかったログのぶんは
+ * `daily` に入っていないので、**左端の日は一部しか数えていない。** それを全部数えた日と
+ * 同じ顔で並べると、左が低く出て右肩上がりに読める。画面はこの日より前を描かない。
+ *
+ * ## 決め方
+ *
+ * **数えなかったログのうち、いちばん新しい最終更新（mtime）の次の日から。**
+ * 会話ログは追記しか起きないので、1本の中の要求はどれもそのログの最終更新より前にある
+ * （実測 2026-11-24: 552 本すべてで、末尾にある最新の timestamp ≦ mtime。はみ出し 0 本）。
+ * だから数えなかったログは、その最終更新の日より後には1つも要求を持っていない。
+ * **最終更新のその日は含めない。** 同じ日の 0 時からの要求を持っているかもしれない。
+ *
+ * 「数えなかった」に入るのは、中身が分からないものだけ。
+ *
+ *   - 上限で開かなかったもの（新しい順に `limit` 本の外）
+ *   - 期間で外したもの（`?days=` は最終更新で選ぶだけで、日で切っていない）
+ *   - 開きに行ったが読めなかったもの（`read` が null）
+ *
+ * **読んで中身が分かったものは入れない。** 要求0本（日ごとに何も足さない）と、
+ * モデルで外したもの（絞り込みの意味として外した）がそれ。だから `read` を
+ * 絞り込む**前**の並びで受け取る ―― 絞ったあとの `recs` から決めると、
+ * モデルで絞っただけで境目が新しい側にずれて、そろっている日を捨てる。
+ *
+ * **読んだ最古の最終更新からは決めない。** 開かなかったログの最終更新は索引が
+ * 既に持っている（読みは1回も増えない）。読んだ最古より前でも、開かなかった最新より
+ * 後の日はそろっているので、そちらのほうが描ける日が多く、しかも正しい。
+ *
+ * ## 決められないとき（null）
+ *
+ *   - 数えたセッションが無い（描く日が無い。境目だけ返すと「全部読めて 0」に見える）
+ *   - 数えなかったログの最終更新が分からない（どの日に要求があるか言えない。0 も不明として扱う）
+ *   - 全部読めたのに、時刻の付いた要求が1本も無い（どの日にも置けない）
+ *
+ * **全部読めたときは `daily` の最初の日。** 欠けが無いので境目も無いが、null にすると
+ * 「決められない」と区別が付かない。
+ * **今日より後の日を返すことがある**（今日動いたログまで読み切れなかったとき）。
+ * それは「そろっている日が1日も無い」という分かっている事実で、null とは別物。
+ *
+ * @param {{all: Array<{sessionId: string, mtimeMs: number}>, scan: Array<{sessionId: string}>,
+ *          read: Array<object|null>, agg: object}} input
+ *   all: 索引の全部（期間で絞る前）。scan: 開きに行ったもの。
+ *   read: scan と同じ並びの読んだ結果（読めなかったものは null。絞り込む前）。agg: aggregateUsage の戻り
+ * @returns {string|null}
+ */
+function scanFromOf({ all, scan, read, agg }) {
+  if (!agg.sessions) return null;
+
+  const counted = new Set();
+  scan.forEach((r, i) => {
+    if (read[i]) counted.add(r.sessionId);
+  });
+
+  let newest = null;
+  for (const r of all) {
+    if (counted.has(r.sessionId)) continue;
+    if (!Number.isFinite(r.mtimeMs) || r.mtimeMs <= 0) return null;
+    if (newest === null || r.mtimeMs > newest) newest = r.mtimeMs;
+  }
+
+  if (newest === null) return agg.daily.list[0]?.day ?? null;
+  return nextLocalDay(newest);
+}
+
+/**
+ * 読み終えたものから応答を組む。**ディスクを触らない。**
+ *
+ * listUsage から「読んだあと」を切り出したもの。表から外す判断（要求0本・モデル）と、
+ * どの日から全部数えてあるか（`meta.scanFrom`）をここに置くので、ファイルを用意せずにテストできる。
+ *
+ * **応答の形は前のまま。** 足したのは `meta.scanFrom` の1つだけで、
+ * 古い画面は知らないキーとして読み飛ばす。
+ *
+ * @param {{q: object, now: number, all: object[], scan: object[], scanLimited: boolean,
+ *          read: Array<object|null>}} input
+ *   q: parseUsageQuery の戻り。all: 索引の全部。scan: 開きに行ったもの。
+ *   read: scan と同じ並びの usageForTranscript の戻り（読めなかったものは null）
+ * @returns {object}
+ */
+export function usageResponse({ q, now, all, scan, scanLimited, read }) {
+  // 読めなかったものは黙って落とす。書き込み途中のファイルもここに来る
+  // （黙るのは表からだけで、境目では欠けとして数える。scanFromOf）
+  let recs = read.filter(Boolean);
+  // 要求が1件も無いもの（/clear の残骸など）は表から外す。0 が並ぶ行は読む時間を取るだけ
+  const empty = recs.filter((r) => !r.usage.requests).length;
+  recs = recs.filter((r) => r.usage.requests > 0);
+
+  if (q.model) {
+    // 主に使ったモデルで絞る。セッションの中でモデルが混ざっていることはあるので、
+    // 絞っても models が1つになるとは限らない（hitRate はそこを見て決める）
+    recs = recs.filter((r) => r.usage.model === q.model);
+  }
+
+  const agg = aggregateUsage(recs);
+  return {
+    ...agg,
+    limit: q.limit,
+    days: q.days,
+    filterModel: q.model,
+    meta: {
+      now,
+      indexed: all.length,
+      // 何件のファイルを開いたか。打ち切ったかどうかも正直に返す
+      scanned: scan.length,
+      scanLimited,
+      scanMax: USAGE_SCAN_MAX,
+      // 開いたが表に出なかったもの。合計が思ったより小さいときの説明になる
+      empty,
+      // 日ごとの推移がどの日から全部数えてあるか。これより前の日は一部しか数えていない
+      scanFrom: scanFromOf({ all, scan, read, agg }),
+    },
+  };
+}
+
+/**
  * 複数セッションを跨いだ数値。
  *
- * 新しい順に上限まで開いて、aggregateUsage に渡すだけ。
- * ここでやる判断は「どれを開くか」と「どれを表から外すか」の2つに絞ってある。
+ * 新しい順に上限まで開いて、usageResponse に渡すだけ。
+ * ここでやる判断は「どれを開くか」の1つに絞ってある（表から外す判断は usageResponse）。
  *
  * @param {object} q parseUsageQuery の戻り
  * @param {number} now
@@ -877,32 +1009,6 @@ export async function listUsage(q, now = Date.now()) {
   const read = await pooled(scan, READ_CONCURRENCY, (rec) =>
     usageForTranscript(rec.sessionId, rec).catch(() => null));
 
-  // 読めなかったものは黙って落とす。書き込み途中のファイルもここに来る
-  let recs = read.filter(Boolean);
-  // 要求が1件も無いもの（/clear の残骸など）は表から外す。0 が並ぶ行は読む時間を取るだけ
-  const empty = recs.filter((r) => !r.usage.requests).length;
-  recs = recs.filter((r) => r.usage.requests > 0);
-
-  if (q.model) {
-    // 主に使ったモデルで絞る。セッションの中でモデルが混ざっていることはあるので、
-    // 絞っても models が1つになるとは限らない（hitRate はそこを見て決める）
-    recs = recs.filter((r) => r.usage.model === q.model);
-  }
-
-  return {
-    ...aggregateUsage(recs),
-    limit: q.limit,
-    days: q.days,
-    filterModel: q.model,
-    meta: {
-      now,
-      indexed: all.length,
-      // 何件のファイルを開いたか。打ち切ったかどうかも正直に返す
-      scanned: scan.length,
-      scanLimited,
-      scanMax: USAGE_SCAN_MAX,
-      // 開いたが表に出なかったもの。合計が思ったより小さいときの説明になる
-      empty,
-    },
-  };
+  // **all（期間で絞る前）を渡す。** 期間で外したログも、境目（scanFrom）では欠けに数える
+  return usageResponse({ q, now, all, scan, scanLimited, read });
 }

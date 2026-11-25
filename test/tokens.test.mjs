@@ -291,6 +291,98 @@ test('塗った強調の上の字（--accent-fg × --accent）も 4.5:1 を満�
   assert.ok(r >= 4.5, `--accent-fg（${fg}）が --accent（${bg}）の上で ${ratio(r)}:1（AA の 4.5 を割る）`);
 });
 
+/**
+ * CSS の1枚を `{ selectors, decls }` の並びにする。入れ子は `@media` の1段だけなので、
+ * `{` と `}` を含まない「セレクタ { 宣言 }」を拾えば足りる（`detail-pane.test.mjs` の `cssRules` と同じ読み方）。
+ *
+ * @param {string} file `public/css/` の中の名前
+ */
+function rulesIn(file) {
+  const out = [];
+  for (const m of cssCode(read(path.join(CSS_DIR, file))).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = m[1].split(',').map((s) => s.trim().replace(/\s+/g, ' '));
+    const decls = m[2].split(';').map((d) => d.trim()).filter(Boolean).map((d) => {
+      const i = d.indexOf(':');
+      return { prop: d.slice(0, i).trim(), value: d.slice(i + 1).trim() };
+    });
+    out.push({ file, selectors, decls });
+  }
+  return out;
+}
+
+/**
+ * 字の色の書き方を `#RRGGBB` に直す。読めるのは `var(--x)` と
+ * `color-mix(in srgb, var(--a) N%, var(--b))` の2つだけ（読めなければ null）。
+ *
+ * `in srgb` はガンマのかかったままの値を割合で混ぜる（`srgb-linear` ではない）ので、ここも同じ式で混ぜる。
+ *
+ * @param {string} value
+ * @returns {string|null}
+ */
+function inkOf(value) {
+  const v = value.match(/^var\((--[\w-]+)\)$/);
+  if (v) return hexOf(v[1]);
+  const m = value.match(/^color-mix\(in srgb,\s*var\((--[\w-]+)\)\s+(\d+(?:\.\d+)?)%,\s*var\((--[\w-]+)\)\)$/);
+  if (!m) return null;
+  const p = Number(m[2]) / 100;
+  const a = hexOf(m[1]);
+  const b = hexOf(m[3]);
+  const ch = (hex, i) => parseInt(hex.slice(i, i + 2), 16);
+  return `#${[1, 3, 5]
+    .map((i) => Math.round(ch(a, i) * p + ch(b, i) * (1 - p)).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+test('数値モードの主役の札（--accent を塗った面）の上の字は、全部 4.5:1 以上', () => {
+  // 補助の字（ラベル・差・但し書き・単位）は color-mix で作るので、比の表（字9つ × 面5つ）に入らない。
+  // ここで混ぜた結果の色を出して測る
+  const HERO = '.usage-pane .stat.is-hero';
+  const rules = [...rulesIn('usage.css'), ...rulesIn('usage-mode.css')];
+  const heroDecls = rules.filter((r) => r.selectors.includes(HERO)).flatMap((r) => r.decls);
+  const ground = heroDecls.find((d) => d.prop === 'background');
+  assert.equal(ground?.value, 'var(--accent)', `${HERO} の面が --accent でない（比をどの面で測るかが変わる）`);
+  const bg = hexOf('--accent');
+
+  // 札の中で字の色を持つ部品（素の規則で color を書いているもの）は、主役の札の中で全部塗り替える。
+  // 書き忘れると、その部品だけ地の上の色（--fg-muted など）のままラベンダーの上に出て読めない
+  const parts = new Set();
+  for (const r of rules) {
+    for (const s of r.selectors) {
+      const m = s.match(/(\.stat-[\w-]+)$/);
+      if (m && !/\bis-hero\b/.test(s) && r.decls.some((d) => d.prop === 'color')) parts.add(m[1]);
+    }
+  }
+  assert.ok(parts.has('.stat-label'), '札の部品の色を拾えていない（読み方が崩れた）');
+  const covered = new Set();
+  const inks = [];
+  for (const r of rules) {
+    for (const s of r.selectors) {
+      if (!/\bis-hero\b/.test(s)) continue;
+      const m = s.match(/(\.stat-[\w-]+)$/);
+      for (const d of r.decls) {
+        if (d.prop !== 'color') continue;
+        if (m) covered.add(m[1]);
+        inks.push({ at: s, value: d.value });
+      }
+    }
+  }
+  const missing = [...parts].filter((p) => !covered.has(p));
+  assert.deepEqual(missing, [], `主役の札の中で字の色を塗り替えていない部品がある: ${missing.join(' / ')}`);
+  assert.ok(inks.some((x) => x.at === HERO), `${HERO} が字の色（値の大きな数が継ぐ）を持たない`);
+
+  const bad = [];
+  for (const { at, value } of inks) {
+    const fg = inkOf(value);
+    if (!fg) {
+      bad.push(`${at} … 色の書き方が読めない（${value}）`);
+      continue;
+    }
+    const r = contrast(fg, bg);
+    if (r < 4.5) bad.push(`${at} … ${value}（${fg}）が --accent（${bg}）の上で ${ratio(r)}:1`);
+  }
+  assert.deepEqual(bad, [], `主役の札の上で AA の 4.5:1 を割る字がある:\n  ${bad.join('\n  ')}`);
+});
+
 /* ── 字の段 ──────────────────────────────────────────── */
 
 test('字の段は 12px を割らず、--fs-0 から --fs-6 へ小さい順に並ぶ', () => {
