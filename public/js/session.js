@@ -263,7 +263,7 @@ export async function loadUsageBaseline(sessionId) {
  * @param {string|null} sessionId
  * @param {'live'|'query'|'archive'|'usage'} [from] 選んだ経路。store.selectedFrom の説明を参照。
  *   'live' 以外は、一覧から消えても選択を外さない（stream.js が見ている）
- * @param {object|null} [row] 押した行（書庫と数値のカードが渡す）。`store.pickedRow` に控え、
+ * @param {object|null} [row] 押した行（書庫・数値のカードと今日のまとめの題が渡す）。`store.pickedRow` に控え、
  *   一覧の外のセッションを開いた拡大の窓が、詳細の届く前に畳まれないようにする（理由は store.js）
  */
 export function select(sessionId, from = 'live', row = null) {

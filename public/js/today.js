@@ -142,7 +142,10 @@ function openButton(row, cls) {
   b.addEventListener('click', () => {
     // 閉じてから開く。<dialog> を2枚重ねると、閉じたあと焦点がどちらへ戻るかが読めなくなる
     dom.today.close();
-    select(row.sessionId, 'archive');
+    // 押した行を控えさせる（store.pickedRow）。前の日のセッションは24時間の一覧にも書庫の行にも居ないので、
+    // 控えが無いと詳細の届く前の組み直しで拡大の窓が畳まれる（rows.js の rowOf）。
+    // この行は alive を持つが、詳細の頭へ状態を上書きするのは一覧の行だけ（rows.js の headOf）
+    select(row.sessionId, 'archive', row);
     openZoom();
   });
   return b;

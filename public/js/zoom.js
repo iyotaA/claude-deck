@@ -16,9 +16,12 @@
  * 移すだけなら DOM の同一性も配線も焦点の控えもそのまま生きる。
  *
  * 開いているかは**節点がどこに居るか**で決まる。**旗を持たない。**
- * dialog.open も見ない（実測: Esc で閉じたとき Chrome は 'cancel' しか投げず、
+ * 開閉の判断に dialog.open も使わない（実測: Esc で閉じたとき Chrome は 'cancel' しか投げず、
  * その時点では open がまだ true。あそこを基準にすると、閉じる途中に組み直した札が
  * 「縮小」のまま残る）。2箇所に持てば必ず片方が古くなる。
+ *
+ * dialog.open を見るのは、dialog そのものを扱う2箇所だけ。closeZoom() の「閉じ済みなら close() を呼ばない」と、
+ * 'close' の受け手の「その知らせが今の窓のものか」（閉じた知らせの中なら open は当てになる。理由は initZoom）。
  */
 import { store } from './store.js';
 import { STOP_STATES } from './groups.js';
@@ -219,8 +222,17 @@ export function initZoom({ onChange, onOpenInWork, onPick } = {}) {
   // 片方だけに配線すると、Esc で閉じたあとペインが畳まれた dialog の中に
   // 取り残され、盤も隠れたままになる（画面が真っ黒になる）。
   // closeZoom() は二度呼ばれても平気なので、両方に付けておく
+  //
+  // **'close' は、窓が開き直していたら何もしない。** close() を呼んでも 'close' はその場では来ず、
+  // ブラウザが一拍あと（次の番）に届ける。そのあいだに別のカードが押されて窓が開き直すと、
+  // 遅れて着いた 'close' が新しい窓を閉じていた（閉じる → 別のカードを押す、を同じ瞬間に撃って再現）。
+  // 閉じた知らせの中なら open は当てになる（開き直していなければ必ず false）。
+  // **'cancel' には付けない。** Esc の 'cancel' の時点では open がまだ true なので、付けると Esc で閉じなくなる
   dom.zoom.addEventListener('cancel', () => closeZoom());
-  dom.zoom.addEventListener('close', () => closeZoom());
+  dom.zoom.addEventListener('close', () => {
+    if (dom.zoom.open) return;
+    closeZoom();
+  });
   dom.zoomClose.addEventListener('click', () => closeZoom());
 
   // 閉じ方を差し替える。節点を詳細ペインへ戻す後始末があるので素の close() では足りない

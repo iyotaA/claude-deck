@@ -484,11 +484,41 @@ test('一覧に居ないセッションでも、押した行の控えから詳�
     '書庫のカードが押した行を控えさせていない');
 });
 
+test('詳細の頭へ状態を上書きするのは一覧の行だけ（書庫の行・押した行の控えの古い状態で上書きしない）', () => {
+  // 控え（store.pickedRow）は押した時点の写し。今日のまとめの行は alive を持つので、控えから上書きすると
+  // まとめを引いた時点の古い値が詳細の上に乗る。前は rowOf の行から上書きしていて、「控えには状態の項目を
+  // 持たない行しか入れない」を呼ぶ側が守る約束だった（今日のまとめの題が行を渡せなかったのはそのため）
+  const body = fnBody(jsCode(read(path.join(JS_DIR, 'rows.js'))), 'headOf');
+  assert.match(body, /const live = store\.rows\.find\(\(r\) => r\.sessionId === sessionId\)/,
+    '上書きの出どころを一覧の行から引いていない');
+  assert.match(body, /if \(key in live\) head\[key\] = live\[key\]/, '一覧の行から状態を上書きしていない');
+  assert.doesNotMatch(body, /head\[key\] = row\[key\]/, 'rowOf の返した行（書庫の行・控え）から状態を上書きしている');
+  // 詳細が届く前は手元の行（一覧 → 書庫の行 → 控え）で組む。空だと拡大の窓が畳まれる
+  assert.match(body, /if \(!detail\) return rowOf\(sessionId\);/, '詳細が届く前に手元の行へ落としていない（窓が畳まれる）');
+  assert.equal((body.match(/rowOf\(/g) ?? []).length, 1, 'rowOf の行を詳細が届く前の落とし先以外にも使っている');
+});
+
 test('拡大の窓の「作業台で開く」は、作業台の外（書庫・数値）から開いたときに出す', () => {
   const zoom = jsCode(read(path.join(JS_DIR, 'zoom.js')));
   assert.match(fnBody(zoom, 'openZoom'), /dom\.zoomWork\.hidden = store\.mode === 'work'/,
     '「作業台で開く」を出す条件が「作業台の外から開いたとき」になっていない');
   assert.doesNotMatch(zoom, /store\.mode !== 'archive'/, '「作業台で開く」を書庫のときだけに絞っている（数値から開くと移る口が無い）');
+});
+
+test('拡大の窓の close の受け手は、窓が開き直していたら何もしない（遅れて着いた close が新しい窓を閉じない）', () => {
+  // close() を呼んでも 'close' は一拍あとに届く。そのあいだに別のカードを押して開き直すと、
+  // 遅れて着いた 'close' が closeZoom() を呼び、開いたばかりの窓を閉じていた（同じ瞬間に撃って再現）
+  const zoom = jsCode(read(path.join(JS_DIR, 'zoom.js')));
+  const init = fnBody(zoom, 'initZoom');
+  assert.match(init, /addEventListener\('close', \(\) => \{\s*if \(dom\.zoom\.open\) return;\s*closeZoom\(\);\s*\}\)/,
+    "'close' の受け手が、窓が開き直していても閉じにいく");
+  // 'cancel' には付けない。Esc の 'cancel' の時点では open がまだ true なので、付けると Esc で閉じなくなる
+  assert.match(init, /addEventListener\('cancel', \(\) => closeZoom\(\)\)/, "'cancel' の受け手が素の closeZoom() でない");
+  // 開閉の判断は節点の位置のまま（旗を持たない）。dialog.open を見るのは dialog そのものを扱う2箇所だけ
+  // （closeZoom の「閉じ済みなら close() を呼ばない」と、'close' の受け手）
+  assert.match(fnBody(zoom, 'isZoomed'), /return dom\.detailPane\.parentElement === dom\.zoomBody;/,
+    '開いているかの判断が節点の位置でなくなっている');
+  assert.equal((zoom.match(/dom\.zoom\.open/g) ?? []).length, 2, 'dialog.open を開閉の判断にまで使い始めている');
 });
 
 test('数値モードで拡大を開いているあいだも、apply() は詳細を描き直す（作業台でないあいだの早期 return を抜ける）', () => {
