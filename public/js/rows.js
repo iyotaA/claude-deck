@@ -18,11 +18,13 @@ export function idleOf(row) {
 /**
  * 一覧から素の行を引く。無ければ書庫の行、次に押して選んだときの行の控え（`store.pickedRow`）に落とす。
  *
- * 書庫の行と控え（書庫と数値のカードの行）は LIVE_FIELDS（state / idleMs など）を1つも持たないので、
- * headOf の上書きは何も起こさない。逆に logSize は持っているので、
- * 書庫・数値から開いたセッションでも detailStampOf が本物の目印を取れる。
+ * ここで返した行は、詳細が届く前の頭にそのまま使われる（headOf）。詳細が届いたあとは、
+ * 状態の項目（LIVE_FIELDS）を詳細の上へ上書きするのに**一覧の行しか使わない**ので、
+ * 書庫の行や控えが状態の項目を持っていても（今日のまとめの行は alive を持つ）古い値は乗らない。
+ * 書庫と数値の行は logSize を持っているので、そこから開いたセッションでも detailStampOf が本物の目印を取れる
+ * （今日のまとめの行は持たないので、目印は不明＝0 になり詳細を毎回取り直す）。
  *
- * **控えに落とすのは、書庫と数値のカードを拡大の窓で開くため**（数値は画面刷新⑤の D27）。
+ * **控えに落とすのは、書庫・数値のカードと今日のまとめの題を拡大の窓で開くため**（数値は画面刷新⑤の D27）。
  * `renderDetailInner` は `headOf` が空だと拡大を畳む。押した直後は詳細がまだ届いていないので、
  * 一覧（24時間より古いものは居ない）にも書庫の行にも居ないセッションは、開いた直後に閉じていた（実測。
  * 新しい順に読む数値の 60 本には、一覧に居ない終わったセッションが普通に混ざる）。
@@ -52,7 +54,7 @@ export function rowOf(sessionId) {
  *
  * `run`（台帳の行）だけは「新しいほう」ではなく**一覧の行しか持っていない**。
  * 合流させているのが `server.mjs` の `refresh()` で、詳細の窓口は台帳を知らないため。
- * 持っていない行では `key in row` が偽になるので、書庫から開いたぶんも壊れない。
+ * 台帳に無いセッションの行では `key in live` が偽になるので、詳細の値がそのまま残る。
  *
  * 上書きする項目を配列で名前付けするのは、プロパティの並び順に判断を埋めないため。
  */
@@ -69,18 +71,27 @@ export const LIVE_FIELDS = [
  * 一覧の行だけを頼りにすると、一覧に居ないセッション（24時間より古いもの）を
  * 開けない。詳細の応答は身元と状態の項目を同じ形で持っているので、そこから組める。
  *
+ * **状態の項目を上書きするのは一覧の行（`store.rows`）だけ。** 一覧は毎秒引き直しているが、
+ * 書庫の行と押した行の控え（`store.pickedRow`）は引いた・押した時点の写しで、詳細より古い。
+ * 前は rowOf の返した行から上書きしていて、「控えには状態の項目を持たない行しか入れない」を
+ * 呼ぶ側が守る約束になっていた。今日のまとめの行は alive を持つのでその約束に入れず、
+ * 題を押しても行を渡せなかった。そのため一覧にも書庫の行にも居ない前の日のセッションは、
+ * 詳細の届く前の組み直しで拡大の窓が畳まれていた（1回目だけ。2回目は詳細のキャッシュが効いて開く。実測）。
+ * 上書きの出どころをここで一覧に絞れば、控えに何を入れても詳細の上に古い状態は乗らない。
+ *
  * @param {string|null} sessionId
  * @returns {object|null} どちらの出どころも無ければ null
  */
 export function headOf(sessionId) {
   if (!sessionId) return null;
-  const row = rowOf(sessionId);
   const detail = store.detail?.sessionId === sessionId ? store.detail : null;
-  if (!detail) return row;
+  // 詳細が届く前は手元の行で組む（一覧 → 書庫の行 → 押した行の控え）。空だと拡大の窓が畳まれる
+  if (!detail) return rowOf(sessionId);
   const head = { ...detail };
-  if (row) {
+  const live = store.rows.find((r) => r.sessionId === sessionId);
+  if (live) {
     for (const key of LIVE_FIELDS) {
-      if (key in row) head[key] = row[key];
+      if (key in live) head[key] = live[key];
     }
   }
   return head;

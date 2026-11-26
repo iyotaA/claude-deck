@@ -10,6 +10,7 @@
  * - 題に日付を出す。日の選択肢は開くたびに組み直す
  * - 足は 一言 → 閉じる → Markdown でコピー。塗るのはコピーの1つだけ（D26）
  * - 1本ずつは横罫のまま（D24）・数の帯は字だけのまま（D25）・窓の高さは固定のまま
+ * - 題を押したら、押した行を控えさせてから拡大の窓で開く（窓を閉じる → 選ぶ → 開く）
  *
  * 字面はコメントを落としてから読む。このリポジトリは説明が厚く、経緯がコメントに残るため。
  */
@@ -238,4 +239,18 @@ test('1本ずつは横罫のまま（カードにしない）・数の帯は字�
   const win = declsOf('.today-win');
   assert.ok(win.some((d) => d.prop === 'height'), '窓の高さを固定していない');
   assert.ok(!win.some((d) => d.prop === 'max-height'), '窓の高さを max-height にしている（中身なりで跳ねる）');
+});
+
+/* ── 題を押して開く ─────────────────────────────────────── */
+
+test('題を押したら、押した行を控えさせてから拡大の窓で開く（窓を閉じる → 選ぶ → 開く）', () => {
+  // 前の日のセッションは24時間の一覧にも書庫の行にも居ない。行を渡さないと控え（store.pickedRow）が空で、
+  // 詳細の届く前の組み直しで拡大の窓が畳まれていた（1回目だけ。2回目は詳細のキャッシュが効いて開く。実測）
+  const body = fnBody(todayCode(), 'openButton');
+  const close = body.indexOf('dom.today.close()');
+  const sel = body.indexOf("select(row.sessionId, 'archive', row)");
+  const open = body.indexOf('openZoom()');
+  assert.ok(sel >= 0, "題が select(row.sessionId, 'archive', row) で選んでいない（押した行を控えさせていない）");
+  // <dialog> を2枚重ねない（閉じたあと焦点がどちらへ戻るかが読めなくなる）。選ぶ前に開くと前のセッションが一瞬出る
+  assert.ok(close >= 0 && close < sel && sel < open, '窓を閉じる → 選ぶ → 開くの順になっていない');
 });
